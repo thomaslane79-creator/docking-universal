@@ -13,7 +13,7 @@ conda activate docking-universal
 make test
 ```
 
-The main environment includes the historically compatible smina executable. smina is a fork of AutoDock Vina with additional scoring and minimization features, not a wholly separate docking framework. To compare the same inputs with current AutoDock Vina, create its optional environment:
+AutoDock Vina is kept in a small engine environment so its compiled dependencies do not destabilize the preparation, analysis, and PyMOL stack:
 
 ```bash
 conda env create -f environments/vina.yml
@@ -39,7 +39,6 @@ The tested M1/M2/M3 route is the conda-forge package `pymol-open-source`, not th
 | PyMOL Open Source | 3.0.0 |
 | PyCairo | 1.27.0 |
 | RDKit | 2023.09.6 |
-| smina | 2020.12.10 |
 
 Conda installs Qt, Cairo, OpenGL support libraries, and other low-level PyMOL dependencies automatically. They should not be installed one by one. This matrix was solved in a new native `osx-arm64` environment and produced a headless 640 × 480 PNG on 2026-08-08.
 
@@ -51,28 +50,27 @@ Conda installs Qt, Cairo, OpenGL support libraries, and other low-level PyMOL de
 | Compound preparation | Open Babel plus ADFRsuite `prepare_ligand` (legacy) or Meeko | Split, convert, optimize, and create ligand PDBQT |
 | Chemical states + conformers | MolScrub 0.2.2 plus RDKit | pH-aware protomer/tautomer enumeration and independent seeded ETKDG/MMFF ensembles |
 | Pocket discovery | fpocket | Detect and rank candidate cavities |
-| Docking | smina (main environment) and AutoDock Vina (optional environment) | Run separate comparison batches with the selected engine |
+| Docking | AutoDock Vina 1.2.7 (engine environment) | Perform docking search and scoring |
 | Interaction analysis | PLIP | Calculate interactions and write XML/text/fixed-coordinate output |
 | Interaction scene | Docking Universal | Convert PLIP output into one consolidated PyMOL `.pml` scene |
 | 3D image | PyMOL Open Source | Render `.pml` or coordinate files headlessly to PNG |
 | Generic 2D image | RDKit, with Open Babel fallback | Render molecule depictions to PNG or SVG |
 
-Only the packages needed by the selected stage must be available. `environment.yml` installs the full preparation, analysis, visualization, and smina toolchain. `environments/vina.yml` adds current Vina without destabilizing the historically compatible smina/PyMOL library set.
+Only the packages needed by the selected stage must be available. `environment.yml` installs preparation, analysis, and visualization tools. `environments/vina.yml` supplies AutoDock Vina without destabilizing the PyMOL and chemistry library set.
 
 ## Why Vina has a small separate environment
 
-On current macOS arm64 conda-forge builds, Vina 1.2.7 requires a newer Python/libboost generation than smina 2020.12.10. Keeping Vina isolated is a standard scientific-software solution to that compiled-library conflict. It is still accessed through the same Docking Universal command, and all outputs remain in the same study directory.
+On current macOS arm64 conda-forge builds, Vina 1.2.7 may require a different Python/libboost generation than parts of the visualization and preparation stack. Keeping Vina isolated is a standard scientific-software solution to that compiled-library conflict. It is still accessed through the same Docking Universal command, and all outputs remain in the same study directory.
 
-Run both engines explicitly:
+Run Vina explicitly:
 
 ```bash
-docking-universal dock --engine smina --receptor receptor.pdbqt --ligands prepared_ligands --config box.conf --out results_smina
 docking-universal dock --engine vina  --receptor receptor.pdbqt --ligands prepared_ligands --config box.conf --out results_vina
 ```
 
 Each output directory receives a manifest containing the selected engine, version, executable source, receptor, ligand directory, and configuration file.
 
-The `control` command uses this same arrangement automatically. Vina is the default because its supported Meeko preparation can sample flexible macrocycles. `--engine smina` uses an independently generated rigid-macrocycle ensemble, and `--engine both` calibrates the engines separately. Users do not switch environments manually.
+The `control` command uses this arrangement automatically. Users do not switch environments manually. Vina is the only docking engine supported in this research preview; a smina comparison backend may be evaluated in a future version.
 
 After a five-seed control passes, use its target-locked record for an unknown compound:
 
@@ -107,7 +105,7 @@ The following checks passed from the new `docking-universal-test` environment on
 - PLIP analyzed an existing protein–ligand complex;
 - the custom interaction stage wrote a fixed PDB, consolidated PML scene, and run manifest.
 - matched 1HVR/XK2 raw inputs passed strict receptor preparation, ligand preparation, ligand-centered preparation, and ligand-free pocket recovery;
-- Vina 1.2.7 and smina 2020.12.10 both completed smoke runs on the same prepared inputs;
+- Vina 1.2.7 completed smoke runs on the prepared inputs;
 - the PLIP interaction scene and ligand-centered pocket scene rendered to visually inspected nonblank PNGs.
 
 These are software and representative-data checks. They are not a claim that every receptor, ligand chemistry, operating system, or scientific use case has been validated.

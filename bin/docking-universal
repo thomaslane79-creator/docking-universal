@@ -70,11 +70,6 @@ doctor() {
   done
 
   printf '\nDocking engines\n'
-  if command -v smina >/dev/null 2>&1; then
-    printf '  available  smina (%s)\n' "$(command -v smina)"
-  else
-    printf '  absent     smina\n'
-  fi
   if command -v vina >/dev/null 2>&1; then
     printf '  available  vina (%s)\n' "$(command -v vina)"
   elif command -v conda >/dev/null 2>&1 && conda run -n "${DOCKING_UNIVERSAL_VINA_ENV:-docking-universal-vina}" vina --version >/dev/null 2>&1; then

@@ -83,7 +83,7 @@ After an approved control, screen rilpivirine with the resulting locked protocol
 
 Rilpivirine is a known HIV-1 RT non-nucleoside inhibitor, so this is not presented as a blind prospective prediction. It is larger and more conformationally flexible than the calibration ligand, making it a useful demonstration of independent conformer generation and pose clustering. It demonstrates that the locked control protocol can prepare and dock a different compound in the same target context. Its docking score and proposed pose remain computational hypotheses, not experimental confirmation.
 
-The terminal reports each major stage in plain language and sends detailed Meeko, fpocket, Vina/smina, PLIP, and PyMOL diagnostics to retained log files. This keeps progress readable while preserving evidence for troubleshooting.
+The terminal reports each major stage in plain language and sends detailed Meeko, fpocket, AutoDock Vina, PLIP, and PyMOL diagnostics to retained log files. This keeps progress readable while preserving evidence for troubleshooting.
 
 ## Principal outputs
 

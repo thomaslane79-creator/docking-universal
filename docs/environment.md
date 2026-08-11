@@ -22,12 +22,11 @@ Key tested versions:
 | PLIP | 2.3.1 |
 | PyMOL Open Source | 3.0.0 |
 | RDKit | 2023.09.6 |
-| smina | 2020.12.10 |
 | pycairo | 1.27.0 |
 | Pillow | 11.3.0 |
 | Meeko | 0.6.1 |
 
-AutoDock Vina 1.2.7 is intentionally separated from this historical compatibility matrix. Its current macOS arm64 conda package requires a newer Python/libboost generation than smina 2020.12.10. Docking Universal can invoke it from the optional `docking-universal-vina` environment and records that environment in the run manifest.
+AutoDock Vina 1.2.7 is intentionally separated from the main compatibility matrix. Its current macOS arm64 conda package may require a different Python/libboost generation than parts of the preparation and visualization stack. Docking Universal invokes it from `docking-universal-vina` and records that environment in the run manifest.
 
 Receptor and ligand PDBQT preparation in the original workflow used the `prepare_receptor` and `prepare_ligand` executables from **ADFRsuite 1.0**, installed separately from conda. The packaged commands now prefer Meeko automatically when its `mk_prepare_receptor.py` and `mk_prepare_ligand.py` executables are available, while `--backend adfr` and the `DOCKING_UNIVERSAL_PREP_*` variables preserve the legacy path. Meeko passed the matched raw 1HVR/XK2 test, but preparation backends must not be treated as scientifically interchangeable without comparison.
 

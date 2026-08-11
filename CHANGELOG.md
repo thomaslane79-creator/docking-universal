@@ -2,6 +2,7 @@
 
 ## 0.4.0 — 2026-08-09
 
+- Narrowed the research preview to AutoDock Vina only. The earlier experimental smina comparison path and dependency were removed from the interface; a new backend may be evaluated in a future release.
 - Added `run`, a guided study orchestrator with bound-control, approved-screen, and explicitly uncalibrated exploratory pathways.
 - Added multi-record SDF and SDF-directory handling with collision-safe per-compound folders, retained partial outputs, failure records, and optional stop-on-error behavior.
 - Added plan-only validation plus consolidated CSV, JSON, Markdown, and HTML study reports with separate scientific and completion statuses.
@@ -32,11 +33,11 @@
 - Added an optional isolated AutoDock Vina 1.2.7 environment and automatic engine discovery.
 - Recorded docking-engine version and executable source in run manifests.
 - Added native Meeko ligand and receptor preparation backends alongside ADFRsuite compatibility.
-- Parsed both Vina and smina score records without conflating their RMSD fields.
+- Parsed AutoDock Vina score and RMSD-bound records into tidy output.
 - Corrected receptor metal filtering to use the fixed-width PDB element column instead of matching metal symbols anywhere in a `HETATM` record.
 - Excluded `MODRES`-declared polymer modifications from bound-ligand candidates.
 - Added fpocket 4.2 report/coordinate compatibility and strict positive box-dimension checks.
-- Added shared Vina/smina macrocycle preparation and fixed portable PyMOL PML loading on Apple silicon.
+- Added Meeko/Vina macrocycle preparation and fixed portable PyMOL PML loading on Apple silicon.
 
 ## 0.2.0 — 2026-08-08
 

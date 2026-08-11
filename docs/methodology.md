@@ -6,7 +6,7 @@ This note records what the workflow does, why the major decisions exist, and whe
 
 AutoDock Vina performs the actual docking search and produces the docking scores in the default workflow. Docking Universal is not a replacement docking engine and does not implement a new scoring function; it is the scientific orchestration and analysis layer around Vina. Its contribution is the end-to-end handling of chemistry and receptor preparation, docking-box definition, independent conformers and seeds, retrospective protocol calibration, batch execution, pose clustering, interaction analysis, provenance, and reporting.
 
-Docking Universal currently supports rigid-receptor AutoDock Vina workflows and retains an optional smina comparison path. **smina is a fork of AutoDock Vina**, with additional scoring and local-minimization functionality; the package therefore treats it as a related Vina-family implementation rather than an independent docking framework. AutoDock Vina is the default and presently validated path in this research preview. Receptor coordinates do not move during a docking job. Ligand rotatable bonds may be sampled according to the implementation-specific PDBQT representation, and independent ligand conformers can be docked across multiple seeds. This is not flexible-receptor or induced-fit docking.
+Docking Universal currently supports rigid-receptor AutoDock Vina workflows. Vina is the only docking engine included in this research preview; a smina comparison backend may be evaluated in a future version. Receptor coordinates do not move during a docking job. Ligand rotatable bonds may be sampled according to the PDBQT representation, and independent ligand conformers can be docked across multiple seeds. This is not flexible-receptor or induced-fit docking.
 
 The same preparation and search protocol can be applied to one compound, a multi-record SDF, or a directory of SDF files. Batch execution isolates every compound and retains per-seed outputs before consolidated pose clustering and reporting.
 
@@ -53,7 +53,7 @@ The reference centroid is either the whole protein or the largest chain. Higher 
 
 ## 6. Bound-ligand redocking control
 
-The retrospective control removes the confirmed experimental ligand, prepares the ligand-free receptor, centers a box on the withheld ligand coordinates, and redocks independently generated ligand conformers. Vina and smina run independently. Docked poses are mapped back to typed chemistry and compared with the experimental pose using symmetry-aware heavy-atom RMSD in the receptor coordinate frame, without fitting the docked ligand onto the reference. A 2.0 Å threshold is reported by default but remains configurable.
+The retrospective control removes the confirmed experimental ligand, prepares the ligand-free receptor, centers a box on the withheld ligand coordinates, and redocks independently generated ligand conformers with AutoDock Vina. Docked poses are mapped back to typed chemistry and compared with the experimental pose using symmetry-aware heavy-atom RMSD in the receptor coordinate frame, without fitting the docked ligand onto the reference. A 2.0 Å threshold is reported by default but remains configurable.
 
 This tests pose recovery for a known ligand/site under the selected preparation and docking settings. It is separate from prospective compound docking and from ligand-free pocket ranking, and success on one complex does not validate a scoring function generally.
 
@@ -79,9 +79,9 @@ The workflow records:
 
 These artifacts are designed to make a result reproducible and reviewable.
 
-## 9. Ligand preparation and engine compatibility
+## 9. Ligand preparation and Vina compatibility
 
-Open Babel splits ordinary SDF input and can generate an optimized 3D representation. Calibration and protocol-locked screening instead preserve the independently generated ETKDG conformers. Meeko or the legacy ADFRsuite backend writes PDBQT. Vina-only preparation retains Meeko's flexible-macrocycle representation; smina 2020.12.10 receives rigid macrocycle conformers because it cannot parse the newer `CG0/G0` closure atom types. The selected backend and target engine are written to the preparation manifest.
+Open Babel splits ordinary SDF input and can generate an optimized 3D representation. Calibration and protocol-locked screening instead preserve the independently generated ETKDG conformers. Meeko or the legacy ADFRsuite backend writes PDBQT. Vina preparation retains Meeko's supported flexible-macrocycle representation. The selected backend and Vina target are written to the preparation manifest.
 
 ## Limitations
 
