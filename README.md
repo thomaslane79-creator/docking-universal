@@ -14,6 +14,12 @@ The project was created in part to make this compiled scientific toolchain pract
 
 ![A ligand-centered pocket rendered from a Docking Universal PyMOL scene](docs/assets/ligand-pocket.png)
 
+## Example scientific report
+
+[View the complete automatically generated PDF report](docs/assets/docking-universal-example-report.pdf).
+
+This representative 1HVR/XK2 study shows the standard report produced by the pipeline: retrospective bound-ligand control and PASS criteria, the selected target-matched protocol, two-compound docking results, score-versus-RMSD cluster panels, color-matched 3D cluster representatives, SDF-aware 2D interaction diagrams, ranked docking tables, limitations, software versions, and references. It is included as a format and workflow example; its target-specific retrospective result is not general validation of docking accuracy.
+
 ## Package map
 
 | Stage | Command | Main outputs |
@@ -216,7 +222,7 @@ docking-universal depict2d ligand.pdb ligand_02.sdf --format svg --out-dir figur
 
 These are generic structure depictions. Protein–ligand interaction visuals use a separate path: PLIP computes and writes interaction reports and fixed coordinates, then Docking Universal reads those outputs and writes a consolidated PyMOL PML scene. This custom scene step avoids depending on PLIP's native visualization path, which was unreliable in the original environment.
 
-The repository includes a [self-contained 1HVR/XK2 reference run](tests/expected_runs/1hvr_xk2/README.md): editable PML scripts with their coordinate dependencies, location-independent PSE sessions, PLIP reports, inspected PNG renders, prepared inputs, engine logs, pose files, manifests, and collected score tables. A separate generic XK2 depiction demonstrates the SDF-to-2D path without implying docking or receptor interactions.
+The repository includes small, provenance-recorded inputs for the 1HVR/XK2 bound-ligand tutorial and the 2R8N ligand-free cavity tutorial. The [example PDF report](docs/assets/docking-universal-example-report.pdf) demonstrates the automatic consolidated-report path without adding bulky intermediate docking runs to the repository. A separate generic XK2 depiction demonstrates the SDF-to-2D path without implying docking or receptor interactions.
 
 ## Output provenance
 
