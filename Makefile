@@ -6,7 +6,7 @@ LIBEXECDIR ?= $(PREFIX)/libexec/docking-universal
 
 test:
 	./tests/test_cli.sh
-	$${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_run_selection.py
+	$${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_run_selection.py tests/test_report_cavity.py
 
 install:
 	install -d "$(DESTDIR)$(BINDIR)"
