@@ -35,6 +35,10 @@ Options:
   --approval-min-seeds N    Independent seeds required for approval (default: 5)
   --base-seed N             First deterministic seed (default: 20260808)
   --ph VALUE                Ligand-state preparation pH (default: 7.4)
+  --conformers-override N   Conformers per state; overrides the selected tier
+  --forcefield NAME         mmff94, mmff94s, or uff (default: mmff94)
+  --rmsd-prune A            Conformer pruning threshold (default: 0.75 A)
+  --skip-tautomers          Disable tautomer enumeration
   --charge-model NAME       Meeko charge model (default: gasteiger)
   --non-interactive         Never prompt or automatically retry
   --engine-command PATH     Explicit docking-engine executable
@@ -75,6 +79,10 @@ control_tier="quick"
 approval_min_seeds="5"
 base_seed="20260808"
 ph="7.4"
+conformers_override=""
+forcefield="mmff94"
+rmsd_prune="0.75"
+skip_tautomers=0
 charge_model="gasteiger"
 non_interactive=0
 engine_command=""
@@ -103,6 +111,10 @@ while [ "$#" -gt 0 ]; do
     --approval-min-seeds) approval_min_seeds="$2"; shift 2 ;;
     --base-seed) base_seed="$2"; shift 2 ;;
     --ph) ph="$2"; shift 2 ;;
+    --conformers-override) conformers_override="$2"; shift 2 ;;
+    --forcefield) forcefield="$2"; shift 2 ;;
+    --rmsd-prune) rmsd_prune="$2"; shift 2 ;;
+    --skip-tautomers) skip_tautomers=1; shift ;;
     --charge-model) charge_model="$2"; shift 2 ;;
     --non-interactive) non_interactive=1; shift ;;
     --engine-command) engine_command="$2"; shift 2 ;;
@@ -138,6 +150,8 @@ done
 }
 case "$engine" in vina|smina|both) ;; *) echo "ERROR: --engine must be vina, smina, or both" >&2; exit 2 ;; esac
 case "$control_tier" in quick|repeatability|broader|conformers|robust) ;; *) echo "ERROR: invalid --control-tier" >&2; exit 2 ;; esac
+case "$forcefield" in mmff94|mmff94s|uff) ;; *) echo "ERROR: --forcefield must be mmff94, mmff94s, or uff" >&2; exit 2 ;; esac
+[ -z "$conformers_override" ] || [[ "$conformers_override" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: --conformers-override must be a positive integer" >&2; exit 2; }
 [[ "$exhaustiveness" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: --exhaustiveness must be a positive integer" >&2; exit 2; }
 [[ "$num_modes" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: --num-modes must be a positive integer" >&2; exit 2; }
 [[ "$approval_min_seeds" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: --approval-min-seeds must be a positive integer" >&2; exit 2; }
@@ -488,9 +502,13 @@ if [ "$legacy_single_conformer" -eq 0 ]; then
       --approval-min-seeds "$approval_min_seeds"
       --rmsd-threshold "$rmsd_threshold"
       --ph "$ph"
+      --forcefield "$forcefield"
+      --rmsd-prune "$rmsd_prune"
       --charge-model "$charge_model"
       --mk-export "$mk_export_command"
     )
+    [ -z "$conformers_override" ] || calibration_args+=(--conformers-override "$conformers_override")
+    [ "$skip_tautomers" -eq 0 ] || calibration_args+=(--skip-tautomers)
     [ "$non_interactive" -eq 0 ] || calibration_args+=(--non-interactive)
     [ "$visuals" -eq 0 ] || calibration_args+=(--render-visuals --pymol "$pymol_command" --plip-command "$plip_command")
     [ -z "$engine_command" ] || calibration_args+=(--engine-command "$engine_command")

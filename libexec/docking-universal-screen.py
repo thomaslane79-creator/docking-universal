@@ -59,6 +59,10 @@ def main():
     parser.add_argument("--num-modes", type=int, default=20, help="exploratory poses retained per job")
     parser.add_argument("--energy-range", type=float, default=8.0, help="exploratory kcal/mol output window")
     parser.add_argument("--ph", type=float, default=7.4, help="exploratory ligand-state pH")
+    parser.add_argument("--base-seed", type=int, default=20260808, help="exploratory deterministic base seed")
+    parser.add_argument("--forcefield", choices=("mmff94", "mmff94s", "uff"), default="mmff94")
+    parser.add_argument("--rmsd-prune", type=float, default=0.75)
+    parser.add_argument("--skip-tautomers", action="store_true")
     parser.add_argument("--charge-model", default="gasteiger")
     args = parser.parse_args()
 
@@ -112,6 +116,8 @@ def main():
             parser.error("--exploratory requires --receptor and --box")
         if min(args.seeds, args.conformers, args.exhaustiveness, args.num_modes) < 1:
             parser.error("exploratory seeds, conformers, exhaustiveness, and num-modes must be positive")
+        if args.base_seed < 0 or args.rmsd_prune < 0:
+            parser.error("exploratory base seed and RMSD pruning threshold must be non-negative")
         receptor = args.receptor.expanduser().resolve()
         box = args.box.expanduser().resolve()
         if not receptor.is_file() or not box.is_file():
@@ -119,11 +125,14 @@ def main():
         engine = args.engine
         parameters = {
             "ph": args.ph, "conformers_per_state": args.conformers,
+            "ensemble_seed": args.base_seed, "forcefield": args.forcefield,
+            "rmsd_prune_angstrom": args.rmsd_prune,
+            "tautomers_enumerated": not args.skip_tautomers,
             "charge_model": args.charge_model,
             "macrocycle_treatment": "flexible_meeko" if engine == "vina" else "rigid_conformer_ensemble",
             "exhaustiveness": args.exhaustiveness, "num_modes": args.num_modes,
             "energy_range_kcal_per_mol": args.energy_range,
-            "seeds": [20260808 + index for index in range(args.seeds)],
+            "seeds": [args.base_seed + index for index in range(args.seeds)],
         }
         protocol_path = None
         workflow_status = "EXPLORATORY_NO_CONTROL"
@@ -155,11 +164,16 @@ def main():
             raise SystemExit("Cancelled")
 
     ensemble = out / "independent_ensemble.sdf"
-    run([
+    ensemble_command = [
         sys.executable, project / "libexec/docking-universal-ensemble.py", ligand,
         "--out", ensemble, "--ph", parameters["ph"], "--conformers", conformers,
-        "--seed", seeds[0],
-    ])
+        "--seed", parameters.get("ensemble_seed", seeds[0]),
+        "--forcefield", parameters.get("forcefield", "mmff94"),
+        "--rmsd-prune", parameters.get("rmsd_prune_angstrom", 0.75),
+    ]
+    if parameters.get("tautomers_enumerated", True) is False:
+        ensemble_command.append("--skip-tautomers")
+    run(ensemble_command)
     prep = out / "ligand_preparation"
     run([
         project / "bin/docking-universal", "ligands", ensemble, "--out", prep,
@@ -210,6 +224,15 @@ def main():
         "box": str(box),
         "engine": engine,
         "seeds": seeds,
+        "ensemble_parameters": {
+            "ph": parameters["ph"],
+            "conformers_per_state": conformers,
+            "ensemble_seed": parameters.get("ensemble_seed", seeds[0]),
+            "forcefield": parameters.get("forcefield", "mmff94"),
+            "rmsd_prune_angstrom": parameters.get("rmsd_prune_angstrom", 0.75),
+            "tautomers_enumerated": parameters.get("tautomers_enumerated", True),
+            "charge_model": parameters["charge_model"],
+        },
         "docking_job_count": job_count,
         "scientific_warning": "Scores and poses require independent scientific interpretation." if protocol_path else "EXPLORATORY: no approved target-specific pose-recovery control was available.",
     }

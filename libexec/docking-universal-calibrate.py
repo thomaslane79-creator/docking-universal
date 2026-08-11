@@ -32,6 +32,13 @@ TIERS = {
 }
 
 
+def tier_settings(args, tier_name):
+    settings = dict(TIERS[tier_name])
+    if args.conformers_override is not None:
+        settings["conformers"] = args.conformers_override
+    return settings
+
+
 def run(command):
     """Run one auditable stage and stop immediately if it fails."""
     print("+ " + " ".join(map(str, command)), flush=True)
@@ -144,6 +151,10 @@ def parse_args():
     parser.add_argument("--rmsd-threshold", type=float, default=2.0)
     parser.add_argument("--approval-min-seeds", type=int, default=5)
     parser.add_argument("--ph", type=float, default=7.4)
+    parser.add_argument("--conformers-override", type=int)
+    parser.add_argument("--forcefield", choices=("mmff94", "mmff94s", "uff"), default="mmff94")
+    parser.add_argument("--rmsd-prune", type=float, default=0.75)
+    parser.add_argument("--skip-tautomers", action="store_true")
     parser.add_argument("--charge-model", default="gasteiger")
     parser.add_argument(
         "--provisional-chemistry", action="store_true",
@@ -161,18 +172,22 @@ def parse_args():
 
 def run_tier(args, tier_name, project, tier_root):
     started = time.monotonic()
-    settings = TIERS[tier_name]
+    settings = tier_settings(args, tier_name)
     tier_root.mkdir(parents=True, exist_ok=True)
     ensemble = tier_root / "independent_ensemble.sdf"
     prep = tier_root / "ligand_preparation"
     comparisons = []
     seeds = [args.base_seed + index for index in range(settings["seeds"])]
 
-    run([
+    ensemble_command = [
         sys.executable, project / "libexec/docking-universal-ensemble.py", args.reference_sdf,
         "--out", ensemble, "--ph", args.ph, "--conformers", settings["conformers"],
-        "--seed", args.base_seed,
-    ])
+        "--seed", args.base_seed, "--forcefield", args.forcefield,
+        "--rmsd-prune", args.rmsd_prune,
+    ]
+    if args.skip_tautomers:
+        ensemble_command.append("--skip-tautomers")
+    run(ensemble_command)
     run([
         project / "bin/docking-universal", "ligands", ensemble, "--out", prep,
         "--target-engines", args.engine, "--geometry-mode", "preserve",
@@ -226,6 +241,12 @@ def run_tier(args, tier_name, project, tier_root):
         evaluate += ["--seed", seed]
     run(evaluate)
     result = json.loads(protocol.read_text())
+    result.setdefault("parameters", {}).update({
+        "ensemble_seed": args.base_seed,
+        "forcefield": args.forcefield,
+        "rmsd_prune_angstrom": args.rmsd_prune,
+        "tautomers_enumerated": not args.skip_tautomers,
+    })
     result["schema_name"] = "docking-universal-protocol"
     result["schema_version"] = 1
     result["calibration_tier"] = tier_name
@@ -306,6 +327,10 @@ def run_tier(args, tier_name, project, tier_root):
 
 def main():
     args = parse_args()
+    if args.conformers_override is not None and args.conformers_override < 1:
+        raise SystemExit("--conformers-override must be positive")
+    if args.base_seed < 0 or args.rmsd_prune < 0:
+        raise SystemExit("--base-seed and --rmsd-prune must be non-negative")
     for path in (args.reference_sdf, args.crystal_ligand, args.receptor_pdb, args.receptor_pdbqt, args.box):
         if not path.expanduser().is_file():
             raise SystemExit(f"Required input not found: {path}")
@@ -327,7 +352,7 @@ def main():
         next_tier, reason = guided_next_tier(previous_tier, previous)
         if not next_tier:
             raise SystemExit(f"Guided calibration cannot advance from {previous_tier}: {reason}")
-        previous_settings = TIERS[previous_tier]
+        previous_settings = tier_settings(args, previous_tier)
         escalation_history = [{
             "tier": previous_tier,
             "approved": bool(previous.get("unknown_docking_allowed")),
@@ -343,7 +368,7 @@ def main():
         print(f"Guided resume from {previous_tier}: {reason}.")
         print(f"Starting next informative tier: {tier}.")
     while tier:
-        settings = TIERS[tier]
+        settings = tier_settings(args, tier)
         job_count = settings["conformers"] * settings["seeds"]
         print()
         print(f"Calibration tier: {tier}")
@@ -400,7 +425,7 @@ def main():
             next_tier, reason = guided_next_tier(tier, result)
             print(f"Guided assessment: {reason}.")
             if next_tier:
-                settings = TIERS[next_tier]
+                settings = tier_settings(args, next_tier)
                 print(
                     f"Next incremental tier: {next_tier} — {settings['conformers']} conformers × "
                     f"{settings['seeds']} seeds, exhaustiveness {settings['exhaustiveness']}."
