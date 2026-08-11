@@ -49,6 +49,8 @@ h2 { font-family: Georgia, "Times New Roman", serif; font-size: clamp(2.15rem, 4
 .hero-visual::before { content: ""; position: absolute; inset: -20% 45% 45% -25%; background: radial-gradient(circle, rgba(32,201,189,.5), transparent 65%); }
 .hero-visual img { position: relative; display: block; width: 100%; min-height: 420px; object-fit: contain; border-radius: inherit; }
 .hero-visual figcaption { position: absolute; left: 1.5rem; right: 1.5rem; bottom: 1.4rem; padding: .7rem .9rem; color: #dff7f2; background: rgba(4, 25, 21, .75); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,.14); border-radius: .75rem; font-size: .76rem; }
+.overview-figure { margin: 2rem 0 0; padding: 1rem; background: #07110f; border-radius: 1.5rem; box-shadow: var(--shadow); }
+.overview-figure img { display: block; width: 100%; height: auto; border-radius: 1rem; }
 .dot { display: inline-block; width: .52rem; height: .52rem; margin-right: .5rem; background: var(--cyan); border-radius: 50%; box-shadow: 0 0 0 .25rem rgba(32,201,189,.16); }
 .section { padding: 7rem 0; border-top: 1px solid var(--line); }
 .section-heading { display: grid; grid-template-columns: .6fr 1.4fr; gap: 2rem; align-items: start; }

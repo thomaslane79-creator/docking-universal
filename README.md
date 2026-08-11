@@ -1,6 +1,12 @@
 # Docking Universal
 
-Docking Universal is a scientific workflow, orchestration, validation, and reporting layer built around **AutoDock Vina**, which performs the actual docking search and scoring. Docking Universal does not introduce a new docking engine or scoring function. It prepares receptors and ligand ensembles, defines and reviews docking boxes, calibrates target-specific search settings, runs reproducible Vina batches, clusters and analyzes poses, and produces auditable visual and PDF reports.
+**Current research-preview release: v0.4.0**
+
+**Docking Universal is a scientific workflow orchestration, validation, analysis, visualization, and reporting system built around AutoDock Vina and established open-source structural-bioinformatics tools.**
+
+It provides one guided, configurable Bash interface for control-guided or ligand-free docking studies while retaining independently composable commands, complete provenance, PyMOL Open-Source visualizations, and automatic scientific PDF reports.
+
+**AutoDock Vina performs the actual docking search and scoring.** Docking Universal does not introduce a new docking engine or scoring function; it makes the surrounding multi-tool scientific workflow reproducible, reviewable, batch-capable, and easier to run without launching each script manually.
 
 In short: **Vina docks; Docking Universal makes the surrounding scientific workflow reproducible and reviewable.** The optional **smina path uses smina, a fork of AutoDock Vina**, retained here for comparison and its additional scoring/minimization capabilities; it is not presented as an unrelated docking framework. AutoDock Vina is the default and presently validated path in this research preview.
 
@@ -14,7 +20,7 @@ The project was created in part to make this compiled scientific toolchain pract
 
 **Research preview.** The core workflow has produced useful outputs across the author's working structural-docking cases. A matched public 1HVR/XK2 case passes raw preparation, ligand-free pocket recovery, engine execution, score collection, PLIP processing, and visual rendering on an M2 Mac. Its five-seed Vina ensemble control passed the target-specific 2 Å sampling/ranking rule; the tested smina rigid-macrocycle control did not. This single retrospective case is not broad accuracy validation. See [Validation](docs/validation.md).
 
-![A ligand-centered pocket rendered from a Docking Universal PyMOL scene](docs/assets/ligand-pocket.png)
+![Two end-to-end Docking Universal pathways: control-guided screening and ligand-free exploratory screening](docs/assets/end-to-end-workflows-and-outputs-mockup.png)
 
 ## Example scientific report
 
@@ -151,6 +157,8 @@ Exploratory mode is intentionally labeled `EXPLORATORY_NO_CONTROL` in every cons
 
 Two [complete workflow tutorials](examples/tutorials/README.md) show the major starting cases: a 1HVR/XK2 bound-ligand control and a 2R8N unbound cavity-search study.
 
+Completed PDFs receive descriptive archival names derived from the target, ligand scope, run date, and report type—for example, `2R8N_Indinavir_2026-08-11_docking_report.pdf`, `1HVR_XK2_2026-08-11_control_report.pdf`, or `4AKE_cavity_2026-08-11_cavity_report.pdf`. Libraries of more than three compounds use a bounded label such as `2R8N_15-ligands_2026-08-11_docking_report.pdf`; the individual ligand names remain in the report and machine-readable summary.
+
 `docking-universal control` is the guided retrospective-control workflow. It lists exact bound-ligand instances as `RESNAME:CHAIN:RESNUM` with atom counts and requires confirmation. The Bash prompt then offers strict chemistry verification (recommended) or a manual override whose reason is recorded in `run_manifest.tsv`.
 
 The default path now performs independent-ensemble calibration and writes a versioned, target-locked `protocol.json`. The superseded single-conformer implementation is available only through `--legacy-single-conformer` to reproduce historical output and cannot authorize unknown docking.
@@ -207,6 +215,8 @@ fpocket_score × exp(−distance_to_reference_centroid / 10)
 ```
 
 The reference is the whole protein or largest chain. Boxes that exceed the configured volume-overlap fraction with an earlier choice are suppressed. See [Methodology](docs/methodology.md) for assumptions and limitations.
+
+Ligand-free guided runs start with conservative fpocket settings and a score threshold of 0.10. If no candidate survives, the interface offers a documented retry at 0.0 while retaining the geometry, broad-pocket, and overlap filters. Lowering the threshold admits additional geometric hypotheses; it does not validate them as binding sites. When multiple retained pockets have competitive scores (within 0.05 score units or 20% of the best score, whichever is larger), the interface marks the near-tie, can open all competitive PyMOL scenes, and waits for the user to choose the numbered pocket/box. fpocket rank is therefore a review aid rather than an automatic biological-site assignment.
 
 ## Visual output from existing files
 
