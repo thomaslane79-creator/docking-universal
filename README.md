@@ -16,6 +16,16 @@ It consolidates a series of working research scripts behind one consistent comma
 
 The project was created in part to make this compiled scientific toolchain practical and reproducible on Apple-silicon M-series computers. Its current reference platform is an M2 Mac (`osx-arm64`); portability to other platforms remains a tested goal rather than an assumed guarantee.
 
+## Why I built it: a scientist's perspective
+
+Docking Universal began with a practical problem I encountered while using docking software: **how should I determine where to dock?** Vina requires a search region, but that choice is scientifically consequential and is often treated as a setup detail. If no relevant ligand is available, candidate cavities must be detected, compared in structural context, and documented before a docking box is selected. If a relevant experimental ligand is available, I believe the workflow should also test whether the proposed protocol can recover evidence it already has.
+
+That control requires careful chemistry. A ligand's coordinates in a PDB file are not a complete, authoritative small-molecule representation: bond orders, aromaticity, formal charge, protonation, and stereochemistry may be absent or ambiguous. Docking Universal therefore verifies the molecular graph using the RCSB Chemical Component Dictionary or a supplied SDF while keeping the crystallographic coordinates separate as a withheld evaluation reference.
+
+The control ligand is then placed on substantially the same methodological footing as an unknown compound. Its experimental 3D coordinates do not seed docking; it follows the same chemical-state handling, independent conformer generation, PDBQT preparation, random-seed strategy, Vina search, scoring, and pose analysis. This reduces conformational information leakage and avoids giving the protocol undue credit for recovering a pose that was effectively supplied to it.
+
+The comparison is deliberately described as target-specific retrospective evidence, not proof of prospective accuracy. The known ligand still identifies the site and box center. A passing control shows that the recorded workflow can reproducibly recover a known pose within that known site; a failed control prevents those settings from silently authorizing subsequent screening.
+
 ## Project status
 
 **Research preview.** The core workflow has produced useful outputs across the author's working structural-docking cases. A matched public 1HVR/XK2 case passes raw preparation, ligand-free pocket recovery, Vina execution, score collection, PLIP processing, and visual rendering on an M2 Mac. Its five-seed Vina ensemble control passed the target-specific 2 Å sampling/ranking rule. This single retrospective case is not broad accuracy validation. See [Validation](docs/validation.md).
@@ -76,7 +86,7 @@ Create the tested scientific environment:
 ```bash
 conda env create -f environment.yml
 conda activate docking-universal
-./bin/docking-universal doctor
+./bin/docking-universal check-install
 make test
 ```
 
@@ -86,7 +96,7 @@ Create the small AutoDock Vina engine environment:
 conda env create -f environments/vina.yml
 ```
 
-The `dock` command discovers Vina there automatically. The two engines are run as separate, auditable batches against the same receptor, ligand directory, and box configuration.
+The `dock` command discovers Vina there automatically and records the executable source, version, receptor, ligand directory, box, and search settings.
 
 For exact reproduction of the M2 Vina test environment, use `environments/vina-lock-osx-arm64.txt`; use the readable YAML for normal installation.
 

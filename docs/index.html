@@ -36,7 +36,7 @@
           <a class="button secondary" href="methodology.md">Read the method</a>
         </div>
         <dl class="hero-stats">
-          <div><dt>16</dt><dd>composable commands</dd></div>
+          <div><dt>17</dt><dd>composable commands</dd></div>
           <div><dt>2D + 3D</dt><dd>visual outputs</dd></div>
           <div><dt>1</dt><dd>auditable pipeline</dd></div>
         </dl>
@@ -45,6 +45,20 @@
         <img src="assets/end-to-end-two-pathways-mockup.png" alt="Control-guided and ligand-free docking workflows using AutoDock Vina and fpocket">
         <figcaption><span class="dot"></span> Control-guided screening or ligand-free exploratory screening</figcaption>
       </figure>
+    </section>
+
+    <section class="section split" id="motivation">
+      <div>
+        <p class="eyebrow">Why I built it · a scientist's perspective</p>
+        <h2>I had docking software. The first problem was: where should I dock?</h2>
+        <p>Vina requires a search region, but choosing that region is scientifically consequential. Without a relevant ligand, I wanted candidate cavities to be detected, visualized, compared, and documented before selecting a box. With an experimental ligand, I wanted the workflow to test whether its proposed protocol could recover a known pose rather than simply assuming the setup was adequate.</p>
+      </div>
+      <div class="output-list">
+        <article><span>SITE</span><div><h3>Make site selection explicit</h3><p>A known ligand defines an experimentally observed site; otherwise fpocket generates geometric cavity hypotheses for structural review.</p></div></article>
+        <article><span>CHEM</span><div><h3>Coordinates are not complete chemistry</h3><p>A PDB does not reliably encode an authoritative ligand molecular graph. CCD or supplied-SDF chemistry provides bonds, aromaticity, charge, and stereochemistry.</p></div></article>
+        <article><span>CTRL</span><div><h3>Do not give the control an unfair advantage</h3><p>The crystallographic conformation is withheld. The control ligand follows the same state, conformer, preparation, seed, Vina, scoring, and analysis pipeline used for unknown compounds.</p></div></article>
+        <article><span>SCOPE</span><div><h3>Report what the evidence supports</h3><p>A pass is target-specific pose-recovery evidence within a known site—not proof of prospective pose, affinity, or biological activity.</p></div></article>
+      </div>
     </section>
 
     <section class="section workflow-overview" aria-labelledby="workflow-overview-title">
@@ -135,7 +149,7 @@
     <section class="section install" id="install">
       <div>
         <p class="eyebrow">Package interface</p>
-        <h2>One interface, sixteen commands</h2>
+        <h2>One interface, seventeen commands</h2>
         <p>The main Conda environment installs preparation, analysis, and visualization tools. A small isolated engine environment supplies AutoDock Vina without disturbing the Apple-silicon PyMOL and chemistry stack. Vina is the only docking engine supported in this research preview; a smina comparison backend may be evaluated in a future version.</p>
         <p><a href="installation.md">Complete installation guide, dependency roles, and M2 notes →</a></p>
       </div>
