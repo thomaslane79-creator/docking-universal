@@ -137,5 +137,63 @@ class EnsembleSettingsTests(unittest.TestCase):
         prompt.assert_not_called()
 
 
+class PocketReviewTests(unittest.TestCase):
+    def test_near_tied_pockets_are_marked_competitive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cavity = Path(directory) / "cavity"
+            cavity.mkdir()
+            boxes = [cavity / f"target_pocket{index}.conf" for index in (1, 2, 3)]
+            for box in boxes:
+                box.write_text("size_x = 26\n")
+            (cavity / "pocket_selection_diagnostics.tsv").write_text(
+                "rank_order\tpocket_file\tscore\tdecision\n"
+                "1\tpocket1_atm.pdb\t0.0861\tselected\n"
+                "2\tpocket2_atm.pdb\t0.0725\tselected\n"
+                "3\tpocket3_atm.pdb\t0.0125\tselected\n"
+            )
+            records = RUNNER.prepared_box_records(boxes)
+            self.assertTrue(records[0]["competitive"])
+            self.assertTrue(records[1]["competitive"])
+            self.assertFalse(records[2]["competitive"])
+            self.assertEqual(records[1]["row"]["pocket_file"], "pocket2_atm.pdb")
+
+
+class ReportFilenameTests(unittest.TestCase):
+    def test_single_ligand_report_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            study = Path(directory)
+            (study / "inputs").mkdir()
+            (study / "inputs" / "2R8N.pdb").write_text("END\n")
+            manifest = {"workflow": "exploratory", "created_utc": "2026-08-11T12:00:00Z"}
+            compounds = [{"compound_name": "Indinavir"}]
+            self.assertEqual(
+                RUNNER.report_pdf_name(study, manifest, compounds),
+                "2R8N_Indinavir_2026-08-11_docking_report.pdf",
+            )
+
+    def test_large_library_report_name_is_bounded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            study = Path(directory)
+            (study / "inputs").mkdir()
+            (study / "inputs" / "4AKE.pdb").write_text("END\n")
+            manifest = {"workflow": "exploratory", "created_utc": "2026-08-11T12:00:00Z"}
+            compounds = [{"compound_name": f"Ligand {index}"} for index in range(15)]
+            self.assertEqual(
+                RUNNER.report_pdf_name(study, manifest, compounds),
+                "4AKE_15-ligands_2026-08-11_docking_report.pdf",
+            )
+
+    def test_cavity_only_report_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            study = Path(directory)
+            (study / "inputs").mkdir()
+            (study / "inputs" / "4AKE.pdb").write_text("END\n")
+            manifest = {"workflow": "exploratory", "created_utc": "2026-08-11T12:00:00Z"}
+            self.assertEqual(
+                RUNNER.report_pdf_name(study, manifest, []),
+                "4AKE_cavity_2026-08-11_cavity_report.pdf",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

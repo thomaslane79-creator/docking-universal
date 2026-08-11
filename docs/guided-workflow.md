@@ -66,7 +66,9 @@ Use `--mode exploratory` when no suitable experimental control ligand exists. Pr
 
 The output is permanently marked `EXPLORATORY_NO_CONTROL`. Convergence across seeds can reveal whether the search repeatedly finds similar poses, but it cannot substitute for pose-recovery evidence or experimental validation.
 
-When a raw ligand-free PDB is supplied, the runner prepares an expanded cavity search by default, retains candidate boxes with diagnostics, and chooses the first box deterministically in unattended mode. Interactive use lists the generated PyMOL cavity scenes and offers to open the review before docking. Use `--review-pockets` to request that launch explicitly, or adjust `--cavity-mode`, `--max-pockets`, and `--center-mode` for a different cavity-search policy.
+When a raw ligand-free PDB is supplied, the runner starts with conservative fpocket settings, retains candidate boxes with diagnostics, and chooses the first box deterministically only in unattended mode. It first applies the 0.10 score threshold. If no cavity survives, guided use offers a documented retry at 0.0 while retaining geometry, broad-pocket, and overlap filtering. The relaxed threshold expands the hypotheses available for review; it is not evidence of biological relevance.
+
+Interactive use lists each generated box with its source pocket and fpocket score. Candidates within 0.05 score units or 20% of the best score (whichever tolerance is larger) are marked as competitive. The interface can open all competitive PyMOL scenes and then waits for the user to select the numbered pocket/box. The automatic cavity-report figure shows all retained pocket hypotheses on the receptor before a separate figure records the chosen box. Use `--review-pockets` to request PyMOL review explicitly, or adjust `--cavity-mode`, `--max-pockets`, and `--center-mode` for a different cavity-search policy.
 
 ## Useful options
 
@@ -89,7 +91,7 @@ study/
 │   ├── compound_summary.csv
 │   ├── study_summary.json
 │   ├── study_report.md
-│   ├── study_report.pdf
+│   ├── <PDB>_<ligand-or-library>_<YYYY-MM-DD>_<report-type>.pdf
 │   ├── report_figure_manifest.json
 │   ├── run_details.md
 │   └── index.html
@@ -102,11 +104,11 @@ study/
 
 The PDF report stage automatically generates numbered control and compound figures from the retained pose, cluster, receptor, and protocol artifacts. Control provenance is recovered from the protocol path stored in the screen manifest, so a screen launched separately from its control still produces a combined report. Figure distances use the same symmetry-aware, no-fit heavy-atom RMSD in the fixed receptor frame as pose clustering; the RMSD display includes a small margin below zero so a 0 A reference point is not clipped, while labeled ticks remain nonnegative. A control report includes SDF-aware interaction diagrams for the experimental pose, globally lowest-energy redocked pose, and globally lowest-RMSD redocked pose. Compound results similarly include the three top energy-ranked cluster representatives. Ligand chemistry comes from retained SDF files and PLIP calls come from retained XML; the report-figure manifest and per-diagram manifests record these sources and the coordinate-mapping check.
 
-When no bound-ligand control is supplied, the generator writes a distinct **Ligand-Free Cavity and Docking Report** instead of silently omitting validation. Its first section records fpocket candidate ranks, score, druggability score, calculated cavity volume, alpha-sphere count, cavity bounds, the selected cavity and box center, and the separate docking-box dimensions and volume. An A/B figure shows the ranked cavity decisions and the structural cavity/box view. These are site-selection records, not pose-recovery validation or evidence that the predicted cavity is biologically correct. Missing descriptors in older retained runs are reported as `NA`, never reconstructed or guessed.
+When no bound-ligand control is supplied, the generator writes a distinct **Ligand-Free Cavity and Docking Report** instead of silently omitting validation. Its first section records fpocket candidate ranks, score, druggability score, calculated cavity volume, alpha-sphere count, cavity bounds, the selected cavity and box center, and the separate docking-box dimensions and volume. Panel A shows the ranked candidate decisions; Panel B places all retained pocket hypotheses on the whole receptor. A following figure records only the chosen pocket and docking box. These are site-selection records, not pose-recovery validation or evidence that a predicted cavity is biologically correct. A preparation-only run receives the same cavity section without empty protocol or docking sections. Missing descriptors in older retained runs are reported as `NA`, never reconstructed or guessed.
 
 Every automatically generated PDF ends with a reproducibility section that assigns each reported quantity or visual to the program that produced it, lists run-specific software versions, and provides primary scientific/software references. The same information is written in machine-readable form as `report/software_versions_and_references.json`.
 
-At completion, the terminal prints the exact `report/study_report.pdf` path. If optional PDF dependencies or figure generation fail, the workflow retains its HTML/Markdown/JSON reports and prints an explicit warning with the PDF-generation error rather than silently omitting the PDF.
+At completion, the terminal prints the exact descriptive PDF path. The filename records the target, ligand scope, date, and report type. One to three ligand names are included directly; larger libraries use a bounded count such as `15-ligands`, while the full names remain inside the report and machine summary. If optional PDF dependencies or figure generation fail, the workflow retains its HTML/Markdown/JSON reports and prints an explicit warning with the PDF-generation error rather than silently omitting the PDF.
 
 For multi-record SDF libraries, compound labels always come from each individual SDF record rather than the shared source filename. The PDF is published atomically only after every approved-style A/B panel and SDF-aware interaction diagram has been rebuilt successfully; a figure-generation failure cannot silently replace the approved report with raw fallback renders.
 

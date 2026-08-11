@@ -14,7 +14,8 @@ set -e
 #   - hide all PyMOL objects before rendering each scene to avoid ghost pockets
 #   - add timestamped logging and a run log
 ###############################################################################
-PACKAGE_VERSION="0.2.0"
+PACKAGE_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+PACKAGE_VERSION=$(sed -n '1p' "$PACKAGE_ROOT/VERSION" 2>/dev/null || printf 'unknown')
 SCRIPT_VERSION="1.35.13_surface_local_pockets_patch1"
 
 print_help() {
@@ -1252,6 +1253,20 @@ for REC in "${SORTED[@]}"; do
   done
   done
   done
+
+  # Explicit cube-edge connectivity keeps the synthetic docking box visible
+  # in PyMOL; its corner atoms are too far apart for reliable bond inference.
+  cat >> "$BOX" <<'EOF'
+CONECT    1    2    3    5
+CONECT    2    1    4    6
+CONECT    3    1    4    7
+CONECT    4    2    3    8
+CONECT    5    1    6    7
+CONECT    6    2    5    8
+CONECT    7    3    5    8
+CONECT    8    4    6    7
+END
+EOF
 
   cat > "$CONF" <<EOF
 # Generated: $TIMESTAMP

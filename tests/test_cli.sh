@@ -65,6 +65,34 @@ grep -q $'engine_version\tsmina fake-0.1' "$mock_dir/results/run_manifest.tsv" |
 [ -s "$mock_dir/results/example_smina.pdbqt" ] || fail "dock output"
 [ -s "$mock_dir/results/example_two_smina.pdbqt" ] || fail "multi-ligand dock output"
 
+# Exercise the primary AutoDock Vina routing independently of a local Vina
+# installation. The mock validates argument/output plumbing; scientific engine
+# behavior is covered by the retained completed example studies.
+mock_vina="$mock_dir/vina"
+cat > "$mock_vina" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = "--version" ]; then
+  echo "AutoDock Vina fake-0.1"
+  exit 0
+fi
+output=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --out) output="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+[ -n "$output" ] || exit 2
+printf 'MODEL 1\nREMARK VINA RESULT: -7.0 0.0 0.0\nENDMDL\n' > "$output"
+EOF
+chmod +x "$mock_vina"
+"$cli" dock --engine vina --engine-command "$mock_vina" \
+  --receptor "$mock_dir/receptor.pdbqt" --ligands "$mock_dir/ligands" \
+  --config "$mock_dir/box.conf" --out "$mock_dir/vina_results" >/dev/null || fail "vina dock engine command"
+grep -q $'engine_version\tAutoDock Vina fake-0.1' "$mock_dir/vina_results/run_manifest.tsv" || fail "vina version manifest"
+[ -s "$mock_dir/vina_results/example_vina.pdbqt" ] || fail "vina dock output"
+[ -s "$mock_dir/vina_results/example_two_vina.pdbqt" ] || fail "vina multi-ligand dock output"
+
 for command_name in run control calibrate ensemble prepare ligands pockets dock collect compare-redock evaluate-control screen cluster-poses interactions render3d depict2d; do
   "$cli" "$command_name" --help >/dev/null || fail "$command_name help"
 done

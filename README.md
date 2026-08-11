@@ -259,6 +259,8 @@ pose RMSD; state and formal-charge metadata remain available for interpretation.
 
 ## Test
 
+The complete option-coverage and real-tool validation record is documented in [Validation status](docs/validation-status.md).
+
 ```bash
 make test
 ```

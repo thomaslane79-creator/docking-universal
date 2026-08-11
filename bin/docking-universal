@@ -4,8 +4,9 @@ set -eu
 # Public command dispatcher. Scientific computation lives in libexec; this file
 # resolves the package-local implementation and forwards user arguments.
 
-VERSION="0.4.0"
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+VERSION_FILE="$SCRIPT_DIR/../VERSION"
+VERSION=$(sed -n '1p' "$VERSION_FILE" 2>/dev/null || printf 'unknown')
 PYTHON_COMMAND="${DOCKING_UNIVERSAL_PYTHON:-python}"
 if [ -n "${DOCKING_UNIVERSAL_LIBEXEC:-}" ]; then
   LIBEXEC_DIR="$DOCKING_UNIVERSAL_LIBEXEC"
