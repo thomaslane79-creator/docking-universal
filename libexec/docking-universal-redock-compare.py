@@ -302,7 +302,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reference-sdf", required=True, type=Path, help="Matching ligand SDF with bond orders")
     parser.add_argument("--crystal-ligand", required=True, type=Path, help="Bound ligand coordinates extracted from the complex PDB")
-    parser.add_argument("--docked-pdbqt", required=True, type=Path, help="Multi-model Vina/smina docking output")
+    parser.add_argument("--docked-pdbqt", required=True, type=Path, help="Multi-model AutoDock Vina docking output")
     parser.add_argument("--receptor-pdb", required=True, type=Path, help="Prepared receptor PDB without the bound ligand")
     parser.add_argument("--out", required=True, type=Path, help="Output directory")
     parser.add_argument("--mk-export", default="mk_export.py", help="Meeko pose exporter")

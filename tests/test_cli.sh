@@ -35,36 +35,11 @@ case "$doctor_output" in
   *) fail "doctor output" ;;
 esac
 
-mock_engine="$mock_dir/smina"
-cat > "$mock_engine" <<'EOF'
-#!/usr/bin/env bash
-if [ "${1:-}" = "--version" ]; then
-  echo "smina fake-0.1"
-  exit 0
-fi
-output=""
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --out) output="$2"; shift 2 ;;
-    *) shift ;;
-  esac
-done
-[ -n "$output" ] || exit 2
-printf 'MODEL 1\nENDMDL\n' > "$output"
-EOF
-chmod +x "$mock_engine"
 mkdir -p "$mock_dir/ligands"
 printf 'ATOM\n' > "$mock_dir/receptor.pdbqt"
 printf 'MODEL\n' > "$mock_dir/ligands/example.pdbqt"
 printf 'MODEL\n' > "$mock_dir/ligands/example_two.pdbqt"
 printf 'center_x = 0\ncenter_y = 0\ncenter_z = 0\nsize_x = 20\nsize_y = 20\nsize_z = 20\n' > "$mock_dir/box.conf"
-"$cli" dock --engine smina --engine-command "$mock_engine" \
-  --receptor "$mock_dir/receptor.pdbqt" --ligands "$mock_dir/ligands" \
-  --config "$mock_dir/box.conf" --out "$mock_dir/results" >/dev/null || fail "dock engine command"
-grep -q $'engine_version\tsmina fake-0.1' "$mock_dir/results/run_manifest.tsv" || fail "dock version manifest"
-[ -s "$mock_dir/results/example_smina.pdbqt" ] || fail "dock output"
-[ -s "$mock_dir/results/example_two_smina.pdbqt" ] || fail "multi-ligand dock output"
-
 # Exercise the primary AutoDock Vina routing independently of a local Vina
 # installation. The mock validates argument/output plumbing; scientific engine
 # behavior is covered by the retained completed example studies.
@@ -92,6 +67,14 @@ chmod +x "$mock_vina"
 grep -q $'engine_version\tAutoDock Vina fake-0.1' "$mock_dir/vina_results/run_manifest.tsv" || fail "vina version manifest"
 [ -s "$mock_dir/vina_results/example_vina.pdbqt" ] || fail "vina dock output"
 [ -s "$mock_dir/vina_results/example_two_vina.pdbqt" ] || fail "vina multi-ligand dock output"
+
+# The research-preview interface is deliberately Vina-only. Obsolete smina
+# selections must fail before any external engine is launched.
+if "$cli" dock --engine smina --engine-command "$mock_vina" \
+  --receptor "$mock_dir/receptor.pdbqt" --ligands "$mock_dir/ligands" \
+  --config "$mock_dir/box.conf" --out "$mock_dir/rejected_smina" >/dev/null 2>&1; then
+  fail "obsolete smina engine option was accepted"
+fi
 
 for command_name in run control calibrate ensemble prepare ligands pockets dock collect compare-redock evaluate-control screen cluster-poses interactions render3d depict2d; do
   "$cli" "$command_name" --help >/dev/null || fail "$command_name help"
@@ -131,8 +114,6 @@ if "$cli" screen --protocol "$mock_dir/unapproved.json" --ligand "$mock_dir/unkn
 fi
 
 "$cli" collect "$project_dir/tests/expected_outputs/engine_parser/vina_result.pdbqt" --out "$mock_dir/vina.csv" >/dev/null
-grep -q 'example_vina,1,CCO,vina,-7.500,0.000,0.000,' "$mock_dir/vina.csv" || fail "Vina result parsing"
-"$cli" collect "$project_dir/tests/expected_outputs/engine_parser/smina_result.pdbqt" --out "$mock_dir/smina.csv" >/dev/null
-grep -q 'example_smina,1,CCO,smina,-8.250,,,1.125' "$mock_dir/smina.csv" || fail "smina result parsing"
+grep -q 'example_vina,1,CCO,vina,-7.500,0.000,0.000' "$mock_dir/vina.csv" || fail "Vina result parsing"
 
 printf 'PASS: Docking Universal CLI checks\n'

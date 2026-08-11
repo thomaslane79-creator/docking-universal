@@ -1,9 +1,5 @@
 #!/usr/bin/env python
-"""Collect Vina and smina PDBQT results into a tidy CSV.
-
-Vina RMSD bounds and smina minimized-RMSD fields have different meanings and
-are preserved in separate columns rather than treated as equivalent values.
-"""
+"""Collect AutoDock Vina PDBQT results into a tidy CSV."""
 
 import argparse
 import csv
@@ -24,7 +20,6 @@ def parse_file(path: Path):
     affinity = ""
     rmsd_lower = ""
     rmsd_upper = ""
-    smina_minimized_rmsd = ""
     score_format = ""
 
     with path.open(errors="replace") as handle:
@@ -39,17 +34,10 @@ def parse_file(path: Path):
                 affinity = ""
                 rmsd_lower = ""
                 rmsd_upper = ""
-                smina_minimized_rmsd = ""
                 score_format = ""
             elif fields[:3] == ["REMARK", "VINA", "RESULT:"] and len(fields) >= 6:
                 affinity, rmsd_lower, rmsd_upper = fields[-3:]
                 score_format = "vina"
-            elif fields[:2] == ["REMARK", "minimizedAffinity"] and len(fields) >= 3:
-                affinity = fields[2]
-                score_format = "smina"
-            elif fields[:2] == ["REMARK", "minimizedRMSD"] and len(fields) >= 3:
-                smina_minimized_rmsd = fields[2]
-                score_format = "smina"
             elif fields[:1] == ["ENDMDL"] and model is not None:
                 yield {
                     "file_path": str(path.resolve()),
@@ -60,7 +48,6 @@ def parse_file(path: Path):
                     "affinity_kcal_per_mol": affinity,
                     "rmsd_lower_bound": rmsd_lower,
                     "rmsd_upper_bound": rmsd_upper,
-                    "smina_minimized_rmsd": smina_minimized_rmsd,
                 }
                 model = None
 
@@ -83,7 +70,6 @@ def main():
         "affinity_kcal_per_mol",
         "rmsd_lower_bound",
         "rmsd_upper_bound",
-        "smina_minimized_rmsd",
     ]
     count = 0
     with output.open("w", newline="") as handle:

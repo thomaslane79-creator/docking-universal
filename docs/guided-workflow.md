@@ -4,7 +4,7 @@ For the two starting cases, see [bound-ligand and ligand-free workflow examples]
 
 `docking-universal run` is the recommended entry point for a complete study. It organizes the composable preparation, docking, clustering, interaction, and rendering commands without hiding their files or assumptions.
 
-This release performs rigid-receptor docking. Protein coordinates are fixed during Vina/smina searches; ligand torsions and independently prepared ligand conformers may still be sampled. Receptor conformational change and induced fit are outside the current scope. One SDF, a multi-record SDF, or a directory of SDF files can be processed as a batch, with failures and outputs isolated by compound.
+This release performs rigid-receptor AutoDock Vina docking. Protein coordinates are fixed during searches; ligand torsions and independently prepared ligand conformers may still be sampled. Receptor conformational change and induced fit are outside the current scope. One SDF, a multi-record SDF, or a directory of SDF files can be processed as a batch, with failures and outputs isolated by compound.
 
 ## Default or custom ligand ensemble
 

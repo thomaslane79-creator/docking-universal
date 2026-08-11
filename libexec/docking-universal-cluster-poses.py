@@ -267,7 +267,7 @@ conformer support are reported separately as measures of search repeatability.
     source.add_argument("--comparison-root", type=Path, help="existing redocking comparison tree containing typed pose SDFs")
     source.add_argument("--docking-root", type=Path, help="raw cross-seed docking tree to export and cluster")
     parser.add_argument("--ligand-work", type=Path, help="typed per-conformer SDF directory; required with --docking-root")
-    parser.add_argument("--engine", choices=("vina", "smina"), default="vina", help="score syntax and output suffix to parse (default: vina)")
+    parser.add_argument("--engine", choices=("vina",), default="vina", help="score syntax and output suffix to parse (Vina)")
     parser.add_argument("--receptor", required=True, type=Path, help="fixed receptor-frame PDB used for nearby residues and scenes")
     parser.add_argument("--out", required=True, type=Path, help="cluster tables, all-pose SDF, representatives, and PyMOL scripts")
     parser.add_argument("--cluster-rmsd", type=float, default=2.0, help="symmetry-aware no-fit heavy-atom RMSD cutoff in A (default: 2.0)")

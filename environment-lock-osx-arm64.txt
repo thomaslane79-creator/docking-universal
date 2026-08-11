@@ -173,7 +173,6 @@ https://conda.anaconda.org/conda-forge/noarch/pdb2pqr-3.6.1-pyhd8ed1ab_1.conda
 https://conda.anaconda.org/conda-forge/noarch/plip-2.3.1-pyh29332c3_1.conda
 https://repo.anaconda.com/pkgs/main/osx-arm64/pyqt-5.15.10-py39h313beb8_1.conda
 https://conda.anaconda.org/conda-forge/noarch/rlpycairo-0.2.0-pyhd8ed1ab_0.conda
-https://conda.anaconda.org/conda-forge/osx-arm64/smina-2020.12.10-h286801f_2.conda
 https://conda.anaconda.org/conda-forge/osx-arm64/pymol-open-source-3.0.0-py39hae55e1c_8.conda
 https://conda.anaconda.org/conda-forge/osx-arm64/reportlab-4.4.1-py39hf3bc14e_0.conda
 https://conda.anaconda.org/conda-forge/osx-arm64/rdkit-2023.09.6-py39hed78e32_1.conda

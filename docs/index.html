@@ -136,7 +136,7 @@
       <div>
         <p class="eyebrow">Package interface</p>
         <h2>One interface, sixteen commands</h2>
-        <p>The main Conda environment installs preparation, analysis, visualization, and smina. smina is a fork of AutoDock Vina with additional scoring and minimization capabilities, not an unrelated docking framework. A small optional environment supplies current AutoDock Vina for reproducible comparison runs without disturbing the Apple-silicon PyMOL stack.</p>
+        <p>The main Conda environment installs preparation, analysis, and visualization tools. A small isolated engine environment supplies AutoDock Vina without disturbing the Apple-silicon PyMOL and chemistry stack. Vina is the only docking engine supported in this research preview; a smina comparison backend may be evaluated in a future version.</p>
         <p><a href="installation.md">Complete installation guide, dependency roles, and M2 notes →</a></p>
       </div>
       <div class="terminal" role="region" aria-label="Docking Universal terminal example">
@@ -150,8 +150,7 @@ available  fpocket
 available  obabel
 available  plip
 available  pymol
-available  smina
-available  vina (optional environment)
+available  vina (isolated engine environment)
 
 <b>$</b> ./bin/docking-universal control --complex 1HVR.pdb
 <b>$</b> ./bin/docking-universal screen --protocol protocol.json \
@@ -163,7 +162,7 @@ available  vina (optional environment)
     <section class="section caution">
       <p class="eyebrow">Research preview</p>
       <h2>Scientifically useful, with validation still in progress.</h2>
-      <p>Docking Universal packages transparent structural-docking computations. It does not prove biological relevance. The documented 1HVR/XK2 work includes a failed low-effort baseline, a successful three-seed Vina ensemble follow-up, and a failed smina rigid-macrocycle follow-up. These target-specific controls are reported separately rather than treated as general accuracy validation.</p>
+      <p>Docking Universal packages transparent structural-docking computations. It does not prove biological relevance. The documented 1HVR/XK2 work includes a failed low-effort baseline and a successful multi-seed Vina ensemble follow-up. This target-specific control is reported as retrospective evidence rather than general accuracy validation.</p>
       <a href="validation.md">Review the raw-input validation →</a>
     </section>
   </main>

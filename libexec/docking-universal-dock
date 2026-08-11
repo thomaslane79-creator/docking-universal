@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Low-level Vina/smina runner for an already prepared receptor, ligand PDBQT
+# Low-level AutoDock Vina runner for an already prepared receptor, ligand PDBQT
 # directory, and box. It records executable versions and parameters; scientific
 # preparation and protocol approval are handled by higher-level commands.
 
@@ -11,7 +11,7 @@ Usage:
   docking-universal dock --receptor receptor.pdbqt --ligands DIR --config box.conf --out DIR [options]
 
 Options:
-  --engine vina|smina      Docking engine (default: vina)
+  --engine vina            Docking engine (only Vina is supported in 0.4.x)
   --engine-command PATH    Explicit engine executable
   --engine-env NAME        Conda environment containing the engine
   --exhaustiveness N       Forwarded to the selected engine when provided
@@ -59,13 +59,10 @@ done
   usage >&2
   exit 2
 }
-[ "$engine" = "vina" ] || [ "$engine" = "smina" ] || { echo "ERROR: engine must be vina or smina" >&2; exit 2; }
+[ "$engine" = "vina" ] || { echo "ERROR: only AutoDock Vina is supported in this release; smina may be evaluated in a future version" >&2; exit 2; }
 
 if [ -z "$engine_command" ]; then
-  case "$engine" in
-    vina) engine_command="${DOCKING_UNIVERSAL_VINA:-}" ;;
-    smina) engine_command="${DOCKING_UNIVERSAL_SMINA:-}" ;;
-  esac
+  engine_command="${DOCKING_UNIVERSAL_VINA:-}"
 fi
 
 engine_cmd=()
@@ -78,7 +75,7 @@ elif command -v "$engine" >/dev/null 2>&1; then
   engine_cmd=("$(command -v "$engine")")
   engine_source="PATH"
 else
-  if [ -z "$engine_env" ] && [ "$engine" = "vina" ]; then
+  if [ -z "$engine_env" ]; then
     engine_env="${DOCKING_UNIVERSAL_VINA_ENV:-docking-universal-vina}"
   fi
   [ -n "$engine_env" ] || { echo "ERROR: $engine not found in PATH; use --engine-command or --engine-env" >&2; exit 1; }

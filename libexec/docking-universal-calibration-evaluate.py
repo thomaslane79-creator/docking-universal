@@ -24,7 +24,7 @@ def sha256(path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("comparison_root", type=Path, nargs="+")
-    parser.add_argument("--engine", required=True, choices=("vina", "smina"))
+    parser.add_argument("--engine", required=True, choices=("vina",))
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--receptor", required=True, type=Path)
     parser.add_argument("--box", required=True, type=Path)

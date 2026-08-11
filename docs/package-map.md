@@ -8,7 +8,7 @@ Docking Universal consolidates distinct structural-docking utilities found in th
 | `docking-universal prepare` | `prepare_receptor_and_conf_v1.35.13_surface_local_pockets.sh` | Latest receptor, ligand-detection, pocket-diagnostics, box, and PyMOL-scene workflow; exposed as the supported preparation command |
 | `docking-universal ligands` | `prepare_ligands_from_sdf_with_smiles.sh` | Preserves SDF splitting, 3D optimization, PDBQT conversion, and metadata insertion; removes the machine-specific executable path |
 | `docking-universal pockets` | `find_pockets.sh` | Preserves the smaller standalone coordinate/box generator; fixes fpocket output-path resolution and validates mode/input |
-| `docking-universal dock` | `dock_all.sh` and `dock_all_smina.sh` | Replaces hard-coded structures and directories with one checked Vina/smina interface and a run manifest |
+| `docking-universal dock` | `dock_all.sh` | Replaces hard-coded structures and directories with one checked AutoDock Vina interface and a run manifest |
 | `docking-universal control` / `calibrate` | Bound-ligand scripts plus new calibration layer | Verifies a selected crystal ligand, creates unbiased ensembles, runs tiered seed/conformer controls, and writes target-locked protocol records |
 | `docking-universal screen` | New protocol-transfer layer | Rejects unapproved or altered protocols and docks one unknown compound using the locked engine-specific search settings |
 | `docking-universal cluster-poses` | New cross-run analysis layer | Uses symmetry-aware receptor-frame RMSD to group poses across seeds/conformers and select energy-ranked representatives |

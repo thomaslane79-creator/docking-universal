@@ -13,7 +13,7 @@ The test suite exercises:
 - all approved-protocol resume routes and multiple-protocol disambiguation;
 - each prepared pocket selection plus single-pocket, competitive-pocket, and no-PyMOL review choices;
 - docking-box validation, rejected choices, unapproved-protocol blocking, result parsing, and all command help entry points;
-- primary AutoDock Vina and optional smina-compatible engine command/output routing with deterministic mock engines.
+- primary AutoDock Vina command/output routing with a deterministic mock engine.
 
 Run the automated suite with:
 

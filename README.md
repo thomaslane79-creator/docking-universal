@@ -8,9 +8,9 @@ It provides one guided, configurable Bash interface for control-guided or ligand
 
 **AutoDock Vina performs the actual docking search and scoring.** Docking Universal does not introduce a new docking engine or scoring function; it makes the surrounding multi-tool scientific workflow reproducible, reviewable, batch-capable, and easier to run without launching each script manually.
 
-In short: **Vina docks; Docking Universal makes the surrounding scientific workflow reproducible and reviewable.** The optional **smina path uses smina, a fork of AutoDock Vina**, retained here for comparison and its additional scoring/minimization capabilities; it is not presented as an unrelated docking framework. AutoDock Vina is the default and presently validated path in this research preview.
+In short: **Vina docks; Docking Universal makes the surrounding scientific workflow reproducible and reviewable.** AutoDock Vina is the only docking engine supported in this research preview. A smina comparison backend may be evaluated for a later version, but it is not part of the current installation or interface.
 
-The current release supports **rigid-receptor docking only**: receptor coordinates remain fixed during each Vina or optional smina search. Prepared ligand torsions may remain flexible, and independent ligand conformers can be searched, but receptor side-chain or backbone flexibility is not modeled. The guided runner accepts a multi-record SDF or a directory of SDF files for batch docking, with one isolated result folder per compound.
+The current release supports **rigid-receptor docking only**: receptor coordinates remain fixed during each Vina search. Prepared ligand torsions may remain flexible, and independent ligand conformers can be searched, but receptor side-chain or backbone flexibility is not modeled. The guided runner accepts a multi-record SDF or a directory of SDF files for batch docking, with one isolated result folder per compound.
 
 It consolidates a series of working research scripts behind one consistent command while retaining the provenance and diagnostics that made the original workflow auditable.
 
@@ -18,7 +18,7 @@ The project was created in part to make this compiled scientific toolchain pract
 
 ## Project status
 
-**Research preview.** The core workflow has produced useful outputs across the author's working structural-docking cases. A matched public 1HVR/XK2 case passes raw preparation, ligand-free pocket recovery, engine execution, score collection, PLIP processing, and visual rendering on an M2 Mac. Its five-seed Vina ensemble control passed the target-specific 2 Å sampling/ranking rule; the tested smina rigid-macrocycle control did not. This single retrospective case is not broad accuracy validation. See [Validation](docs/validation.md).
+**Research preview.** The core workflow has produced useful outputs across the author's working structural-docking cases. A matched public 1HVR/XK2 case passes raw preparation, ligand-free pocket recovery, Vina execution, score collection, PLIP processing, and visual rendering on an M2 Mac. Its five-seed Vina ensemble control passed the target-specific 2 Å sampling/ranking rule. This single retrospective case is not broad accuracy validation. See [Validation](docs/validation.md).
 
 ![Two end-to-end Docking Universal pathways: control-guided screening and ligand-free exploratory screening](docs/assets/end-to-end-workflows-and-outputs-mockup.png)
 
@@ -39,7 +39,7 @@ This representative 1HVR/XK2 study shows the standard report produced by the pip
 | Compound library | `docking-universal ligands` | optimized per-compound PDBQT files with name and SMILES metadata |
 | Pocket coordinates | `docking-universal pockets` | ranked pocket coordinates, box PDBs, and configuration files |
 | Batch execution | `docking-universal dock` | per-compound PDBQT models, logs, and run manifest |
-| Result collation | `docking-universal collect` | tidy CSV preserving Vina and smina score/RMSD formats |
+| Result collation | `docking-universal collect` | tidy CSV preserving Vina score and RMSD-bound fields |
 | Pose comparison | `docking-universal compare-redock` | symmetry-aware pose RMSDs, summary, complexes, and overlay scene |
 | Control evaluation | `docking-universal evaluate-control` | sampling/ranking/seed acceptance and versioned protocol gate |
 | Protocol-locked unknown | `docking-universal screen` | independent unknown-ligand ensemble, replicated poses, combined scores, audit manifest |
@@ -54,7 +54,7 @@ The dispatcher and file-processing commands require Bash 3.2+, Python 3, and sta
 
 - receptor and pocket preparation: Meeko `mk_prepare_receptor.py` plus `fpocket`, with ADFRsuite `prepare_receptor` as a legacy backend;
 - ligand-library preparation: Open Babel (`obabel`) plus Meeko `mk_prepare_ligand.py`, with ADFRsuite `prepare_ligand` as a legacy backend;
-- batch engines: smina in the main environment and AutoDock Vina in an optional engine environment;
+- docking engine: AutoDock Vina in its isolated engine environment;
 - interaction analysis: PLIP (`plip`), followed by Docking Universal's custom consolidated PyMOL-scene writer;
 - 3D rendering: `pymol`;
 - 2D rendering: RDKit when available, with Open Babel as a fallback.
@@ -80,7 +80,7 @@ conda activate docking-universal
 make test
 ```
 
-To run comparison jobs with AutoDock Vina as well as smina, create the small optional engine environment:
+Create the small AutoDock Vina engine environment:
 
 ```bash
 conda env create -f environments/vina.yml
@@ -118,7 +118,7 @@ docking-universal ensemble ligand_template.sdf --out ensemble.sdf --ph 7.4 --con
 docking-universal prepare <complex.pdb>
 docking-universal ligands <library.sdf> [-n SDF_NAME_FIELD]
 docking-universal pockets <protein_only.pdb> <name> [quick|robust]
-docking-universal dock --engine smina --receptor receptor.pdbqt --ligands DIR --config box.conf --out results_smina
+docking-universal dock --engine vina --receptor receptor.pdbqt --ligands DIR --config box.conf --out results_vina
 docking-universal dock --engine vina --receptor receptor.pdbqt --ligands DIR --config box.conf --out results_vina
 docking-universal collect RESULTS_DIR --out scores.csv
 docking-universal screen --protocol protocol.json --ligand unknown.sdf --out unknown_run
@@ -163,7 +163,7 @@ Completed PDFs receive descriptive archival names derived from the target, ligan
 
 The default path now performs independent-ensemble calibration and writes a versioned, target-locked `protocol.json`. The superseded single-conformer implementation is available only through `--legacy-single-conformer` to reproduce historical output and cannot authorize unknown docking.
 
-Strict mode maps an RCSB Chemical Component Dictionary template—or an explicitly supplied `--ligand-template` SDF—onto the selected crystallographic coordinates. It writes `<RESNAME>_experimental.sdf`, removes the selected ligand for receptor preparation, discards the bound coordinates before conformer generation, and redocks independent chemical-state/conformer ensembles. Vina and smina are calibrated separately because their supported macrocycle representations differ.
+Strict mode maps an RCSB Chemical Component Dictionary template—or an explicitly supplied `--ligand-template` SDF—onto the selected crystallographic coordinates. It writes `<RESNAME>_experimental.sdf`, removes the selected ligand for receptor preparation, discards the bound coordinates before conformer generation, and redocks independent chemical-state/conformer ensembles with AutoDock Vina.
 
 For an unpublished local complex with no authoritative ligand SDF, `--infer-ligand-chemistry --force-ligand --override-reason "..."` is an explicit **not-recommended** fallback. It uses Open Babel to perceive a provisional graph from PDB geometry, writes a labeled 2D review image, and requires interactive confirmation before docking. The resulting manifest records that the chemistry was inferred; a curated SDF remains the appropriate choice whenever available.
 

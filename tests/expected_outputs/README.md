@@ -3,7 +3,7 @@
 These compact files are stable fixtures for automated checks. They are not
 full docking studies.
 
-- `engine_parser/`: representative Vina and smina PDBQT result records used to
+- `engine_parser/`: representative AutoDock Vina PDBQT result records used to
   verify score parsing.
 
 The larger, reviewable output tree from a completed public example is in
