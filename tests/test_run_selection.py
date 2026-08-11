@@ -2,6 +2,7 @@
 """Focused tests for the interactive compound-input chooser."""
 
 import importlib.util
+import argparse
 import tempfile
 import unittest
 from pathlib import Path
@@ -97,6 +98,43 @@ class ControlFolderNamingTests(unittest.TestCase):
                  patch.object(RUNNER.shutil, "which", return_value=None), \
                  patch("builtins.input", side_effect=["", str(sdf)]):
                 self.assertEqual(RUNNER.choose_ligand_source(), sdf.resolve())
+
+
+class EnsembleSettingsTests(unittest.TestCase):
+    @staticmethod
+    def defaults():
+        return argparse.Namespace(
+            ph=7.4, conformers=3, conformers_override=None, base_seed=20260808,
+            forcefield="mmff94", rmsd_prune=0.75, skip_tautomers=False,
+            charge_model="gasteiger", seeds=5,
+        )
+
+    def test_default_choice_preserves_recommended_settings(self):
+        args = self.defaults()
+        with patch("builtins.input", return_value=""):
+            RUNNER.choose_ensemble_settings(args, "exploratory")
+        self.assertEqual(args.ph, 7.4)
+        self.assertEqual(args.conformers, 3)
+        self.assertEqual(args.forcefield, "mmff94")
+        self.assertFalse(args.skip_tautomers)
+
+    def test_custom_control_settings_are_applied(self):
+        args = self.defaults()
+        answers = ["2", "6.5", "8", "1234", "2", "1.1", "n", "gasteiger"]
+        with patch("builtins.input", side_effect=answers):
+            RUNNER.choose_ensemble_settings(args, "control")
+        self.assertEqual(args.ph, 6.5)
+        self.assertEqual(args.conformers_override, 8)
+        self.assertEqual(args.base_seed, 1234)
+        self.assertEqual(args.forcefield, "mmff94s")
+        self.assertEqual(args.rmsd_prune, 1.1)
+        self.assertTrue(args.skip_tautomers)
+
+    def test_approved_screen_does_not_prompt_or_override_protocol(self):
+        args = self.defaults()
+        with patch("builtins.input") as prompt:
+            RUNNER.choose_ensemble_settings(args, "screen")
+        prompt.assert_not_called()
 
 
 if __name__ == "__main__":

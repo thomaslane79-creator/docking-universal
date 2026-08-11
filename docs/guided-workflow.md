@@ -6,6 +6,14 @@ For the two starting cases, see [bound-ligand and ligand-free workflow examples]
 
 This release performs rigid-receptor docking. Protein coordinates are fixed during Vina/smina searches; ligand torsions and independently prepared ligand conformers may still be sampled. Receptor conformational change and induced fit are outside the current scope. One SDF, a multi-record SDF, or a directory of SDF files can be processed as a batch, with failures and outputs isolated by compound.
 
+## Default or custom ligand ensemble
+
+The interactive `docking-universal run` command is sufficient for ligand-state and conformer configuration; users do not need to call the standalone ensemble script. The recommended path uses pH 7.4, three conformers per chemical state where the selected tier does not specify otherwise, deterministic seeded ETKDG generation, MMFF94 with UFF fallback, a 0.75 A conformer-pruning threshold, tautomer enumeration, and Gasteiger charges.
+
+Custom mode presents every ligand-ensemble setting used by the guided workflow: pH, conformers retained per chemical state, base seed, MMFF94/MMFF94s/UFF selection, RMSD pruning threshold, tautomer enumeration, and charge model. Exploratory mode also presents the number of independent docking seeds. During control calibration, a custom conformer count overrides the count in the chosen tier while seed count, exhaustiveness, and retained docking modes remain tier-controlled. The resulting values are written into the protocol and screen manifests.
+
+Approved-protocol screening intentionally does not permit these values to be changed: it reads them from the passing target-locked protocol so unknown compounds are prepared consistently with the control.
+
 ## Choose the scientific pathway first
 
 ### Bound-ligand control

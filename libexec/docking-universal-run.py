@@ -134,6 +134,53 @@ def explain_workflow(mode):
     print("Progress messages summarize decisions; detailed external-tool output is retained in logs.\n")
 
 
+def choose_ensemble_settings(args, mode):
+    """Expose ligand-state/conformer settings without low-level commands."""
+    if mode == "screen":
+        print("Ligand ensemble settings will be read from the approved protocol and cannot be changed for this screen.\n")
+        return
+    print("Ligand ensemble configuration:")
+    print("  1) Recommended defaults - tier/default conformer count, pH 7.4, base seed 20260808,")
+    print("     MMFF94 with UFF fallback, 0.75 A pruning, tautomer enumeration, Gasteiger charges")
+    print("  2) Custom - review and set every ligand-ensemble option")
+    choice = input("Select [1]: ").strip() or "1"
+    if choice == "1":
+        return
+    if choice != "2":
+        raise SystemExit("Choose ligand ensemble configuration 1 or 2")
+
+    def number(prompt, current, cast, minimum=None):
+        raw = input(f"{prompt} [{current}]: ").strip()
+        try:
+            value = current if not raw else cast(raw)
+        except ValueError:
+            raise SystemExit(f"{prompt} must be numeric") from None
+        if minimum is not None and value < minimum:
+            raise SystemExit(f"{prompt} must be at least {minimum}")
+        return value
+
+    args.ph = number("Ligand-state pH", args.ph, float, 0.0)
+    args.conformers = number("Conformers retained per chemical state", args.conformers, int, 1)
+    if mode == "control":
+        args.conformers_override = args.conformers
+        print("This overrides the conformer count in the calibration tier; seeds and search depth remain tier-controlled.")
+    args.base_seed = number("Deterministic base seed", args.base_seed, int, 0)
+    print("Force field: 1) MMFF94 (recommended)  2) MMFF94s  3) UFF")
+    args.forcefield = {"1": "mmff94", "2": "mmff94s", "3": "uff"}.get(input("Select [1]: ").strip() or "1")
+    if not args.forcefield:
+        raise SystemExit("Choose force field 1, 2, or 3")
+    args.rmsd_prune = number("Conformer RMSD pruning threshold in Angstroms", args.rmsd_prune, float, 0.0)
+    args.skip_tautomers = input("Enumerate plausible tautomers? [Y/n]: ").strip().lower() in {"n", "no"}
+    args.charge_model = input(f"Ligand charge model [{args.charge_model}]: ").strip() or args.charge_model
+    if mode == "exploratory":
+        args.seeds = number("Independent docking seeds", args.seeds, int, 1)
+    print(
+        f"Selected ensemble: pH {args.ph}; {args.conformers} conformers/state; {args.forcefield}; "
+        f"RMSD prune {args.rmsd_prune} A; tautomers {'off' if args.skip_tautomers else 'on'}; "
+        f"base seed {args.base_seed}; charge model {args.charge_model}.\n"
+    )
+
+
 def choose_file_with_finder():
     """Open the native macOS file chooser and return its POSIX path."""
     if platform.system() != "Darwin" or not shutil.which("osascript"):
@@ -907,10 +954,16 @@ def parse_args():
     parser.add_argument("--control-tier", choices=("quick", "repeatability", "broader", "conformers", "robust"), default="quick")
     parser.add_argument("--seeds", type=int, default=5, help="exploratory independent seeds (default: 5)")
     parser.add_argument("--conformers", type=int, default=3, help="exploratory conformers per state (default: 3)")
+    parser.add_argument("--conformers-override", type=int, help="control conformers per state; overrides the selected tier")
     parser.add_argument("--exhaustiveness", type=int, default=16, help="exploratory search effort (default: 16)")
     parser.add_argument("--num-modes", type=int, default=20)
     parser.add_argument("--energy-range", type=float, default=8.0)
     parser.add_argument("--ph", type=float, default=7.4)
+    parser.add_argument("--base-seed", type=int, default=20260808)
+    parser.add_argument("--forcefield", choices=("mmff94", "mmff94s", "uff"), default="mmff94")
+    parser.add_argument("--rmsd-prune", type=float, default=0.75)
+    parser.add_argument("--skip-tautomers", action="store_true")
+    parser.add_argument("--charge-model", default="gasteiger")
     parser.add_argument("--analysis", choices=("none", "summary", "representatives"), default="representatives")
     parser.add_argument("--representatives", type=int, default=3)
     parser.add_argument("--cluster-rmsd", type=float, default=2.0)
@@ -938,6 +991,8 @@ def main():
         if not mode:
             raise SystemExit("Invalid workflow selection")
     explain_workflow(mode)
+    if not args.non_interactive:
+        choose_ensemble_settings(args, mode)
     run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if mode == "control" and not args.complex and not args.non_interactive:
         args.complex = choose_complex_source()
@@ -951,6 +1006,15 @@ def main():
             if not protocol_allows_screening(args.protocol):
                 raise SystemExit(f"Protocol is not approved for screening: {args.protocol}")
             print(f"Selected approved protocol: {args.protocol}")
+        locked_parameters = (read_json(args.protocol) or {}).get("parameters", {})
+        print("Locked ligand ensemble from approved protocol:")
+        print(f"  pH: {locked_parameters.get('ph', 'NA')}")
+        print(f"  Conformers per chemical state: {locked_parameters.get('conformers_per_state', 'NA')}")
+        print(f"  Ensemble seed: {locked_parameters.get('ensemble_seed', (locked_parameters.get('seeds') or ['NA'])[0])}")
+        print(f"  Force field: {locked_parameters.get('forcefield', 'mmff94')}")
+        print(f"  RMSD pruning: {locked_parameters.get('rmsd_prune_angstrom', 0.75)} A")
+        print(f"  Tautomers enumerated: {locked_parameters.get('tautomers_enumerated', True)}")
+        print(f"  Charge model: {locked_parameters.get('charge_model', 'NA')}")
     study_name = args.name or f"docking_universal_{mode}"
     default_control_output = mode == "control" and args.out is None
     if default_control_output:
@@ -1006,7 +1070,16 @@ def main():
                     raise ValueError
             except ValueError:
                 raise SystemExit("Docking-box edge length must be between 10 and 50 Angstroms")
-        command = ["env", f"BOX_SIZE={box_size}", cli, "control", "--complex", complex_path, "--engine", args.engine, "--control-tier", control_tier, "--out", study / "control"]
+        command = [
+            "env", f"BOX_SIZE={box_size}", cli, "control", "--complex", complex_path,
+            "--engine", args.engine, "--control-tier", control_tier, "--out", study / "control",
+            "--ph", args.ph, "--base-seed", args.base_seed, "--forcefield", args.forcefield,
+            "--rmsd-prune", args.rmsd_prune, "--charge-model", args.charge_model,
+        ]
+        if args.conformers_override:
+            command += ["--conformers-override", args.conformers_override]
+        if args.skip_tautomers:
+            command.append("--skip-tautomers")
         if legacy_single_conformer:
             command.append("--legacy-single-conformer")
         if args.non_interactive:
@@ -1161,7 +1234,11 @@ def main():
                 "--box", box, "--engine", args.engine, "--seeds", args.seeds,
                 "--conformers", args.conformers, "--exhaustiveness", args.exhaustiveness,
                 "--num-modes", args.num_modes, "--energy-range", args.energy_range, "--ph", args.ph,
+                "--base-seed", args.base_seed, "--forcefield", args.forcefield,
+                "--rmsd-prune", args.rmsd_prune, "--charge-model", args.charge_model,
             ]
+            if args.skip_tautomers:
+                command.append("--skip-tautomers")
         try:
             run(command)
             compound["run_status"] = "COMPLETED"

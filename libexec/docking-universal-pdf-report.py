@@ -261,7 +261,7 @@ def main():
             story.append(PageBreak())
         else:
             story.append(PageBreak())
-        story += [Paragraph("Approved protocol",styles["Heading2"]),table([["Parameter","Selected value"],["Engine",protocol.get("engine","NA")],["Tier",protocol.get("calibration_tier","NA")],["Exhaustiveness",p.get("exhaustiveness","NA")],["Modes per job",p.get("num_modes","NA")],["Conformers per state",p.get("conformers_per_state","NA")],["Independent seeds",len(p.get("seeds",[]))],["Charge model",p.get("charge_model","NA")],["pH",p.get("ph","NA")],["Runtime",f"{protocol.get('wall_time_seconds',0)/60:.1f} min"],["Calibration jobs",last.get("job_count","NA")]], [2.55*inch,4.15*inch]),PageBreak()]
+        story += [Paragraph("Approved protocol",styles["Heading2"]),table([["Parameter","Selected value"],["Engine",protocol.get("engine","NA")],["Tier",protocol.get("calibration_tier","NA")],["Exhaustiveness",p.get("exhaustiveness","NA")],["Modes per job",p.get("num_modes","NA")],["Conformers per state",p.get("conformers_per_state","NA")],["Independent seeds",len(p.get("seeds",[]))],["Charge model",p.get("charge_model","NA")],["pH",p.get("ph","NA")],["Conformer force field",p.get("forcefield","mmff94")],["Tautomers enumerated",p.get("tautomers_enumerated",True)],["Conformer RMSD pruning",f"{p.get('rmsd_prune_angstrom',0.75)} A"],["Runtime",f"{protocol.get('wall_time_seconds',0)/60:.1f} min"],["Calibration jobs",last.get("job_count","NA")]], [2.55*inch,4.15*inch]),PageBreak()]
     else:
         manifest_path = first(args.study,["compounds/*/seed_*/docking/run_manifest.tsv","**/docking/run_manifest.tsv"])
         manifest = read_key_value_tsv(manifest_path)
