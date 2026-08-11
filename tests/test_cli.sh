@@ -76,9 +76,11 @@ if "$cli" dock --engine smina --engine-command "$mock_vina" \
   fail "obsolete smina engine option was accepted"
 fi
 
-for command_name in run control calibrate ensemble prepare ligands pockets dock collect compare-redock evaluate-control screen cluster-poses interactions render3d depict2d; do
+for command_name in run control calibrate ensemble prepare ligands pockets dock collect compare-redock evaluate-control screen cluster-poses interactions render3d depict2d validate; do
   "$cli" "$command_name" --help >/dev/null || fail "$command_name help"
 done
+
+"$cli" check-install >/dev/null || fail "check-install alias"
 
 PYTHONPYCACHEPREFIX="$mock_dir/pycache" "${DOCKING_UNIVERSAL_PYTHON:-python}" -m py_compile "$project_dir"/libexec/*.py || fail "Python syntax"
 

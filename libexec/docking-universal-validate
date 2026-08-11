@@ -1,0 +1,204 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Reproducible validation runner. It separates fast interface tests, real-tool
+# integration probes, and expensive end-to-end scientific reference workflows.
+
+usage() {
+  cat <<'EOF'
+Usage:
+  docking-universal validate quick [--out DIR] [--background]
+  docking-universal validate integration [--out DIR] [--background]
+  docking-universal validate release [--out DIR] [--background]
+
+Levels:
+  quick        All menu, routing, validation, parser, and mock-engine tests.
+  integration Real fpocket, Meeko, RDKit/MolScrub, Vina, and report probes.
+  release     Integration checks plus long control-guided and ligand-free runs.
+
+Options:
+  --out DIR       New validation output directory (must not already exist)
+  --background    Start an unattended process and return its PID immediately
+  -h, --help      Show this help
+
+Every run writes run.log and status.json. A passing software validation does
+not establish biological correctness or broad docking accuracy.
+EOF
+}
+
+level="${1:-}"
+case "$level" in quick|integration|release) shift ;; -h|--help|"") usage; exit 0 ;; *) echo "ERROR: validation level must be quick, integration, or release" >&2; exit 2 ;; esac
+out=""
+background=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --out) out="$2"; shift 2 ;;
+    --background) background=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "ERROR: unknown option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PROJECT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+CLI="$PROJECT/bin/docking-universal"
+PYTHON_COMMAND="${DOCKING_UNIVERSAL_PYTHON:-python}"
+timestamp=$(date '+%Y%m%d_%H%M%S')
+[ -n "$out" ] || out="$PROJECT/validation_runs/${level}_${timestamp}"
+case "$out" in /*) ;; *) out="$PWD/$out" ;; esac
+
+if [ "$background" -eq 1 ]; then
+  [ ! -e "$out" ] || { echo "ERROR: validation output already exists: $out" >&2; exit 2; }
+  mkdir -p "$out"
+  nohup "$0" "$level" --out "$out" > "$out/run.log" 2>&1 < /dev/null &
+  pid=$!
+  printf '%s\n' "$pid" > "$out/pid"
+  printf '{"status":"RUNNING","level":"%s","pid":%s,"output":"%s"}\n' "$level" "$pid" "$out" > "$out/status.json"
+  echo "Validation started in the background."
+  echo "Level: $level"
+  echo "PID: $pid"
+  echo "Output: $out"
+  echo "Progress: tail -f \"$out/run.log\""
+  echo "Status: cat \"$out/status.json\""
+  exit 0
+fi
+
+if [ -e "$out" ]; then
+  # A background launcher creates the directory before the child starts.
+  [ -f "$out/pid" ] || { echo "ERROR: validation output already exists: $out" >&2; exit 2; }
+else
+  mkdir -p "$out"
+fi
+
+started=$(date '+%Y-%m-%dT%H:%M:%S%z')
+current_stage="initialization"
+write_status() {
+  status="$1"
+  finished="${2:-}"
+  printf '{"status":"%s","level":"%s","stage":"%s","started":"%s","finished":"%s","output":"%s"}\n' \
+    "$status" "$level" "$current_stage" "$started" "$finished" "$out" > "$out/status.json"
+}
+fail_status() {
+  code=$?
+  write_status "FAILED" "$(date '+%Y-%m-%dT%H:%M:%S%z')"
+  echo "VALIDATION FAILED during: $current_stage" >&2
+  echo "Retained output: $out" >&2
+  exit "$code"
+}
+trap fail_status ERR HUP INT TERM
+write_status "RUNNING"
+
+run_quick() {
+  current_stage="fast interface and routing tests"; write_status "RUNNING"
+  (cd "$PROJECT" && make test)
+}
+
+run_integration() {
+  run_quick
+  current_stage="installed-tool discovery"; write_status "RUNNING"
+  "$CLI" doctor > "$out/doctor.txt"
+
+  input_sdf="$PROJECT/examples/tutorials/01_bound_ligand/inputs/rilpivirine_pubchem.sdf"
+  for forcefield in mmff94 mmff94s uff; do
+    current_stage="real $forcefield ensemble generation"; write_status "RUNNING"
+    if [ "$forcefield" = "mmff94s" ]; then
+      "$CLI" ensemble "$input_sdf" --out "$out/ensemble_${forcefield}.sdf" \
+        --ph 7.4 --conformers 2 --seed 41001 --forcefield "$forcefield" --skip-tautomers
+    else
+      "$CLI" ensemble "$input_sdf" --out "$out/ensemble_${forcefield}.sdf" \
+        --ph 7.4 --conformers 2 --seed 41001 --forcefield "$forcefield"
+    fi
+    [ -s "$out/ensemble_${forcefield}.manifest.json" ]
+  done
+
+  current_stage="real Meeko ligand preparation"; write_status "RUNNING"
+  "$CLI" ligands "$out/ensemble_mmff94.sdf" --out "$out/ligand_preparation" \
+    --geometry-mode preserve --target-engines vina
+  [ "$(find "$out/ligand_preparation/pdbqt_ligands" -type f -name '*.pdbqt' | wc -l | tr -d ' ')" -ge 2 ]
+
+  current_stage="ligand-centered receptor and box preparation"; write_status "RUNNING"
+  mkdir -p "$out/ligand_centered"
+  (cd "$out/ligand_centered" && env FEEDBACK_LEVEL=concise DOCKING_UNIVERSAL_SITE_MODE=ligand \
+    DOCKING_UNIVERSAL_LIGAND_RESNAME=XK2 BOX_SIZE=26 DOCKING_UNIVERSAL_LOG_MODE=file \
+    "$CLI" prepare "$PROJECT/examples/tutorials/01_bound_ligand/inputs/1HVR.pdb")
+
+  for cavity_mode in 1 2 3; do
+    current_stage="fpocket cavity mode $cavity_mode"; write_status "RUNNING"
+    mode_root="$out/cavity_mode_${cavity_mode}"; mkdir -p "$mode_root"
+    center_mode="centroid"; centroid_mode=2
+    [ "$cavity_mode" != "2" ] || center_mode="deepest"
+    [ "$cavity_mode" != "3" ] || centroid_mode=1
+    (cd "$mode_root" && env FEEDBACK_LEVEL=concise DOCKING_UNIVERSAL_SITE_MODE=pockets \
+      DOCKING_UNIVERSAL_CAVITY_MODE="$cavity_mode" DOCKING_UNIVERSAL_MAX_POCKETS=5 \
+      DOCKING_UNIVERSAL_CENTER_MODE="$center_mode" DOCKING_UNIVERSAL_CENTROID_MODE="$centroid_mode" \
+      SCORE_THRESHOLD=0.0 STRICT_LOCAL_POCKETS=1 DOCKING_UNIVERSAL_LOG_MODE=file \
+      "$CLI" prepare "$PROJECT/examples/tutorials/02_ligand_free_cavity/inputs/2R8N.pdb")
+  done
+
+  current_stage="real AutoDock Vina smoke docking"; write_status "RUNNING"
+  receptor=$(find "$out/ligand_centered" -path '*/receptor/*.pdbqt' -type f | head -1)
+  box=$(find "$out/ligand_centered" -path '*/cavity/*_pocket1.conf' -type f | head -1)
+  "$CLI" dock --engine vina --receptor "$receptor" \
+    --ligands "$out/ligand_preparation/pdbqt_ligands" --config "$box" \
+    --out "$out/vina_smoke" --exhaustiveness 1 --num-modes 1 --energy-range 3 --seed 41001
+  "$CLI" collect "$out/vina_smoke" --out "$out/vina_smoke_scores.csv"
+  [ "$(wc -l < "$out/vina_smoke_scores.csv" | tr -d ' ')" -ge 3 ]
+
+  current_stage="approved-protocol batch planning and report"; write_status "RUNNING"
+  "$CLI" run --mode screen \
+    --protocol "$PROJECT/examples/tutorials/01_bound_ligand/study/control/04_redocking/vina/repeatability/protocol.json" \
+    --ligands "$PROJECT/examples/test_inputs/two_compounds.sdf" --out "$out/approved_screen_plan" \
+    --name validation_screen --plan-only --non-interactive
+  find "$out/approved_screen_plan/report" -type f -name '*.pdf' -size +1000c | grep -q .
+
+  current_stage="ligand-free planning, fallback, and report"; write_status "RUNNING"
+  "$CLI" run --mode exploratory \
+    --complex "$PROJECT/examples/tutorials/02_ligand_free_cavity/inputs/2R8N.pdb" \
+    --ligands "$PROJECT/examples/tutorials/02_ligand_free_cavity/inputs/indinavir_pubchem_5362440.sdf" \
+    --out "$out/exploratory_plan" --name validation_exploratory --plan-only --non-interactive
+  find "$out/exploratory_plan/report" -type f -name '*.pdf' -size +1000c | grep -q .
+}
+
+run_release() {
+  run_integration
+  current_stage="repeatable bound-ligand control"; write_status "RUNNING"
+  "$CLI" control --complex "$PROJECT/examples/tutorials/01_bound_ligand/inputs/1HVR.pdb" \
+    --ligand-id XK2:A:263 --engine vina --control-tier repeatability \
+    --out "$out/control_1HVR_XK2" --non-interactive
+  protocol=$(find "$out/control_1HVR_XK2/04_redocking/vina" -name protocol.json -type f | sort | tail -1)
+  [ -s "$protocol" ]
+  "$PYTHON_COMMAND" - "$protocol" <<'PY'
+import json, sys
+record = json.load(open(sys.argv[1]))
+if not record.get("unknown_docking_allowed"):
+    raise SystemExit("reference control did not approve unknown docking")
+PY
+
+  current_stage="approved-protocol held-out compound docking"; write_status "RUNNING"
+  "$CLI" run --mode screen --protocol "$protocol" \
+    --ligands "$PROJECT/examples/tutorials/01_bound_ligand/inputs/rilpivirine_pubchem.sdf" \
+    --out "$out/screen_1HVR_Rilpivirine" --name release_screen --non-interactive
+
+  current_stage="ligand-free exploratory compound docking"; write_status "RUNNING"
+  prepared_root=$(find "$out/cavity_mode_1" -maxdepth 1 -type d -name '*_receptor_prep' | head -1)
+  receptor_pdb=$(find "$prepared_root/receptor" -type f -name '*.pdb' | head -1)
+  receptor_pdbqt=$(find "$prepared_root/receptor" -type f -name '*.pdbqt' | head -1)
+  exploratory_box=$(find "$prepared_root/cavity" -type f -name '*_pocket1.conf' | head -1)
+  "$CLI" run --mode exploratory --receptor-pdb "$receptor_pdb" --receptor-pdbqt "$receptor_pdbqt" \
+    --box "$exploratory_box" \
+    --ligands "$PROJECT/examples/tutorials/02_ligand_free_cavity/inputs/indinavir_pubchem_5362440.sdf" \
+    --out "$out/exploratory_2R8N_Indinavir" --name release_exploratory --non-interactive
+}
+
+case "$level" in
+  quick) run_quick ;;
+  integration) run_integration ;;
+  release) run_release ;;
+esac
+current_stage="complete"
+finished=$(date '+%Y-%m-%dT%H:%M:%S%z')
+write_status "PASSED" "$finished"
+trap - ERR HUP INT TERM
+echo "VALIDATION PASSED"
+echo "Level: $level"
+echo "Output: $out"
