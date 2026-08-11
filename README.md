@@ -1,8 +1,10 @@
 # Docking Universal
 
-Docking Universal is a packaged structural-docking workflow for preparing receptors and compound libraries, defining pocket coordinates, organizing batch runs, collecting model scores, and producing review-ready 3D and 2D visuals.
+Docking Universal is a scientific workflow, orchestration, validation, and reporting layer built around **AutoDock Vina**, which performs the actual docking search and scoring. Docking Universal does not introduce a new docking engine or scoring function. It prepares receptors and ligand ensembles, defines and reviews docking boxes, calibrates target-specific search settings, runs reproducible Vina batches, clusters and analyzes poses, and produces auditable visual and PDF reports.
 
-The current release supports **rigid-receptor docking only**: receptor coordinates remain fixed during each Vina or smina search. Prepared ligand torsions may remain flexible, and independent ligand conformers can be searched, but receptor side-chain or backbone flexibility is not modeled. The guided runner accepts a multi-record SDF or a directory of SDF files for batch docking, with one isolated result folder per compound.
+In short: **Vina docks; Docking Universal makes the surrounding scientific workflow reproducible and reviewable.** The optional smina path is retained for engine-comparison work, but Vina is the default and presently validated path in this research preview.
+
+The current release supports **rigid-receptor docking only**: receptor coordinates remain fixed during each Vina or optional smina search. Prepared ligand torsions may remain flexible, and independent ligand conformers can be searched, but receptor side-chain or backbone flexibility is not modeled. The guided runner accepts a multi-record SDF or a directory of SDF files for batch docking, with one isolated result folder per compound.
 
 It consolidates a series of working research scripts behind one consistent command while retaining the provenance and diagnostics that made the original workflow auditable.
 

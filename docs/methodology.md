@@ -4,7 +4,9 @@ This note records what the workflow does, why the major decisions exist, and whe
 
 ## Docking model and batch scope
 
-Docking Universal currently supports rigid-receptor Vina and smina workflows. Receptor coordinates do not move during a docking job. Ligand rotatable bonds may be sampled according to the engine-specific PDBQT representation, and independent ligand conformers can be docked across multiple seeds. This is not flexible-receptor or induced-fit docking.
+AutoDock Vina performs the actual docking search and produces the docking scores in the default workflow. Docking Universal is not a replacement docking engine and does not implement a new scoring function; it is the scientific orchestration and analysis layer around Vina. Its contribution is the end-to-end handling of chemistry and receptor preparation, docking-box definition, independent conformers and seeds, retrospective protocol calibration, batch execution, pose clustering, interaction analysis, provenance, and reporting.
+
+Docking Universal currently supports rigid-receptor Vina workflows and retains an optional smina comparison path. Vina is the default and presently validated path in this research preview. Receptor coordinates do not move during a docking job. Ligand rotatable bonds may be sampled according to the engine-specific PDBQT representation, and independent ligand conformers can be docked across multiple seeds. This is not flexible-receptor or induced-fit docking.
 
 The same preparation and search protocol can be applied to one compound, a multi-record SDF, or a directory of SDF files. Batch execution isolates every compound and retains per-seed outputs before consolidated pose clustering and reporting.
 
