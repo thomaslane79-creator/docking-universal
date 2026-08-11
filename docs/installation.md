@@ -13,7 +13,7 @@ conda activate docking-universal
 make test
 ```
 
-The main environment includes the historically compatible smina engine. To compare the same inputs with current AutoDock Vina, create its optional environment:
+The main environment includes the historically compatible smina executable. smina is a fork of AutoDock Vina with additional scoring and minimization features, not a wholly separate docking framework. To compare the same inputs with current AutoDock Vina, create its optional environment:
 
 ```bash
 conda env create -f environments/vina.yml
