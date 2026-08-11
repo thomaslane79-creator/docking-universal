@@ -26,8 +26,9 @@
     <section class="hero" id="top">
       <div class="hero-copy">
         <p class="eyebrow">Structural bioinformatics · M-series verified research software</p>
-        <h1>A complete structural docking workflow, made reusable.</h1>
-        <p class="lede"><strong>AutoDock Vina performs the docking search and scoring.</strong> Docking Universal is the scientific workflow, orchestration, validation, and reporting layer around it—from receptor and compound preparation through docking-box definition, protocol calibration, batch execution, pose clustering, PLIP scenes, and 2D/3D reports. It was developed in part for reproducible use on Apple-silicon M-series systems.</p>
+        <h1>Scientific docking workflow orchestration, validation, analysis, visualization, and reporting.</h1>
+        <p class="lede"><strong>Docking Universal is built around AutoDock Vina and established open-source structural-bioinformatics tools.</strong> It provides one guided, configurable Bash interface for control-guided or ligand-free docking studies while retaining independently composable commands, complete provenance, PyMOL Open-Source visualizations, and automatic scientific PDF reports.</p>
+        <p class="lede"><strong>AutoDock Vina performs the docking search and scoring.</strong> Docking Universal makes the surrounding established open-source toolchain reproducible, reviewable, batch-capable, and easier to run without launching each script manually.</p>
         <div class="actions">
           <a class="button primary" href="#install">Get started</a>
           <a class="button secondary" href="guided-workflow.md">Run a study</a>
@@ -41,8 +42,19 @@
         </dl>
       </div>
       <figure class="hero-visual">
-        <img src="assets/ligand-pocket.png" alt="Cyan ligand-centered pocket surface surrounding a molecular ligand">
-        <figcaption><span class="dot"></span> Ligand-centered pocket surface generated for visual review</figcaption>
+        <img src="assets/end-to-end-two-pathways-mockup.png" alt="Control-guided and ligand-free docking workflows using AutoDock Vina and fpocket">
+        <figcaption><span class="dot"></span> Control-guided screening or ligand-free exploratory screening</figcaption>
+      </figure>
+    </section>
+
+    <section class="section workflow-overview" aria-labelledby="workflow-overview-title">
+      <div class="section-heading">
+        <p class="eyebrow">One guided interface · two scientific pathways · auditable outputs</p>
+        <h2 id="workflow-overview-title">From scientific decisions to reusable reports and sessions</h2>
+        <p>The guided Bash workflow records inputs, choices, parameters, seeds, versions, scores, and limitations. Both pathways continue through Vina docking and produce structured results, versioned PDF reports, PyMOL Open-Source sessions, and 2D interaction diagrams.</p>
+      </div>
+      <figure class="overview-figure">
+        <img src="assets/end-to-end-workflows-and-outputs-mockup.png" alt="Complete Docking Universal workflows leading to PDF reports, PyMOL sessions, and 2D interaction diagrams">
       </figure>
     </section>
 
