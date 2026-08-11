@@ -301,4 +301,6 @@ MIT. See [LICENSE](LICENSE).
 
 ## Citation
 
-If the software contributes to published work, cite the repository release and the scientific tools used by the relevant stages. Machine-readable project citation metadata is provided in [CITATION.cff](CITATION.cff).
+If Docking Universal contributes to your research, please cite the repository release used and all applicable underlying software and methods. Docking Universal integrates established scientific tools; citing this repository recognizes the workflow and its implementation, but does not replace citation of the original work behind AutoDock Vina, fpocket, RDKit, Meeko, Open Babel, PLIP, PyMOL Open-Source, or any other tool used in the relevant stages.
+
+Run-specific reports record software versions and applicable references to make this attribution easier. Machine-readable project citation metadata is provided in [CITATION.cff](CITATION.cff), and the primary references for the underlying methods are listed in the generated reports and documentation.
