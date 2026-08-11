@@ -226,7 +226,7 @@ docking-universal depict2d ligand.pdb ligand_02.sdf --format svg --out-dir figur
 
 These are generic structure depictions. Protein–ligand interaction visuals use a separate path: PLIP computes and writes interaction reports and fixed coordinates, then Docking Universal reads those outputs and writes a consolidated PyMOL PML scene. This custom scene step avoids depending on PLIP's native visualization path, which was unreliable in the original environment.
 
-The repository includes small, provenance-recorded inputs for the 1HVR/XK2 bound-ligand tutorial and the 2R8N ligand-free cavity tutorial. The [example PDF report](docs/assets/docking-universal-example-report.pdf) demonstrates the automatic consolidated-report path without adding bulky intermediate docking runs to the repository. A separate generic XK2 depiction demonstrates the SDF-to-2D path without implying docking or receptor interactions.
+The repository includes small, provenance-recorded inputs for the 1HVR/XK2 bound-ligand tutorial and the 2R8N ligand-free cavity tutorial. The [example PDF report](docs/assets/docking-universal-example-report.pdf) demonstrates the automatic consolidated-report path without adding bulky intermediate docking runs to the repository. A ligand-free exploratory run automatically receives a distinct cavity-and-docking report: fpocket candidate ranks, cavity volume and druggability descriptors, the selected pocket and docking-box geometry, an A/B cavity-review figure, the configured protocol, and subsequent compound results replace the bound-ligand control section. A separate generic XK2 depiction demonstrates the SDF-to-2D path without implying docking or receptor interactions.
 
 ## Output provenance
 

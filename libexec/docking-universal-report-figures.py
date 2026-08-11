@@ -89,6 +89,121 @@ def first(root, patterns):
     return None
 
 
+def read_key_value_tsv(path):
+    values = {}
+    if not path:
+        return values
+    try:
+        with Path(path).open(newline="") as handle:
+            for row in csv.reader(handle, delimiter="\t"):
+                if len(row) >= 2:
+                    values[row[0]] = row[1]
+    except OSError:
+        pass
+    return values
+
+
+def cavity_artifacts(study):
+    diagnostics = first(study, [
+        "preparation/*_receptor_prep/cavity/pocket_selection_diagnostics.tsv",
+        "**/cavity/pocket_selection_diagnostics.tsv",
+    ])
+    if not diagnostics:
+        return None, None, None
+    manifest = read_key_value_tsv(first(study, [
+        "compounds/*/seed_*/docking/run_manifest.tsv", "**/docking/run_manifest.tsv",
+    ]))
+    selected_config = Path(manifest.get("config", "")).name
+    selected_stem = Path(selected_config).stem if selected_config else ""
+    selected_pml = diagnostics.parent / f"{selected_stem}.pml" if selected_stem else None
+    if not selected_pml or not selected_pml.is_file():
+        selected_pml = first(diagnostics.parent, ["*_pocket*.pml"])
+    return diagnostics, selected_config or None, selected_pml
+
+
+def plot_cavity_selection(diagnostics, selected_config, output):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    with Path(diagnostics).open(newline="") as handle:
+        rows = list(csv.DictReader(handle, delimiter="\t"))
+    if not rows:
+        return False
+    selected_pocket = None
+    match = __import__("re").search(r"pocket(\d+)", selected_config or "", __import__("re").I)
+    if match:
+        selected_pocket = f"pocket{match.group(1)}_atm.pdb"
+    ranks = [int(row.get("rank_order", index + 1)) for index, row in enumerate(rows)]
+    scores = [float(row.get("score", "nan")) for row in rows]
+    colors = ["#1f77b4" if row.get("decision") == "selected" else "#b8c0c8" for row in rows]
+    if selected_pocket:
+        colors = ["#d62728" if row.get("pocket_file") == selected_pocket else color for row, color in zip(rows, colors)]
+    fig, ax = plt.subplots(figsize=(10.5, 6.2))
+    ax.scatter(ranks, scores, c=colors, s=105, edgecolor="black", linewidth=.6, zorder=3)
+    for rank, score, row in zip(ranks, scores, rows):
+        if row.get("pocket_file") == selected_pocket:
+            ax.annotate(
+                f"Docking box: {Path(selected_config).stem}", (rank, score), xytext=(18, 18),
+                textcoords="offset points", fontsize=11,
+                bbox=dict(fc="white", ec="#d62728", alpha=.96),
+                arrowprops=dict(arrowstyle="->", color="#d62728"),
+            )
+    ax.set_xlabel("Cavity rank after geometry and overlap filtering", fontsize=14)
+    ax.set_ylabel("fpocket score", fontsize=14)
+    ax.set_title("Ligand-free cavity candidates and selected docking region", fontsize=16)
+    ax.grid(alpha=.25)
+    ax.tick_params(labelsize=11)
+    ax.text(
+        .98, .97, "Red = box used for docking\nBlue = retained candidate\nGray = skipped overlapping candidate",
+        transform=ax.transAxes, ha="right", va="top", fontsize=10,
+        bbox=dict(fc="white", ec="0.6", alpha=.95),
+    )
+    fig.tight_layout()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output, dpi=240)
+    plt.close(fig)
+    return True
+
+
+def render_cavity_scene(scene, output, session, pymol):
+    if not pymol or not scene or not Path(scene).is_file():
+        return False
+    wrapper = output.with_suffix(".pml")
+    output_arg = str(output.resolve()).replace(" ", "\\ ")
+    session_arg = str(session.resolve()).replace(" ", "\\ ")
+    wrapper.write_text(Path(scene).read_text(errors="replace") + "\n" + "\n".join([
+        "bg_color white",
+        "set ray_opaque_background, off", "set depth_cue, 0", "zoom all, 4",
+        f"png {output_arg}, 1800, 1200, dpi=220, ray=1",
+        f"save {session_arg}", "quit",
+    ]) + "\n")
+    result = subprocess.run([str(pymol), "-cq", str(wrapper)], cwd=str(Path(scene).parent), text=True, capture_output=True)
+    if result.returncode != 0:
+        print(f"Report figure warning: cavity PyMOL render failed: {result.stderr.strip()}", file=sys.stderr)
+    return result.returncode == 0 and output.is_file()
+
+
+def build_cavity_figures(study, pymol):
+    diagnostics, selected_config, scene = cavity_artifacts(study)
+    if not diagnostics:
+        return []
+    report = study / "report"
+    report.mkdir(parents=True, exist_ok=True)
+    outputs = []
+    panel_a = report / "cavity_panel_A_selection.png"
+    if plot_cavity_selection(diagnostics, selected_config, panel_a):
+        outputs.append(str(panel_a))
+    panel_b = report / "cavity_panel_B_structure.png"
+    if render_cavity_scene(scene, panel_b, report / "cavity_panel_B_structure.pse", pymol):
+        outputs.append(str(panel_b))
+    combined = report / "cavity_panels_AB.png"
+    if panel_a.is_file() and panel_b.is_file():
+        combine_panels(panel_a, panel_b, combined, control=False)
+        outputs.append(str(combined))
+    return outputs
+
+
 def ensure_control_clusters(control, protocol_path):
     output = control / "report" / "control_pose_analysis"
     if (output / "cluster_summary.csv").is_file():
@@ -770,6 +885,8 @@ def main():
     plip2d = plip2d_executable(args.plip2d_runner)
     plip = plip_executable()
     outputs = build_compound_figures(study, pymol, plip2d)
+    if not control:
+        outputs.extend(build_cavity_figures(study, pymol))
     protocol = choose_protocol(control) if control else None
     if control and protocol:
         outputs.extend(build_control_figures(control, protocol, pymol, plip2d, plip))

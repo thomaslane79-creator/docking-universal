@@ -30,6 +30,81 @@ def read_key_value_tsv(path):
         pass
     return data
 
+def read_tsv_rows(path):
+    try:
+        with path.open(newline="") as handle:
+            return list(csv.DictReader(handle, delimiter="\t"))
+    except (OSError, TypeError):
+        return []
+
+def read_fpocket_descriptors(cavity_dir):
+    import re
+    info = first(cavity_dir, ["**/*_info.txt"])
+    if not info:
+        return {}
+    records, pocket = {}, None
+    for line in info.read_text(errors="replace").splitlines():
+        match = re.match(r"\s*Pocket\s+(\d+)\s*:", line)
+        if match:
+            pocket = f"pocket{match.group(1)}_atm.pdb"
+            records[pocket] = {}
+            continue
+        if not pocket or ":" not in line:
+            continue
+        key, value = (part.strip() for part in line.split(":", 1))
+        normalized = {"Druggability Score": "druggability_score", "Volume": "volume_angstrom3"}.get(key)
+        if normalized:
+            try:
+                records[pocket][normalized] = float(value)
+            except ValueError:
+                pass
+    return records
+
+def read_box_dimensions(config_path):
+    values = {}
+    try:
+        for line in config_path.read_text(errors="replace").splitlines():
+            key, separator, value = line.partition("=")
+            if separator and key.strip() in {"size_x", "size_y", "size_z"}:
+                try:
+                    values[key.strip()] = float(value.strip())
+                except ValueError:
+                    continue
+    except OSError:
+        return None
+    dimensions = [values.get(key) for key in ("size_x", "size_y", "size_z")]
+    if any(value is None for value in dimensions):
+        return None
+    return dimensions
+
+def discover_cavity_record(study):
+    selection = first(study, [
+        "preparation/*_receptor_prep/cavity/pocket_selection_diagnostics.tsv",
+        "**/cavity/pocket_selection_diagnostics.tsv",
+    ])
+    if not selection:
+        return None
+    manifest = read_key_value_tsv(first(study, [
+        "compounds/*/seed_*/docking/run_manifest.tsv", "**/docking/run_manifest.tsv",
+    ]))
+    config = Path(manifest.get("config", "")).name
+    import re
+    match = re.search(r"pocket(\d+)", config, re.I)
+    selected_file = f"pocket{match.group(1)}_atm.pdb" if match else None
+    rows = read_tsv_rows(selection)
+    selected = next((row for row in rows if row.get("pocket_file") == selected_file), {})
+    diagnostics = selection.parent / "pocket_diagnostics.tsv"
+    diagnostic_rows = read_tsv_rows(diagnostics)
+    detail = next((row for row in diagnostic_rows if row.get("pocket_file") == selected_file), {})
+    descriptors = read_fpocket_descriptors(selection.parent)
+    config_path = selection.parent / config if config else None
+    dimensions = read_box_dimensions(config_path) if config_path and config_path.is_file() else None
+    return {
+        "selection": selection, "rows": rows, "selected": selected,
+        "detail": detail, "descriptors": descriptors, "config": config,
+        "selected_file": selected_file, "box_dimensions": dimensions,
+    }
+
 def choose_protocol(root):
     candidates = list(root.glob("**/protocol.json")) if root else []
     if not candidates:
@@ -85,6 +160,15 @@ def openbabel_version():
     except (OSError, subprocess.SubprocessError):
         return "not detected"
 
+def fpocket_version():
+    prefix = Path(sys.executable).resolve().parent.parent
+    records = sorted((prefix / "conda-meta").glob("fpocket-*.json"))
+    for record in records:
+        version = read_json(record).get("version")
+        if version:
+            return str(version)
+    return "detected; version not recorded" if (prefix / "bin" / "fpocket").is_file() else "not detected"
+
 def reproducibility_record(protocol, study, control):
     """Collect versions and methods from the actual report runtime and protocol."""
     recorded = protocol.get("software", {}) if protocol else {}
@@ -95,6 +179,7 @@ def reproducibility_record(protocol, study, control):
         engine_version += f" ({recorded['engine_source']})"
     software = [
         {"role": "Workflow", "software": "Docking Universal", "version": recorded.get("docking_universal", "not recorded")},
+        {"role": "Ligand-free cavity detection", "software": "fpocket", "version": fpocket_version()},
         {"role": "Docking scores and poses", "software": "AutoDock Vina", "version": engine_version},
         {"role": "Docking parameterization", "software": "Meeko", "version": recorded.get("meeko", installed_version("meeko"))},
         {"role": "Protonation/conformer preparation", "software": "MolScrub", "version": recorded.get("molscrub", installed_version("molscrub"))},
@@ -108,18 +193,20 @@ def reproducibility_record(protocol, study, control):
     ]
     references = [
         {"citation": "Eberhardt J, Santos-Martins D, Tillack AF, Forli S. AutoDock Vina 1.2.0: New Docking Methods, Expanded Force Field, and Python Bindings. J Chem Inf Model. 2021;61:3891-3898.", "url": "https://doi.org/10.1021/acs.jcim.1c00203"},
+        {"citation": "Le Guilloux V, Schmidtke P, Tuffery P. Fpocket: an open source platform for ligand pocket detection. BMC Bioinformatics. 2009;10:168.", "url": "https://doi.org/10.1186/1471-2105-10-168"},
         {"citation": "Santos-Martins D, He Y, Eberhardt J, et al. Meeko: molecule parameterization and software interoperability for docking and beyond. J Chem Inf Model. 2025;65:13045-13050.", "url": "https://doi.org/10.1021/acs.jcim.5c02271"},
         {"citation": "Salentin S, Schreiber S, Haupt VJ, Adasme MF, Schroeder M. PLIP: fully automated protein-ligand interaction profiler. Nucleic Acids Res. 2015;43:W443-W447.", "url": "https://doi.org/10.1093/nar/gkv315"},
         {"citation": "Butina D. Unsupervised Data Base Clustering Based on Daylight's Fingerprint and Tanimoto Similarity: A Fast and Automated Way To Cluster Small and Large Data Sets. J Chem Inf Comput Sci. 1999;39:747-750.", "url": "https://doi.org/10.1021/ci9803381"},
         {"citation": "O'Boyle NM, Banck M, James CA, Morley C, Vandermeersch T, Hutchison GR. Open Babel: An open chemical toolbox. J Cheminform. 2011;3:33.", "url": "https://doi.org/10.1186/1758-2946-3-33"},
         {"citation": "RDKit: Open-source cheminformatics software.", "url": "https://www.rdkit.org/"},
-        {"citation": f"The PyMOL Molecular Graphics System, Version {software[7]['version']}, Schrodinger, LLC.", "url": "https://www.pymol.org/support.html"},
+        {"citation": f"The PyMOL Molecular Graphics System, Version {next(item['version'] for item in software if item['software'] == 'PyMOL')}, Schrodinger, LLC.", "url": "https://www.pymol.org/support.html"},
     ]
     return {
         "schema_name": "docking-universal-report-provenance", "schema_version": 1,
         "study": str(study), "control": str(control) if control else None,
         "software": software,
         "methods": {
+            "cavity_detection": "fpocket geometric cavity detection, descriptor calculation, and recorded geometry/overlap filtering" if discover_cavity_record(study) else "not used in the retained report study",
             "docking_scores_and_poses": "AutoDock Vina",
             "interaction_detection": "PLIP rule-based calls; retained PLIP XML is authoritative",
             "interaction_diagram": figure_manifest.get("interaction_diagram_renderer", "native SDF plus PLIP XML"),
@@ -210,9 +297,82 @@ def main():
     else:
         study_descriptor = f"Target: {target_name}"
 
-    story = [Paragraph("Docking Universal - Docking Study Report", styles["Title"]),
+    cavity = discover_cavity_record(args.study) if not protocol else None
+    report_title = "Docking Universal - Ligand-Free Cavity and Docking Report" if cavity else "Docking Universal - Docking Study Report"
+    story = [Paragraph(report_title, styles["Title"]),
              Paragraph(study_descriptor, styles["Heading2"]), Spacer(1,8)]
+    if cavity:
+        story += [Paragraph("Scientific status: exploratory site selection without a bound-ligand pose-recovery control", styles["BodyText"]), Spacer(1,8)]
     figure_number = 1
+    section_number = 1
+
+    if cavity:
+        selected = cavity["selected"]
+        detail = cavity["detail"]
+        descriptor = cavity["descriptors"].get(cavity["selected_file"], {})
+        box_dimensions = cavity["box_dimensions"]
+        box_volume = box_dimensions[0] * box_dimensions[1] * box_dimensions[2] if box_dimensions else None
+        selected_count = sum(row.get("decision") == "selected" for row in cavity["rows"])
+        skipped_count = sum(row.get("decision") == "skipped" for row in cavity["rows"])
+        story += [
+            Paragraph(f"{section_number}. Ligand-free cavity selection", styles["Heading1"]),
+            Paragraph(
+                "No bound-ligand pose-recovery control was available. In its place, this section records how fpocket-generated cavity hypotheses were filtered and which docking box was actually used. This documents site selection, but it does not validate the biological site or the accuracy of docked poses.",
+                styles["BodyText"],
+            ), Spacer(1,6),
+            table([
+                ["Cavity-selection item", "Recorded result"],
+                ["Candidate decisions recorded", len(cavity["rows"])],
+                ["Retained non-overlapping candidates", selected_count],
+                ["Skipped overlapping candidates", skipped_count],
+                ["Docking box used", cavity["config"] or "Not recorded"],
+                ["Selected fpocket cavity", cavity["selected_file"] or "Not resolved"],
+                ["fpocket score", selected.get("score", detail.get("score", "NA"))],
+                ["fpocket druggability score", descriptor.get("druggability_score", "NA")],
+                ["fpocket cavity volume (A^3)", descriptor.get("volume_angstrom3", "NA")],
+                ["Geometry-filter rank", selected.get("rank_order", "NA")],
+                ["Alpha spheres", detail.get("alpha_spheres", "NA")],
+                ["Cavity bounding box (A)", " x ".join(detail.get(key, "NA") for key in ("bbox_x", "bbox_y", "bbox_z"))],
+                ["Docking-box center (A)", ", ".join(selected.get(key, "NA") for key in ("center_x", "center_y", "center_z"))],
+                ["Docking-box dimensions (A)", " x ".join(f"{value:g}" for value in box_dimensions) if box_dimensions else "NA"],
+                ["Docking-box volume (A^3)", f"{box_volume:g}" if box_volume is not None else "NA"],
+            ], [2.55*inch, 4.15*inch]), Spacer(1,8),
+        ]
+        candidate_rows = [["Rank", "Cavity", "fpocket score", "Druggability", "Volume (A^3)", "Decision"]]
+        for row in cavity["rows"][:10]:
+            descriptor_row = cavity["descriptors"].get(row.get("pocket_file"), {})
+            candidate_rows.append([
+                row.get("rank_order", "NA"), row.get("pocket_file", "NA"), row.get("score", "NA"),
+                descriptor_row.get("druggability_score", "NA"), descriptor_row.get("volume_angstrom3", "NA"),
+                "used for docking" if row.get("pocket_file") == cavity["selected_file"] else row.get("decision", "NA"),
+            ])
+        story += [Paragraph("Ranked cavity candidates", styles["Heading2"]), table(candidate_rows, [.45*inch, 1.35*inch, 1.05*inch, 1.05*inch, 1.05*inch, 1.15*inch], compact=True), Spacer(1,8)]
+        cavity_ab = args.study / "report" / "cavity_panels_AB.png"
+        cavity_a = args.study / "report" / "cavity_panel_A_selection.png"
+        cavity_b = args.study / "report" / "cavity_panel_B_structure.png"
+        if cavity_ab.is_file():
+            story += [
+                image(cavity_ab, 7.0, 4.1),
+                Paragraph(
+                    f"<b>Figure {figure_number}. Ligand-free cavity selection and reviewed docking region.</b> (A) fpocket candidate scores after geometry and overlap filtering; the red point identifies the cavity used to center the retained docking box. (B) Structural view of the selected cavity and docking box. fpocket scores rank geometric pocket hypotheses and are not binding-affinity estimates.",
+                    styles["SmallDU"],
+                ), Spacer(1,8),
+            ]
+            figure_number += 1
+        elif cavity_a.is_file():
+            story += [
+                image(cavity_a, 6.5, 3.8),
+                Paragraph(
+                    f"<b>Figure {figure_number}. Ligand-free cavity selection.</b> fpocket candidate scores after geometry and overlap filtering; the red point identifies the cavity used for docking. fpocket scores are geometric pocket-ranking outputs, not binding-affinity estimates.",
+                    styles["SmallDU"],
+                ), Spacer(1,8),
+            ]
+            figure_number += 1
+        if cavity_b.is_file() and not cavity_ab.is_file():
+            story += [image(cavity_b, 6.5, 3.8), Paragraph(f"<b>Figure {figure_number}. Selected cavity and docking box structural review.</b>", styles["SmallDU"]), Spacer(1,8)]
+            figure_number += 1
+        story.append(PageBreak())
+        section_number += 1
 
     if protocol:
         a=protocol.get("acceptance",{}); p=protocol.get("parameters",{}); g=protocol.get("global_top_ranked_pose",{}); b=protocol.get("global_best_sampled_pose",{})
@@ -224,7 +384,7 @@ def main():
             if control_ligand_sdf
             else "unspecified ligand"
         )
-        story += [Paragraph(f"1. Bound-ligand control: {control_ligand_name}", styles["Heading1"]),
+        story += [Paragraph(f"{section_number}. Bound-ligand control: {control_ligand_name}", styles["Heading1"]),
           Paragraph(f"This retrospective control tests whether the protocol reproducibly recovers the experimental pose of {control_ligand_name}. PASS requires sampling, ranking, and independent-seed criteria to pass. It supports use of the selected protocol for this target, but does not establish affinity or prospective pose accuracy.", styles["BodyText"]), Spacer(1,6)]
         rows=[["Control metric","Result"],["Overall protocol status","PASS" if passed else "REVIEW"],
           ["Sampling control","PASS" if a.get("sampling_pass") else "FAIL"],["Ranking control","PASS" if a.get("ranking_pass") else "FAIL"],
@@ -266,11 +426,11 @@ def main():
         manifest_path = first(args.study,["compounds/*/seed_*/docking/run_manifest.tsv","**/docking/run_manifest.tsv"])
         manifest = read_key_value_tsv(manifest_path)
         seed_count = len(list(args.study.glob("compounds/*/seed_*")))
-        story += [Paragraph("1. Configured docking protocol",styles["Heading1"]),
+        story += [Paragraph(f"{section_number}. Configured docking protocol",styles["Heading1"]),
           Paragraph("This protocol was used for the docking results below. No retrospective bound-ligand control was supplied, so it is configured but not control-approved for pose recovery on this target.",styles["BodyText"]),Spacer(1,6),
           table([["Parameter","Configured value"],["Validation status","Not evaluated by bound-ligand control"],["Engine",manifest.get("engine","NA")],["Engine version",manifest.get("engine_version","NA")],["Exhaustiveness",manifest.get("exhaustiveness","NA")],["Modes per job",manifest.get("num_modes","NA")],["Energy range",f"{manifest.get('energy_range_kcal_per_mol','NA')} kcal/mol"],["Independent seeds",seed_count or "NA"],["Receptor",Path(manifest.get("receptor","NA")).name],["Docking box",Path(manifest.get("config","NA")).name]], [2.55*inch,4.15*inch]),PageBreak()]
 
-    result_number = 2
+    result_number = section_number + 1
     story += [Paragraph(f"{result_number}. Docking results",styles["Heading1"])]
     shared_panel = first(args.study,["report/study_panels_AB.png"]) if len(compounds) == 1 else None
     inventory = read_json(args.study / "inputs" / "compound_library_inventory.json")
@@ -384,8 +544,9 @@ def main():
         ])
     method = provenance["methods"]
     story += [
-        PageBreak(), Paragraph("3. Reproducibility, software, and references", styles["Heading1"]),
+        PageBreak(), Paragraph(f"{result_number + 1}. Reproducibility, software, and references", styles["Heading1"]),
         Paragraph(
+            ("fpocket supplied ligand-free geometric cavity candidates, volumes, and druggability descriptors; the report separately records the selected docking box. " if cavity else "") +
             "Docking scores and poses were produced by AutoDock Vina. PLIP supplied rule-based protein-ligand interaction calls; the retained PLIP XML is the authoritative interaction record. RDKit supplied the retained molecular graph handling and symmetry-aware, no-fit heavy-atom RMSD matrix used by Butina clustering. The clustering cutoff was "
             f"{method['cluster_cutoff_angstrom']} A. If only one cluster is present, its lowest-energy member is reported as the sole representative. PyMOL produced the 3D molecular panels; ReportLab assembled this PDF.",
             styles["BodyText"],
