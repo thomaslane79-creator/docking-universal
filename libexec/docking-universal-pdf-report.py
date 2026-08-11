@@ -17,6 +17,12 @@ def read_json(path, default=None):
     except (OSError, ValueError, TypeError):
         return default or {}
 
+def package_version():
+    try:
+        return (Path(__file__).resolve().parent.parent / "VERSION").read_text().strip()
+    except OSError:
+        return "unknown"
+
 def read_key_value_tsv(path):
     data = {}
     if not path:
@@ -77,6 +83,39 @@ def read_box_dimensions(config_path):
         return None
     return dimensions
 
+def display_compound_name(name, source=None):
+    import re
+    value = str(name or "").strip()
+    if value and not value.isdigit():
+        return value
+    stem = Path(str(source or "")).stem
+    descriptive = re.sub(r"(?i)_pubchem_?\d+$", "", stem).replace("_", " ").strip()
+    return descriptive.title() if descriptive and not descriptive.isdigit() else (value or "Ligand")
+
+def safe_filename_component(value, fallback):
+    import re
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value).strip()).strip("._-")
+    return cleaned or fallback
+
+def descriptive_report_name(target_name, ligand_names, summary):
+    import re
+    target = safe_filename_component(target_name, "protein")
+    target = re.sub(r"(?i)(?:_receptor|_prepared|_protein)+$", "", target) or "protein"
+    names = [safe_filename_component(name, "ligand") for name in ligand_names]
+    if len(names) <= 3 and names:
+        subject = "_".join(names)
+    elif names:
+        subject = f"{len(names)}-ligands"
+    else:
+        subject = "cavity"
+    created = str(summary.get("created_utc", ""))[:10]
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", created):
+        from datetime import datetime
+        created = datetime.now().strftime("%Y-%m-%d")
+    workflow = summary.get("workflow", "")
+    kind = "control_report" if workflow == "control" else "cavity_report" if not names else "docking_report"
+    return f"{target}_{subject}_{created}_{kind}.pdf"
+
 def discover_cavity_record(study):
     selection = first(study, [
         "preparation/*_receptor_prep/cavity/pocket_selection_diagnostics.tsv",
@@ -88,6 +127,9 @@ def discover_cavity_record(study):
         "compounds/*/seed_*/docking/run_manifest.tsv", "**/docking/run_manifest.tsv",
     ]))
     config = Path(manifest.get("config", "")).name
+    if not config:
+        preparation_config = first(selection.parent, ["*_pocket*.conf"])
+        config = preparation_config.name if preparation_config else ""
     import re
     match = re.search(r"pocket(\d+)", config, re.I)
     selected_file = f"pocket{match.group(1)}_atm.pdb" if match else None
@@ -174,11 +216,13 @@ def reproducibility_record(protocol, study, control):
     recorded = protocol.get("software", {}) if protocol else {}
     figure_manifest = read_json(study / "report" / "report_figure_manifest.json")
     clustering = read_json(first(study, ["compounds/*/pose_analysis/clustering_manifest.json", "**/clustering_manifest.json"]))
-    engine_version = recorded.get("engine_version", "not recorded")
-    if recorded.get("engine_source"):
-        engine_version += f" ({recorded['engine_source']})"
+    docking_manifest = read_key_value_tsv(first(study, ["compounds/*/seed_*/docking/run_manifest.tsv", "**/docking/run_manifest.tsv"]))
+    engine_version = recorded.get("engine_version") or docking_manifest.get("engine_version", "not recorded")
+    engine_source = recorded.get("engine_source") or docking_manifest.get("engine_source")
+    if engine_source:
+        engine_version += f" ({engine_source})"
     software = [
-        {"role": "Workflow", "software": "Docking Universal", "version": recorded.get("docking_universal", "not recorded")},
+        {"role": "Workflow", "software": "Docking Universal", "version": recorded.get("docking_universal", package_version())},
         {"role": "Ligand-free cavity detection", "software": "fpocket", "version": fpocket_version()},
         {"role": "Docking scores and poses", "software": "AutoDock Vina", "version": engine_version},
         {"role": "Docking parameterization", "software": "Meeko", "version": recorded.get("meeko", installed_version("meeko"))},
@@ -250,8 +294,6 @@ def main():
 
     summary = read_json(args.study / "report" / "study_summary.json")
     compounds = summary.get("compounds", [])
-    out = args.out or args.study / "report" / "study_report.pdf"
-    out.parent.mkdir(parents=True, exist_ok=True)
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name="SmallDU", parent=styles["BodyText"], fontSize=8, leading=10))
     styles.add(ParagraphStyle(name="CaptionDU", parent=styles["Heading2"], alignment=TA_CENTER, fontSize=11, leading=14))
@@ -278,18 +320,32 @@ def main():
     # study identifiers remain machine metadata and are not used as titles.
     inventory = read_json(args.study / "inputs" / "compound_library_inventory.json")
     inventory_rows = inventory.get("compounds", inventory.get("entries", []))
-    inventory_names = {str(x.get("compound_id")): str(x.get("compound_name") or "") for x in inventory_rows}
+    inventory_by_id = {str(x.get("compound_id")): x for x in inventory_rows}
     ligand_names = []
     for compound in summary.get("compounds", []):
         cid = str(compound.get("compound_id", ""))
-        name = str(compound.get("compound_name") or inventory_names.get(cid) or cid or "Ligand")
+        inventory_row = inventory_by_id.get(cid, {})
+        name = display_compound_name(compound.get("compound_name") or inventory_row.get("compound_name") or cid, inventory_row.get("source"))
         ligand_names.append(name)
 
     receptor_source = protocol.get("locked_inputs", {}).get("receptor", "") if protocol else ""
     if not receptor_source:
-        title_manifest_path = first(args.study,["compounds/*/seed_*/docking/run_manifest.tsv","**/docking/run_manifest.tsv"])
+        receptor_source = summary.get("configured_locked_inputs", {}).get("receptor", "")
+    title_manifest_path = first(args.study,["compounds/*/seed_*/docking/run_manifest.tsv","**/docking/run_manifest.tsv"])
+    if not receptor_source:
         receptor_source = read_key_value_tsv(title_manifest_path).get("receptor", "")
+    if not receptor_source:
+        input_receptor = first(args.study, ["inputs/*.pdb"])
+        receptor_source = str(input_receptor or "")
+    if not receptor_source:
+        prepared_receptor = first(args.study, ["preparation/*_receptor_prep/receptor/*.pdb", "**/*_receptor_prep/receptor/*.pdb"])
+        receptor_source = str(prepared_receptor or "")
     target_name = Path(receptor_source).stem if receptor_source else "Unspecified target"
+    if not ligand_names and summary.get("workflow") == "control" and args.control:
+        control_values = read_key_value_tsv(args.control / "run_manifest.tsv")
+        ligand_names = [control_values.get("ligand_id", "ligand").split(":", 1)[0]]
+    out = args.out or args.study / "report" / descriptive_report_name(target_name, ligand_names, summary)
+    out.parent.mkdir(parents=True, exist_ok=True)
     if len(ligand_names) == 1:
         study_descriptor = f"Target: {target_name} | Ligand: {ligand_names[0]}"
     elif ligand_names:
@@ -298,8 +354,13 @@ def main():
         study_descriptor = f"Target: {target_name}"
 
     cavity = discover_cavity_record(args.study) if not protocol else None
-    report_title = "Docking Universal - Ligand-Free Cavity and Docking Report" if cavity else "Docking Universal - Docking Study Report"
-    story = [Paragraph(report_title, styles["Title"]),
+    has_docking = bool(protocol or title_manifest_path or compounds)
+    report_title = (
+        "Docking Universal - Ligand-Free Cavity and Docking Report" if cavity and has_docking
+        else "Docking Universal - Ligand-Free Cavity Report" if cavity
+        else "Docking Universal - Docking Study Report"
+    )
+    story = [Paragraph(f"{report_title}<br/><font size=\"12\">Version {package_version()} - Research preview</font>", styles["Title"]),
              Paragraph(study_descriptor, styles["Heading2"]), Spacer(1,8)]
     if cavity:
         story += [Paragraph("Scientific status: exploratory site selection without a bound-ligand pose-recovery control", styles["BodyText"]), Spacer(1,8)]
@@ -317,7 +378,7 @@ def main():
         story += [
             Paragraph(f"{section_number}. Ligand-free cavity selection", styles["Heading1"]),
             Paragraph(
-                "No bound-ligand pose-recovery control was available. In its place, this section records how fpocket-generated cavity hypotheses were filtered and which docking box was actually used. This documents site selection, but it does not validate the biological site or the accuracy of docked poses.",
+                "No bound-ligand pose-recovery control was available. In its place, this section records how fpocket-generated cavity hypotheses were filtered and which docking box was selected. This documents site selection, but it does not validate the biological site or the accuracy of docked poses.",
                 styles["BodyText"],
             ), Spacer(1,6),
             table([
@@ -325,7 +386,7 @@ def main():
                 ["Candidate decisions recorded", len(cavity["rows"])],
                 ["Retained non-overlapping candidates", selected_count],
                 ["Skipped overlapping candidates", skipped_count],
-                ["Docking box used", cavity["config"] or "Not recorded"],
+                ["Selected docking box", cavity["config"] or "Not recorded"],
                 ["Selected fpocket cavity", cavity["selected_file"] or "Not resolved"],
                 ["fpocket score", selected.get("score", detail.get("score", "NA"))],
                 ["fpocket druggability score", descriptor.get("druggability_score", "NA")],
@@ -344,17 +405,18 @@ def main():
             candidate_rows.append([
                 row.get("rank_order", "NA"), row.get("pocket_file", "NA"), row.get("score", "NA"),
                 descriptor_row.get("druggability_score", "NA"), descriptor_row.get("volume_angstrom3", "NA"),
-                "used for docking" if row.get("pocket_file") == cavity["selected_file"] else row.get("decision", "NA"),
+                "selected box" if row.get("pocket_file") == cavity["selected_file"] else row.get("decision", "NA"),
             ])
         story += [Paragraph("Ranked cavity candidates", styles["Heading2"]), table(candidate_rows, [.45*inch, 1.35*inch, 1.05*inch, 1.05*inch, 1.05*inch, 1.15*inch], compact=True), Spacer(1,8)]
         cavity_ab = args.study / "report" / "cavity_panels_AB.png"
         cavity_a = args.study / "report" / "cavity_panel_A_selection.png"
         cavity_b = args.study / "report" / "cavity_panel_B_structure.png"
+        cavity_overview = args.study / "report" / "cavity_selected_box.png"
         if cavity_ab.is_file():
             story += [
                 image(cavity_ab, 7.0, 4.1),
                 Paragraph(
-                    f"<b>Figure {figure_number}. Ligand-free cavity selection and reviewed docking region.</b> (A) fpocket candidate scores after geometry and overlap filtering; the red point identifies the cavity used to center the retained docking box. (B) Structural view of the selected cavity and docking box. fpocket scores rank geometric pocket hypotheses and are not binding-affinity estimates.",
+                    f"<b>Figure {figure_number}. Ligand-free cavity candidates and spatial comparison.</b> (A) Eligible cavities are shown in their integer evaluation order. Order 1 has the highest composite priority, calculated from the fpocket score with a penalty for distance from the protein interior; gray candidates were subsequently removed because their docking boxes overlapped a higher-priority retained box. (B) All retained non-overlapping pocket hypotheses are shown on the complete receptor as translucent surface envelopes generated from their fpocket alpha spheres. Candidate colors correspond between panels; red identifies the candidate selected to define the docking box. These are geometric representations, not experimentally observed molecular surfaces. fpocket scores are not binding-affinity estimates.",
                     styles["SmallDU"],
                 ), Spacer(1,8),
             ]
@@ -363,7 +425,7 @@ def main():
             story += [
                 image(cavity_a, 6.5, 3.8),
                 Paragraph(
-                    f"<b>Figure {figure_number}. Ligand-free cavity selection.</b> fpocket candidate scores after geometry and overlap filtering; the red point identifies the cavity used for docking. fpocket scores are geometric pocket-ranking outputs, not binding-affinity estimates.",
+                    f"<b>Figure {figure_number}. Ligand-free cavity selection.</b> Eligible cavities are shown in their integer evaluation order. Order 1 has the highest composite priority, calculated from the fpocket score with a penalty for distance from the protein interior; gray candidates were subsequently removed because their docking boxes overlapped a higher-priority retained box. The red point identifies the cavity selected to define the docking box. fpocket scores are geometric pocket-ranking outputs, not binding-affinity estimates.",
                     styles["SmallDU"],
                 ), Spacer(1,8),
             ]
@@ -371,8 +433,41 @@ def main():
         if cavity_b.is_file() and not cavity_ab.is_file():
             story += [image(cavity_b, 6.5, 3.8), Paragraph(f"<b>Figure {figure_number}. Selected cavity and docking box structural review.</b>", styles["SmallDU"]), Spacer(1,8)]
             figure_number += 1
+        if cavity_overview.is_file():
+            story += [
+                image(cavity_overview, 6.5, 4.15),
+                Paragraph(
+                    f"<b>Figure {figure_number}. Chosen pocket and docking box.</b> The receptor is shown as a gray cartoon, the selected alpha-sphere-derived pocket surface in translucent red, the selected center in yellow, and the docking box as an orange wireframe. Red matches the selected candidate in Figure {figure_number - 1}. This records the region chosen to proceed; it does not establish that the pocket is biologically correct.",
+                    styles["SmallDU"],
+                ), Spacer(1,8),
+            ]
+            figure_number += 1
         story.append(PageBreak())
         section_number += 1
+
+    if cavity and not has_docking:
+        provenance = reproducibility_record(protocol, args.study, args.control)
+        allowed_roles = {"Workflow", "Ligand-free cavity detection", "3D rendering", "Plots", "PDF generation", "Runtime"}
+        software = [item for item in provenance["software"] if item["role"] in allowed_roles]
+        references = [item for item in provenance["references"] if "Fpocket" in item["citation"] or "PyMOL" in item["citation"]]
+        provenance["software"] = software
+        provenance["references"] = references
+        (args.study / "report" / "software_versions_and_references.json").write_text(json.dumps(provenance, indent=2) + "\n")
+        provenance_rows = [["Result element", "Software", "Version used"]]
+        for item in software:
+            provenance_rows.append([Paragraph(item["role"], styles["SmallDU"]), Paragraph(item["software"], styles["SmallDU"]), Paragraph(str(item["version"]), styles["SmallDU"])])
+        story += [
+            Paragraph(f"{section_number}. Reproducibility, software, and references", styles["Heading1"]),
+            Paragraph("This preparation-only report records fpocket cavity detection, candidate filtering, the selected review box, and PyMOL structural rendering. No ligand docking, scoring, pose clustering, or interaction analysis was performed.", styles["BodyText"]),
+            Spacer(1,8), Paragraph("Software versions used for this report", styles["Heading2"]),
+            table(provenance_rows, [2.35*inch, 1.55*inch, 2.8*inch], compact=True),
+            Spacer(1,10), Paragraph("Scientific and software references", styles["Heading2"]),
+        ]
+        for index, reference in enumerate(references, start=1):
+            story += [Paragraph(f"{index}. {reference['citation']} <link href=\"{reference['url']}\"><font color=\"#1f4e79\">{reference['url']}</font></link>", styles["SmallDU"]), Spacer(1,4)]
+        SimpleDocTemplate(str(out),pagesize=letter,leftMargin=.65*inch,rightMargin=.65*inch,topMargin=.6*inch,bottomMargin=.6*inch,title="Docking Universal ligand-free cavity report").build(story)
+        print(f"PDF report: {out}")
+        return
 
     if protocol:
         a=protocol.get("acceptance",{}); p=protocol.get("parameters",{}); g=protocol.get("global_top_ranked_pose",{}); b=protocol.get("global_best_sampled_pose",{})
@@ -425,21 +520,29 @@ def main():
     else:
         manifest_path = first(args.study,["compounds/*/seed_*/docking/run_manifest.tsv","**/docking/run_manifest.tsv"])
         manifest = read_key_value_tsv(manifest_path)
-        seed_count = len(list(args.study.glob("compounds/*/seed_*")))
+        configured = summary.get("configured_docking_parameters", {})
+        locked = summary.get("configured_locked_inputs", {})
+        configured_seeds = configured.get("seeds", [])
+        seed_count = len(list(args.study.glob("compounds/*/seed_*"))) or len(configured_seeds)
+        engine = manifest.get("engine") or summary.get("configured_engine", "NA")
+        engine_version = manifest.get("engine_version") or summary.get("configured_engine_version", "NA")
+        validation_status = summary.get("protocol_validation_status", "Not evaluated by bound-ligand control")
+        receptor = manifest.get("receptor") or locked.get("receptor", "NA")
+        docking_box = manifest.get("config") or locked.get("box", "NA")
         story += [Paragraph(f"{section_number}. Configured docking protocol",styles["Heading1"]),
-          Paragraph("This protocol was used for the docking results below. No retrospective bound-ligand control was supplied, so it is configured but not control-approved for pose recovery on this target.",styles["BodyText"]),Spacer(1,6),
-          table([["Parameter","Configured value"],["Validation status","Not evaluated by bound-ligand control"],["Engine",manifest.get("engine","NA")],["Engine version",manifest.get("engine_version","NA")],["Exhaustiveness",manifest.get("exhaustiveness","NA")],["Modes per job",manifest.get("num_modes","NA")],["Energy range",f"{manifest.get('energy_range_kcal_per_mol','NA')} kcal/mol"],["Independent seeds",seed_count or "NA"],["Receptor",Path(manifest.get("receptor","NA")).name],["Docking box",Path(manifest.get("config","NA")).name]], [2.55*inch,4.15*inch]),PageBreak()]
+          Paragraph("This section records the settings selected for this study. Control approval applies only when an approved target-matched protocol is identified below.",styles["BodyText"]),Spacer(1,6),
+          table([["Parameter","Configured value"],["Validation status",validation_status],["Engine",engine],["Engine version",engine_version],["Exhaustiveness",manifest.get("exhaustiveness") or configured.get("exhaustiveness","NA")],["Modes per job",manifest.get("num_modes") or configured.get("num_modes","NA")],["Energy range",f"{manifest.get('energy_range_kcal_per_mol') or configured.get('energy_range_kcal_per_mol','NA')} kcal/mol"],["Independent seeds",seed_count or "NA"],["Receptor",Path(receptor).name],["Docking box",Path(docking_box).name]], [2.55*inch,4.15*inch]),PageBreak()]
 
     result_number = section_number + 1
     story += [Paragraph(f"{result_number}. Docking results",styles["Heading1"])]
     shared_panel = first(args.study,["report/study_panels_AB.png"]) if len(compounds) == 1 else None
     inventory = read_json(args.study / "inputs" / "compound_library_inventory.json")
     inventory_rows = inventory.get("compounds", inventory.get("entries", []))
-    inventory_names = {str(x.get("compound_id")): str(x.get("compound_name") or "") for x in inventory_rows}
+    inventory_by_id = {str(x.get("compound_id")): x for x in inventory_rows}
     display_names = {}
     report_compounds = compounds or [{"compound_name":args.study.name,"compound_id":""}]
     for compound_index, compound in enumerate(report_compounds):
-        cid=str(compound.get("compound_id", "")); name=str(compound.get("compound_name") or inventory_names.get(cid) or cid or "ligand")
+        cid=str(compound.get("compound_id", "")); inventory_row=inventory_by_id.get(cid, {}); name=display_compound_name(compound.get("compound_name") or inventory_row.get("compound_name") or cid, inventory_row.get("source"))
         display_names[cid] = name
         if protocol:
             scope_text = "Docking used the approved target-matched protocol shown above."
@@ -470,7 +573,7 @@ def main():
             )
             story += [
                 Paragraph("Top-ranked 3D cluster snapshots", styles["Heading2"]),
-                image(snapshot_panel, 4.0, 2.95),
+                image(snapshot_panel, 6.5, 1.8),
                 Paragraph(
                     f"<b>Figure {figure_number}. Three-dimensional interaction snapshots for {name}.</b> "
                     f"Shown are {snapshot_count} energy-ranked distinct cluster {representative_label}, ordered by Vina score. "

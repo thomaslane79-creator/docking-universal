@@ -114,6 +114,9 @@ def cavity_artifacts(study):
         "compounds/*/seed_*/docking/run_manifest.tsv", "**/docking/run_manifest.tsv",
     ]))
     selected_config = Path(manifest.get("config", "")).name
+    if not selected_config:
+        preparation_config = first(diagnostics.parent, ["*_pocket*.conf"])
+        selected_config = preparation_config.name if preparation_config else ""
     selected_stem = Path(selected_config).stem if selected_config else ""
     selected_pml = diagnostics.parent / f"{selected_stem}.pml" if selected_stem else None
     if not selected_pml or not selected_pml.is_file():
@@ -133,29 +136,42 @@ def plot_cavity_selection(diagnostics, selected_config, output):
     selected_pocket = None
     match = __import__("re").search(r"pocket(\d+)", selected_config or "", __import__("re").I)
     if match:
-        selected_pocket = f"pocket{match.group(1)}_atm.pdb"
+        retained_rows = [row for row in rows if row.get("decision") == "selected"]
+        selected_index = int(match.group(1)) - 1
+        if selected_index < len(retained_rows):
+            selected_pocket = retained_rows[selected_index].get("pocket_file")
     ranks = [int(row.get("rank_order", index + 1)) for index, row in enumerate(rows)]
     scores = [float(row.get("score", "nan")) for row in rows]
-    colors = ["#1f77b4" if row.get("decision") == "selected" else "#b8c0c8" for row in rows]
-    if selected_pocket:
-        colors = ["#d62728" if row.get("pocket_file") == selected_pocket else color for row, color in zip(rows, colors)]
+    retained_palette = ["#1f77b4", "#d9a400", "#d627c1", "#00a6b2", "#f28e2b", "#9467bd", "#fa8072"]
+    colors, retained_index = [], 0
+    for row in rows:
+        if row.get("decision") != "selected":
+            colors.append("#b8c0c8")
+            continue
+        if row.get("pocket_file") == selected_pocket:
+            colors.append("#d62728")
+        else:
+            colors.append(retained_palette[retained_index % len(retained_palette)])
+        retained_index += 1
     fig, ax = plt.subplots(figsize=(10.5, 6.2))
     ax.scatter(ranks, scores, c=colors, s=105, edgecolor="black", linewidth=.6, zorder=3)
     for rank, score, row in zip(ranks, scores, rows):
         if row.get("pocket_file") == selected_pocket:
             ax.annotate(
-                f"Docking box: {Path(selected_config).stem}", (rank, score), xytext=(18, 18),
+                f"Docking box: {Path(selected_config).stem}", (rank, score), xytext=(18, -32),
                 textcoords="offset points", fontsize=11,
                 bbox=dict(fc="white", ec="#d62728", alpha=.96),
                 arrowprops=dict(arrowstyle="->", color="#d62728"),
             )
-    ax.set_xlabel("Cavity rank after geometry and overlap filtering", fontsize=14)
+    ax.set_xticks(ranks)
+    ax.set_xlim(min(ranks) - 0.25, max(ranks) + 0.25)
+    ax.set_xlabel("Candidate evaluation order (1 = highest composite rank)", fontsize=14)
     ax.set_ylabel("fpocket score", fontsize=14)
     ax.set_title("Ligand-free cavity candidates and selected docking region", fontsize=16)
     ax.grid(alpha=.25)
     ax.tick_params(labelsize=11)
     ax.text(
-        .98, .97, "Red = box used for docking\nBlue = retained candidate\nGray = skipped overlapping candidate",
+        .98, .97, "Colors match Panel B\nRed = selected docking box\nGray = skipped overlapping candidate",
         transform=ax.transAxes, ha="right", va="top", fontsize=10,
         bbox=dict(fc="white", ec="0.6", alpha=.95),
     )
@@ -166,22 +182,88 @@ def plot_cavity_selection(diagnostics, selected_config, output):
     return True
 
 
-def render_cavity_scene(scene, output, session, pymol):
+def render_cavity_scene(scene, output, session, pymol, overview=False):
     if not pymol or not scene or not Path(scene).is_file():
         return False
     wrapper = output.with_suffix(".pml")
     output_arg = str(output.resolve()).replace(" ", "\\ ")
     session_arg = str(session.resolve()).replace(" ", "\\ ")
+    view_commands = []
+    if overview:
+        view_commands = [
+            "color gray70, polymer.protein",
+            "set cartoon_transparency, 0.15, polymer.protein",
+            "hide spheres, cavity_core*",
+            "show surface, cavity_core*",
+            "set transparency, 0.35, cavity_core*",
+            "color red, cavity_core*",
+            "hide spheres, *_box*",
+            "show sticks, *_box*",
+            "set stick_radius, 0.08, *_box*",
+            "color orange, *_box*",
+            "orient polymer.protein",
+            "zoom polymer.protein, 12",
+        ]
+    else:
+        view_commands = ["zoom all, 4"]
     wrapper.write_text(Path(scene).read_text(errors="replace") + "\n" + "\n".join([
         "bg_color white",
-        "set ray_opaque_background, off", "set depth_cue, 0", "zoom all, 4",
+        "set ray_opaque_background, off", "set depth_cue, 0", *view_commands,
         f"png {output_arg}, 1800, 1200, dpi=220, ray=1",
         f"save {session_arg}", "quit",
     ]) + "\n")
     result = subprocess.run([str(pymol), "-cq", str(wrapper)], cwd=str(Path(scene).parent), text=True, capture_output=True)
     if result.returncode != 0:
         print(f"Report figure warning: cavity PyMOL render failed: {result.stderr.strip()}", file=sys.stderr)
+    if result.returncode == 0 and output.is_file() and overview:
+        trim_white_png(output, padding=70)
     return result.returncode == 0 and output.is_file()
+
+
+def render_all_cavity_candidates(diagnostics, selected_config, output, session, pymol):
+    """Show every retained non-overlapping pocket on the complete receptor."""
+    if not pymol:
+        return False
+    receptor = first(diagnostics.parent.parent, ["receptor/*.pdb"])
+    if not receptor:
+        return False
+    with Path(diagnostics).open(newline="") as handle:
+        retained = [row for row in csv.DictReader(handle, delimiter="\t") if row.get("decision") == "selected"]
+    if not retained:
+        return False
+    match = __import__("re").search(r"pocket(\d+)", selected_config or "", __import__("re").I)
+    selected_index = int(match.group(1)) - 1 if match else 0
+    selected_file = retained[selected_index].get("pocket_file") if selected_index < len(retained) else retained[0].get("pocket_file")
+    palette = ["marine", "gold", "magenta", "cyan", "orange", "violet", "salmon"]
+    lines = [
+        "reinitialize", f'load "{receptor.resolve()}", receptor', "hide everything, all",
+        "show cartoon, receptor", "color gray70, receptor", "set cartoon_transparency, 0.12, receptor",
+    ]
+    for index, row in enumerate(retained, start=1):
+        pocket = diagnostics.parent / "frozen_pockets" / row.get("pocket_file", "")
+        if not pocket.is_file():
+            continue
+        obj = f"retained_pocket_{index}"
+        color = "red" if pocket.name == selected_file else palette[(index - 1) % len(palette)]
+        lines += [
+            f'load "{pocket.resolve()}", {obj}', f"hide everything, {obj}", f"show surface, {obj}",
+            f"set transparency, 0.35, {obj}", f"color {color}, {obj}",
+        ]
+    lines += [
+        "bg_color white", "set ray_opaque_background, off", "set depth_cue, 0",
+        "orient receptor", "zoom receptor, 8",
+        f"png {output.resolve()}, 1800, 1200, dpi=220, ray=1",
+        f"save {session.resolve()}", "quit",
+    ]
+    wrapper = output.with_suffix(".pml")
+    wrapper.write_text("\n".join(lines) + "\n")
+    result = subprocess.run([str(pymol), "-cq", str(wrapper)], text=True, capture_output=True)
+    if result.returncode == 0 and output.is_file():
+        trim_white_png(output, padding=70)
+        return True
+    if result.returncode != 0:
+        print(f"Report figure warning: all-pocket PyMOL render failed: {result.stderr.strip()}", file=sys.stderr)
+    return False
 
 
 def build_cavity_figures(study, pymol):
@@ -195,8 +277,11 @@ def build_cavity_figures(study, pymol):
     if plot_cavity_selection(diagnostics, selected_config, panel_a):
         outputs.append(str(panel_a))
     panel_b = report / "cavity_panel_B_structure.png"
-    if render_cavity_scene(scene, panel_b, report / "cavity_panel_B_structure.pse", pymol):
+    if render_all_cavity_candidates(diagnostics, selected_config, panel_b, report / "cavity_panel_B_structure.pse", pymol):
         outputs.append(str(panel_b))
+    selected_box = report / "cavity_selected_box.png"
+    if render_cavity_scene(scene, selected_box, report / "cavity_selected_box.pse", pymol, overview=True):
+        outputs.append(str(selected_box))
     combined = report / "cavity_panels_AB.png"
     if panel_a.is_file() and panel_b.is_file():
         combine_panels(panel_a, panel_b, combined, control=False)
@@ -721,7 +806,7 @@ def combine_panels(panel_a, panel_b, output, control=False):
 
 def combine_cluster_snapshots(analysis, rows, output):
     """Build a compact, consistently labeled figure from up to three 3D renders."""
-    from PIL import Image, ImageDraw, ImageFont, ImageOps
+    from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageOps
 
     colors = TOP_COLORS
     entries = []
@@ -739,23 +824,30 @@ def combine_cluster_snapshots(analysis, rows, output):
     font_path = Path("/System/Library/Fonts/Helvetica.ttc")
     label_font = ImageFont.truetype(str(font_path), 42) if font_path.is_file() else ImageFont.load_default()
     caption_font = ImageFont.truetype(str(font_path), 30) if font_path.is_file() else ImageFont.load_default()
-    cell_w, cell_h, image_h = 1050, 760, 650
+    cell_w, cell_h, image_h = 760, 610, 500
     if len(entries) == 1:
         canvas_w, canvas_h = 1400, 920
         positions = [(175, 70)]
         cell_w, cell_h, image_h = 1050, 780, 660
     elif len(entries) == 2:
-        canvas_w, canvas_h = 2200, 850
-        positions = [(40, 45), (1110, 45)]
+        canvas_w, canvas_h = 1600, 660
+        positions = [(30, 30), (810, 30)]
     else:
-        canvas_w, canvas_h = 2200, 1660
-        positions = [(40, 45), (1110, 45), (575, 855)]
+        canvas_w, canvas_h = 2400, 660
+        positions = [(30, 30), (820, 30), (1610, 30)]
     canvas = Image.new("RGB", (canvas_w, canvas_h), "white")
     draw = ImageDraw.Draw(canvas)
     panel_letters = "ABC"
     sources = []
     for index, ((row, source, color), (x, y)) in enumerate(zip(entries, positions)):
         snapshot = Image.open(source).convert("RGB")
+        content = ImageChops.difference(snapshot, Image.new("RGB", snapshot.size, "white")).getbbox()
+        if content:
+            pad = 28
+            snapshot = snapshot.crop((
+                max(0, content[0] - pad), max(0, content[1] - pad),
+                min(snapshot.width, content[2] + pad), min(snapshot.height, content[3] + pad),
+            ))
         snapshot.thumbnail((cell_w - 36, image_h - 24), Image.Resampling.LANCZOS)
         frame = Image.new("RGB", (cell_w, image_h), "white")
         frame.paste(snapshot, ((cell_w - snapshot.width) // 2, (image_h - snapshot.height) // 2))

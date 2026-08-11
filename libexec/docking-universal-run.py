@@ -46,9 +46,45 @@ def run(command, cwd=None):
     subprocess.run([str(value) for value in command], cwd=cwd, check=True)
 
 
+def package_version():
+    try:
+        return (Path(__file__).resolve().parent.parent / "VERSION").read_text().strip()
+    except OSError:
+        return "unknown"
+
+
 def safe_id(value, fallback="compound"):
     identifier = re.sub(r"[^A-Za-z0-9._-]+", "_", value.strip()).strip("._-")
     return identifier or fallback
+
+
+def report_pdf_name(study, manifest, compounds):
+    """Return a readable, bounded filename derived from retained study metadata."""
+    target_source = manifest.get("experimental_complex") or manifest.get("target_source") or ""
+    if not target_source:
+        input_pdbs = sorted((Path(study) / "inputs").glob("*.pdb"))
+        target_source = str(input_pdbs[0]) if input_pdbs else "protein"
+    target = safe_id(Path(str(target_source)).stem, "protein")
+    target = re.sub(r"(?i)(?:_receptor|_prepared|_protein)+$", "", target) or "protein"
+
+    ligand_names = [safe_id(str(row.get("compound_name", "")), "ligand") for row in compounds]
+    workflow = manifest.get("workflow", "")
+    if not ligand_names and workflow == "control":
+        control_values = read_key_value_tsv(Path(study) / "control" / "run_manifest.tsv")
+        ligand_names = [safe_id(control_values.get("ligand_id", "ligand").split(":", 1)[0], "ligand")]
+
+    if len(ligand_names) <= 3 and ligand_names:
+        subject = "_".join(ligand_names)
+    elif ligand_names:
+        subject = f"{len(ligand_names)}-ligands"
+    else:
+        subject = "cavity"
+
+    created = str(manifest.get("created_utc", ""))[:10]
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", created):
+        created = datetime.now().strftime("%Y-%m-%d")
+    report_kind = "control_report" if workflow == "control" else "cavity_report" if not ligand_names else "docking_report"
+    return f"{target}_{subject}_{created}_{report_kind}.pdf"
 
 
 def read_key_value_tsv(path):
@@ -113,6 +149,32 @@ def choose_mode():
     print("     Uses predicted cavities and must be interpreted as hypothesis generation without target-specific pose validation.")
     choice = input("Select [1]: ").strip() or "1"
     return {"1": "control", "2": "screen", "3": "exploratory"}.get(choice)
+
+
+def calibration_strategy(choice):
+    """Translate every guided calibration choice into recorded execution settings."""
+    choices = {
+        "1": ("quick", False),
+        "2": ("quick", True),
+        "3": ("repeatability", False),
+        "4": ("broader", False),
+        "5": ("conformers", False),
+        "6": ("robust", False),
+    }
+    if choice not in choices:
+        raise SystemExit("Choose a calibration strategy from 1 to 6")
+    return choices[choice]
+
+
+def validated_box_size(value):
+    """Validate the common guided control-box edge and return its normalized text."""
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        raise SystemExit("Docking-box edge length must be between 10 and 50 Angstroms") from None
+    if not 10.0 <= numeric <= 50.0:
+        raise SystemExit("Docking-box edge length must be between 10 and 50 Angstroms")
+    return str(value)
 
 
 def explain_workflow(mode):
@@ -612,9 +674,15 @@ def split_compounds(source, destination):
         for index, molecule in enumerate(molecules, start=1):
             raw_name = molecule.GetProp("_Name").strip() if molecule.HasProp("_Name") else ""
             property_name = molecule.GetProp("Name").strip() if molecule.HasProp("Name") else ""
-            compound_name = raw_name or property_name
+            descriptive_stem = re.sub(r"(?i)_pubchem_?\d+$", "", path.stem)
+            filename_name = descriptive_stem.replace("_", " ").strip().title()
+            compound_name = (
+                raw_name if raw_name and not raw_name.isdigit()
+                else property_name
+                or (filename_name if filename_name and not filename_name.isdigit() else raw_name)
+            )
             base = safe_id(
-                compound_name
+                raw_name or compound_name
                 or (path.stem if len(molecules) == 1 else f"{path.stem}_{index}")
             )
             identifier = base
@@ -685,12 +753,54 @@ def discover_preparation(root, interactive=True, defer_box_selection=False):
     return receptor_pdb, receptor_pdbqt, box
 
 
+def prepared_box_records(boxes):
+    """Attach retained fpocket provenance and a transparent near-tie flag to boxes."""
+    if not boxes:
+        return []
+    cavity = boxes[0].parent
+    diagnostics = cavity / "pocket_selection_diagnostics.tsv"
+    rows = []
+    if diagnostics.is_file():
+        with diagnostics.open(newline="") as handle:
+            rows = [row for row in csv.DictReader(handle, delimiter="\t") if row.get("decision") == "selected"]
+    records = []
+    for index, box in enumerate(boxes):
+        row = rows[index] if index < len(rows) else {}
+        try:
+            score = float(row.get("score", "nan"))
+        except ValueError:
+            score = float("nan")
+        records.append({"box": box, "scene": box.with_suffix(".pml"), "row": row, "score": score})
+    finite = [record["score"] for record in records if record["score"] == record["score"]]
+    if finite:
+        best = max(finite)
+        tolerance = max(0.05, abs(best) * 0.20)
+        for record in records:
+            record["competitive"] = record["score"] == record["score"] and record["score"] >= best - tolerance
+            record["competitive_tolerance"] = tolerance
+    else:
+        for record in records:
+            record["competitive"] = False
+    return records
+
+
+def describe_prepared_boxes(boxes):
+    records = prepared_box_records(boxes)
+    for index, record in enumerate(records, start=1):
+        row = record["row"]
+        score = f"{record['score']:.4f}" if record["score"] == record["score"] else "not recorded"
+        marker = " - competitive score" if record.get("competitive") else ""
+        source = row.get("pocket_file", "fpocket source not recorded")
+        print(f"  {index}) {record['box'].name} | {source} | fpocket score {score}{marker}")
+    return records
+
+
 def choose_prepared_box(boxes, interactive=True):
     if len(boxes) == 1:
         return boxes[0]
     print("Prepared docking boxes available after pocket review:")
-    for index, box in enumerate(boxes, start=1):
-        print(f"  {index}) {box.name}")
+    describe_prepared_boxes(boxes)
+    print("Scores prioritize geometric pocket hypotheses; they do not establish the biological binding site.")
     choice = input("Select reviewed pocket/box [1]: ").strip() or "1" if interactive else "1"
     if not choice.isdigit() or not (1 <= int(choice) <= len(boxes)):
         raise SystemExit("Invalid docking-box selection")
@@ -700,18 +810,30 @@ def choose_prepared_box(boxes, interactive=True):
 def review_pocket_scene(root, pymol_command, interactive=False, requested=False):
     """Optionally open the prepared cavity scene before exploratory docking."""
     prep_roots = sorted(root.glob("*_receptor_prep"))
-    scenes = sorted(prep_roots[0].glob("cavity/*.pml")) if len(prep_roots) == 1 else []
-    if not scenes:
+    boxes = sorted(prep_roots[0].glob("cavity/*.conf")) if len(prep_roots) == 1 else []
+    records = prepared_box_records(boxes)
+    if not records:
         print("Pocket review: no generated PyMOL cavity scene was found.")
         return None
-    print("Pocket review scenes:")
-    for scene in scenes:
-        print(f"  {scene}")
-    should_open = requested
-    if interactive and not requested:
-        answer = input("Open the prepared cavity scene in PyMOL before docking? [y/N]: ").strip().lower()
-        should_open = answer in {"y", "yes"}
-    if not should_open:
+    print("Pocket review candidates:")
+    describe_prepared_boxes(boxes)
+    competitive = [record for record in records if record.get("competitive") and record["scene"].is_file()]
+    if interactive:
+        default = "a" if len(competitive) > 1 else "1"
+        print("Open in PyMOL before selecting the docking box:")
+        print("  Enter a pocket number, a = all competitive pockets, or n = do not open PyMOL")
+        answer = input(f"Select [{default}]: ").strip().lower() or default
+        if answer in {"n", "no"}:
+            return None
+        if answer == "a":
+            selected = competitive or [records[0]]
+        elif answer.isdigit() and 1 <= int(answer) <= len(records):
+            selected = [records[int(answer) - 1]]
+        else:
+            raise SystemExit("Invalid pocket-review selection")
+    elif requested:
+        selected = competitive or [records[0]]
+    else:
         return None
     executable = shutil.which(pymol_command) or (pymol_command if Path(pymol_command).is_file() else None)
     if not executable:
@@ -720,10 +842,15 @@ def review_pocket_scene(root, pymol_command, interactive=False, requested=False)
             raise SystemExit(message)
         print(message)
         return None
-    scene = scenes[0]
-    subprocess.Popen([str(executable), str(scene)], cwd=str(scene.parent))
-    print(f"Opened cavity review in PyMOL: {scene}")
-    return str(scene)
+    opened = []
+    for record in selected:
+        scene = record["scene"]
+        if not scene.is_file():
+            continue
+        subprocess.Popen([str(executable), str(scene)], cwd=str(scene.parent))
+        opened.append(str(scene))
+        print(f"Opened cavity review in PyMOL: {scene}")
+    return opened or None
 
 
 def read_cluster_rows(compound_dir):
@@ -927,8 +1054,8 @@ def write_reports(study, manifest, compounds):
     # PDF is a presentation artifact; keep it optional so core report generation
     # remains usable in minimal/headless installations, but never hide its status.
     pdf_script = Path(__file__).with_name("docking-universal-pdf-report.py")
-    pdf_path = report_dir / "study_report.pdf"
-    temporary_pdf = report_dir / ".study_report.building.pdf"
+    pdf_path = report_dir / report_pdf_name(study, manifest, compounds)
+    temporary_pdf = report_dir / f".{pdf_path.name}.building"
     try:
         result = subprocess.run(
             [sys.executable, str(pdf_script), str(study), "--out", str(temporary_pdf)],
@@ -936,10 +1063,14 @@ def write_reports(study, manifest, compounds):
         )
         if temporary_pdf.is_file():
             temporary_pdf.replace(pdf_path)
+            summary_path = report_dir / "study_summary.json"
+            summary_record = read_json(summary_path) or {}
+            summary_record["pdf_report"] = pdf_path.name
+            summary_path.write_text(json.dumps(summary_record, indent=2) + "\n")
             print(f"PDF report: {pdf_path}")
         else:
             print(
-                "WARNING: PDF generation returned successfully but study_report.pdf was not found. "
+                f"WARNING: PDF generation returned successfully but {pdf_path.name} was not found. "
                 f"Generator output: {result.stdout.strip()}", file=sys.stderr,
             )
     except subprocess.CalledProcessError as exc:
@@ -987,7 +1118,7 @@ def parse_args():
     parser.add_argument("--no-visuals", action="store_true")
     parser.add_argument("--review-pockets", action="store_true", help="open the prepared exploratory cavity scene in PyMOL before docking")
     parser.add_argument("--pymol", default="pymol", help="PyMOL executable for --review-pockets")
-    parser.add_argument("--cavity-mode", choices=("1", "2", "3"), default="2", help="ligand-free fpocket mode: conservative, expanded, or permissive")
+    parser.add_argument("--cavity-mode", choices=("1", "2", "3"), default="1", help="ligand-free fpocket mode: conservative (default), expanded, or permissive")
     parser.add_argument("--max-pockets", type=int, default=5, help="maximum ligand-free pockets to retain")
     parser.add_argument("--center-mode", choices=("deepest", "centroid"), default="centroid", help="ligand-free cavity center strategy")
     parser.add_argument("--plan-only", action="store_true", help="validate/split inputs and write a study plan without docking")
@@ -1038,6 +1169,7 @@ def main():
         requested_study = Path(f"control_pending_{protein_hint}_{run_timestamp}").resolve()
     else:
         requested_study = (args.out or Path(safe_id(study_name))).expanduser().resolve()
+    resume_planned = False
     if mode == "control" and requested_study.exists():
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         study = requested_study.with_name(f"{requested_study.name}_{timestamp}")
@@ -1045,7 +1177,20 @@ def main():
         print(f"Writing this control study to timestamped directory: {study}")
     else:
         study = requested_study
-    study.mkdir(parents=True, exist_ok=False)
+    if study.exists() and mode != "control":
+        existing = read_json(study / "study_manifest.json")
+        resume_planned = bool(
+            not args.plan_only
+            and existing.get("completion_status") == "PLANNED"
+            and existing.get("workflow") == mode
+        )
+        if not resume_planned:
+            raise SystemExit(
+                f"Study directory already exists and is not a resumable {mode} plan: {study}"
+            )
+        print(f"Resuming reviewed PLANNED study in place: {study}")
+        print("Existing preparation and cavity-review artifacts are retained; docking outputs will be added.")
+    study.mkdir(parents=True, exist_ok=resume_planned)
 
     if mode == "control":
         complex_path = args.complex
@@ -1081,18 +1226,10 @@ def main():
             print("  6) Robust - combine five conformers, five seeds, and greater exhaustiveness")
             print("     Tests all sampled sources together, but a pass at this tier does not show that cheaper settings are sufficient.")
             calibration_choice = input("Select [1]: ").strip() or "1"
-            calibration_tiers = {"1": "quick", "2": "quick", "3": "repeatability", "4": "broader", "5": "conformers", "6": "robust"}
-            if calibration_choice not in calibration_tiers:
-                raise SystemExit("Choose a calibration strategy from 1 to 6")
-            control_tier = calibration_tiers[calibration_choice]
-            legacy_single_conformer = calibration_choice == "2"
+            control_tier, legacy_single_conformer = calibration_strategy(calibration_choice)
             print("Box size defines the searchable receptor region: too small can exclude valid poses; too large can add alternate sites and search noise.")
             box_size = input("Docking-box edge length in Angstroms [26.0]: ").strip() or "26.0"
-            try:
-                if not 10.0 <= float(box_size) <= 50.0:
-                    raise ValueError
-            except ValueError:
-                raise SystemExit("Docking-box edge length must be between 10 and 50 Angstroms")
+            box_size = validated_box_size(box_size)
         command = [
             "env", f"BOX_SIZE={box_size}", cli, "control", "--complex", complex_path,
             "--engine", args.engine, "--control-tier", control_tier, "--out", study / "control",
@@ -1127,6 +1264,7 @@ def main():
         control_approved = any(protocol.get("unknown_docking_allowed") for protocol in completed_protocols)
         control_study_manifest = {
             "schema_name": "docking-universal-study", "schema_version": 1,
+            "docking_universal_version": package_version(),
             "study_name": study_name,
             "study_status": "CONTROL_APPROVED" if control_approved else "CONTROL_NOT_APPROVED",
             "workflow": "control",
@@ -1165,7 +1303,10 @@ def main():
                         "--analysis", "representatives", "--representatives", "20",
                     ])
                     pdf_script = Path(__file__).with_name("docking-universal-pdf-report.py")
-                    combined_pdf = screen_out / "report" / "study_report.pdf"
+                    screen_summary = read_json(screen_out / "report" / "study_summary.json") or {}
+                    combined_pdf = screen_out / "report" / report_pdf_name(
+                        screen_out, screen_summary, screen_summary.get("compounds", [])
+                    )
                     subprocess.run([
                         sys.executable, str(pdf_script), str(screen_out),
                         "--control", study / "control", "--out", combined_pdf,
@@ -1191,6 +1332,7 @@ def main():
     receptor_pdbqt = args.receptor_pdbqt
     box = args.box
     pocket_review_scene = None
+    score_threshold_used = None
     if mode == "exploratory" and not (receptor_pdb and receptor_pdbqt and box):
         if not args.complex:
             raise SystemExit("exploratory mode requires prepared receptor/box inputs or --complex for guided preparation")
@@ -1207,13 +1349,29 @@ def main():
         # Planning and unattended exploratory runs must not stop at the
         # preparation guide's feedback/site prompts.  Cavity mode is the
         # scientifically appropriate default when no bound ligand is selected.
-        run([
+        preparation_command = [
             "env", "FEEDBACK_LEVEL=concise", "DOCKING_UNIVERSAL_SITE_MODE=pockets",
             f"DOCKING_UNIVERSAL_CAVITY_MODE={args.cavity_mode}", f"DOCKING_UNIVERSAL_MAX_POCKETS={args.max_pockets}",
-            f"DOCKING_UNIVERSAL_CENTER_MODE={args.center_mode}", "DOCKING_UNIVERSAL_CENTROID_MODE=1",
-            "STRICT_LOCAL_POCKETS=0",
+            f"DOCKING_UNIVERSAL_CENTER_MODE={args.center_mode}", "DOCKING_UNIVERSAL_CENTROID_MODE=2",
+            "STRICT_LOCAL_POCKETS=1",
             "DOCKING_UNIVERSAL_LOG_MODE=file", cli, "prepare", raw_complex,
-        ], cwd=prep_parent)
+        ]
+        run(preparation_command, cwd=prep_parent)
+        prepared_box_count = len(list(prep_parent.glob("*_receptor_prep/cavity/*.conf")))
+        score_threshold_used = 0.10
+        if prepared_box_count == 0:
+            print("\nNo cavity met the default fpocket score threshold (0.10).")
+            print("A target-adaptive fallback can retry at 0.0 while retaining geometry, broad-pocket, and overlap filters.")
+            print("Scientific implication: lower-scoring geometric hypotheses enter review; this does not validate them as binding sites.")
+            retry = True
+            if not args.non_interactive and not args.plan_only:
+                retry = input("Retry cavity preparation with the documented 0.0 threshold? [Y/n]: ").strip().lower() not in {"n", "no"}
+            if not retry:
+                raise SystemExit("No docking box was selected; cavity preparation was retained for review")
+            fallback_command = preparation_command[:]
+            fallback_command.insert(1, "SCORE_THRESHOLD=0.0")
+            run(fallback_command, cwd=prep_parent)
+            score_threshold_used = 0.0
         receptor_pdb, receptor_pdbqt, prepared_boxes = discover_preparation(
             prep_parent, interactive=not args.non_interactive, defer_box_selection=True
         )
@@ -1226,12 +1384,46 @@ def main():
 
     manifest = {
         "schema_name": "docking-universal-study", "schema_version": 1,
+        "docking_universal_version": package_version(),
         "study_name": study_name, "study_status": STATUSES[mode], "workflow": mode,
         "created_utc": datetime.now(timezone.utc).isoformat(), "compound_count": len(compounds),
         "analysis": args.analysis, "representatives": args.representatives, "cluster_rmsd_angstrom": args.cluster_rmsd,
         "completion_status": "PLANNED" if args.plan_only else "RUNNING",
         "pocket_review_scene": pocket_review_scene,
+        "cavity_score_threshold_used": score_threshold_used,
     }
+    if mode == "screen":
+        approved_record = read_json(args.protocol) or {}
+        manifest.update({
+            "approved_protocol": str(args.protocol),
+            "configured_engine": approved_record.get("engine", "vina"),
+            "configured_engine_version": approved_record.get("software", {}).get("engine_version", "not recorded"),
+            "configured_docking_parameters": approved_record.get("parameters", {}),
+            "configured_locked_inputs": approved_record.get("locked_inputs", {}),
+            "protocol_validation_status": "Control-approved; locked inputs verified",
+        })
+    elif mode == "exploratory":
+        manifest.update({
+            "configured_engine": args.engine,
+            "configured_engine_version": "recorded when docking runs",
+            "configured_docking_parameters": {
+                "ph": args.ph,
+                "conformers_per_state": args.conformers,
+                "charge_model": args.charge_model,
+                "exhaustiveness": args.exhaustiveness,
+                "num_modes": args.num_modes,
+                "energy_range_kcal_per_mol": args.energy_range,
+                "seeds": [args.base_seed + index for index in range(args.seeds)],
+                "forcefield": args.forcefield,
+                "rmsd_prune_angstrom": args.rmsd_prune,
+                "tautomers_enumerated": not args.skip_tautomers,
+            },
+            "configured_locked_inputs": {
+                "receptor": str(receptor_pdbqt),
+                "box": str(box),
+            },
+            "protocol_validation_status": "Configured exploratory protocol; not evaluated by bound-ligand control",
+        })
     (study / "study_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
     failures = 0
