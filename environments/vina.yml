@@ -1,0 +1,8 @@
+name: docking-universal-vina
+channels:
+  - conda-forge
+dependencies:
+  # Kept separate because current Vina and the historically verified smina
+  # build require incompatible libboost generations on macOS arm64.
+  - python=3.10
+  - vina=1.2.7

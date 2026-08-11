@@ -1,0 +1,9 @@
+{
+  "compound_name": "nevirapine",
+  "pubchem_cid": 4463,
+  "source": "PubChem",
+  "url": "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/4463/SDF?record_type=2d",
+  "role": "held-out known HIV-1 reverse-transcriptase inhibitor for protocol-screening demonstration",
+  "coordinate_policy": "The supplied 2D chemical graph defines identity; input coordinates are not used to seed the default docking ensemble.",
+  "sha256": "ccc039a68c2bcf8f2033afe0e0783a85dfb87daeea97f70b6fc2b2bdfd08c7ec"
+}

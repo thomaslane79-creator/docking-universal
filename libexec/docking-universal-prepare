@@ -1,0 +1,1667 @@
+#!/usr/bin/env bash
+set -e
+
+# Prepare a receptor and a ligand-centered or ligand-free site. Third-party
+# diagnostics are retained in logs; modified residues, protonation, and inferred
+# templates still require scientific inspection after successful preparation.
+
+###############################################################################
+# Version
+# v1.35.3_interactive_feedback integrates the Copilot surgical fixes into v1.33 and adds guided parameter/centroid advice:
+#   - recompute ligand centroid inside the alpha-sphere merge block
+#   - filter distant/phantom alpha spheres relative to ligand centroid
+#   - tighten ligand/alpha-sphere VDW overlap criterion
+#   - hide all PyMOL objects before rendering each scene to avoid ghost pockets
+#   - add timestamped logging and a run log
+###############################################################################
+PACKAGE_VERSION="0.2.0"
+SCRIPT_VERSION="1.35.13_surface_local_pockets_patch1"
+
+print_help() {
+  cat <<'EOF'
+Docking Universal - auditable receptor and docking-box preparation
+
+Usage:
+  docking-universal prepare <complex.pdb>
+  docking-universal prepare --help
+
+Docking Universal prepares a receptor, detects bound ligands, discovers pockets with
+fpocket, and writes AutoDock Vina configuration plus PyMOL review files.
+The main workflow is guided interactively.
+
+Required tools:
+  fpocket, awk, grep, sort, tee, and one receptor backend:
+  mk_prepare_receptor.py (Meeko) or prepare_receptor (ADFRsuite)
+
+Optional tool:
+  pymol (to open generated .pml scenes)
+
+Common environment settings:
+  BOX_SIZE=26.0                 Docking-box edge length in angstroms
+  SCORE_THRESHOLD=0.10          Minimum fpocket eligibility score
+  MAX_OVERLAP_FRAC=0.60         Maximum accepted box-volume overlap
+  FEEDBACK_LEVEL=guided         concise, guided, or verbose
+  STRICT_LOCAL_POCKETS=1        Reject unusually broad pockets
+  SHOW_POCKET_SURFACE=1         Render pocket surfaces in PyMOL scenes
+  DOCKING_UNIVERSAL_FPOCKET     fpocket executable path
+  DOCKING_UNIVERSAL_PREP_BACKEND   auto, meeko, or adfr
+  DOCKING_UNIVERSAL_PREP_RECEPTOR  receptor backend executable path
+  DOCKING_UNIVERSAL_LOG_MODE       tee (default) or file (restricted/headless)
+  DOCKING_UNIVERSAL_SITE_MODE      ask (default), ligand, or pockets
+  DOCKING_UNIVERSAL_LIGAND_RESNAME Bound ligand residue name for ligand mode
+  DOCKING_UNIVERSAL_CAVITY_MODE    1, 2, or 3 for unattended cavity mode
+  DOCKING_UNIVERSAL_MAX_POCKETS    number of ligand-free cavities to retain
+  DOCKING_UNIVERSAL_CENTER_MODE    deepest or centroid for ligand-free review
+  DOCKING_UNIVERSAL_CENTROID_MODE  1 whole protein or 2 per-chain centroid
+  MEEKO_ALLOW_BAD_RES=0         Set 1 to delete unmatched residues (review output)
+  MEEKO_DEFAULT_ALTLOC          Optional default alternate location, e.g. A
+
+Example:
+  FEEDBACK_LEVEL=guided docking-universal prepare receptor_complex.pdb
+
+See the project README for the complete settings reference and scientific
+method notes.
+EOF
+}
+
+print_version() {
+  printf 'Docking Universal %s (workflow %s)\n' "$PACKAGE_VERSION" "$SCRIPT_VERSION"
+}
+
+doctor() {
+  missing=0
+  for tool in fpocket awk grep sort tee; do
+    if command -v "$tool" >/dev/null 2>&1; then
+      printf 'ok       %s\n' "$tool"
+    else
+      printf 'missing  %s\n' "$tool"
+      missing=1
+    fi
+  done
+
+  if command -v mk_prepare_receptor.py >/dev/null 2>&1; then
+    printf 'ok       mk_prepare_receptor.py (Meeko backend)\n'
+  elif command -v prepare_receptor >/dev/null 2>&1; then
+    printf 'ok       prepare_receptor (ADFRsuite backend)\n'
+  else
+    printf 'missing  receptor preparation backend (Meeko or ADFRsuite)\n'
+    missing=1
+  fi
+
+  if command -v pymol >/dev/null 2>&1; then
+    printf 'ok       pymol (optional)\n'
+  else
+    printf 'optional pymol (generated scenes can be opened elsewhere)\n'
+  fi
+
+  if [ "$missing" -ne 0 ]; then
+    printf '\nInstall the missing required tools before running Docking Universal.\n' >&2
+    return 1
+  fi
+
+  printf '\nDocking Universal is ready.\n'
+}
+
+case "${1:-}" in
+  -h|--help)
+    print_help
+    exit 0
+    ;;
+  -V|--version)
+    print_version
+    exit 0
+    ;;
+  doctor)
+    doctor
+    exit $?
+    ;;
+esac
+
+log() {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+}
+
+print_parameter_guidance() {
+  cat <<EOF
+
+Parameter guidance for ligand-centered pocket merge:
+  MERGED_MAX_CENTROID_DIST=$MERGED_MAX_CENTROID_DIST A
+    Meaning: rejects fpocket alpha spheres farther than this from the ligand centroid.
+    Use 8-10 A for small/compact ligands when ghost pockets appear.
+    Use 12-15 A for elongated ligands, macrocycles, extended inhibitors, or known broad pockets.
+    Use OFF to disable this centroid-distance filter.
+
+  LIGAND_OVERLAP_MARGIN=$LIGAND_OVERLAP_MARGIN A
+    Meaning: keeps alpha spheres when distance < alpha_radius + ligand_vdw_radius + margin.
+    -0.5 A = stricter; good when cavity surfaces look bloated or include ghost pocket volume.
+     0.0 A = neutral VDW contact; good default if the strict setting removes too much cavity.
+    +0.5 to +1.0 A = permissive; useful when fpocket under-samples peripheral ligand regions.
+
+  BOX_SIZE=$BOX_SIZE A
+    Meaning: cubic Vina docking box edge length.
+    22-26 A is typical for compact ligand-centered redocking.
+    28-34 A may be needed for large ligands or induced-fit exploration, but increases search space.
+EOF
+}
+
+print_settings_summary() {
+  cat <<EOF
+
+Settings:
+  BOX_SIZE=$BOX_SIZE A
+  MERGED_MAX_CENTROID_DIST=$MERGED_MAX_CENTROID_DIST A
+  LIGAND_OVERLAP_MARGIN=$LIGAND_OVERLAP_MARGIN A
+  SCORE_THRESHOLD=$SCORE_THRESHOLD
+  SHOW_POCKET_SURFACE=$SHOW_POCKET_SURFACE
+  POCKET_WARN_ATOMS=$POCKET_WARN_ATOMS
+  POCKET_WARN_BBOX=$POCKET_WARN_BBOX A
+  STRICT_LOCAL_POCKETS=$STRICT_LOCAL_POCKETS
+  HYBRID_COMPARE_FP_MODE=$HYBRID_COMPARE_FP_MODE
+
+EOF
+}
+
+choose_feedback_level() {
+  # FEEDBACK_LEVEL can still be set by environment for unattended runs, but
+  # default behavior is interactive because this script is used as a guided tool.
+  case "${FEEDBACK_LEVEL:-ASK}" in
+    concise|guided|verbose)
+      return 0
+      ;;
+  esac
+
+  echo
+  echo "How much feedback do you want during this run?"
+  echo "  1) Concise - minimal status and required prompts"
+  echo "  2) Guided  - recommendations at decision points (recommended)"
+  echo "  3) Verbose - full parameter guidance and diagnostics"
+  read -r -p "Select feedback level [2]: " feedback_choice
+
+  case "${feedback_choice:-2}" in
+    1) FEEDBACK_LEVEL="concise" ;;
+    2) FEEDBACK_LEVEL="guided" ;;
+    3) FEEDBACK_LEVEL="verbose" ;;
+    *)
+      echo "Unrecognized choice; using guided feedback."
+      FEEDBACK_LEVEL="guided"
+      ;;
+  esac
+}
+
+feedback_at_least_guided() {
+  [ "$FEEDBACK_LEVEL" = "guided" ] || [ "$FEEDBACK_LEVEL" = "verbose" ]
+}
+
+feedback_verbose() {
+  [ "$FEEDBACK_LEVEL" = "verbose" ]
+}
+
+summarize_chains() {
+  local pdb="$1"
+  local out="$2"
+  awk '
+    /^ATOM/ {
+      ch=substr($0,22,1); if (ch==" ") ch="_"
+      resseq=substr($0,23,4); gsub(/ /,"",resseq)
+      icode=substr($0,27,1); gsub(/ /,"",icode)
+      resname=substr($0,18,3); gsub(/ /,"",resname)
+      key=ch":"resseq":"icode":"resname
+      if (!(key in seen)) { seen[key]=1; residues[ch]++ }
+      atoms[ch]++
+    }
+    END {
+      for (ch in atoms) {
+        printf "%s\t%d\t%d\n", ch, residues[ch]+0, atoms[ch]+0
+      }
+    }
+  ' "$pdb" | sort > "$out"
+}
+
+print_chain_guidance() {
+  local summary="$1"
+  local n_chains
+  n_chains=$(awk 'END{print NR+0}' "$summary")
+  echo
+  echo "Protein chain summary from prepared receptor:"
+  awk -F '	' '{printf "  Chain %s: %d residues, %d atoms\n", $1, $2, $3}' "$summary"
+  echo
+  if [ "$n_chains" -gt 1 ]; then
+    echo "Guidance: multiple chains detected. Per-chain centroid is usually safer for cavity ranking,"
+    echo "especially for oligomers or asymmetric complexes, because whole-protein centroid can point"
+    echo "between chains and over-penalize real pockets on one chain."
+    echo "Recommended centroid mode: 2) Per-chain."
+  else
+    echo "Guidance: one protein chain detected. Whole-protein centroid is usually fine."
+    echo "Recommended centroid mode: 1) Whole protein."
+  fi
+}
+
+
+
+###############################################################################
+# fpocket run comparison helpers
+###############################################################################
+count_total_pockets() {
+  local outdir="$1"
+  local count
+  count=$(ls "$outdir"/pockets/pocket*_atm.pdb 2>/dev/null | wc -l | tr -d ' ')
+  echo "${count:-0}"
+}
+
+count_reasonable_pockets() {
+  local outdir="$1"
+  local count=0
+  local atm score atoms max_bbox
+
+  for atm in "$outdir"/pockets/pocket*_atm.pdb; do
+    [ -e "$atm" ] || continue
+
+    score=$(awk -F':' '/Pocket Score/ {gsub(/ /,"",$2); print $2; exit}' "$atm")
+    [ -n "$score" ] || continue
+
+    # Must pass score threshold.
+    awk -v s="$score" -v t="$SCORE_THRESHOLD" 'BEGIN{exit !(s>=t)}' || continue
+
+    atoms=$(awk '/^(ATOM|HETATM)/ {n++} END{print n+0}' "$atm")
+    max_bbox=$(awk '
+      /^(ATOM|HETATM)/ {
+        x=substr($0,31,8)+0; y=substr($0,39,8)+0; z=substr($0,47,8)+0
+        if (n==0 || x<minx) minx=x; if (n==0 || x>maxx) maxx=x
+        if (n==0 || y<miny) miny=y; if (n==0 || y>maxy) maxy=y
+        if (n==0 || z<minz) minz=z; if (n==0 || z>maxz) maxz=z
+        n++
+      }
+      END {
+        if (n==0) { print 0; exit }
+        bx=maxx-minx; by=maxy-miny; bz=maxz-minz; m=bx
+        if (by>m) m=by; if (bz>m) m=bz
+        printf "%.3f", m
+      }
+    ' "$atm")
+
+    # Must not be clearly too large for a localized docking cavity.
+    awk -v a="$atoms" -v lim="$POCKET_WARN_ATOMS" 'BEGIN{exit !(a<=lim)}' || continue
+    awk -v b="$max_bbox" -v lim="$POCKET_WARN_BBOX" 'BEGIN{exit !(b<=lim)}' || continue
+
+    count=$((count+1))
+  done
+
+  echo "$count"
+}
+
+write_fpocket_run_summary() {
+  local label="$1"
+  local outdir="$2"
+  local outfile="$3"
+  local atm base score atoms bbx bby bbz max_bbox warning reasonable
+
+  if [ ! -s "$outfile" ]; then
+    printf "run_label\tpocket_file\tscore\talpha_spheres\tbbox_x\tbbox_y\tbbox_z\tmax_bbox\treasonable\twarning\n" >> "$outfile"
+  fi
+
+  for atm in "$outdir"/pockets/pocket*_atm.pdb; do
+    [ -e "$atm" ] || continue
+    base="$(basename "$atm")"
+    score=$(awk -F':' '/Pocket Score/ {gsub(/ /,"",$2); print $2; exit}' "$atm")
+    [ -n "$score" ] || score="NA"
+    atoms=$(awk '/^(ATOM|HETATM)/ {n++} END{print n+0}' "$atm")
+    read bbx bby bbz max_bbox <<< $(awk '
+      /^(ATOM|HETATM)/ {
+        x=substr($0,31,8)+0; y=substr($0,39,8)+0; z=substr($0,47,8)+0
+        if (n==0 || x<minx) minx=x; if (n==0 || x>maxx) maxx=x
+        if (n==0 || y<miny) miny=y; if (n==0 || y>maxy) maxy=y
+        if (n==0 || z<minz) minz=z; if (n==0 || z>maxz) maxz=z
+        n++
+      }
+      END {
+        if (n==0) { printf "0.000 0.000 0.000 0.000"; exit }
+        bx=maxx-minx; by=maxy-miny; bz=maxz-minz; m=bx
+        if (by>m) m=by; if (bz>m) m=bz
+        printf "%.3f %.3f %.3f %.3f", bx, by, bz, m
+      }
+    ' "$atm")
+
+    warning="ok"
+    if awk -v a="$atoms" -v lim="$POCKET_WARN_ATOMS" 'BEGIN{exit !(a>lim)}'; then
+      warning="large_alpha_sphere_count"
+    fi
+    if awk -v b="$max_bbox" -v lim="$POCKET_WARN_BBOX" 'BEGIN{exit !(b>lim)}'; then
+      if [ "$warning" = "ok" ]; then warning="large_spatial_extent"; else warning="${warning};large_spatial_extent"; fi
+    fi
+
+    reasonable="no"
+    if [ "$score" != "NA" ] && \
+       awk -v s="$score" -v t="$SCORE_THRESHOLD" 'BEGIN{exit !(s>=t)}' && \
+       awk -v a="$atoms" -v lim="$POCKET_WARN_ATOMS" 'BEGIN{exit !(a<=lim)}' && \
+       awk -v b="$max_bbox" -v lim="$POCKET_WARN_BBOX" 'BEGIN{exit !(b<=lim)}'; then
+      reasonable="yes"
+    fi
+
+    printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+      "$label" "$base" "$score" "$atoms" "$bbx" "$bby" "$bbz" "$max_bbox" "$reasonable" "$warning" >> "$outfile"
+  done
+}
+
+###############################################################################
+# USER DEFAULTS
+###############################################################################
+BOX_SIZE="${BOX_SIZE:-26.0}"
+HALF_BOX="${HALF_BOX:-13.0}"
+SCORE_THRESHOLD="${SCORE_THRESHOLD:-0.10}"
+MAX_OVERLAP_FRAC="${MAX_OVERLAP_FRAC:-0.60}"
+MERGED_MAX_CENTROID_DIST="${MERGED_MAX_CENTROID_DIST:-10.0}"    # A; filters distant/phantom alpha spheres in ligand mode
+LIGAND_OVERLAP_MARGIN="${LIGAND_OVERLAP_MARGIN:--0.5}"           # A; tightens overlap: d < alpha_radius + ligand_vdw + margin
+SHOW_LIGAND_VOLUME="${SHOW_LIGAND_VOLUME:-0}"                       # 0/1; show ligand molecular surface as a separate cavity layer
+SHOW_REFERENCE_LIGANDS="${SHOW_REFERENCE_LIGANDS:-1}"               # 0/1; load detected ligand(s) into every PML as hidden atom-colored reference objects
+SHOW_ADJACENT_CAVITY="${SHOW_ADJACENT_CAVITY:-0}"                 # 0/1; render adjacent pocket extension in non-ligand mode
+SHOW_POCKET_SURFACE="${SHOW_POCKET_SURFACE:-1}"                     # 0/1; render fpocket alpha spheres as PyMOL surfaces instead of spheres
+POCKET_WARN_ATOMS="${POCKET_WARN_ATOMS:-500}"                       # warn when a pocket contains more alpha spheres than this
+POCKET_WARN_BBOX="${POCKET_WARN_BBOX:-40.0}"                        # A; warn when any pocket bounding-box dimension exceeds this
+STRICT_LOCAL_POCKETS="${STRICT_LOCAL_POCKETS:-1}"                         # 1 rejects giant/spatially broad pockets from normal selection; 0 warns only
+HYBRID_COMPARE_FP_MODE="${HYBRID_COMPARE_FP_MODE:-1}"                  # if 1, moderate mode also runs conservative and chooses the run with more reasonable pockets
+SITE_MODE="${DOCKING_UNIVERSAL_SITE_MODE:-ask}"
+REQUESTED_LIGAND="${DOCKING_UNIVERSAL_LIGAND_RESNAME:-}"
+
+case "$SITE_MODE" in
+  ask|ligand|pockets) ;;
+  *) echo "ERROR: DOCKING_UNIVERSAL_SITE_MODE must be ask, ligand, or pockets" >&2; exit 2 ;;
+esac
+
+###############################################################################
+# REQUIREMENTS
+###############################################################################
+FPOCKET_BIN="${DOCKING_UNIVERSAL_FPOCKET:-$(command -v fpocket 2>/dev/null || true)}"
+PREP_BACKEND="${DOCKING_UNIVERSAL_PREP_BACKEND:-auto}"
+PREP_RECEPTOR_BIN="${DOCKING_UNIVERSAL_PREP_RECEPTOR:-}"
+
+case "$PREP_BACKEND" in
+  auto)
+    if [ -n "$PREP_RECEPTOR_BIN" ]; then
+      case "$(basename "$PREP_RECEPTOR_BIN")" in mk_prepare_receptor.py) PREP_BACKEND="meeko" ;; *) PREP_BACKEND="adfr" ;; esac
+    elif command -v mk_prepare_receptor.py >/dev/null 2>&1; then
+      PREP_BACKEND="meeko"
+      PREP_RECEPTOR_BIN=$(command -v mk_prepare_receptor.py)
+    else
+      PREP_BACKEND="adfr"
+      PREP_RECEPTOR_BIN=$(command -v prepare_receptor 2>/dev/null || true)
+    fi
+    ;;
+  meeko) [ -n "$PREP_RECEPTOR_BIN" ] || PREP_RECEPTOR_BIN=$(command -v mk_prepare_receptor.py 2>/dev/null || true) ;;
+  adfr) [ -n "$PREP_RECEPTOR_BIN" ] || PREP_RECEPTOR_BIN=$(command -v prepare_receptor 2>/dev/null || true) ;;
+  *) echo "ERROR: DOCKING_UNIVERSAL_PREP_BACKEND must be auto, meeko, or adfr"; exit 2 ;;
+esac
+[ -n "$FPOCKET_BIN" ] && [ -x "$FPOCKET_BIN" ] || { echo "ERROR: fpocket not found (run 'docking-universal doctor')"; exit 1; }
+[ -n "$PREP_RECEPTOR_BIN" ] && [ -x "$PREP_RECEPTOR_BIN" ] || { echo "ERROR: receptor preparation backend not found (install Meeko or configure ADFRsuite)"; exit 1; }
+
+###############################################################################
+# INPUT
+###############################################################################
+[ "$#" -eq 1 ] || { print_help >&2; exit 2; }
+INPUT_PDB="$1"
+[ -f "$INPUT_PDB" ] || { echo "ERROR: input PDB not found: $INPUT_PDB" >&2; exit 2; }
+TIMESTAMP="$(date '+%Y-%m-%d %H:%M:%S')"
+
+RAW="$(basename "$INPUT_PDB" .pdb)"
+BASE="$(echo "$RAW" | sed 's/([^)]*)//g; s/[^A-Za-z0-9]/_/g; s/_\+/_/g')"
+PDBID="$(echo "$RAW" | sed -n 's/.*(\([A-Za-z0-9]\{4\}\)).*/\1/p')"
+CANONICAL="${BASE}${PDBID:+_$PDBID}"
+
+ROOT="${CANONICAL}_receptor_prep"
+RECEPTOR_DIR="$ROOT/receptor"
+CAVITY_DIR="$ROOT/cavity"
+FROZEN_DIR="$CAVITY_DIR/frozen_pockets"
+
+mkdir -p "$RECEPTOR_DIR" "$CAVITY_DIR" "$FROZEN_DIR"
+RUN_LOG="$ROOT/run.log"
+FPOCKET_COMPARISON="$CAVITY_DIR/fpocket_mode_comparison.tsv"
+POCKET_DIAG="$CAVITY_DIR/pocket_diagnostics.tsv"
+SELECTION_DIAG="$CAVITY_DIR/pocket_selection_diagnostics.tsv"
+SELECTED_FP_RUN_LABEL="not_set"
+: > "$RUN_LOG"
+case "${DOCKING_UNIVERSAL_LOG_MODE:-tee}" in
+  tee) exec > >(tee -a "$RUN_LOG") 2>&1 ;;
+  file) exec >> "$RUN_LOG" 2>&1 ;;
+  *) echo "ERROR: DOCKING_UNIVERSAL_LOG_MODE must be tee or file" >&2; exit 2 ;;
+esac
+log "Starting receptor/cavity preparation pipeline ($SCRIPT_VERSION)"
+log "Input PDB: $INPUT_PDB"
+log "Output root: $ROOT"
+log "Receptor preparation backend: $PREP_BACKEND ($PREP_RECEPTOR_BIN)"
+choose_feedback_level
+log "Feedback level: $FEEDBACK_LEVEL"
+print_settings_summary
+feedback_verbose && print_parameter_guidance
+
+###############################################################################
+###############################################################################
+# STEP 1: RECEPTOR PREP
+###############################################################################
+RECEPTOR_PDB="$RECEPTOR_DIR/${CANONICAL}.pdb"
+RECEPTOR_PDBQT="$RECEPTOR_DIR/${CANONICAL}.pdbqt"
+RECEPTOR_BACKEND_LOG="$RECEPTOR_DIR/receptor_backend.log"
+
+# Receptor (protein + supported metal atoms). PDB element identity comes from
+# columns 77-78; searching an entire HETATM line for "CA" can accidentally
+# retain alpha-carbon fragments from modified residues.
+awk '
+  FNR == NR {
+    if (/^MODRES/) {
+      modified=substr($0,13,3); gsub(/ /,"",modified)
+      if (modified != "") is_modified[modified]=1
+    }
+    next
+  }
+  /^ATOM  / { print; next }
+  /^HETATM/ {
+    resname=substr($0,18,3); gsub(/ /,"",resname)
+    if (resname in is_modified) {
+      # MODRES entries are covalently integrated polymer residues even when
+      # deposited as HETATM. Normalize only the record label so downstream
+      # chain summaries, centroids, and fpocket treat them as protein context.
+      normalized=$0
+      sub(/^HETATM/, "ATOM  ", normalized)
+      print normalized
+      next
+    }
+    element = toupper(substr($0, 77, 2))
+    gsub(/[[:space:]]/, "", element)
+    if (element == "ZN" || element == "MG" || element == "MN" ||
+        element == "CA" || element == "FE" || element == "CU") print
+  }
+' "$INPUT_PDB" "$INPUT_PDB" > "$RECEPTOR_PDB"
+if [ "$PREP_BACKEND" = "meeko" ]; then
+  MEEKO_ALLOW_BAD_RES="${MEEKO_ALLOW_BAD_RES:-0}"
+  MEEKO_DEFAULT_ALTLOC="${MEEKO_DEFAULT_ALTLOC:-}"
+  if [ "$MEEKO_ALLOW_BAD_RES" = "1" ] && [ -n "$MEEKO_DEFAULT_ALTLOC" ]; then
+    PREP_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --allow_bad_res --default_altloc "$MEEKO_DEFAULT_ALTLOC")
+  elif [ "$MEEKO_ALLOW_BAD_RES" = "1" ]; then
+    PREP_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --allow_bad_res)
+  elif [ -n "$MEEKO_DEFAULT_ALTLOC" ]; then
+    PREP_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --default_altloc "$MEEKO_DEFAULT_ALTLOC")
+  else
+    PREP_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT")
+  fi
+else
+  PREP_COMMAND=("$PREP_RECEPTOR_BIN" -r "$RECEPTOR_PDB" -o "$RECEPTOR_PDBQT" -A none -U waters)
+fi
+
+log "Preparing receptor with $PREP_BACKEND; detailed output -> $RECEPTOR_BACKEND_LOG"
+if ! "${PREP_COMMAND[@]}" > "$RECEPTOR_BACKEND_LOG" 2>&1; then
+  echo "ERROR: receptor preparation failed. Last backend messages:" >&2
+  tail -40 "$RECEPTOR_BACKEND_LOG" >&2
+  echo "Full backend log: $RECEPTOR_BACKEND_LOG" >&2
+  exit 1
+fi
+
+if feedback_verbose; then
+  cat "$RECEPTOR_BACKEND_LOG"
+elif grep -q "not in residue_templates" "$RECEPTOR_BACKEND_LOG"; then
+  log "Meeko resolved one or more nonstandard residue templates automatically; review $RECEPTOR_BACKEND_LOG for chemical-template details"
+fi
+[ -s "$RECEPTOR_PDBQT" ] || { echo "ERROR: receptor backend did not create PDBQT: $RECEPTOR_PDBQT"; exit 1; }
+log "Prepared receptor PDBQT written to $RECEPTOR_PDBQT"
+
+CHAIN_SUMMARY="$ROOT/chain_summary.tsv"
+summarize_chains "$RECEPTOR_PDB" "$CHAIN_SUMMARY"
+log "Chain summary written to $CHAIN_SUMMARY"
+while IFS=$'\t' read -r chain residues atoms; do
+  log "Chain ${chain}: ${residues} residues, ${atoms} atoms"
+done < "$CHAIN_SUMMARY"
+
+###############################################################################
+# LIGAND DETECTION (RESTORED WORKING LOGIC)
+###############################################################################
+echo
+log "=== STEP 1b: Detecting ligand ==="
+
+LIGANDS=()
+
+while IFS= read -r lig; do
+  [ -n "$lig" ] && LIGANDS+=( "$lig" )
+done <<EOF
+$(awk '
+  FNR == NR {
+    if (/^MODRES/) {
+      modified=substr($0,13,3); gsub(/ /,"",modified)
+      if (modified != "") is_modified[modified]=1
+    }
+    next
+  }
+  /^HETATM/ {
+    r=substr($0,18,3); gsub(/ /,"",r)
+    if (r in is_modified) next
+    if (r ~ /^(HOH|WAT|EDO|GOL|PEG|MPD|DMS|IPA|EOH|ACT|ACE|SO4|PO4)$/) next
+    if (r ~ /^(ZN|MG|MN|CA|FE|CU|NA|K|CL)$/) next
+    c[r]++
+  }
+  END {
+    for (r in c) if (c[r] >= 10) print r
+  }
+' "$INPUT_PDB" "$INPUT_PDB")
+EOF
+
+LIG_PRESENT=0
+LIG=""
+
+LIGAND_DIR="$ROOT/ligand"
+mkdir -p "$LIGAND_DIR"
+
+if [ "${#LIGANDS[@]}" -gt 0 ]; then
+  echo "Ligands detected:"
+  i=1
+  for lig in "${LIGANDS[@]}"; do
+    echo "  $i) $lig"
+    i=$((i+1))
+  done
+
+  # Always write every detected ligand to its own PDB before asking whether
+  # ligand-centered docking should be used. This is intentional: even when the
+  # user chooses non-ligand pocket discovery, the detected ligand(s) remain
+  # available for PyMOL reference/validation of the selected fpocket cavity.
+  LIGAND_MANIFEST="$LIGAND_DIR/detected_ligands.tsv"
+  printf "ligand_resname\tatom_count\tfile\n" > "$LIGAND_MANIFEST"
+
+  for lig in "${LIGANDS[@]}"; do
+    LIG_FILE="$LIGAND_DIR/${lig}.pdb"
+    awk -v r="$lig" '
+      /^HETATM/ {
+        res=substr($0,18,3); gsub(/ /,"",res)
+        if (res == r) print
+      }
+    ' "$INPUT_PDB" > "$LIG_FILE"
+
+    LIG_ATOMS=$(awk '/^HETATM/{n++} END{print n+0}' "$LIG_FILE")
+    printf "%s\t%s\t%s\n" "$lig" "$LIG_ATOMS" "$LIG_FILE" >> "$LIGAND_MANIFEST"
+    log "Detected ligand written for reference: $lig ($LIG_ATOMS atoms) -> $LIG_FILE"
+  done
+  log "Detected ligand manifest written to $LIGAND_MANIFEST"
+
+  if [ "$SITE_MODE" = "pockets" ]; then
+    log "Configured ligand-free pocket mode; detected ligands are retained only as disabled references"
+  elif [ "$SITE_MODE" = "ligand" ]; then
+    if [ -n "$REQUESTED_LIGAND" ]; then
+      for lig in "${LIGANDS[@]}"; do
+        if [ "$lig" = "$REQUESTED_LIGAND" ]; then
+          LIG="$lig"
+          break
+        fi
+      done
+      [ -n "$LIG" ] || { echo "ERROR: requested bound ligand '$REQUESTED_LIGAND' was not detected" >&2; exit 1; }
+    elif [ "${#LIGANDS[@]}" -eq 1 ]; then
+      LIG="${LIGANDS[0]}"
+    else
+      echo "ERROR: multiple bound ligands were detected; set DOCKING_UNIVERSAL_LIGAND_RESNAME" >&2
+      exit 1
+    fi
+    LIG_PRESENT=1
+    log "Configured ligand-centered mode using $LIG"
+  else
+    read -p "Use ligand-centered docking? (y/n): " ans
+
+    if [[ "$ans" =~ ^[Yy]$ ]]; then
+      if [ "${#LIGANDS[@]}" -eq 1 ]; then
+        LIG="${LIGANDS[0]}"
+      else
+        read -p "Select ligand number: " idx
+        LIG="${LIGANDS[$((idx-1))]}"
+      fi
+      LIG_PRESENT=1
+    fi
+  fi
+elif [ "$SITE_MODE" = "ligand" ]; then
+  echo "ERROR: ligand-centered mode was requested, but no eligible bound ligand was detected" >&2
+  exit 1
+fi
+
+# compute ligand centroid
+
+if [ "$LIG_PRESENT" -eq 1 ]; then
+  read LIGX LIGY LIGZ <<< $(
+    awk -v lig="$LIG" '
+      /^HETATM/ {
+        r=substr($0,18,3); gsub(/ /,"",r)
+        if (r == lig) {
+          x+=substr($0,31,8)
+          y+=substr($0,39,8)
+          z+=substr($0,47,8)
+          n++
+        }
+      }
+      END{printf "%.6f %.6f %.6f", x/n, y/n, z/n}
+    ' "$INPUT_PDB"
+  )
+fi
+###############################################################################
+# STEP 2: FPOCKET
+###############################################################################
+if [ "$LIG_PRESENT" -eq 1 ]; then
+  log "Ligand detected -> using ligand-centered mode"
+  MODE=1
+  MAX_POCKETS=1
+else
+  MODE="${DOCKING_UNIVERSAL_CAVITY_MODE:-}"
+  MAX_POCKETS="${DOCKING_UNIVERSAL_MAX_POCKETS:-}"
+  if [ -n "$MODE" ]; then
+    [ -n "$MAX_POCKETS" ] || MAX_POCKETS=5
+    log "Unattended cavity settings: mode $MODE; retaining $MAX_POCKETS cavities"
+  elif feedback_at_least_guided; then
+    echo "fpocket cavity mode guidance:"
+    echo "1) Conservative/default fpocket"
+    echo "   Use when you want fewer, higher-confidence pockets and less surface noise."
+    echo "2) Expanded (-m 2.5)"
+    echo "   Recommended first expansion when conservative misses shallow/partially open pockets."
+    echo "3) Permissive (-m 2.0)"
+    echo "   Most permissive; may merge broad clefts into giant high-score pockets. Use diagnostically."
+  else
+    echo "fpocket cavity mode: 1) Conservative  2) Expanded (-m 2.5)  3) Permissive (-m 2.0)"
+  fi
+  [ -n "$MODE" ] || read -p "Select cavity mode [1-3]: " MODE
+  [ -n "${DOCKING_UNIVERSAL_MAX_POCKETS:-}" ] || read -p "How many cavities to select? " MAX_POCKETS
+fi
+
+
+if [ "$LIG_PRESENT" -eq 1 ]; then
+  CENTER_MODE="centroid"
+  CENTROID_SEL=1
+  log "Ligand mode -> using centroid center"
+else
+  CENTER_MODE="${DOCKING_UNIVERSAL_CENTER_MODE:-}"
+  CENTROID_SEL="${DOCKING_UNIVERSAL_CENTROID_MODE:-}"
+  if [ -n "$CENTER_MODE" ]; then
+    [ "$CENTER_MODE" = "deepest" ] || [ "$CENTER_MODE" = "centroid" ] || { echo "ERROR: DOCKING_UNIVERSAL_CENTER_MODE must be deepest or centroid" >&2; exit 2; }
+    [ -n "$CENTROID_SEL" ] || CENTROID_SEL=1
+    log "Unattended center settings: $CENTER_MODE; centroid scope $CENTROID_SEL"
+  fi
+  echo
+  echo "Center mode:"
+  if feedback_at_least_guided; then
+    echo "1) deepest   (largest fpocket alpha sphere; often more entrance/surface biased)"
+    echo "2) centroid  (interior, snapped to real pocket; often better for docking boxes)"
+  else
+    echo "1) deepest"
+    echo "2) centroid"
+  fi
+  if [ -z "${DOCKING_UNIVERSAL_CENTER_MODE:-}" ]; then
+    read -p "Select center mode [1-2]: " CSEL
+    [ "$CSEL" = "2" ] && CENTER_MODE="centroid" || CENTER_MODE="deepest"
+  fi
+
+  if feedback_at_least_guided; then
+    print_chain_guidance "$CHAIN_SUMMARY"
+    echo
+    echo "Centroid mode:"
+    echo "1) Whole protein"
+    echo "   Best for single-chain receptors or compact monomers."
+    echo "2) Per-chain (recommended for multi-chain structures)"
+    echo "   Best when multiple chains are present; avoids using a global centroid between chains."
+  else
+    echo "Centroid mode: 1) Whole protein  2) Per-chain"
+  fi
+  [ -n "${DOCKING_UNIVERSAL_CENTROID_MODE:-}" ] || read -p "Select centroid mode [1-2]: " CENTROID_SEL
+
+  if [ "$CENTROID_SEL" = "2" ]; then
+    read PROT_CX PROT_CY PROT_CZ <<< $(
+      awk '
+        /^ATOM/ {
+          ch=substr($0,22,1)
+          x[ch]+=substr($0,31,8)
+          y[ch]+=substr($0,39,8)
+          z[ch]+=substr($0,47,8)
+          n[ch]++
+        }
+        END {
+          best=""; bn=0
+          for (c in n) if (n[c]>bn) { bn=n[c]; best=c }
+          printf "%.6f %.6f %.6f", x[best]/n[best], y[best]/n[best], z[best]/n[best]
+        }
+      ' "$RECEPTOR_PDB"
+    )
+    log "Using centroid of largest chain"
+  else
+    read PROT_CX PROT_CY PROT_CZ <<< $(
+      awk '/^ATOM/{x+=substr($0,31,8);y+=substr($0,39,8);z+=substr($0,47,8);n++} END{printf "%.6f %.6f %.6f",x/n,y/n,z/n}' "$RECEPTOR_PDB"
+    )
+    log "Using whole-protein centroid"
+  fi
+fi
+
+FP_INPUT="$CAVITY_DIR/fpocket_input.pdb"
+cp "$RECEPTOR_PDB" "$FP_INPUT"
+
+FP_OUT="${FP_INPUT%.pdb}_out"
+rm -rf "$FP_OUT"
+
+if [ "$LIG_PRESENT" -eq 1 ]; then
+  FP_LOCAL="$CAVITY_DIR/fpocket_input_local.pdb"
+  log "Extracting binding site residues (within 12A of ligand)..."
+  awk -v lig="$LIG" '
+    FNR==NR {
+      if (/^HETATM/) {
+        r=substr($0,18,3); gsub(/ /,"",r)
+        if (r==lig) {
+          lx[nl]=substr($0,31,8)+0
+          ly[nl]=substr($0,39,8)+0
+          lz[nl]=substr($0,47,8)+0
+          nl++
+        }
+      }
+      next
+    }
+    /^ATOM/ {
+      x=substr($0,31,8)+0; y=substr($0,39,8)+0; z=substr($0,47,8)+0
+      for (j=0; j<nl; j++) {
+        dx=x-lx[j]; dy=y-ly[j]; dz=z-lz[j]
+        if (sqrt(dx*dx+dy*dy+dz*dz) <= 12.0) { print; break }
+      }
+    }
+    /^HETATM/ {
+      r=substr($0,18,3); gsub(/ /,"",r)
+      if (r ~ /^(ZN|MG|MN|CA|FE|CU)$/) print
+    }
+  ' "$INPUT_PDB" "$FP_INPUT" > "$FP_LOCAL"
+  LOCAL_ATOMS=$(grep -c "^ATOM" "$FP_LOCAL" || echo 0)
+  echo "Local binding site: $LOCAL_ATOMS atoms -> running fpocket (probe -m 2.5)..."
+  FP_LOCAL_OUT="${FP_LOCAL%.pdb}_out"
+  rm -rf "$FP_LOCAL_OUT"
+  "$FPOCKET_BIN" -f "$FP_LOCAL" -m 2.5 >/dev/null
+  log "fpocket complete"
+  FP_OUT="$FP_LOCAL_OUT"
+  SELECTED_FP_RUN_LABEL="ligand_local_m2_5"
+  PQR="$FP_LOCAL_OUT/$(basename "$FP_LOCAL" .pdb)_pockets.pqr"
+elif [ "$MODE" = "2" ] || [ "$MODE" = "3" ]; then
+  if [ "$MODE" = "2" ]; then
+    SELECTED_FP_M="2.5"
+    SELECTED_FP_LABEL="expanded_m2_5"
+  else
+    SELECTED_FP_M="2.0"
+    SELECTED_FP_LABEL="permissive_m2_0"
+  fi
+
+  if [ "$HYBRID_COMPARE_FP_MODE" = "1" ]; then
+    log "Running fpocket (${SELECTED_FP_LABEL}, -m ${SELECTED_FP_M})..."
+    "$FPOCKET_BIN" -f "$FP_INPUT" -m "$SELECTED_FP_M" >/dev/null
+    MOD_OUT="${FP_INPUT%.pdb}_${SELECTED_FP_LABEL}_out"
+    rm -rf "$MOD_OUT"
+    mv "${FP_INPUT%.pdb}_out" "$MOD_OUT"
+    log "fpocket ${SELECTED_FP_LABEL} complete"
+
+    log "Running fpocket (conservative comparison mode)..."
+    "$FPOCKET_BIN" -f "$FP_INPUT" >/dev/null
+    CON_OUT="${FP_INPUT%.pdb}_conservative_out"
+    rm -rf "$CON_OUT"
+    mv "${FP_INPUT%.pdb}_out" "$CON_OUT"
+    log "fpocket conservative comparison complete"
+
+    : > "$FPOCKET_COMPARISON"
+    printf "run_label	pocket_file	score	alpha_spheres	bbox_x	bbox_y	bbox_z	max_bbox	reasonable	warning
+" > "$FPOCKET_COMPARISON"
+    write_fpocket_run_summary "$SELECTED_FP_LABEL" "$MOD_OUT" "$FPOCKET_COMPARISON"
+    write_fpocket_run_summary "conservative" "$CON_OUT" "$FPOCKET_COMPARISON"
+
+    MOD_TOTAL=$(count_total_pockets "$MOD_OUT")
+    CON_TOTAL=$(count_total_pockets "$CON_OUT")
+    MOD_REASONABLE=$(count_reasonable_pockets "$MOD_OUT")
+    CON_REASONABLE=$(count_reasonable_pockets "$CON_OUT")
+
+    log "fpocket mode comparison written to $FPOCKET_COMPARISON"
+    log "${SELECTED_FP_LABEL}: $MOD_TOTAL total pockets, $MOD_REASONABLE reasonable pockets"
+    log "Conservative mode: $CON_TOTAL total pockets, $CON_REASONABLE reasonable pockets"
+
+    if feedback_at_least_guided; then
+      echo
+      echo "fpocket mode comparison:"
+      awk -F '\t' 'NR==1 {next} {printf "  %s  %s  score=%s  alpha_spheres=%s  bbox=%sx%sx%s A  reasonable=%s  warning=%s\n", $1,$2,$3,$4,$5,$6,$7,$9,$10}' "$FPOCKET_COMPARISON"
+      echo
+      echo "Guidance: expanded/permissive fpocket modes are not guaranteed to produce more unique pockets."
+      echo "They can merge a broad cleft/surface into one high-score pocket."
+      echo "This script uses the run with more reasonable localized pockets."
+      echo
+    fi
+
+    if awk -v c="$CON_REASONABLE" -v m="$MOD_REASONABLE" 'BEGIN{exit !(c>m)}'; then
+      FP_OUT="$CON_OUT"
+      SELECTED_FP_RUN_LABEL="conservative"
+      log "Using conservative fpocket output because it produced more reasonable localized pockets."
+    else
+      FP_OUT="$MOD_OUT"
+      SELECTED_FP_RUN_LABEL="$SELECTED_FP_LABEL"
+      log "Using ${SELECTED_FP_LABEL} fpocket output."
+    fi
+  else
+    log "Running fpocket (${SELECTED_FP_LABEL}, -m ${SELECTED_FP_M})..."
+    "$FPOCKET_BIN" -f "$FP_INPUT" -m "$SELECTED_FP_M" >/dev/null
+    SELECTED_FP_RUN_LABEL="$SELECTED_FP_LABEL"
+    log "fpocket complete"
+  fi
+else
+  log "Running fpocket (conservative mode)..."
+  "$FPOCKET_BIN" -f "$FP_INPUT" >/dev/null
+  SELECTED_FP_RUN_LABEL="conservative"
+  log "fpocket complete"
+fi
+
+if [ "$LIG_PRESENT" -eq 0 ]; then
+  PQR="$FP_OUT/$(basename "$FP_INPUT" .pdb)_pockets.pqr"
+fi
+echo "Checking PQR: $PQR"
+ATM_COUNT=$(ls "$FP_OUT"/pockets/pocket*_atm.pdb 2>/dev/null | wc -l)
+echo "Pocket atm files found: $ATM_COUNT"
+if [ "$ATM_COUNT" -eq 0 ] && [ -f "$PQR" ]; then
+  PQR_LINES=$(wc -l < "$PQR")
+  echo "No pocket atm files found - extracting from PQR ($PQR_LINES lines)..."
+  mkdir -p "$FP_OUT/pockets"
+  awk -v dir="$FP_OUT/pockets" '
+    /^ATOM|^HETATM/ {
+      pnum=$5
+      fname = dir "/pocket" pnum "_atm.pdb"
+      print >> fname
+    }
+  ' "$PQR"
+  echo "Extracted $(ls "$FP_OUT"/pockets/pocket*_atm.pdb 2>/dev/null | wc -l) pockets from PQR"
+elif [ ! -f "$PQR" ]; then
+  echo "WARNING: PQR file not found at $PQR"
+fi
+
+if [ "$LIG_PRESENT" -eq 1 ] && [ -f "$PQR" ]; then
+  PQR_ATOMS=$(awk '/^ATOM|^HETATM/{n++} END{print n+0}' "$PQR")
+  echo "PQR total alpha spheres (local binding site): $PQR_ATOMS"
+  log "Selecting alpha spheres overlapping ligand VDW volume..."
+  MERGED="$FP_OUT/pockets/pocket_ligand_merged_atm.pdb"
+
+  awk -v lig="$LIG" -v pqr="$PQR" \
+      -v CLX="$LIGX" -v CLY="$LIGY" -v CLZ="$LIGZ" \
+      -v max_centroid_dist="$MERGED_MAX_CENTROID_DIST" \
+      -v overlap_margin="$LIGAND_OVERLAP_MARGIN" '
+  # standard VDW radii by element symbol
+  function vdw(name,    el) {
+    el = substr(name,1,1)
+    if (el == "C") return 1.70
+    if (el == "N") return 1.55
+    if (el == "O") return 1.52
+    if (el == "S") return 1.80
+    if (el == "P") return 1.80
+    if (el == "F") return 1.47
+    if (el == "H") return 1.20
+    return 1.70
+  }
+
+  # pass 1: collect ligand atom positions and VDW radii from input PDB
+  FNR==NR {
+    if (/^HETATM/) {
+      res=substr($0,18,3); gsub(/ /,"",res)
+      if (res == lig) {
+        lx[nl]=substr($0,31,8)+0
+        ly[nl]=substr($0,39,8)+0
+        lz[nl]=substr($0,47,8)+0
+        aname=substr($0,13,4); gsub(/ /,"",aname)
+        lr[nl]=vdw(aname)
+        nl++
+      }
+    }
+    next
+  }
+
+  # pass 2: read local PQR - all alpha spheres already restricted to binding site
+  /^ATOM|^HETATM/ {
+    ax[na]=$6+0; ay[na]=$7+0; az[na]=$8+0; ar[na]=$10+0
+    na++
+  }
+
+  END {
+    # Copilot v1.33_patch surgical fix 1:
+    # Compute a true ligand centroid from ligand atoms read in pass 1. The CLX/CLY/CLZ
+    # shell variables are still passed in for traceability, but this local centroid
+    # makes the merge block self-contained and guards against stale upstream values.
+    if (nl == 0) {
+      print "ERROR: no ligand atoms were collected for ligand " lig > "/dev/stderr"
+      exit 2
+    }
+    cx=0; cy=0; cz=0
+    for (j=0; j<nl; j++) {
+      cx+=lx[j]; cy+=ly[j]; cz+=lz[j]
+    }
+    cx/=nl; cy/=nl; cz/=nl
+
+    # Select alpha spheres whose volume directly overlaps ligand atom VDW volume.
+    # Copilot v1.33_patch surgical fix 2:
+    # Skip distant alpha spheres relative to the ligand centroid to reduce phantom
+    # pocket/ghost cavity artifacts from the local fpocket PQR.
+    #
+    # Copilot v1.33_patch surgical fix 3:
+    # Tighten overlap criterion by using a negative margin by default:
+    #   d < alpha_radius + ligand_vdw_radius + overlap_margin
+    # where overlap_margin defaults to -0.5 A.
+    n=0
+    skipped_centroid=0
+    for (i=0; i<na; i++) {
+      dx0=ax[i]-cx; dy0=ay[i]-cy; dz0=az[i]-cz
+      if (max_centroid_dist != "OFF" && sqrt(dx0*dx0+dy0*dy0+dz0*dz0) > max_centroid_dist) {
+        skipped_centroid++
+        continue
+      }
+      for (j=0; j<nl; j++) {
+        dx=ax[i]-lx[j]; dy=ay[i]-ly[j]; dz=az[i]-lz[j]
+        d=sqrt(dx*dx+dy*dy+dz*dz)
+        if (d < (ar[i] + lr[j] + overlap_margin)) {
+          n++
+          printf "%-6s%5d  %-3s %3s %1s%4d    %8.3f%8.3f%8.3f\n",
+            "ATOM", n, "C", "STP", "A", 1, ax[i], ay[i], az[i]
+          break
+        }
+      }
+    }
+    if (max_centroid_dist == "OFF") {
+      printf "%d alpha spheres overlapping ligand VDW volume (margin %.2f A; centroid filter OFF; skipped %d distant spheres)\n", n, overlap_margin, skipped_centroid > "/dev/stderr"
+    } else {
+      printf "%d alpha spheres overlapping ligand VDW volume (margin %.2f A; centroid filter %.2f A; skipped %d distant spheres)\n", n, overlap_margin, max_centroid_dist, skipped_centroid > "/dev/stderr"
+    }
+  }
+  ' "$INPUT_PDB" "$PQR" > "$MERGED"
+
+  MERGED_COUNT=$(awk '/^ATOM/{n++} END{print n+0}' "$MERGED")
+  log "Direct VDW overlap: $MERGED_COUNT alpha spheres selected -> $MERGED"
+fi
+###############################################################################
+# STEP 3: FILTER POCKETS BY SCORE + WRITE DIAGNOSTICS
+###############################################################################
+log "Entering Step 3: filtering pockets from $FP_OUT"
+> "$FROZEN_DIR/eligible.list"
+> "$FROZEN_DIR/eligible_all.list"
+
+POCKET_DIAG="$CAVITY_DIR/pocket_diagnostics.tsv"
+printf "pocket_file\tscore\talpha_spheres\tbbox_x\tbbox_y\tbbox_z\tmax_bbox\teligible\tskip_reason\twarning\n" > "$POCKET_DIAG"
+
+for ATM in "$FP_OUT"/pockets/pocket*_atm.pdb; do
+  [ -e "$ATM" ] || continue
+  BASENAME="$(basename "$ATM")"
+  SCORE=$(awk -F':' '/Pocket Score/ {gsub(/ /,"",$2); print $2; exit}' "$ATM")
+
+  ATOMS=$(awk '/^(ATOM|HETATM)/ {n++} END{print n+0}' "$ATM")
+  read BBX BBY BBZ MAX_BBOX <<< $(awk '
+    /^(ATOM|HETATM)/ {
+      x=substr($0,31,8)+0; y=substr($0,39,8)+0; z=substr($0,47,8)+0
+      if (n==0 || x<minx) minx=x; if (n==0 || x>maxx) maxx=x
+      if (n==0 || y<miny) miny=y; if (n==0 || y>maxy) maxy=y
+      if (n==0 || z<minz) minz=z; if (n==0 || z>maxz) maxz=z
+      n++
+    }
+    END {
+      if (n==0) { printf "0.000 0.000 0.000 0.000"; exit }
+      bx=maxx-minx; by=maxy-miny; bz=maxz-minz; m=bx
+      if (by>m) m=by; if (bz>m) m=bz
+      printf "%.3f %.3f %.3f %.3f", bx, by, bz, m
+    }
+  ' "$ATM")
+
+  WARNING="ok"
+  if awk -v a="$ATOMS" -v lim="$POCKET_WARN_ATOMS" 'BEGIN{exit !(a>lim)}'; then
+    WARNING="large_alpha_sphere_count"
+  fi
+  if awk -v b="$MAX_BBOX" -v lim="$POCKET_WARN_BBOX" 'BEGIN{exit !(b>lim)}'; then
+    if [ "$WARNING" = "ok" ]; then
+      WARNING="large_spatial_extent"
+    else
+      WARNING="${WARNING};large_spatial_extent"
+    fi
+  fi
+
+  if [ -z "$SCORE" ]; then
+    printf "%s\tNA\t%s\t%s\t%s\t%s\t%s\tno\tmissing_pocket_score\t%s\n" \
+      "$BASENAME" "$ATOMS" "$BBX" "$BBY" "$BBZ" "$MAX_BBOX" "$WARNING" >> "$POCKET_DIAG"
+    continue
+  fi
+
+  cp "$ATM" "$FROZEN_DIR/$BASENAME"
+
+  # ALL score-parsed pockets go into eligible_all regardless of score - for ligand overlap diagnostics/fallbacks
+  echo "$FROZEN_DIR/$BASENAME" >> "$FROZEN_DIR/eligible_all.list"
+
+  if awk -v s="$SCORE" -v t="$SCORE_THRESHOLD" 'BEGIN{exit !(s>=t)}'; then
+    if [ "$STRICT_LOCAL_POCKETS" = "1" ] && [ "$WARNING" != "ok" ]; then
+      printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\tno\tgeometry_too_large\t%s\n" \
+        "$BASENAME" "$SCORE" "$ATOMS" "$BBX" "$BBY" "$BBZ" "$MAX_BBOX" "$WARNING" >> "$POCKET_DIAG"
+    else
+      echo "$FROZEN_DIR/$BASENAME" >> "$FROZEN_DIR/eligible.list"
+      printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\tyes\tpasses_score_and_geometry_filters\t%s\n" \
+        "$BASENAME" "$SCORE" "$ATOMS" "$BBX" "$BBY" "$BBZ" "$MAX_BBOX" "$WARNING" >> "$POCKET_DIAG"
+    fi
+  else
+    printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\tno\tscore_below_threshold\t%s\n" \
+      "$BASENAME" "$SCORE" "$ATOMS" "$BBX" "$BBY" "$BBZ" "$MAX_BBOX" "$WARNING" >> "$POCKET_DIAG"
+  fi
+done
+
+log "Pocket diagnostics written to $POCKET_DIAG"
+ELIGIBLE_COUNT=$(wc -l < "$FROZEN_DIR/eligible.list" | tr -d " ")
+ALL_SCORE_PARSED_COUNT=$(wc -l < "$FROZEN_DIR/eligible_all.list" | tr -d " ")
+log "Selectable pockets after score/geometry filters: ${ELIGIBLE_COUNT}; score-parsed pockets: ${ALL_SCORE_PARSED_COUNT}"
+if feedback_at_least_guided; then
+  echo
+  echo "Fpocket pocket diagnostics:"
+  awk -F '\t' 'NR==1 {next} {printf "  %s  score=%s  alpha_spheres=%s  bbox=%sx%sx%s A  eligible=%s  warning=%s\n", $1,$2,$3,$4,$5,$6,$8,$10}' "$POCKET_DIAG"
+  echo
+  echo "Guidance: a single fpocket pocket can still be very broad. If bbox or alpha_spheres are large,"
+  echo "rendering it as a PyMOL surface may look like a whole-protein surface. Default visualization uses spheres."
+fi
+
+###############################################################################
+# STEP 4: COMPUTE CENTERS
+###############################################################################
+
+if [ "$LIG_PRESENT" -eq 1 ]; then
+
+  # use the merged pocket (all PQR alpha spheres near ligand centroid) if available
+  MERGED="$FP_OUT/pockets/pocket_ligand_merged_atm.pdb"
+  MERGED_COUNT=$(awk '/^ATOM|^HETATM/{n++} END{print n+0}' "$MERGED" 2>/dev/null || echo 0)
+
+  if [ "$MERGED_COUNT" -gt 0 ]; then
+    echo "Using merged pocket ($MERGED_COUNT alpha spheres) for cavity definition"
+    BEST_GEOM="$MERGED"
+    BEST_SCORE="merged"
+    BEST_OVL="$MERGED_COUNT"
+  else
+    # fallback: overlap-based selection across individual pocket files
+    echo "Merged pocket empty - falling back to overlap search across individual pockets"
+    BEST_OVL=""
+    BEST_GEOM=""
+    BEST_SCORE=""
+
+    while read -r GEOM; do
+      SCORE=$(awk -F':' '/Pocket Score/ {gsub(/ /,"",$2); print $2}' "$GEOM")
+
+      OVL=$(awk -v lx="$LIGX" -v ly="$LIGY" -v lz="$LIGZ" '
+        /^ATOM/ {
+          x=substr($0,31,8); y=substr($0,39,8); z=substr($0,47,8)
+          d=sqrt((x-lx)^2+(y-ly)^2+(z-lz)^2)
+          if (d <= 6.0) n++
+        }
+        END { print n+0 }
+      ' "$GEOM")
+
+      if [ -z "$BEST_OVL" ] || awk "BEGIN{exit !($OVL > $BEST_OVL)}"; then
+        BEST_OVL="$OVL"
+        BEST_GEOM="$GEOM"
+        BEST_SCORE="$SCORE"
+      fi
+    done < "$FROZEN_DIR/eligible_all.list"
+
+    echo "Best overlapping pocket: $(basename "$BEST_GEOM") (alpha atoms within 6A of ligand: $BEST_OVL)"
+  fi
+
+  # box and conf center pinned to ligand centroid
+  SORTED=("0|$BEST_GEOM|$LIGX|$LIGY|$LIGZ|$BEST_SCORE")
+
+else
+  RECORDS=()
+
+  while read -r GEOM; do
+
+    SCORE=$(awk -F':' '/Pocket Score/ {gsub(/ /,"",$2); print $2}' "$GEOM")
+    [ -z "$SCORE" ] && continue
+
+    if [ "$CENTER_MODE" = "centroid" ]; then
+      read CX CY CZ <<< $(
+        awk '
+        /^ATOM/{
+          x+=substr($0,31,8);y+=substr($0,39,8);z+=substr($0,47,8);n++;
+          px[n]=substr($0,31,8);py[n]=substr($0,39,8);pz[n]=substr($0,47,8);
+        }
+        END{
+          cx=x/n;cy=y/n;cz=z/n;
+          mind=1e9;
+          for(i=1;i<=n;i++){
+            dx=px[i]-cx;dy=py[i]-cy;dz=pz[i]-cz;
+            d=dx*dx+dy*dy+dz*dz;
+            if(d<mind){mind=d;bx=px[i];by=py[i];bz=pz[i]}
+          }
+          printf "%.6f %.6f %.6f",bx,by,bz
+        }' "$GEOM"
+      )
+    else
+      read CX CY CZ <<< $(
+        awk '/^ATOM/ {
+          x=substr($0,31,8); y=substr($0,39,8); z=substr($0,47,8)
+          if($11 > m){m=$11; bx=x; by=y; bz=z}
+        }
+        END{printf "%.6f %.6f %.6f",bx,by,bz}' "$GEOM"
+      )
+    fi
+
+    # rank = score * exp(-distance/10) - exponential decay strongly penalizes
+    # surface pockets far from the protein interior
+    RANK=$(awk -v s="$SCORE" -v x="$CX" -v y="$CY" -v z="$CZ" \
+               -v px="$PROT_CX" -v py="$PROT_CY" -v pz="$PROT_CZ" \
+               'BEGIN{d=sqrt((x-px)^2+(y-py)^2+(z-pz)^2); printf "%.6f", s*exp(-d/10)}')
+
+    RECORDS+=("$RANK|$GEOM|$CX|$CY|$CZ|$SCORE")
+
+  done < "$FROZEN_DIR/eligible.list"
+
+  # sort by combined rank descending
+  IFS=$'\n' SORTED_BY_RANK=($(printf "%s\n" "${RECORDS[@]}" | sort -t '|' -k1,1rn))
+  unset IFS
+
+  # select up to MAX_POCKETS pockets, filtering by box overlap
+  SELECTION_DIAG="$CAVITY_DIR/pocket_selection_diagnostics.tsv"
+  printf "rank_order\tpocket_file\tscore\trank_score\tcenter_x\tcenter_y\tcenter_z\tdecision\treason\tmax_overlap\n" > "$SELECTION_DIAG"
+
+  SORTED=()
+  declare -a SEL_CX SEL_CY SEL_CZ
+
+  ORDER=0
+  for REC in "${SORTED_BY_RANK[@]}"; do
+    ORDER=$((ORDER+1))
+    IFS='|' read RANK GEOM CX CY CZ SCORE <<< "$REC"
+    SKIP=0
+    SKIP_REASON="selected"
+    MAX_OBS_OVL="0"
+    for k in "${!SEL_CX[@]}"; do
+      OVL=$(awk -v x1="$CX" -v y1="$CY" -v z1="$CZ" \
+                -v x2="${SEL_CX[$k]}" -v y2="${SEL_CY[$k]}" -v z2="${SEL_CZ[$k]}" \
+                -v h="$HALF_BOX" -v maxovl="$MAX_OVERLAP_FRAC" '
+        BEGIN {
+          # overlap in each axis
+          ox = h*2 - (x1>x2 ? x1-x2 : x2-x1)
+          oy = h*2 - (y1>y2 ? y1-y2 : y2-y1)
+          oz = h*2 - (z1>z2 ? z1-z2 : z2-z1)
+          if (ox<=0 || oy<=0 || oz<=0) { print 0; exit }
+          ovl_vol = ox*oy*oz
+          box_vol = (h*2)^3
+          print ovl_vol/box_vol
+        }')
+      if awk -v o="$OVL" -v m="$MAX_OBS_OVL" 'BEGIN{exit !(o>m)}'; then
+        MAX_OBS_OVL="$OVL"
+      fi
+      if awk -v o="$OVL" -v max="$MAX_OVERLAP_FRAC" 'BEGIN{exit !(o>max)}'; then
+        SKIP=1
+        SKIP_REASON="box_overlap_exceeds_MAX_OVERLAP_FRAC"
+        break
+      fi
+    done
+
+    if [ "$SKIP" -eq 0 ]; then
+      SORTED+=("0|$GEOM|$CX|$CY|$CZ|$SCORE")
+      SEL_CX+=("$CX")
+      SEL_CY+=("$CY")
+      SEL_CZ+=("$CZ")
+      printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\tselected\tselected\t%s\n" \
+        "$ORDER" "$(basename "$GEOM")" "$SCORE" "$RANK" "$CX" "$CY" "$CZ" "$MAX_OBS_OVL" >> "$SELECTION_DIAG"
+    else
+      printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\tskipped\t%s\t%s\n" \
+        "$ORDER" "$(basename "$GEOM")" "$SCORE" "$RANK" "$CX" "$CY" "$CZ" "$SKIP_REASON" "$MAX_OBS_OVL" >> "$SELECTION_DIAG"
+    fi
+
+    [ "${#SORTED[@]}" -ge "$MAX_POCKETS" ] && break
+  done
+
+  log "Pocket selection diagnostics written to $SELECTION_DIAG"
+  if feedback_at_least_guided; then
+    echo
+    echo "Pocket selection decisions:"
+    awk -F '\t' 'NR==1 {next} {printf "  order=%s  %s  score=%s  rank=%s  decision=%s  reason=%s  max_overlap=%s\n", $1,$2,$3,$4,$8,$9,$10}' "$SELECTION_DIAG"
+    echo
+  fi
+
+fi
+
+###############################################################################
+# STEP 5: BUILD OUTPUTS
+###############################################################################
+IDX=1
+
+for REC in "${SORTED[@]}"; do
+
+  if [ "$LIG_PRESENT" -eq 1 ] && [ "$IDX" -gt 1 ]; then
+    break
+  fi
+
+  if [ "$LIG_PRESENT" -eq 0 ] && [ "$IDX" -gt "$MAX_POCKETS" ]; then
+    break
+  fi
+
+
+  IFS='|' read DIST GEOM CX CY CZ SCORE <<< "$REC" 
+
+  CENTER="$CAVITY_DIR/${CANONICAL}_pocket${IDX}_center.pdb"
+  BOX="$CAVITY_DIR/${CANONICAL}_pocket${IDX}_box.pdb"
+  CONF="$CAVITY_DIR/${CANONICAL}_pocket${IDX}.conf"
+  PML="$CAVITY_DIR/${CANONICAL}_pocket${IDX}.pml"
+
+  printf "%-6s%5d %-4s %-3s %1s%4d    %8.3f%8.3f%8.3f\n" \
+  HETATM 1 CTR CTR A 1 "$CX" "$CY" "$CZ" > "$CENTER"
+
+  echo "REMARK BOX" > "$BOX"
+
+  n=1
+  for dx in -1 1; do
+  for dy in -1 1; do
+  for dz in -1 1; do
+
+    X=$(awk -v c="$CX" -v d="$dx" -v h="$HALF_BOX" 'BEGIN{printf "%.3f", c+d*h}')
+    Y=$(awk -v c="$CY" -v d="$dy" -v h="$HALF_BOX" 'BEGIN{printf "%.3f", c+d*h}')
+    Z=$(awk -v c="$CZ" -v d="$dz" -v h="$HALF_BOX" 'BEGIN{printf "%.3f", c+d*h}')
+
+    printf "%-6s%5d %-4s %-3s %1s%4d    %8.3f%8.3f%8.3f\n" \
+    ATOM "$n" X BOX A 1 "$X" "$Y" "$Z" >> "$BOX"
+
+    n=$((n+1))
+
+  done
+  done
+  done
+
+  cat > "$CONF" <<EOF
+# Generated: $TIMESTAMP
+# Input: $INPUT_PDB
+center_x = $CX
+center_y = $CY
+center_z = $CZ
+size_x = $BOX_SIZE
+size_y = $BOX_SIZE
+size_z = $BOX_SIZE
+EOF
+
+POCKET_NAME="$(basename "$GEOM" .pdb)"
+
+ABS_CAVITY_DIR="$(cd "$CAVITY_DIR" && pwd)"
+ABS_RECEPTOR_PDB="$(cd "$RECEPTOR_DIR" && pwd)/${CANONICAL}.pdb"
+ABS_CENTER="$(cd "$(dirname "$CENTER")" && pwd)/$(basename "$CENTER")"
+ABS_BOX="$(cd "$(dirname "$BOX")" && pwd)/$(basename "$BOX")"
+
+{
+echo "# Generated: $TIMESTAMP"
+echo "# Input: $INPUT_PDB"
+echo "cd $ABS_CAVITY_DIR"
+echo "load $ABS_RECEPTOR_PDB, ${CANONICAL}"
+
+echo "set transparency_mode, 1"
+# Copilot v1.33_patch surgical fix 4: clear any stale/ghost pocket rendering
+echo "hide everything, all"
+echo "hide everything, ${CANONICAL}"
+echo "show cartoon, ${CANONICAL}"
+
+# --- center marker ---
+echo "load $ABS_CENTER, ${CANONICAL}_center${IDX}"
+
+if [ "$LIG_PRESENT" -eq 1 ]; then
+
+  # --- cavity layer 1: fpocket alpha spheres overlapping ligand (additional pocket space) ---
+  echo "load $ABS_CAVITY_DIR/fpocket_input_local_out/pockets/pocket_ligand_merged_atm.pdb, cavity_pocket${IDX}"
+  echo "hide everything, cavity_pocket${IDX}"
+  if [ "$SHOW_POCKET_SURFACE" = "1" ]; then
+    echo "show surface, cavity_pocket${IDX}"
+    echo "set transparency, 0.45, cavity_pocket${IDX}"
+  else
+    echo "show spheres, cavity_pocket${IDX}"
+    echo "set sphere_scale, 0.25, cavity_pocket${IDX}"
+  fi
+  echo "color cyan, cavity_pocket${IDX}"
+
+  # --- optional ligand molecular volume layer ---
+  # Default OFF because this extra surface can look like an unexpected/apolar alpha-sphere layer.
+  # Enable with: SHOW_LIGAND_VOLUME=1 ./script.sh complex.pdb
+  if [ "$SHOW_LIGAND_VOLUME" = "1" ]; then
+    echo "load $(cd "$LIGAND_DIR" && pwd)/${LIG}.pdb, cavity_ligand${IDX}"
+    echo "hide everything, cavity_ligand${IDX}"
+    echo "show surface, cavity_ligand${IDX}"
+    echo "set transparency, 0.1, cavity_ligand${IDX}"
+    echo "color teal, cavity_ligand${IDX}"
+  fi
+
+else
+
+  # --- cavity layer 1: selected pocket alpha spheres (inner, high confidence) ---
+  echo "load $(cd "$(dirname "$GEOM")" && pwd)/$(basename "$GEOM"), cavity_core${IDX}"
+  echo "hide everything, cavity_core${IDX}"
+  if [ "$SHOW_POCKET_SURFACE" = "1" ]; then
+    echo "show surface, cavity_core${IDX}"
+    echo "set transparency, 0.45, cavity_core${IDX}"
+  else
+    echo "show spheres, cavity_core${IDX}"
+    echo "set sphere_scale, 0.25, cavity_core${IDX}"
+  fi
+  echo "color teal, cavity_core${IDX}"
+
+  # --- cavity layer 2: adjacent pockets touching layer 1 (outer, extended space) ---
+  # build adjacency from all eligible pockets that touch the selected pocket
+  ADJACENT_PDB="$FROZEN_DIR/adjacent_pocket${IDX}.pdb"
+  CORE_GEOM="$GEOM"
+  > "$ADJACENT_PDB"
+  while read -r OTHER_GEOM; do
+    [ "$OTHER_GEOM" = "$CORE_GEOM" ] && continue
+    # check if any atom in OTHER_GEOM is within touching distance of any atom in CORE_GEOM
+    TOUCHES=$(awk '
+      FNR==NR {
+        if(/^ATOM/){cx[nc]=substr($0,31,8)+0;cy[nc]=substr($0,39,8)+0;cz[nc]=substr($0,47,8)+0;nc++}
+        next
+      }
+      /^ATOM/ {
+        x=substr($0,31,8)+0;y=substr($0,39,8)+0;z=substr($0,47,8)+0
+        for(i=0;i<nc;i++){
+          dx=x-cx[i];dy=y-cy[i];dz=z-cz[i]
+          if(sqrt(dx*dx+dy*dy+dz*dz)<8.0){print "yes";exit}
+        }
+      }
+    ' "$CORE_GEOM" "$OTHER_GEOM")
+    if [ "$TOUCHES" = "yes" ]; then
+      awk '/^(ATOM|HETATM)/ {print}' "$OTHER_GEOM" >> "$ADJACENT_PDB"
+    fi
+  done < <(ls "$FROZEN_DIR"/pocket*_atm.pdb 2>/dev/null)
+
+  # Adjacent cavity extension is OFF by default because it can add visually confusing
+  # fpocket alpha-sphere volume unrelated to the ranked core pocket. Enable with:
+  #   SHOW_ADJACENT_CAVITY=1 ./script.sh complex.pdb
+  if [ "$SHOW_ADJACENT_CAVITY" = "1" ] && [ -s "$ADJACENT_PDB" ]; then
+    echo "load $(cd "$(dirname "$ADJACENT_PDB")" && pwd)/$(basename "$ADJACENT_PDB"), cavity_ext${IDX}"
+    echo "hide everything, cavity_ext${IDX}"
+    echo "show spheres, cavity_ext${IDX}"
+    echo "set sphere_scale, 0.25, cavity_ext${IDX}"
+    echo "set transparency, 0.3, cavity_ext${IDX}"
+    echo "color cyan, cavity_ext${IDX}"
+  fi
+
+fi
+
+# --- center display ---
+echo "show spheres, ${CANONICAL}_center${IDX}"
+echo "color yellow, ${CANONICAL}_center${IDX}"
+echo "set sphere_scale, 0.7, ${CANONICAL}_center${IDX}"
+
+# --- box ---
+echo "load $ABS_BOX, ${CANONICAL}_box${IDX}"
+echo "show sticks, ${CANONICAL}_box${IDX}"
+echo "set stick_radius, 0.18, ${CANONICAL}_box${IDX}"
+echo "color gray70, ${CANONICAL}_box${IDX}"
+
+# --- reference ligand display ---
+# Even in non-ligand mode, load detected ligand(s) as hidden atom-colored sticks so the user can
+# enable them and check whether the selected fpocket cavity is plausible for the known ligand.
+# This does NOT affect cavity ranking or docking-box generation.
+if [ "$SHOW_REFERENCE_LIGANDS" = "1" ] && [ "${#LIGANDS[@]}" -gt 0 ]; then
+  for REF_LIG in "${LIGANDS[@]}"; do
+    REF_OBJ="${CANONICAL}_${REF_LIG}_reference"
+    echo "load $(cd "$LIGAND_DIR" && pwd)/${REF_LIG}.pdb, ${REF_OBJ}"
+    echo "hide everything, ${REF_OBJ}"
+    echo "show sticks, ${REF_OBJ}"
+    echo "util.cbag ${REF_OBJ}"
+    echo "disable ${REF_OBJ}"
+  done
+fi
+
+echo "zoom ${CANONICAL}"
+echo "orient ${CANONICAL}"
+} > "$PML"
+
+
+  echo "Selected cavity $IDX"
+  IDX=$((IDX+1))
+
+
+
+done
+
+###############################################################################
+# STEP 6: README
+###############################################################################
+cat > "$CAVITY_DIR/${CANONICAL}_README.txt" <<EOF
+###############################################################################
+Docking Preparation Summary
+Generated: $TIMESTAMP
+Script version: $SCRIPT_VERSION
+Feedback level: $FEEDBACK_LEVEL
+Run log: $RUN_LOG
+###############################################################################
+
+Input structure:
+$INPUT_PDB
+
+Canonical name:
+$CANONICAL
+
+###############################################################################
+Receptor Preparation
+###############################################################################
+
+Receptor PDB:
+$RECEPTOR_PDB
+
+Receptor PDBQT:
+$RECEPTOR_PDBQT
+
+Protein centroid (A):
+$PROT_CX  $PROT_CY  $PROT_CZ
+
+Centroid computed from:
+$([ "$CENTROID_SEL" = "2" ] && echo "Largest chain" || echo "Whole protein")
+
+Ligand directory:
+$LIGAND_DIR
+
+Detected ligands are written here before the ligand-centered docking prompt.
+If you choose non-ligand pocket discovery, these ligand PDBs are still loaded
+as hidden atom-colored reference stick objects in PyMOL when SHOW_REFERENCE_LIGANDS=1. They do not affect
+pocket ranking or docking-box generation unless ligand-centered mode is chosen.
+
+Detected ligand manifest:
+$LIGAND_DIR/detected_ligands.tsv
+
+$([ "$LIG_PRESENT" -eq 1 ] && echo "Ligand used for docking center:
+$LIG
+
+Ligand centroid (A):
+$LIGX  $LIGY  $LIGZ
+
+Best overlapping fpocket pocket:
+$(basename "$BEST_GEOM") (alpha sphere atoms within 6A of ligand centroid: $BEST_OVL)")
+
+###############################################################################
+Ligand-Mode Merge Settings
+###############################################################################
+
+Merged alpha-sphere centroid distance filter (A):
+$MERGED_MAX_CENTROID_DIST
+
+Ligand/alpha-sphere overlap margin (A):
+$LIGAND_OVERLAP_MARGIN
+
+Interpretation:
+- Alpha spheres farther than MERGED_MAX_CENTROID_DIST from the ligand centroid are excluded.
+- Overlap uses: distance < alpha_radius + ligand_vdw_radius + LIGAND_OVERLAP_MARGIN.
+- The default negative margin tightens the cavity to alpha spheres that more directly overlap ligand VDW volume.
+
+###############################################################################
+Pocket Detection (fpocket)
+###############################################################################
+
+Mode:
+$MODE
+
+Score threshold:
+$SCORE_THRESHOLD
+
+All pockets passing threshold stored in:
+$FROZEN_DIR
+
+###############################################################################
+Cavity Selection
+###############################################################################
+
+Number of cavities selected:
+$MAX_POCKETS
+
+Selection ordering:
+Combined rank = fpocket score * exp(-distance_to_protein_centroid / 10)
+Higher scores and more interior locations are favored; overlapping boxes are suppressed.
+
+###############################################################################
+Center Definition
+###############################################################################
+
+Selected mode:
+$CENTER_MODE
+
+deepest:
+  - Uses fpocket alpha sphere with largest radius
+  - Represents most open / accessible region
+  - Often near pocket entrance or surface
+
+centroid:
+  - Uses geometric centroid of pocket alpha spheres
+  - Snapped to nearest valid pocket coordinate
+  - Represents interior binding region
+
+###############################################################################
+Box Definition
+###############################################################################
+
+Box size (A):
+$BOX_SIZE
+
+Half box size (A):
+$HALF_BOX
+
+Each pocket has:
+  - *_center.pdb  -> center point
+  - *_box.pdb     -> docking grid box
+  - *.conf        -> Vina config file
+  - *.pml         -> PyMOL visualization
+
+###############################################################################
+PyMOL Visualization
+###############################################################################
+
+Each PML file loads:
+  - prepared receptor
+  - specific pocket
+  - corresponding docking box
+  - center marker
+
+View is oriented to full protein (not pocket center)
+
+###############################################################################
+Chain Summary / Centroid Guidance
+###############################################################################
+
+Chain summary file:
+$CHAIN_SUMMARY
+
+$(if [ -f "$CHAIN_SUMMARY" ]; then awk -F '	' '{printf "Chain %s: %d residues, %d atoms\n", $1, $2, $3}' "$CHAIN_SUMMARY"; fi)
+
+Guidance:
+- Use whole-protein centroid for single-chain compact receptors.
+- Use per-chain centroid for multi-chain receptors or oligomers.
+- If the selected cavity appears penalized because the protein centroid lies between chains,
+  rerun with per-chain centroid mode.
+
+###############################################################################
+Parameter Guidance
+###############################################################################
+
+MERGED_MAX_CENTROID_DIST:
+  Current value: $MERGED_MAX_CENTROID_DIST A
+  8-10 A: stricter; useful for compact ligands and ghost-pocket suppression.
+  12-15 A: looser; useful for elongated ligands or broad pockets.
+  OFF: disables centroid-distance filtering.
+
+SHOW_LIGAND_VOLUME:
+  Current value: $SHOW_LIGAND_VOLUME
+  0 = do not render a separate ligand molecular surface layer.
+  1 = render ligand surface as an optional coverage check.
+
+SHOW_REFERENCE_LIGANDS:
+  Current value: $SHOW_REFERENCE_LIGANDS
+  1 = load all detected ligands as hidden atom-colored stick objects in every PyMOL scene for optional visual checking.
+  0 = do not load detected reference ligands unless ligand-centered mode explicitly uses one.
+
+SHOW_ADJACENT_CAVITY:
+  Current value: $SHOW_ADJACENT_CAVITY
+  0 = do not render adjacent fpocket cavity extension by default.
+  1 = render adjacent cavity extension as small cyan spheres for diagnostics.
+
+LIGAND_OVERLAP_MARGIN:
+  Current value: $LIGAND_OVERLAP_MARGIN A
+  -0.5 A: stricter direct-overlap criterion.
+   0.0 A: neutral VDW contact criterion.
+  +0.5 to +1.0 A: more permissive for under-sampled ligand peripheries.
+
+BOX_SIZE:
+  Current value: $BOX_SIZE A
+  22-26 A: compact ligand-centered redocking.
+  28-34 A: larger ligands or exploratory/induced-fit search, at higher computational cost.
+
+
+###############################################################################
+Pocket Diagnostics
+###############################################################################
+
+Pocket diagnostics file:
+$POCKET_DIAG
+
+Pocket selection diagnostics file:
+${SELECTION_DIAG:-not_applicable_in_ligand_mode}
+
+SHOW_POCKET_SURFACE:
+  Current value: $SHOW_POCKET_SURFACE
+  0 = render fpocket alpha spheres as small spheres by default.
+  1 = render fpocket alpha spheres as PyMOL surfaces. Use only after inspecting pocket diagnostics.
+
+POCKET_WARN_ATOMS:
+  Current value: $POCKET_WARN_ATOMS
+  Pockets above this alpha-sphere count are flagged as broad/large.
+
+POCKET_WARN_BBOX:
+  Current value: $POCKET_WARN_BBOX A
+  Pockets with any bounding-box dimension above this are flagged as spatially broad.
+
+STRICT_LOCAL_POCKETS:
+  Current value: $STRICT_LOCAL_POCKETS
+  1 = exclude giant/spatially broad pockets from normal cavity selection.
+  0 = allow them but keep warning labels in diagnostics.
+  Recommended: 1 for normal docking-box generation; use 0 only for diagnostic review.
+
+###############################################################################
+Notes
+###############################################################################
+
+- Coordinates extracted using fixed-width PDB parsing (columns 31-54)
+- Centroid mode avoids empty-space centers by snapping to real pocket atoms
+- Box coordinates are written in strict PDB format to ensure correct rendering
+- File naming preserves pocket ranking (pocket1, pocket2, ...)
+- v1.34_patch and later integrate Copilot surgical fixes for ligand-mode cavity merge:
+  ligand centroid filter, tighter VDW overlap, and PyMOL ghost-rendering cleanup.
+
+###############################################################################
+EOF
+
+
+echo
+log "Diagnostics summary:"
+log "  Selected fpocket run: ${SELECTED_FP_RUN_LABEL}"
+if [ -f "$FPOCKET_COMPARISON" ]; then
+  log "  fpocket mode comparison: $FPOCKET_COMPARISON"
+else
+  log "  fpocket mode comparison: not generated (single fpocket run or ligand-local mode)"
+fi
+if [ -f "$POCKET_DIAG" ]; then
+  log "  pocket diagnostics: $POCKET_DIAG"
+else
+  log "  pocket diagnostics: not generated - script did not reach Step 3"
+fi
+if [ -f "$SELECTION_DIAG" ]; then
+  log "  pocket selection diagnostics: $SELECTION_DIAG"
+else
+  if [ "$LIG_PRESENT" -eq 1 ]; then
+    log "  pocket selection diagnostics: not generated in ligand-centered mode; center is pinned to ligand centroid"
+  else
+    log "  pocket selection diagnostics: not generated - no non-ligand pocket selection was completed"
+  fi
+fi
+if [ "${#SORTED[@]:-0}" -eq 0 ] 2>/dev/null; then
+  log "  selected cavities: 0"
+  log "  WARNING: no cavities were selected. Inspect diagnostics and consider lower SCORE_THRESHOLD, ligand-centered mode, or different fpocket mode."
+else
+  log "  selected cavities: ${#SORTED[@]}"
+fi
+
+log "Receptor and pocket preparation complete"
+log "No docking has been run by this command"

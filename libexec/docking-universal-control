@@ -1,0 +1,575 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# End-to-end bound-ligand control. It verifies ligand identity, prepares the
+# receptor/site, withholds the crystal pose, and delegates unbiased ensemble
+# redocking. Pose recovery is a target-specific search control, not prospective
+# validation of affinity, biological activity, or unknown-ligand poses.
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PROJECT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+CLI="$PROJECT_DIR/bin/docking-universal"
+PYTHON_COMMAND="${DOCKING_UNIVERSAL_PYTHON:-python}"
+
+usage() {
+  cat <<'EOF'
+Docking Universal - bound-ligand analysis and redocking control
+
+Usage:
+  docking-universal control --complex bound_complex.pdb [options]
+
+Required inputs:
+  --complex PDB             Experimental protein-ligand complex
+
+Options:
+  --ligand-id ID            Exact RESNAME:CHAIN:RESNUM; prompted if omitted
+  --ligand-template SDF     Optional user chemistry override (default: coordinate-free RCSB CCD identity)
+  --infer-ligand-chemistry  Provisional PDB bond inference (not recommended; requires audit reason and review)
+  --force-ligand            Manually override strict identity verification
+  --override-reason TEXT    Required audit note with --force-ligand
+  --ligand-sdf SDF          Deprecated alias for --ligand-template
+  --ligand-resname NAME     Deprecated; allowed only when the instance is unique
+  --engine NAME             vina, smina, or both (default: vina)
+  --control-tier NAME       quick, repeatability, broader, conformers, or robust
+                            (default: quick, followed by an interactive retry menu)
+  --approval-min-seeds N    Independent seeds required for approval (default: 5)
+  --base-seed N             First deterministic seed (default: 20260808)
+  --ph VALUE                Ligand-state preparation pH (default: 7.4)
+  --charge-model NAME       Meeko charge model (default: gasteiger)
+  --non-interactive         Never prompt or automatically retry
+  --engine-command PATH     Explicit docking-engine executable
+  --engine-env NAME         Conda environment containing the engine
+  --exhaustiveness N        Legacy workflow only (default: 8)
+  --num-modes N             Legacy workflow only (default: 9)
+  --rmsd-threshold A        Conventional pose-recovery threshold (default: 2.0)
+  --out DIR                 Output folder (default: control_<PDB>_<ligand>_<timestamp>)
+  --no-visuals              Skip PLIP, PyMOL PNG/PSE, and generic 2D depiction
+  --plip-command PATH       PLIP executable (default: plip)
+  --pymol PATH              PyMOL executable (default: pymol)
+  --mk-export PATH          Meeko pose exporter (default: mk_export.py)
+  --legacy-single-conformer Run the superseded pre-calibration workflow
+  -h, --help                Show this help
+
+In interactive use, the command lists exact ligand candidates and offers strict
+verification (recommended), a recorded manual override, or an explicitly
+provisional PDB-based bond-inference fallback with 2D review. It creates an
+SDF with experimental coordinates, removes that ligand for receptor
+preparation, redocks it into the experimental site, and compares poses without
+fitting.
+EOF
+}
+
+log() {
+  printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
+}
+
+complex=""
+ligand_template=""
+ligand_id=""
+ligand_resname=""
+force_ligand=0
+infer_ligand_chemistry=0
+override_reason=""
+engine="vina"
+control_tier="quick"
+approval_min_seeds="5"
+base_seed="20260808"
+ph="7.4"
+charge_model="gasteiger"
+non_interactive=0
+engine_command=""
+engine_env=""
+exhaustiveness="8"
+num_modes="9"
+rmsd_threshold="2.0"
+out_dir=""
+visuals=1
+plip_command="${DOCKING_UNIVERSAL_PLIP:-plip}"
+pymol_command="${DOCKING_UNIVERSAL_PYMOL:-pymol}"
+mk_export_command="${DOCKING_UNIVERSAL_MK_EXPORT:-mk_export.py}"
+legacy_single_conformer=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --complex) complex="$2"; shift 2 ;;
+    --ligand-id) ligand_id="$2"; shift 2 ;;
+    --ligand-template|--ligand-sdf) ligand_template="$2"; shift 2 ;;
+    --ligand-resname) ligand_resname="$2"; shift 2 ;;
+    --force-ligand) force_ligand=1; shift ;;
+    --infer-ligand-chemistry) infer_ligand_chemistry=1; shift ;;
+    --override-reason) override_reason="$2"; shift 2 ;;
+    --engine) engine="$2"; shift 2 ;;
+    --control-tier) control_tier="$2"; shift 2 ;;
+    --approval-min-seeds) approval_min_seeds="$2"; shift 2 ;;
+    --base-seed) base_seed="$2"; shift 2 ;;
+    --ph) ph="$2"; shift 2 ;;
+    --charge-model) charge_model="$2"; shift 2 ;;
+    --non-interactive) non_interactive=1; shift ;;
+    --engine-command) engine_command="$2"; shift 2 ;;
+    --engine-env) engine_env="$2"; shift 2 ;;
+    --exhaustiveness) exhaustiveness="$2"; shift 2 ;;
+    --num-modes) num_modes="$2"; shift 2 ;;
+    --rmsd-threshold) rmsd_threshold="$2"; shift 2 ;;
+    --out) out_dir="$2"; shift 2 ;;
+    --no-visuals) visuals=0; shift ;;
+    --plip-command) plip_command="$2"; shift 2 ;;
+    --pymol) pymol_command="$2"; shift 2 ;;
+    --mk-export) mk_export_command="$2"; shift 2 ;;
+    --legacy-single-conformer) legacy_single_conformer=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "ERROR: unknown option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+[ -n "$complex" ] || { usage >&2; exit 2; }
+[ -f "$complex" ] || { echo "ERROR: complex PDB not found: $complex" >&2; exit 2; }
+[ -z "$ligand_template" ] || [ -f "$ligand_template" ] || { echo "ERROR: ligand template SDF not found: $ligand_template" >&2; exit 2; }
+[ "$force_ligand" -eq 0 ] || [ -n "$override_reason" ] || {
+  echo "ERROR: --override-reason is required with --force-ligand" >&2
+  exit 2
+}
+[ "$infer_ligand_chemistry" -eq 0 ] || [ "$force_ligand" -eq 1 ] || {
+  echo "ERROR: --infer-ligand-chemistry requires --force-ligand and --override-reason" >&2
+  exit 2
+}
+[ "$infer_ligand_chemistry" -eq 0 ] || [ -z "$ligand_template" ] || {
+  echo "ERROR: --infer-ligand-chemistry cannot be combined with --ligand-template" >&2
+  exit 2
+}
+case "$engine" in vina|smina|both) ;; *) echo "ERROR: --engine must be vina, smina, or both" >&2; exit 2 ;; esac
+case "$control_tier" in quick|repeatability|broader|conformers|robust) ;; *) echo "ERROR: invalid --control-tier" >&2; exit 2 ;; esac
+[[ "$exhaustiveness" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: --exhaustiveness must be a positive integer" >&2; exit 2; }
+[[ "$num_modes" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: --num-modes must be a positive integer" >&2; exit 2; }
+[[ "$approval_min_seeds" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: --approval-min-seeds must be a positive integer" >&2; exit 2; }
+[[ "$base_seed" =~ ^[0-9]+$ ]] || { echo "ERROR: --base-seed must be a non-negative integer" >&2; exit 2; }
+
+if [ -z "${BOX_SIZE+x}" ]; then
+  BOX_SIZE="26.0"
+  if [ "$non_interactive" -eq 0 ]; then
+    read -r -p "Docking-box edge length in Angstroms [26.0]: " requested_box_size
+    BOX_SIZE="${requested_box_size:-26.0}"
+  fi
+fi
+if ! awk -v value="$BOX_SIZE" 'BEGIN { exit !(value >= 10 && value <= 50) }'; then
+  echo "ERROR: BOX_SIZE must be between 10 and 50 Angstroms" >&2
+  exit 2
+fi
+export BOX_SIZE
+echo "Docking-box edge length: ${BOX_SIZE} Angstroms"
+echo "Docking-box center: experimental ligand coordinates (fixed for control)"
+
+complex=$(CDPATH= cd -- "$(dirname -- "$complex")" && pwd)/$(basename "$complex")
+[ -z "$ligand_template" ] || ligand_template=$(CDPATH= cd -- "$(dirname -- "$ligand_template")" && pwd)/$(basename "$ligand_template")
+
+candidate_ids=()
+candidate_atoms=()
+while IFS=$'\t' read -r candidate_id atom_count; do
+  if [ -n "$candidate_id" ]; then
+    candidate_ids+=("$candidate_id")
+    candidate_atoms+=("$atom_count")
+  fi
+done <<EOF
+$(awk '
+  FNR == NR {
+    if (/^MODRES/) { r=substr($0,13,3); gsub(/ /,"",r); if (r!="") mod[r]=1 }
+    next
+  }
+  /^HETATM/ {
+    r=substr($0,18,3); gsub(/ /,"",r)
+    if (r in mod) next
+    if (r ~ /^(HOH|WAT|EDO|GOL|PEG|MPD|DMS|IPA|EOH|ACT|ACE|SO4|PO4)$/) next
+    if (r ~ /^(ZN|MG|MN|CA|FE|CU|NA|K|CL)$/) next
+    ch=substr($0,22,1); if (ch==" ") ch="_"
+    seq=substr($0,23,4); gsub(/ /,"",seq)
+    count[r ":" ch ":" seq]++
+  }
+  END { for (id in count) if (count[id] >= 10) print id "\t" count[id] }
+' "$complex" "$complex" | sort)
+EOF
+
+[ "${#candidate_ids[@]}" -gt 0 ] || { echo "ERROR: no eligible bound ligand was detected in the complex" >&2; exit 1; }
+
+selection_method="command_line"
+if [ -n "$ligand_resname" ] && [ -z "$ligand_id" ]; then
+  matches=()
+  for candidate in "${candidate_ids[@]}"; do
+    [ "${candidate%%:*}" = "$ligand_resname" ] && matches+=("$candidate")
+  done
+  [ "${#matches[@]}" -eq 1 ] || {
+    echo "ERROR: --ligand-resname '$ligand_resname' does not identify exactly one candidate; use --ligand-id" >&2
+    exit 1
+  }
+  ligand_id="${matches[0]}"
+  selection_method="deprecated_resname"
+fi
+
+if [ -z "$ligand_id" ]; then
+  selection_method="interactive_confirmed"
+  echo "Eligible bound-ligand candidates:"
+  echo "  Each identifier is RESNAME:CHAIN:RESIDUE. Atom count helps distinguish substantial compounds from small additives."
+  echo "  Eligibility does not prove biological relevance; review every option before selecting the experimental control."
+  for i in "${!candidate_ids[@]}"; do
+    printf '  %d) %-18s %s atoms\n' "$((i + 1))" "${candidate_ids[$i]}" "${candidate_atoms[$i]}"
+  done
+  read -r -p "Select the experimental ligand [1]: " selected_index
+  selected_index="${selected_index:-1}"
+  [[ "$selected_index" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: invalid ligand selection" >&2; exit 2; }
+  [ "$selected_index" -le "${#candidate_ids[@]}" ] || { echo "ERROR: ligand selection is out of range" >&2; exit 2; }
+  ligand_id="${candidate_ids[$((selected_index - 1))]}"
+  read -r -p "Use $ligand_id as the experimental ligand? [Y/n]: " confirmed
+  case "${confirmed:-y}" in y|Y|yes|YES) ;; *) echo "Cancelled."; exit 1 ;; esac
+
+  echo "Identity verification:"
+  echo "  1) Strict verification using coordinate-free RCSB CCD chemical identity (recommended)"
+  echo "     Retains bonds, charge, and stereochemistry; no known 3D conformation seeds docking."
+  echo "  2) Select a local SDF chemistry template"
+  echo "     Uses the SDF for chemical identity while retaining the experimental coordinates from the PDB."
+  echo "  3) Manual override (recorded in the run manifest)"
+  echo "  4) Provisional bond inference from the local PDB (not recommended)"
+  echo "     Writes a 2D review image; confirmation is required before docking."
+  read -r -p "Choose verification mode [1]: " verification_choice
+  case "${verification_choice:-1}" in
+    1) ;;
+    2)
+      read -r -p "Path to the ligand SDF chemistry template: " ligand_template
+      ligand_template="${ligand_template/#\~/$HOME}"
+      [ -f "$ligand_template" ] || { echo "ERROR: ligand template SDF not found: $ligand_template" >&2; exit 2; }
+      ligand_template=$(CDPATH= cd -- "$(dirname -- "$ligand_template")" && pwd)/$(basename "$ligand_template")
+      ;;
+    3)
+      force_ligand=1
+      read -r -p "Reason for manual override: " override_reason
+      [ -n "$override_reason" ] || { echo "ERROR: an override reason is required" >&2; exit 2; }
+      ;;
+    4)
+      force_ligand=1
+      infer_ligand_chemistry=1
+      read -r -p "Reason for provisional PDB-based chemistry inference: " override_reason
+      [ -n "$override_reason" ] || { echo "ERROR: an override reason is required" >&2; exit 2; }
+      ;;
+    *) echo "ERROR: choose 1, 2, 3, or 4" >&2; exit 2 ;;
+  esac
+fi
+
+found=0
+for candidate in "${candidate_ids[@]}"; do [ "$candidate" = "$ligand_id" ] && found=1; done
+[ "$found" -eq 1 ] || { echo "ERROR: bound ligand '$ligand_id' was not detected as an eligible candidate" >&2; exit 1; }
+
+IFS=: read -r ligand_resname ligand_chain ligand_position <<EOF
+$ligand_id
+EOF
+[ -n "$ligand_resname" ] && [ -n "$ligand_chain" ] && [ -n "$ligand_position" ] || {
+  echo "ERROR: --ligand-id must be RESNAME:CHAIN:RESNUM (use _ for a blank chain)" >&2
+  exit 2
+}
+
+instance_count=$(awk -v r="$ligand_resname" '
+  /^HETATM/ {
+    rn=substr($0,18,3); gsub(/ /,"",rn)
+    if (rn==r) { ch=substr($0,22,1); seq=substr($0,23,4); gsub(/ /,"",seq); seen[ch ":" seq]=1 }
+  }
+  END { for (x in seen) n++; print n+0 }
+' "$complex")
+[ "$instance_count" -eq 1 ] || {
+  echo "ERROR: $ligand_resname occurs in $instance_count residue instances. This control command currently requires a unique bound-ligand instance." >&2
+  exit 1
+}
+
+complex_base=$(basename "$complex" .pdb | sed 's/[^A-Za-z0-9._-]/_/g')
+ligand_base=$(printf '%s' "$ligand_resname" | sed 's/[^A-Za-z0-9._-]/_/g')
+[ -n "$out_dir" ] || out_dir="control_${complex_base}_${ligand_base}_$(date '+%Y%m%d_%H%M%S')"
+mkdir -p "$out_dir"
+out_dir=$(CDPATH= cd -- "$out_dir" && pwd)
+
+run_log="$out_dir/run.log"
+exec > >(tee -a "$run_log") 2>&1
+
+inputs_dir="$out_dir/00_inputs"
+prep_parent="$out_dir/01_preparation"
+experimental_dir="$out_dir/02_experimental_pose"
+control_ligand_dir="$out_dir/03_control_ligand"
+redocking_dir="$out_dir/04_redocking"
+mkdir -p "$inputs_dir" "$prep_parent" "$experimental_dir" "$control_ligand_dir" "$redocking_dir"
+
+complex_copy="$inputs_dir/$(basename "$complex")"
+cp "$complex" "$complex_copy"
+[ -z "$ligand_template" ] || cp "$ligand_template" "$inputs_dir/$(basename "$ligand_template")"
+
+{
+  printf 'workflow\tbound_ligand_redocking_control\n'
+  printf 'date\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')"
+  printf 'complex\t%s\n' "$complex_copy"
+  printf 'ligand_id\t%s\n' "$ligand_id"
+  printf 'ligand_selection\t%s\n' "$selection_method"
+  printf 'identity_verification\t%s\n' "$([ "$infer_ligand_chemistry" -eq 1 ] && printf provisional_pdb_inference || { [ "$force_ligand" -eq 1 ] && printf manual_override || printf strict; })"
+  printf 'provisional_pdb_chemistry_inference\t%s\n' "$([ "$infer_ligand_chemistry" -eq 1 ] && printf yes || printf no)"
+  printf 'override_reason\t%s\n' "${override_reason:-NA}"
+  printf 'chemistry_identity\t%s\n' "$([ "$infer_ligand_chemistry" -eq 1 ] && printf PDB_bond_perception || printf '%s' "${ligand_template:-RCSB_CCD_SMILES}")"
+  printf 'engine\t%s\n' "$engine"
+  printf 'exhaustiveness\t%s\n' "$exhaustiveness"
+  printf 'num_modes_requested_per_engine\t%s\n' "$num_modes"
+  printf 'rmsd_threshold_angstrom\t%s\n' "$rmsd_threshold"
+} > "$out_dir/run_manifest.tsv"
+
+log "CONTROL 1/6: preparing ligand-free receptor and experimental-site box"
+(
+  cd "$prep_parent"
+  env FEEDBACK_LEVEL=concise \
+    DOCKING_UNIVERSAL_LOG_MODE=file \
+    DOCKING_UNIVERSAL_SITE_MODE=ligand \
+    DOCKING_UNIVERSAL_LIGAND_RESNAME="$ligand_resname" \
+    "$CLI" prepare "$complex_copy"
+)
+
+prep_roots=("$prep_parent"/*_receptor_prep)
+[ "${#prep_roots[@]}" -eq 1 ] && [ -d "${prep_roots[0]}" ] || { echo "ERROR: expected one receptor-preparation folder" >&2; exit 1; }
+prep_root="${prep_roots[0]}"
+receptor_pdb=$(find "$prep_root/receptor" -maxdepth 1 -type f -name '*.pdb' | head -1)
+receptor_pdbqt=$(find "$prep_root/receptor" -maxdepth 1 -type f -name '*.pdbqt' | head -1)
+crystal_ligand="$prep_root/ligand/${ligand_resname}.pdb"
+box_config=$(find "$prep_root/cavity" -maxdepth 1 -type f -name '*_pocket1.conf' | head -1)
+[ -s "$receptor_pdb" ] && [ -s "$receptor_pdbqt" ] && [ -s "$crystal_ligand" ] && [ -s "$box_config" ] || {
+  echo "ERROR: preparation did not produce the receptor, selected ligand, and pocket-1 configuration" >&2
+  exit 1
+}
+
+actual_chain=$(awk '/^HETATM/{x=substr($0,22,1); if (x==" ") x="_"; print x; exit}' "$crystal_ligand")
+actual_position=$(awk '/^HETATM/{x=substr($0,23,4); gsub(/ /,"",x); print x; exit}' "$crystal_ligand")
+[ "$actual_chain" = "$ligand_chain" ] && [ "$actual_position" = "$ligand_position" ] || {
+  echo "ERROR: prepared ligand instance does not match selected $ligand_id" >&2
+  exit 1
+}
+
+sdf_copy="$inputs_dir/${ligand_resname}_experimental.sdf"
+bound_sdf_args=(
+  --ligand-pdb "$crystal_ligand"
+  --ligand-id "$ligand_id"
+  --out "$sdf_copy"
+)
+[ -z "$ligand_template" ] || bound_sdf_args+=(--template-sdf "$ligand_template")
+[ "$force_ligand" -eq 0 ] || bound_sdf_args+=(--force --override-reason "$override_reason")
+[ "$infer_ligand_chemistry" -eq 0 ] || bound_sdf_args+=(--infer-from-pdb)
+log "CONTROL 2/6: verifying ligand identity and creating the experimental-coordinate SDF"
+if [ "$infer_ligand_chemistry" -eq 1 ]; then
+  log "Chemistry policy: provisional bond perception from local PDB geometry; review is required before docking"
+else
+  log "Chemistry policy: use only the coordinate-free molecular graph (bonds, charge, stereochemistry) from CCD identity"
+fi
+log "Docking starts from independently embedded conformers; the experimental pose is withheld for RMSD evaluation"
+if ! "$PYTHON_COMMAND" "$SCRIPT_DIR/docking-universal-bound-sdf.py" "${bound_sdf_args[@]}"; then
+  if [ "$infer_ligand_chemistry" -eq 0 ] && [ -z "$ligand_template" ] && [ "$non_interactive" -eq 0 ]; then
+    echo "Strict coordinate-free chemistry could not be obtained or verified (for example, RCSB may be unavailable)."
+    echo "A local PDB-based bond-perception fallback is available for exploratory review only."
+    read -r -p "Create a provisional SDF and 2D review image from PDB geometry [y/N]: " use_provisional
+    case "${use_provisional:-n}" in
+      y|Y|yes|YES)
+        force_ligand=1
+        infer_ligand_chemistry=1
+        read -r -p "Reason for provisional PDB-based chemistry inference: " override_reason
+        [ -n "$override_reason" ] || { echo "ERROR: an override reason is required" >&2; exit 2; }
+        bound_sdf_args+=(--force --override-reason "$override_reason" --infer-from-pdb)
+        "$PYTHON_COMMAND" "$SCRIPT_DIR/docking-universal-bound-sdf.py" "${bound_sdf_args[@]}"
+        printf 'identity_verification\tprovisional_pdb_inference\n' >> "$out_dir/run_manifest.tsv"
+        printf 'provisional_pdb_chemistry_inference\tyes\n' >> "$out_dir/run_manifest.tsv"
+        printf 'chemistry_identity\tPDB_bond_perception\n' >> "$out_dir/run_manifest.tsv"
+        printf 'override_reason\t%s\n' "$override_reason" >> "$out_dir/run_manifest.tsv"
+        ;;
+      *)
+        echo "Stopped before docking. Supply --ligand-template for authoritative local chemistry, or explicitly choose provisional inference." >&2
+        exit 1
+        ;;
+    esac
+  else
+    echo "Strict chemistry could not be verified. Provide --ligand-template, or use the explicit provisional inference option interactively." >&2
+    exit 1
+  fi
+fi
+printf 'generated_ligand_sdf\t%s\n' "$sdf_copy" >> "$out_dir/run_manifest.tsv"
+
+if [ "$infer_ligand_chemistry" -eq 1 ]; then
+  provisional_review_dir="$experimental_dir/provisional_chemistry_review"
+  log "CONTROL 2/6: writing a provisional 2D chemistry review image"
+  "$CLI" depict2d "$sdf_copy" --out-dir "$provisional_review_dir"
+  echo "WARNING: ligand bond orders were inferred from PDB geometry and are provisional."
+  echo "Review the generated 2D image before using this chemistry for docking: $provisional_review_dir"
+  if [ "$non_interactive" -eq 0 ]; then
+    read -r -p "I reviewed this provisional chemistry and want to continue to docking [y/N]: " provisional_confirmed
+    case "${provisional_confirmed:-n}" in y|Y|yes|YES) ;; *) echo "Stopped before docking; review outputs were retained in $provisional_review_dir"; exit 1 ;; esac
+  else
+    echo "Non-interactive use records the explicit --infer-ligand-chemistry acknowledgement and audit reason."
+  fi
+  printf 'provisional_chemistry_review\t%s\n' "$provisional_review_dir" >> "$out_dir/run_manifest.tsv"
+fi
+
+experimental_complex="$experimental_dir/experimental_complex.pdb"
+{
+  awk '/^(ATOM  |HETATM|TER)/ {print}' "$receptor_pdb"
+  awk '/^HETATM/ {print}' "$crystal_ligand"
+  printf 'END\n'
+} > "$experimental_complex"
+cp "$crystal_ligand" "$experimental_dir/crystal_ligand.pdb"
+
+if [ "$visuals" -eq 1 ]; then
+  log "CONTROL 3/6: analyzing the crystallographic ligand and writing reference visuals"
+  "$CLI" depict2d "$sdf_copy" --out-dir "$experimental_dir/ligand_2d"
+  experimental_pml="$experimental_dir/interactions/$(basename "$experimental_complex" .pdb)_plip_all_in_one.pml"
+  if [ -f "$experimental_pml" ]; then
+    log "CONTROL 3/6: reusing the completed experimental interaction scene"
+  else
+    if [ -d "$experimental_dir/interactions" ]; then
+      incomplete_backup="$experimental_dir/interactions.incomplete.$(date +%Y%m%d_%H%M%S)"
+      mv "$experimental_dir/interactions" "$incomplete_backup"
+      log "Archived incomplete interaction output: $incomplete_backup"
+    fi
+    "$CLI" interactions "$experimental_complex" \
+      --out-dir "$experimental_dir/interactions" \
+      --plip-command "$plip_command" --skip-native-visuals \
+      --typed-ligand-sdf "$sdf_copy" \
+      --ligand-resname "$ligand_resname" --ligand-chain "$([ "$ligand_chain" = _ ] && printf '' || printf '%s' "$ligand_chain")" --ligand-position "$ligand_position"
+  fi
+  "$CLI" render3d "$experimental_pml" \
+    --out "$experimental_dir/experimental_interactions.png" \
+    --session-out "$experimental_dir/experimental_interactions.pse" \
+    --pymol "$pymol_command"
+  if [ "$non_interactive" -eq 0 ]; then
+    ligand_2d_image="$experimental_dir/ligand_2d/$(basename "$sdf_copy" .sdf).png"
+    echo
+    echo "Experimental-ligand review files:"
+    echo "  2D chemistry: $ligand_2d_image"
+    echo "  3D interactions: $experimental_dir/experimental_interactions.png"
+    echo "  PyMOL session: $experimental_dir/experimental_interactions.pse"
+    while :; do
+      echo "Review the verified experimental ligand before calibration:"
+      echo "  1) Continue to redocking calibration"
+      echo "  2) Open the 2D chemistry image"
+      echo "  3) Open the experimental PyMOL session"
+      echo "  4) Stop and retain the review files"
+      read -r -p "Select [1]: " review_choice
+      case "${review_choice:-1}" in
+        1) break ;;
+        2)
+          if command -v open >/dev/null 2>&1 && open "$ligand_2d_image"; then :
+          elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$ligand_2d_image" >/dev/null 2>&1 &
+          else echo "Could not launch an image viewer. Open manually: $ligand_2d_image"; fi
+          ;;
+        3)
+          if command -v open >/dev/null 2>&1 && open -a PyMOL "$experimental_dir/experimental_interactions.pse" 2>/dev/null; then :
+          elif command -v "$pymol_command" >/dev/null 2>&1; then "$pymol_command" "$experimental_dir/experimental_interactions.pse" >/dev/null 2>&1 &
+          else echo "Could not launch PyMOL automatically. Open manually: $experimental_dir/experimental_interactions.pse"; fi
+          ;;
+        4) echo "Stopped before docking; review files were retained in $experimental_dir"; exit 0 ;;
+        *) echo "ERROR: choose 1, 2, 3, or 4" >&2 ;;
+      esac
+    done
+    printf 'experimental_ligand_review	confirmed_interactively\n' >> "$out_dir/run_manifest.tsv"
+  fi
+else
+  log "CONTROL 3/6: experimental visuals skipped"
+fi
+
+# The modern path delegates search calibration to a dedicated orchestrator.
+# This keeps ligand identity/receptor preparation in this command while making
+# the tier logic and protocol record independently testable. The legacy branch
+# below is retained only to reproduce historical output layouts.
+if [ "$legacy_single_conformer" -eq 0 ]; then
+  engines=("$engine")
+  [ "$engine" = "both" ] && engines=(vina smina)
+  for current_engine in "${engines[@]}"; do
+    calibration_args=(
+      --reference-sdf "$sdf_copy"
+      --crystal-ligand "$crystal_ligand"
+      --receptor-pdb "$receptor_pdb"
+      --receptor-pdbqt "$receptor_pdbqt"
+      --box "$box_config"
+      --out "$redocking_dir/$current_engine"
+      --engine "$current_engine"
+      --tier "$control_tier"
+      --base-seed "$base_seed"
+      --approval-min-seeds "$approval_min_seeds"
+      --rmsd-threshold "$rmsd_threshold"
+      --ph "$ph"
+      --charge-model "$charge_model"
+      --mk-export "$mk_export_command"
+    )
+    [ "$non_interactive" -eq 0 ] || calibration_args+=(--non-interactive)
+    [ "$visuals" -eq 0 ] || calibration_args+=(--render-visuals --pymol "$pymol_command" --plip-command "$plip_command")
+    [ -z "$engine_command" ] || calibration_args+=(--engine-command "$engine_command")
+    [ -z "$engine_env" ] || calibration_args+=(--engine-env "$engine_env")
+    [ "$infer_ligand_chemistry" -eq 0 ] || calibration_args+=(--provisional-chemistry)
+    log "CONTROL 4/4: running $current_engine ensemble calibration ($control_tier tier)"
+    "$CLI" calibrate "${calibration_args[@]}"
+  done
+  log "CONTROL COMPLETE: $out_dir"
+  log "Experimental ligand: $ligand_id"
+  log "Protocol records are under: $redocking_dir/<engine>/<tier>/protocol.json"
+  log "This retrospective control does not establish prospective docking accuracy."
+  exit 0
+fi
+
+log "CONTROL 4/6: preparing the generated experimental ligand for redocking"
+target_engines="$engine"
+[ "$engine" = "both" ] && target_engines="both"
+"$CLI" ligands "$sdf_copy" --out "$control_ligand_dir" --target-engines "$target_engines"
+
+printf 'engine\ttop_score_model\taffinity_kcal_per_mol\ttop_score_rmsd_angstrom\twithin_threshold\tbest_rmsd_model\tbest_rmsd_angstrom\n' > "$out_dir/control_summary.tsv"
+engines=("$engine")
+[ "$engine" = "both" ] && engines=(vina smina)
+
+log "CONTROL 5/6: redocking the experimental ligand"
+for current_engine in "${engines[@]}"; do
+  engine_dir="$redocking_dir/$current_engine"
+  docking_output="$engine_dir/docking"
+  comparison_output="$engine_dir/comparison"
+  mkdir -p "$engine_dir"
+
+  "$CLI" dock --engine "$current_engine" \
+    --receptor "$receptor_pdbqt" \
+    --ligands "$control_ligand_dir/pdbqt_ligands" \
+    --config "$box_config" \
+    --out "$docking_output" \
+    --exhaustiveness "$exhaustiveness" \
+    --num-modes "$num_modes"
+  "$CLI" collect "$docking_output" --out "$engine_dir/scores.csv"
+
+  docked_files=("$docking_output"/*_"$current_engine".pdbqt)
+  [ "${#docked_files[@]}" -eq 1 ] && [ -s "${docked_files[0]}" ] || { echo "ERROR: expected one $current_engine control pose file" >&2; exit 1; }
+  docked_pdbqt="${docked_files[0]}"
+
+  "$PYTHON_COMMAND" "$SCRIPT_DIR/docking-universal-redock-compare.py" \
+    --reference-sdf "$sdf_copy" \
+    --crystal-ligand "$crystal_ligand" \
+    --docked-pdbqt "$docked_pdbqt" \
+    --receptor-pdb "$receptor_pdb" \
+    --out "$comparison_output" \
+    --mk-export "$mk_export_command" \
+    --rmsd-threshold "$rmsd_threshold"
+
+  "$PYTHON_COMMAND" -c 'import json,sys; d=json.load(open(sys.argv[1])); print("\t".join(map(str,[sys.argv[2],d["top_score_model"],d["top_score_affinity_kcal_per_mol"],d["top_score_rmsd_angstrom"],"yes" if d["top_score_within_threshold"] else "no",d["best_rmsd_model"],d["best_rmsd_angstrom"]])))' \
+    "$comparison_output/comparison_summary.json" "$current_engine" >> "$out_dir/control_summary.tsv"
+
+  if [ "$visuals" -eq 1 ]; then
+    "$CLI" render3d "$comparison_output/crystal_vs_top_pose.pml" \
+      --out "$engine_dir/crystal_vs_top_pose.png" \
+      --session-out "$engine_dir/crystal_vs_top_pose.pse" \
+      --pymol "$pymol_command"
+    "$CLI" render3d "$comparison_output/crystal_pose_browser.pml" \
+      --out "$engine_dir/crystal_pose_browser.png" \
+      --session-out "$engine_dir/crystal_pose_browser.pse" \
+      --pymol "$pymol_command"
+    "$CLI" interactions "$comparison_output/top_score_complex.pdb" \
+      --out-dir "$engine_dir/top_pose_interactions" \
+      --plip-command "$plip_command" --skip-native-visuals \
+      --typed-ligand-sdf "$comparison_output/top_score_pose.sdf" \
+      --ligand-resname UNL --ligand-chain Z --ligand-position 1
+    docked_pml="$engine_dir/top_pose_interactions/top_score_complex_plip_all_in_one.pml"
+    "$CLI" render3d "$docked_pml" \
+      --out "$engine_dir/top_pose_interactions.png" \
+      --session-out "$engine_dir/top_pose_interactions.pse" \
+      --pymol "$pymol_command"
+  fi
+done
+
+log "CONTROL 6/6: complete"
+log "Experimental ligand: $ligand_id"
+log "Control summary: $out_dir/control_summary.tsv"
+log "This control does not screen additional compounds or test ligand-free pocket ranking."

@@ -1,0 +1,209 @@
+#!/usr/bin/env bash
+set -euo pipefail
+shopt -s nullglob
+
+# Run ligand-free fpocket detection and convert ranked pockets into docking-box
+# coordinates. Geometric pocket scores are hypotheses and require review.
+
+###############################################################################
+# Usage
+###############################################################################
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  echo "Usage: docking-universal pockets <protein_only.pdb> <PROTEIN_NAME> [quick|robust]"
+  exit 0
+fi
+if [ "$#" -lt 2 ]; then
+  echo "Usage:"
+  echo "  docking-universal pockets <protein_only.pdb> <PROTEIN_NAME> [quick|robust]"
+  exit 2
+fi
+
+###############################################################################
+# Inputs
+###############################################################################
+PROTEIN_PDB="$1"
+PROTEIN_NAME_RAW="$2"
+MODE="${3:-quick}"
+[ -f "$PROTEIN_PDB" ] || { echo "ERROR: protein PDB not found: $PROTEIN_PDB" >&2; exit 2; }
+[ "$MODE" = "quick" ] || [ "$MODE" = "robust" ] || { echo "ERROR: mode must be quick or robust" >&2; exit 2; }
+
+# Sanitize protein name for filesystem safety
+PROTEIN_NAME="$(echo "$PROTEIN_NAME_RAW" | sed 's/[^A-Za-z0-9._-]/_/g')"
+
+###############################################################################
+# Output directory
+###############################################################################
+OUTDIR="${PROTEIN_NAME}_pockets_${MODE}"
+mkdir -p "$OUTDIR"
+
+###############################################################################
+# Tool check
+###############################################################################
+command -v fpocket >/dev/null 2>&1 || {
+  [ -n "${DOCKING_UNIVERSAL_FPOCKET:-}" ] || { echo "ERROR: fpocket not found"; exit 1; }
+}
+FPOCKET_BIN="${DOCKING_UNIVERSAL_FPOCKET:-$(command -v fpocket)}"
+[ -x "$FPOCKET_BIN" ] || { echo "ERROR: fpocket is not executable: $FPOCKET_BIN" >&2; exit 1; }
+
+###############################################################################
+# Prepare sanitized fpocket input
+###############################################################################
+SAFE_PDB="${OUTDIR}/${PROTEIN_NAME}_fpocket_input.pdb"
+cp "$PROTEIN_PDB" "$SAFE_PDB"
+
+###############################################################################
+# Remove any previous fpocket output (critical)
+###############################################################################
+FP_DIR="${SAFE_PDB%.pdb}_out"
+if [ -d "$FP_DIR" ]; then
+  rm -rf "$FP_DIR"
+fi
+
+###############################################################################
+# Run fpocket
+###############################################################################
+echo "🔹 Running fpocket on sanitized input ($MODE mode)..."
+"$FPOCKET_BIN" -f "$SAFE_PDB" > "$OUTDIR/fpocket.log"
+
+###############################################################################
+# Detect fpocket output directory dynamically (FIX)
+###############################################################################
+if [ -z "$FP_DIR" ] || [ ! -d "$FP_DIR" ]; then
+  echo "❌ ERROR: fpocket output directory not found"
+  exit 1
+fi
+
+###############################################################################
+# Rank pockets
+###############################################################################
+INFO_FILE="$FP_DIR/pockets_info.txt"
+if [ ! -f "$INFO_FILE" ]; then
+  info_candidates=("$FP_DIR"/*_info.txt)
+  [ "${#info_candidates[@]}" -eq 1 ] || {
+    echo "ERROR: could not identify a unique fpocket info file in $FP_DIR" >&2
+    exit 1
+  }
+  INFO_FILE="${info_candidates[0]}"
+fi
+
+awk '
+  /^Pocket/ {p=$2}
+  /^[[:space:]]*Score[[:space:]]*:/  {score[p]=$NF}
+  /^[[:space:]]*Volume[[:space:]]*:/ {vol[p]=$NF}
+  END {
+    for (p in score)
+      printf "%d %.3f %.3f\n", p, score[p], vol[p]
+  }
+' "$INFO_FILE" \
+| sort -k2 -nr > "$OUTDIR/pocket_ranking.txt"
+
+###############################################################################
+# Select pockets
+###############################################################################
+if [ "$MODE" = "robust" ]; then
+  N_KEEP=3
+else
+  N_KEEP=5
+fi
+
+head -n "$N_KEEP" "$OUTDIR/pocket_ranking.txt" > "$OUTDIR/pockets_selected.txt"
+
+###############################################################################
+# Generate configs and box PDBs
+###############################################################################
+IDX=0
+
+while read -r PID SCORE VOL; do
+  IDX=$((IDX+1))
+  TAG="POCKET${IDX}"
+  POCKET_PDB="$FP_DIR/pockets/pocket${PID}_vert.pqr"
+  [ -f "$POCKET_PDB" ] || POCKET_PDB="$FP_DIR/pocket${PID}_vert.pdb"
+  [ -f "$POCKET_PDB" ] || {
+    echo "ERROR: fpocket coordinates missing for pocket $PID" >&2
+    exit 1
+  }
+
+  # Pocket center
+  read CX CY CZ <<< $(
+    awk '
+      BEGIN {x=0;y=0;z=0;n=0}
+      /^ATOM/ {
+        x+=substr($0,31,8)+0; y+=substr($0,39,8)+0; z+=substr($0,47,8)+0; n++
+      }
+      END {
+        if (n == 0) exit 1
+        printf "%.3f %.3f %.3f\n",x/n,y/n,z/n
+      }
+    ' "$POCKET_PDB"
+  )
+
+  # Pocket extents (+ padding)
+  read SX SY SZ <<< $(
+    awk '
+      BEGIN {xmin=1e9;xmax=-1e9;ymin=1e9;ymax=-1e9;zmin=1e9;zmax=-1e9}
+      /^ATOM/ {
+        x=substr($0,31,8)+0; y=substr($0,39,8)+0; z=substr($0,47,8)+0
+        if (x<xmin) xmin=x; if (x>xmax) xmax=x
+        if (y<ymin) ymin=y; if (y>ymax) ymax=y
+        if (z<zmin) zmin=z; if (z>zmax) zmax=z
+      }
+      END {
+        printf "%.1f %.1f %.1f\n",
+          (xmax-xmin)+4,
+          (ymax-ymin)+4,
+          (zmax-zmin)+4
+      }
+    ' "$POCKET_PDB"
+  )
+
+  awk -v x="$SX" -v y="$SY" -v z="$SZ" 'BEGIN {exit !(x > 0 && y > 0 && z > 0)}' || {
+    echo "ERROR: nonpositive box dimension for pocket $PID: $SX $SY $SZ" >&2
+    exit 1
+  }
+
+  CONF="${OUTDIR}/${PROTEIN_NAME}_${TAG}.conf"
+  BOX="${OUTDIR}/${PROTEIN_NAME}_${TAG}_dock_box.pdb"
+
+  echo "🔹 Writing $TAG (score=$SCORE, volume=$VOL)"
+
+  cat > "$CONF" <<EOF
+# ⚠️ Predicted pocket (no bound ligand)
+# source_protein = $PROTEIN_PDB
+# Supply the prepared receptor PDBQT explicitly to docking-universal dock.
+
+center_x = $CX
+center_y = $CY
+center_z = $CZ
+
+size_x = $SX
+size_y = $SY
+size_z = $SZ
+EOF
+
+  HX=$(awk "BEGIN{print $SX/2}")
+  HY=$(awk "BEGIN{print $SY/2}")
+  HZ=$(awk "BEGIN{print $SZ/2}")
+
+  cat > "$BOX" <<EOF
+HEADER POCKET BOX
+ATOM 1 X BOX A 1 $(printf "%8.3f" "$(awk "BEGIN{print $CX-$HX}")") $(printf "%8.3f" "$(awk "BEGIN{print $CY-$HY}")") $(printf "%8.3f" "$(awk "BEGIN{print $CZ-$HZ}")")
+ATOM 2 X BOX A 1 $(printf "%8.3f" "$(awk "BEGIN{print $CX+$HX}")") $(printf "%8.3f" "$(awk "BEGIN{print $CY-$HY}")") $(printf "%8.3f" "$(awk "BEGIN{print $CZ-$HZ}")")
+ATOM 3 X BOX A 1 $(printf "%8.3f" "$(awk "BEGIN{print $CX+$HX}")") $(printf "%8.3f" "$(awk "BEGIN{print $CY+$HY}")") $(printf "%8.3f" "$(awk "BEGIN{print $CZ-$HZ}")")
+ATOM 4 X BOX A 1 $(printf "%8.3f" "$(awk "BEGIN{print $CX-$HX}")") $(printf "%8.3f" "$(awk "BEGIN{print $CY+$HY}")") $(printf "%8.3f" "$(awk "BEGIN{print $CZ-$HZ}")")
+ATOM 5 X BOX A 1 $(printf "%8.3f" "$(awk "BEGIN{print $CX-$HX}")") $(printf "%8.3f" "$(awk "BEGIN{print $CY-$HY}")") $(printf "%8.3f" "$(awk "BEGIN{print $CZ+$HZ}")")
+ATOM 6 X BOX A 1 $(printf "%8.3f" "$(awk "BEGIN{print $CX+$HX}")") $(printf "%8.3f" "$(awk "BEGIN{print $CY-$HY}")") $(printf "%8.3f" "$(awk "BEGIN{print $CZ+$HZ}")")
+ATOM 7 X BOX A 1 $(printf "%8.3f" "$(awk "BEGIN{print $CX+$HX}")") $(printf "%8.3f" "$(awk "BEGIN{print $CY+$HY}")") $(printf "%8.3f" "$(awk "BEGIN{print $CZ+$HZ}")")
+ATOM 8 X BOX A 1 $(printf "%8.3f" "$(awk "BEGIN{print $CX-$HX}")") $(printf "%8.3f" "$(awk "BEGIN{print $CY+$HY}")") $(printf "%8.3f" "$(awk "BEGIN{print $CZ+$HZ}")")
+END
+EOF
+
+done < "$OUTDIR/pockets_selected.txt"
+
+###############################################################################
+# Done
+###############################################################################
+echo
+echo "✅ Pocket detection complete"
+echo "   Protein: $PROTEIN_NAME"
+echo "   Mode: $MODE"
+echo "   Output directory: $OUTDIR"

@@ -1,0 +1,16 @@
+.DS_Store
+*_receptor_prep/
+*.log
+*.pse
+!examples/**/*.log
+!examples/**/*.pse
+__pycache__/
+*.pyc
+.pytest_cache/
+*_control/
+*_runs/
+examples/tutorials/*/study/
+tests/output/*
+!tests/output/.gitkeep
+runs/*
+!runs/README.md

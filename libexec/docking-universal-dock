@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Low-level Vina/smina runner for an already prepared receptor, ligand PDBQT
+# directory, and box. It records executable versions and parameters; scientific
+# preparation and protocol approval are handled by higher-level commands.
+
+usage() {
+  cat <<'EOF'
+Usage:
+  docking-universal dock --receptor receptor.pdbqt --ligands DIR --config box.conf --out DIR [options]
+
+Options:
+  --engine vina|smina      Docking engine (default: vina)
+  --engine-command PATH    Explicit engine executable
+  --engine-env NAME        Conda environment containing the engine
+  --exhaustiveness N       Forwarded to the selected engine when provided
+  --num-modes N            Maximum output poses requested from the engine
+  --energy-range KCAL      Maximum energy range retained from the best pose
+  --seed N                 Reproducible engine random seed
+  --skip-existing          Preserve existing output files
+  -h, --help               Show this help
+EOF
+}
+
+engine="vina"
+receptor=""
+ligand_dir=""
+config=""
+out_dir=""
+exhaustiveness=""
+num_modes=""
+energy_range=""
+seed=""
+skip_existing=0
+engine_command=""
+engine_env=""
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --engine) engine="$2"; shift 2 ;;
+    --engine-command) engine_command="$2"; shift 2 ;;
+    --engine-env) engine_env="$2"; shift 2 ;;
+    --receptor) receptor="$2"; shift 2 ;;
+    --ligands) ligand_dir="$2"; shift 2 ;;
+    --config) config="$2"; shift 2 ;;
+    --out) out_dir="$2"; shift 2 ;;
+    --exhaustiveness) exhaustiveness="$2"; shift 2 ;;
+    --num-modes) num_modes="$2"; shift 2 ;;
+    --energy-range) energy_range="$2"; shift 2 ;;
+    --seed) seed="$2"; shift 2 ;;
+    --skip-existing) skip_existing=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+[ -n "$receptor" ] && [ -n "$ligand_dir" ] && [ -n "$config" ] && [ -n "$out_dir" ] || {
+  usage >&2
+  exit 2
+}
+[ "$engine" = "vina" ] || [ "$engine" = "smina" ] || { echo "ERROR: engine must be vina or smina" >&2; exit 2; }
+
+if [ -z "$engine_command" ]; then
+  case "$engine" in
+    vina) engine_command="${DOCKING_UNIVERSAL_VINA:-}" ;;
+    smina) engine_command="${DOCKING_UNIVERSAL_SMINA:-}" ;;
+  esac
+fi
+
+engine_cmd=()
+engine_source=""
+if [ -n "$engine_command" ]; then
+  [ -x "$engine_command" ] || { echo "ERROR: engine executable is not executable: $engine_command" >&2; exit 1; }
+  engine_cmd=("$engine_command")
+  engine_source="explicit executable"
+elif command -v "$engine" >/dev/null 2>&1; then
+  engine_cmd=("$(command -v "$engine")")
+  engine_source="PATH"
+else
+  if [ -z "$engine_env" ] && [ "$engine" = "vina" ]; then
+    engine_env="${DOCKING_UNIVERSAL_VINA_ENV:-docking-universal-vina}"
+  fi
+  [ -n "$engine_env" ] || { echo "ERROR: $engine not found in PATH; use --engine-command or --engine-env" >&2; exit 1; }
+  command -v conda >/dev/null 2>&1 || { echo "ERROR: conda is required to use --engine-env $engine_env" >&2; exit 1; }
+  if ! conda run -n "$engine_env" "$engine" --version >/dev/null 2>&1; then
+    echo "ERROR: $engine is not runnable from Conda environment: $engine_env" >&2
+    exit 1
+  fi
+  engine_cmd=(conda run --no-capture-output -n "$engine_env" "$engine")
+  engine_source="conda environment $engine_env"
+fi
+
+[ -f "$receptor" ] || { echo "ERROR: receptor not found: $receptor" >&2; exit 1; }
+[ -f "$config" ] || { echo "ERROR: config not found: $config" >&2; exit 1; }
+[ -d "$ligand_dir" ] || { echo "ERROR: ligand directory not found: $ligand_dir" >&2; exit 1; }
+
+mkdir -p "$out_dir"
+version_output=$("${engine_cmd[@]}" --version 2>&1 || true)
+engine_version=$(printf '%s\n' "$version_output" | awk 'NF {print; exit}')
+[ -n "$engine_version" ] || engine_version="unknown"
+{
+  printf 'engine\t%s\n' "$engine"
+  printf 'engine_version\t%s\n' "$engine_version"
+  printf 'engine_source\t%s\n' "$engine_source"
+  printf 'engine_command\t%s\n' "${engine_cmd[*]}"
+  printf 'date\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')"
+  printf 'receptor\t%s\n' "$receptor"
+  printf 'ligand_dir\t%s\n' "$ligand_dir"
+  printf 'config\t%s\n' "$config"
+  printf 'exhaustiveness\t%s\n' "${exhaustiveness:-engine_default}"
+  printf 'num_modes\t%s\n' "${num_modes:-engine_default}"
+  printf 'energy_range_kcal_per_mol\t%s\n' "${energy_range:-engine_default}"
+  printf 'seed\t%s\n' "${seed:-engine_random}"
+} > "$out_dir/run_manifest.tsv"
+cp "$config" "$out_dir/$(basename "$config").used"
+
+found=0
+for ligand in "$ligand_dir"/*.pdbqt; do
+  [ -e "$ligand" ] || continue
+  case "$ligand" in *_out.pdbqt) continue ;; esac
+  found=1
+  base=$(basename "$ligand" .pdbqt)
+  output="$out_dir/${base}_${engine}.pdbqt"
+  log_file="$out_dir/${base}_${engine}.log"
+  if [ "$skip_existing" -eq 1 ] && [ -s "$output" ]; then
+    printf 'skip  %s\n' "$base"
+    continue
+  fi
+
+  printf 'run   %s\n' "$base"
+  args=(--receptor "$receptor" --ligand "$ligand" --config "$config" --out "$output")
+  [ -z "$exhaustiveness" ] || args+=(--exhaustiveness "$exhaustiveness")
+  [ -z "$num_modes" ] || args+=(--num_modes "$num_modes")
+  [ -z "$energy_range" ] || args+=(--energy_range "$energy_range")
+  [ -z "$seed" ] || args+=(--seed "$seed")
+  if ! "${engine_cmd[@]}" "${args[@]}" > "$log_file" 2>&1; then
+    echo "ERROR: $engine failed for $base; see $log_file" >&2
+    exit 1
+  fi
+  [ -s "$output" ] || { echo "ERROR: no output for $base; see $log_file" >&2; exit 1; }
+done
+
+[ "$found" -eq 1 ] || { echo "ERROR: no PDBQT ligands found in $ligand_dir" >&2; exit 1; }
+printf 'Batch complete: %s\n' "$out_dir"

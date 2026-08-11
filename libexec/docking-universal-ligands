@@ -1,0 +1,204 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Convert SDF records to auditable engine-ready PDBQTs. Vina may receive Meeko
+# flexible-macrocycle types; the supported older smina requires rigid rings.
+# Preserve mode is used for independently generated calibration conformers.
+
+usage() {
+  cat <<'EOF'
+Usage:
+  docking-universal ligands <ligands.sdf> [options]
+
+Options:
+  -n, --name-field FIELD     SDF property used as the compound name
+  -o, --out DIR              Output root (default: sanitized SDF basename)
+  --backend NAME             auto, meeko, or adfr (default: auto)
+  --target-engines NAME      both, vina, or smina (default: both)
+  --geometry-mode NAME       optimize or preserve (default: optimize)
+  --charge-model NAME        gasteiger, espaloma, or zero (default: gasteiger)
+  --prepare-ligand PATH      Backend executable path
+  --obabel PATH              Open Babel executable
+  -h, --help                 Show this help
+
+Environment equivalents:
+  DOCKING_UNIVERSAL_PREP_LIGAND
+  DOCKING_UNIVERSAL_OBABEL
+EOF
+}
+
+[ "$#" -gt 0 ] || { usage >&2; exit 2; }
+case "$1" in -h|--help) usage; exit 0 ;; esac
+
+sdf_file="$1"
+shift
+name_field=""
+out_root=""
+backend="${DOCKING_UNIVERSAL_PREP_BACKEND:-auto}"
+target_engines="${DOCKING_UNIVERSAL_TARGET_ENGINES:-both}"
+geometry_mode="optimize"
+charge_model="gasteiger"
+prep_ligand="${DOCKING_UNIVERSAL_PREP_LIGAND:-}"
+obabel_bin="${DOCKING_UNIVERSAL_OBABEL:-$(command -v obabel 2>/dev/null || true)}"
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -n|--name-field) name_field="$2"; shift 2 ;;
+    -o|--out) out_root="$2"; shift 2 ;;
+    --backend) backend="$2"; shift 2 ;;
+    --target-engines) target_engines="$2"; shift 2 ;;
+    --geometry-mode) geometry_mode="$2"; shift 2 ;;
+    --charge-model) charge_model="$2"; shift 2 ;;
+    --prepare-ligand) prep_ligand="$2"; shift 2 ;;
+    --obabel) obabel_bin="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+case "$target_engines" in
+  both|vina|smina) ;;
+  *) echo "ERROR: --target-engines must be both, vina, or smina" >&2; exit 2 ;;
+esac
+case "$geometry_mode" in optimize|preserve) ;; *) echo "ERROR: --geometry-mode must be optimize or preserve" >&2; exit 2 ;; esac
+case "$charge_model" in gasteiger|espaloma|zero) ;; *) echo "ERROR: unsupported --charge-model" >&2; exit 2 ;; esac
+
+case "$backend" in
+  auto)
+    if [ -n "$prep_ligand" ]; then
+      case "$(basename "$prep_ligand")" in mk_prepare_ligand.py) backend="meeko" ;; *) backend="adfr" ;; esac
+    elif command -v mk_prepare_ligand.py >/dev/null 2>&1; then
+      backend="meeko"
+      prep_ligand=$(command -v mk_prepare_ligand.py)
+    else
+      backend="adfr"
+      prep_ligand=$(command -v prepare_ligand 2>/dev/null || true)
+    fi
+    ;;
+  meeko) [ -n "$prep_ligand" ] || prep_ligand=$(command -v mk_prepare_ligand.py 2>/dev/null || true) ;;
+  adfr) [ -n "$prep_ligand" ] || prep_ligand=$(command -v prepare_ligand 2>/dev/null || true) ;;
+  *) echo "ERROR: --backend must be auto, meeko, or adfr" >&2; exit 2 ;;
+esac
+
+[ -f "$sdf_file" ] || { echo "ERROR: SDF input not found: $sdf_file" >&2; exit 2; }
+[ -n "$prep_ligand" ] && [ -x "$prep_ligand" ] || {
+  echo "ERROR: no executable ligand-preparation backend found. Install Meeko or use --backend adfr --prepare-ligand PATH." >&2
+  exit 1
+}
+[ -n "$obabel_bin" ] && [ -x "$obabel_bin" ] || {
+  echo "ERROR: obabel is not executable. Use --obabel or DOCKING_UNIVERSAL_OBABEL." >&2
+  exit 1
+}
+
+raw_base=$(basename "$sdf_file")
+raw_base=${raw_base%.*}
+base_name=$(printf '%s' "$raw_base" | sed 's/[^A-Za-z0-9._-]/_/g')
+[ -n "$out_root" ] || out_root="$base_name"
+work_dir="$out_root/ligand_work"
+out_dir="$out_root/pdbqt_ligands"
+mkdir -p "$work_dir" "$out_dir"
+manifest="$out_root/preparation_manifest.tsv"
+printf 'compound_id\tcompound_name\tbackend\ttarget_engines\tgeometry_mode\tcharge_model\tinput\toutput\n' > "$manifest"
+printf 'Ligand preparation backend: %s (%s)\n' "$backend" "$prep_ligand"
+printf 'Target docking engines: %s\n' "$target_engines"
+
+# Some third-party Open Babel launchers do not preserve quoted paths. All
+# chemistry operations therefore run in a short, space-free temporary path.
+temp_root=$(mktemp -d "${TMPDIR:-/tmp}/docking-universal-ligands.XXXXXX")
+trap 'rm -rf "$temp_root"' EXIT HUP INT TERM
+cp "$sdf_file" "$temp_root/input.sdf"
+
+echo "Splitting SDF..."
+"$obabel_bin" "$temp_root/input.sdf" -O "$temp_root/ligand.sdf" -m >/dev/null
+
+count=0
+success=0
+failed=0
+found=0
+
+for one_sdf in "$temp_root"/ligand*.sdf; do
+  [ -e "$one_sdf" ] || continue
+  found=1
+  count=$((count + 1))
+  compound_id="${base_name}_${count}"
+  opt_sdf="$temp_root/${compound_id}_opt.sdf"
+  opt_mol2="$temp_root/${compound_id}_opt.mol2"
+  prepared="$temp_root/${compound_id}_opt.pdbqt"
+  output_pdbqt="$out_dir/${compound_id}.pdbqt"
+
+  if [ -n "$name_field" ]; then
+    compound_name=$(awk -v key="$name_field" '$0 ~ "^> *<"key">" {getline; print; exit}' "$one_sdf")
+  else
+    compound_name=$(awk 'NR==1 {print; exit}' "$one_sdf")
+  fi
+  compound_name=$(printf '%s' "${compound_name:-$compound_id}" | tr -d '\r\n')
+  smiles=$("$obabel_bin" "$one_sdf" -osmi 2>/dev/null | awk 'NR==1 {print $1}')
+
+  printf 'prepare  %s\n' "$compound_id"
+  if [ "$geometry_mode" = "preserve" ]; then
+    cp "$one_sdf" "$opt_sdf"
+  elif ! "$obabel_bin" "$one_sdf" -O "$opt_sdf" --gen3d --minimize >/dev/null 2>&1; then
+      printf 'warning  3D optimization failed for %s\n' "$compound_id" >&2
+      failed=$((failed + 1))
+      continue
+  fi
+  if ! "$obabel_bin" "$opt_sdf" -O "$opt_mol2" >/dev/null 2>&1; then
+    printf 'warning  MOL2 conversion failed for %s\n' "$compound_id" >&2
+    failed=$((failed + 1))
+    continue
+  fi
+  if [ "$backend" = "meeko" ]; then
+    if [ "$target_engines" = "vina" ]; then
+      meeko_result=0
+      "$prep_ligand" -i "$opt_sdf" -o "$prepared" --charge_model "$charge_model" >/dev/null 2>&1 || meeko_result=$?
+    else
+      # smina is based on Vina 1.1.2 and does not understand the CG0/G0 atom
+      # types used by newer Meeko flexible-macrocycle output. A shared rigid
+      # representation keeps the same PDBQT usable by both engines.
+      meeko_result=0
+      "$prep_ligand" -i "$opt_sdf" -o "$prepared" --rigid_macrocycles --charge_model "$charge_model" >/dev/null 2>&1 || meeko_result=$?
+    fi
+    if [ "$meeko_result" -ne 0 ]; then
+      printf 'warning  Meeko ligand preparation failed for %s\n' "$compound_id" >&2
+      failed=$((failed + 1))
+      continue
+    fi
+  else
+    if ! (cd "$temp_root" && "$prep_ligand" -l "$(basename "$opt_mol2")" >/dev/null 2>&1); then
+      printf 'warning  ADFRsuite ligand preparation failed for %s\n' "$compound_id" >&2
+      failed=$((failed + 1))
+      continue
+    fi
+  fi
+
+  if [ ! -s "$prepared" ]; then
+    alternate="$temp_root/${compound_id}.pdbqt"
+    [ -s "$alternate" ] && prepared="$alternate"
+  fi
+  if [ ! -s "$prepared" ]; then
+    printf 'warning  no PDBQT was produced for %s\n' "$compound_id" >&2
+    failed=$((failed + 1))
+    continue
+  fi
+
+  {
+    [ -z "$smiles" ] || printf 'REMARK SMILES %s\n' "$smiles"
+    printf 'REMARK NAME %s\n' "$compound_name"
+    cat "$prepared"
+  } > "$output_pdbqt"
+
+  cp "$one_sdf" "$work_dir/${compound_id}.sdf"
+  cp "$opt_sdf" "$work_dir/${compound_id}_opt.sdf"
+  cp "$opt_mol2" "$work_dir/${compound_id}_opt.mol2"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$compound_id" "$compound_name" "$backend" "$target_engines" "$geometry_mode" "$charge_model" "$sdf_file" "$output_pdbqt" >> "$manifest"
+  success=$((success + 1))
+done
+
+[ "$found" -eq 1 ] || { echo "ERROR: Open Babel did not split any SDF records" >&2; exit 1; }
+
+printf '\nLigand preparation complete.\n'
+printf 'Total molecules:  %s\n' "$count"
+printf 'Prepared PDBQT:   %s\n' "$success"
+printf 'Failed/skipped:   %s\n' "$failed"
+printf 'Output directory: %s\n' "$out_dir"
+[ "$success" -gt 0 ] || exit 1

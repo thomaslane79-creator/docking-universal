@@ -1,0 +1,178 @@
+#!/usr/bin/env bash
+set -eu
+
+# Public command dispatcher. Scientific computation lives in libexec; this file
+# resolves the package-local implementation and forwards user arguments.
+
+VERSION="0.4.0"
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PYTHON_COMMAND="${DOCKING_UNIVERSAL_PYTHON:-python}"
+if [ -n "${DOCKING_UNIVERSAL_LIBEXEC:-}" ]; then
+  LIBEXEC_DIR="$DOCKING_UNIVERSAL_LIBEXEC"
+elif [ -x "$SCRIPT_DIR/../libexec/docking-universal-prepare" ]; then
+  LIBEXEC_DIR="$SCRIPT_DIR/../libexec"
+else
+  LIBEXEC_DIR="$SCRIPT_DIR/../libexec/docking-universal"
+fi
+
+usage() {
+  cat <<'EOF'
+Docking Universal - structural docking preparation and visualization toolkit
+
+Usage:
+  docking-universal <command> [options]
+
+Preparation:
+  run           Guided end-to-end control, approved-screen, or exploratory study
+  control       Analyze a bound ligand and redock it as a pose-recovery control
+  calibrate     Run tiered ensemble redocking and write a protocol record
+  ensemble      Generate independent pH-aware protomer/tautomer conformers
+  prepare       Prepare a receptor and generate pocket/box coordinates
+  ligands       Convert an SDF ligand library to prepared PDBQT files
+  pockets       Generate fpocket-ranked pocket coordinates from a protein PDB
+
+Analysis:
+  evaluate-control Evaluate ensemble sampling/ranking and gate unknown docking
+  screen        Dock one unknown ligand with an approved target-locked protocol
+  cluster-poses Cluster cross-seed/conformer poses and select representatives
+  dock          Batch an existing receptor, ligand set, and Vina config
+  collect       Convert PDBQT docking outputs into a tidy CSV table
+  compare-redock Compare docked poses with an experimental ligand pose
+  interactions Generate PLIP reports and an all-in-one PyMOL scene
+
+Visualization:
+  render3d      Render an existing PML or coordinate file with headless PyMOL
+  depict2d      Create generic 2D PNG/SVG depictions from coordinate files
+
+Utilities:
+  doctor        Report available required and optional tools
+  version       Print the package version
+  help          Show this message
+
+Run `docking-universal <command> --help` for command-specific options.
+EOF
+}
+
+doctor() {
+  required="awk grep sort tee"
+  optional="fpocket prepare_receptor prepare_ligand mk_prepare_receptor.py mk_prepare_ligand.py obabel plip pymol $PYTHON_COMMAND"
+  missing=0
+
+  printf 'Core tools\n'
+  for tool in $required; do
+    if command -v "$tool" >/dev/null 2>&1; then
+      printf '  ok       %s\n' "$tool"
+    else
+      printf '  missing  %s\n' "$tool"
+      missing=1
+    fi
+  done
+
+  printf '\nDocking engines\n'
+  if command -v smina >/dev/null 2>&1; then
+    printf '  available  smina (%s)\n' "$(command -v smina)"
+  else
+    printf '  absent     smina\n'
+  fi
+  if command -v vina >/dev/null 2>&1; then
+    printf '  available  vina (%s)\n' "$(command -v vina)"
+  elif command -v conda >/dev/null 2>&1 && conda run -n "${DOCKING_UNIVERSAL_VINA_ENV:-docking-universal-vina}" vina --version >/dev/null 2>&1; then
+    printf '  available  vina (Conda environment: %s)\n' "${DOCKING_UNIVERSAL_VINA_ENV:-docking-universal-vina}"
+  else
+    printf '  absent     vina (optional environment not found)\n'
+  fi
+
+  printf '\nStage-specific tools\n'
+  for tool in $optional; do
+    if command -v "$tool" >/dev/null 2>&1; then
+      printf '  available  %s\n' "$tool"
+    else
+      printf '  absent     %s\n' "$tool"
+    fi
+  done
+
+  printf '\nOnly tools used by the selected command are required.\n'
+  return "$missing"
+}
+
+command_name="${1:-help}"
+case "$command_name" in
+  -h|--help|help)
+    usage
+    ;;
+  -V|--version|version)
+    printf 'Docking Universal %s\n' "$VERSION"
+    ;;
+  doctor)
+    doctor
+    ;;
+  control)
+    shift
+    exec "$LIBEXEC_DIR/docking-universal-control" "$@"
+    ;;
+  run)
+    shift
+    exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-run.py" "$@"
+    ;;
+  calibrate)
+    shift
+    exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-calibrate.py" "$@"
+    ;;
+  ensemble)
+    shift
+    exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-ensemble.py" "$@"
+    ;;
+  prepare)
+    shift
+    exec "$LIBEXEC_DIR/docking-universal-prepare" "$@"
+    ;;
+  ligands)
+    shift
+    exec "$LIBEXEC_DIR/docking-universal-ligands" "$@"
+    ;;
+  pockets)
+    shift
+    exec "$LIBEXEC_DIR/docking-universal-pockets" "$@"
+    ;;
+  dock)
+    shift
+    exec "$LIBEXEC_DIR/docking-universal-dock" "$@"
+    ;;
+  collect)
+    shift
+    exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-collect.py" "$@"
+    ;;
+  compare-redock)
+    shift
+    exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-redock-compare.py" "$@"
+    ;;
+  evaluate-control)
+    shift
+    exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-calibration-evaluate.py" "$@"
+    ;;
+  screen)
+    shift
+    exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-screen.py" "$@"
+    ;;
+  cluster-poses)
+    shift
+    exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-cluster-poses.py" "$@"
+    ;;
+  interactions)
+    shift
+    exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-interactions.py" "$@"
+    ;;
+  render3d)
+    shift
+    exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-render3d.py" "$@"
+    ;;
+  depict2d)
+    shift
+    exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-depict2d.py" "$@"
+    ;;
+  *)
+    printf 'Unknown command: %s\n\n' "$command_name" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

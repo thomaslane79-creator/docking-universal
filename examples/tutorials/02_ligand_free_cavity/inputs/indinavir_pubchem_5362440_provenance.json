@@ -1,0 +1,9 @@
+{
+  "compound": "indinavir",
+  "pubchem_cid": 5362440,
+  "source": "PubChem",
+  "url": "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/5362440/SDF?record_type=3d",
+  "role": "ordinary prospective compound input for the ligand-free cavity tutorial",
+  "sha256": "6ce343e1b8468e1e2fa8f1ba94c73bf4f0fab1494f60789b26907f1ccd671a35",
+  "coordinate_policy": "Input coordinates are discarded before independent Docking Universal conformer generation."
+}

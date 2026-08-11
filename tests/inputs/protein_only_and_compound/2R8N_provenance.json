@@ -1,0 +1,10 @@
+{
+  "pdb_id": "2R8N",
+  "source": "RCSB Protein Data Bank",
+  "url": "https://files.rcsb.org/download/2R8N.pdb",
+  "retrieved_utc": "2026-08-09T00:00:00-04:00",
+  "role": "unbound experimental protein structure for ligand-free cavity tutorial",
+  "sha256": "40c136fdc3bbbe7594bf6f87934aec4f8d11bc17dcdba4affd78a97b125aaee8",
+  "experimental_method": "X-RAY DIFFRACTION",
+  "structure_note": "RCSB title: Structural Analysis of the Unbound Form of HIV-1 Subtype C Protease. Water and glycerol crystallization additives are present; no inhibitor is used to define or validate the pocket."
+}

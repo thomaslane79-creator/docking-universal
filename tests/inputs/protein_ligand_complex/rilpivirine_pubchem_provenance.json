@@ -1,0 +1,9 @@
+{
+  "compound_name": "rilpivirine",
+  "pubchem_cid": 6451164,
+  "source": "PubChem",
+  "url": "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/rilpivirine/SDF?record_type=2d",
+  "role": "held-out known HIV-1 reverse-transcriptase inhibitor for flexible-ligand protocol-screening demonstration",
+  "coordinate_policy": "The supplied 2D chemical graph defines identity; input coordinates are not used to seed the default docking ensemble.",
+  "sha256": "2455d762969ed145987d89d2dd160425c0ebb9da9abd24d29c3a34d04dee1957"
+}

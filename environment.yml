@@ -1,0 +1,18 @@
+name: docking-universal
+channels:
+  - conda-forge
+dependencies:
+  # Direct, stage-level dependencies verified in a fresh macOS arm64 environment.
+  - python=3.9.23
+  - fpocket=4.2.2
+  - openbabel=3.1.1
+  - plip=2.3.1
+  - pymol-open-source=3.0.0
+  - rdkit=2023.09.6
+  - smina=2020.12.10
+  - molscrub=0.2.2
+  - pycairo=1.27.0
+  - pip
+  - pip:
+      - meeko==0.6.1
+      - reportlab==4.2.5

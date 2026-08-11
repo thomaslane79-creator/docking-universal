@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Docking Universal is a scientist-designed structural docking pipeline spanning receptor and compound preparation, pocket coordinates, results, and visualization.">
+  <title>Docking Universal — a complete structural docking pipeline</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <a class="brand" href="#top" aria-label="Docking Universal home"><span class="brand-mark">D</span>Docking Universal</a>
+    <nav aria-label="Primary navigation">
+      <a href="#workflow">Workflow</a>
+      <a href="guided-workflow.md">Guided run</a>
+      <a href="workflow-examples.md">Examples</a>
+      <a href="#outputs">Outputs</a>
+      <a href="pose-clustering.md">Clustering</a>
+      <a href="#install">Install</a>
+      <a class="nav-cta" href="methodology.md">Methodology</a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="top">
+      <div class="hero-copy">
+        <p class="eyebrow">Structural bioinformatics · M-series verified research software</p>
+        <h1>A complete structural docking workflow, made reusable.</h1>
+        <p class="lede">Docking Universal turns an evolving series of research scripts into one auditable package—from receptor and compound preparation through pocket coordinates, result collation, PLIP scenes, and 2D/3D figures. It was developed in part for reproducible use on Apple-silicon M-series systems.</p>
+        <div class="actions">
+          <a class="button primary" href="#install">Get started</a>
+          <a class="button secondary" href="guided-workflow.md">Run a study</a>
+          <a class="button secondary" href="methodology.md">Read the method</a>
+        </div>
+        <dl class="hero-stats">
+          <div><dt>16</dt><dd>composable commands</dd></div>
+          <div><dt>2D + 3D</dt><dd>visual outputs</dd></div>
+          <div><dt>1</dt><dd>auditable pipeline</dd></div>
+        </dl>
+      </div>
+      <figure class="hero-visual">
+        <img src="assets/ligand-pocket.png" alt="Cyan ligand-centered pocket surface surrounding a molecular ligand">
+        <figcaption><span class="dot"></span> Ligand-centered pocket surface generated for visual review</figcaption>
+      </figure>
+    </section>
+
+    <section class="section intro" id="workflow">
+      <div class="section-heading">
+        <p class="eyebrow">End-to-end package</p>
+        <h2>From starting structures to interpretable output</h2>
+      </div>
+      <ol class="workflow-grid">
+        <li><span>01</span><h3>Prepare molecules</h3><p>Build receptor PDBQT files and optimized compound libraries with retained names and SMILES.</p></li>
+        <li><span>02</span><h3>Define sites</h3><p>Use a bound ligand or fpocket cavities to create explicit center and box coordinates.</p></li>
+        <li><span>03</span><h3>Calibrate + run</h3><p>Test known ligands across independent conformers and seeds, then lock successful settings for target-matched unknown docking.</p></li>
+        <li><span>04</span><h3>Visualize</h3><p>Generate PLIP scenes, headless PyMOL PNGs, and generic 2D molecular depictions.</p></li>
+      </ol>
+    </section>
+
+    <section class="section split">
+      <div>
+        <p class="eyebrow">Bound-ligand control</p>
+        <h2>Verification is a visible Bash choice</h2>
+        <p>The guided command lists exact <code>RESNAME:CHAIN:RESNUM</code> candidates with atom counts, asks for confirmation, and offers strict coordinate-free RCSB chemical-identity verification or a manual override with a required audit note.</p>
+      </div>
+      <div class="output-list">
+        <article><span>2D</span><div><h3>No pose leakage</h3><p>Retains only the CCD molecular graph—bonds, charge, and stereochemistry—then embeds docking conformers independently. Neither CCD nor crystal coordinates seed the search.</p></div></article>
+        <article><span>RMSD</span><div><h3>Pose-recovery evidence</h3><p>Separately tests pose sampling, score ranking, and repeatability without fitting poses onto the crystal ligand.</p></div></article>
+        <article><span>JSON</span><div><h3>Locked protocol</h3><p>Records engine-specific settings, seeds, outcomes, and receptor/box hashes before unknown docking is allowed.</p></div></article>
+        <article><span>PSE</span><div><h3>Separate review scenes</h3><p>Writes crystal interactions, docked interactions, and crystal-versus-docked overlays.</p></div></article>
+      </div>
+    </section>
+
+    <section class="section split" id="outputs">
+      <div>
+        <p class="eyebrow">Built for auditability</p>
+        <h2>Each stage leaves evidence</h2>
+        <p>Docking Universal keeps the scientific context behind each transformation and site choice, alongside machine-ready files and human-readable visuals.</p>
+      </div>
+      <div class="output-list">
+        <article><span>PDBQT</span><div><h3>Prepared structures</h3><p>Receptors and compound libraries with traceable source metadata.</p></div></article>
+        <article><span>CONF</span><div><h3>Pocket coordinates</h3><p>Centers, box geometry, and ranked cavity decisions.</p></div></article>
+        <article><span>CSV</span><div><h3>Structured results</h3><p>Model scores and RMSD fields ready for downstream review.</p></div></article>
+        <article><span>PNG</span><div><h3>Review visuals</h3><p>PLIP interaction data transformed by a custom scene writer into consolidated PyMOL views, plus headless 3D and generic 2D images.</p></div></article>
+      </div>
+    </section>
+
+    <section class="section modes">
+      <article class="mode-card ligand">
+        <p class="eyebrow">Domain contribution</p>
+        <h2>Scientist-designed logic</h2>
+        <p>Structural judgment drives ligand handling, pocket locality checks, centroid choices, overlap suppression, diagnostic thresholds, and the interpretation hierarchy.</p>
+        <p class="formula">science → constraints → validation</p>
+      </article>
+      <article class="mode-card cavity">
+        <p class="eyebrow">Software contribution</p>
+        <h2>Iterative engineering</h2>
+        <p>Successive script revisions were compared, debugged, documented, made portable, and consolidated into a tested multi-command package with explicit stage boundaries.</p>
+        <p class="formula">iterate → validate → document → package</p>
+      </article>
+    </section>
+
+    <section class="section results-showcase">
+      <div class="section-heading">
+        <p class="eyebrow">Representative output</p>
+        <h2>Designed to move between computation and visual review</h2>
+      </div>
+      <div class="figure-grid">
+        <figure>
+          <img src="assets/docking-view.png" alt="Three-dimensional protein binding site with molecular poses shown as colored sticks">
+          <figcaption><strong>3D structural context</strong><span>Protein, site surface, and molecular poses prepared for PyMOL review.</span></figcaption>
+        </figure>
+        <figure>
+          <img src="assets/XK2_ideal.png" alt="Generic two-dimensional chemical depiction of the XK2 ligand">
+          <figcaption><strong>2D ligand identity</strong><span>A generic chemical depiction generated directly from the input SDF; it does not represent a docked pose or protein interactions.</span></figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="section install" id="install">
+      <div>
+        <p class="eyebrow">Package interface</p>
+        <h2>One interface, sixteen commands</h2>
+        <p>The main Conda environment installs preparation, analysis, visualization, and smina. A small optional environment supplies current AutoDock Vina for reproducible comparison runs without disturbing the Apple-silicon PyMOL stack.</p>
+        <p><a href="installation.md">Complete installation guide, dependency roles, and M2 notes →</a></p>
+      </div>
+      <div class="terminal" role="region" aria-label="Docking Universal terminal example">
+        <div class="terminal-bar"><i></i><i></i><i></i><span>terminal</span></div>
+        <pre><code><b>$</b> conda env create -f environment.yml
+<b>$</b> conda env create -f environments/vina.yml
+<b>$</b> conda activate docking-universal
+<b>$</b> ./bin/docking-universal doctor
+
+available  fpocket
+available  obabel
+available  plip
+available  pymol
+available  smina
+available  vina (optional environment)
+
+<b>$</b> ./bin/docking-universal control --complex 1HVR.pdb
+<b>$</b> ./bin/docking-universal screen --protocol protocol.json \
+    --ligand unknown.sdf --out unknown_run
+<b>$</b> make test</code></pre>
+      </div>
+    </section>
+
+    <section class="section caution">
+      <p class="eyebrow">Research preview</p>
+      <h2>Scientifically useful, with validation still in progress.</h2>
+      <p>Docking Universal packages transparent structural-docking computations. It does not prove biological relevance. The documented 1HVR/XK2 work includes a failed low-effort baseline, a successful three-seed Vina ensemble follow-up, and a failed smina rigid-macrocycle follow-up. These target-specific controls are reported separately rather than treated as general accuracy validation.</p>
+      <a href="validation.md">Review the raw-input validation →</a>
+    </section>
+  </main>
+
+  <footer>
+    <a class="brand" href="#top"><span class="brand-mark">D</span>Docking Universal</a>
+    <p>Auditable preparation, docking support, interaction analysis, and visualization.</p>
+    <p>MIT licensed · Research use</p>
+  </footer>
+</body>
+</html>
