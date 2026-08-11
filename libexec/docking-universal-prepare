@@ -656,6 +656,7 @@ else
     echo "fpocket cavity mode: 1) Conservative  2) Expanded (-m 2.5)  3) Permissive (-m 2.0)"
   fi
   [ -n "$MODE" ] || read -p "Select cavity mode [1-3]: " MODE
+  echo "Number of retained cavities controls how many site hypotheses proceed to review; it does not improve fpocket ranking."
   [ -n "${DOCKING_UNIVERSAL_MAX_POCKETS:-}" ] || read -p "How many cavities to select? " MAX_POCKETS
 fi
 
@@ -677,6 +678,7 @@ else
   if feedback_at_least_guided; then
     echo "1) deepest   (largest fpocket alpha sphere; often more entrance/surface biased)"
     echo "2) centroid  (interior, snapped to real pocket; often better for docking boxes)"
+    echo "Scientific implication: the selected center changes the spatial region sampled by docking."
   else
     echo "1) deepest"
     echo "2) centroid"
@@ -694,6 +696,7 @@ else
     echo "   Best for single-chain receptors or compact monomers."
     echo "2) Per-chain (recommended for multi-chain structures)"
     echo "   Best when multiple chains are present; avoids using a global centroid between chains."
+    echo "Scientific implication: centroid scope changes cavity-ranking geometry, especially in oligomers."
   else
     echo "Centroid mode: 1) Whole protein  2) Per-chain"
   fi

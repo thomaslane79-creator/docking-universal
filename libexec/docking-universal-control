@@ -239,7 +239,9 @@ if [ -z "$ligand_id" ]; then
   echo "  2) Select a local SDF chemistry template"
   echo "     Uses the SDF for chemical identity while retaining the experimental coordinates from the PDB."
   echo "  3) Manual override (recorded in the run manifest)"
+  echo "     Accepts the selected residue without independent identity verification; interpretation depends on the user's evidence."
   echo "  4) Provisional bond inference from the local PDB (not recommended)"
+  echo "     Guesses bonds from coordinates; bond order, aromaticity, charge, and stereochemistry may be wrong."
   echo "     Writes a 2D review image; confirmation is required before docking."
   read -r -p "Choose verification mode [1]: " verification_choice
   case "${verification_choice:-1}" in

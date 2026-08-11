@@ -70,10 +70,15 @@ def choose_manual_tier(result):
     print("Manual tier selection tests only the chosen settings.")
     print("A passing result will not establish that any less expensive tier would also pass.")
     print("  1) Repeatability — five seeds at the current search depth")
+    print("     Tests stochastic reproducibility without changing chemistry or search depth.")
     print("  2) Broader search — five seeds and greater exhaustiveness")
+    print("     Tests whether search depth limited recovery; the scientific model is unchanged.")
     print("  3) More conformers — expand independent starting geometries")
+    print("     Tests sensitivity to the ligand's initial 3D geometry.")
     print("  4) Robust retry — combine five conformers, five seeds, and greater exhaustiveness")
+    print("     Broadens both starting geometry and stochastic search, but cannot identify which change enabled a pass.")
     print("  5) Inspect inputs — stop and review chemistry, receptor, and docking box")
+    print("     Reconsiders scientific assumptions before adding computation; appropriate when preparation or site definition is doubtful.")
     if not acceptance["sampling_pass"] and not acceptance["ranking_pass"]:
         recommendation = "4"
     elif not acceptance["sampling_pass"]:
@@ -112,6 +117,7 @@ def choose_retry_strategy(current_tier, result):
     print("  2) Choose a tier manually")
     print("     Test only the selected complexity; no claim is made about cheaper settings.")
     print("  3) Inspect inputs and stop")
+    print("     Review chemistry, receptor preparation, and site definition instead of treating every failure as under-sampling.")
     answer = input("Select an approach [1]: ").strip() or "1"
     if answer == "1":
         next_tier, reason = guided_next_tier(current_tier, result)

@@ -106,8 +106,11 @@ def relocate_study(study, destination):
 def choose_mode():
     print("Choose a study pathway:")
     print("  1) Bound-ligand control — calibrate against an experimental pose")
+    print("     Tests whether the selected preparation and search protocol can reproducibly recover a withheld known pose.")
     print("  2) Approved-protocol screen — dock unknown compounds reproducibly")
+    print("     Applies target-matched settings unchanged; scores rank modeled poses but do not establish binding or activity.")
     print("  3) Exploratory ligand-free docking — no pose-recovery control available")
+    print("     Uses predicted cavities and must be interpreted as hypothesis generation without target-specific pose validation.")
     choice = input("Select [1]: ").strip() or "1"
     return {"1": "control", "2": "screen", "3": "exploratory"}.get(choice)
 
@@ -142,7 +145,9 @@ def choose_ensemble_settings(args, mode):
     print("Ligand ensemble configuration:")
     print("  1) Recommended defaults - tier/default conformer count, pH 7.4, base seed 20260808,")
     print("     MMFF94 with UFF fallback, 0.75 A pruning, tautomer enumeration, Gasteiger charges")
+    print("     Scientific implication: samples plausible pH-dependent chemistry and diverse starting geometries under one recorded policy.")
     print("  2) Custom - review and set every ligand-ensemble option")
+    print("     Scientific implication: changes which chemical states or starting conformations can enter docking; justify deviations.")
     choice = input("Select [1]: ").strip() or "1"
     if choice == "1":
         return
@@ -159,20 +164,31 @@ def choose_ensemble_settings(args, mode):
             raise SystemExit(f"{prompt} must be at least {minimum}")
         return value
 
+    print("pH controls which protonation and tautomer states are considered plausible; it can change charge and interactions.")
     args.ph = number("Ligand-state pH", args.ph, float, 0.0)
+    print("More conformers broaden starting-geometry coverage; they do not represent independent chemical states.")
     args.conformers = number("Conformers retained per chemical state", args.conformers, int, 1)
     if mode == "control":
         args.conformers_override = args.conformers
         print("This overrides the conformer count in the calibration tier; seeds and search depth remain tier-controlled.")
+    print("The base seed changes reproducible random starting geometries, not the molecular model or scoring function.")
     args.base_seed = number("Deterministic base seed", args.base_seed, int, 0)
-    print("Force field: 1) MMFF94 (recommended)  2) MMFF94s  3) UFF")
+    print("Force field for conformer relaxation:")
+    print("  1) MMFF94 (recommended) — broad small-molecule parameterization")
+    print("  2) MMFF94s — MMFF94 variant tuned toward static structures")
+    print("  3) UFF — broader element coverage but generally less specialized for drug-like molecules")
+    print("  Scientific implication: this affects starting conformer geometry, not Vina's docking score.")
     args.forcefield = {"1": "mmff94", "2": "mmff94s", "3": "uff"}.get(input("Select [1]: ").strip() or "1")
     if not args.forcefield:
         raise SystemExit("Choose force field 1, 2, or 3")
+    print("RMSD pruning removes geometrically redundant conformers; a larger threshold preserves less starting-shape diversity.")
     args.rmsd_prune = number("Conformer RMSD pruning threshold in Angstroms", args.rmsd_prune, float, 0.0)
+    print("Tautomer enumeration tests alternative hydrogen/bond-order arrangements that can change donors, acceptors, and charge.")
     args.skip_tautomers = input("Enumerate plausible tautomers? [Y/n]: ").strip().lower() in {"n", "no"}
+    print("The charge model affects electrostatic atom typing used in preparation and can alter predicted pose ranking.")
     args.charge_model = input(f"Ligand charge model [{args.charge_model}]: ").strip() or args.charge_model
     if mode == "exploratory":
+        print("Additional seeds test stochastic repeatability; they increase sampling evidence without changing the scientific model.")
         args.seeds = number("Independent docking seeds", args.seeds, int, 1)
     print(
         f"Selected ensemble: pH {args.ph}; {args.conformers} conformers/state; {args.forcefield}; "
@@ -1053,17 +1069,24 @@ def main():
         if not args.non_interactive:
             print("\nChoose the initial calibration strategy:")
             print("  1) Guided iterative - start quick, then offer broader sampling only if needed (recommended)")
+            print("     Identifies the least-cost tier that meets pose-recovery and repeatability criteria for this target.")
             print("  2) Minimal single-conformer control - fastest qualitative check; not a repeatability control")
+            print("     Can reveal an obvious failure, but one run cannot support a reproducibility claim or approve screening.")
             print("  3) Repeatability - five independent seeds at the standard search depth")
+            print("     Tests whether recovery is stable to stochastic search variation; the molecular model is unchanged.")
             print("  4) Broader search - five seeds with greater exhaustiveness")
+            print("     Tests whether inadequate search depth caused failure; this mainly increases computation and sampling evidence.")
             print("  5) More conformers - expand independent starting geometries")
+            print("     Tests sensitivity to ligand starting shape and expands conformational coverage.")
             print("  6) Robust - combine five conformers, five seeds, and greater exhaustiveness")
+            print("     Tests all sampled sources together, but a pass at this tier does not show that cheaper settings are sufficient.")
             calibration_choice = input("Select [1]: ").strip() or "1"
             calibration_tiers = {"1": "quick", "2": "quick", "3": "repeatability", "4": "broader", "5": "conformers", "6": "robust"}
             if calibration_choice not in calibration_tiers:
                 raise SystemExit("Choose a calibration strategy from 1 to 6")
             control_tier = calibration_tiers[calibration_choice]
             legacy_single_conformer = calibration_choice == "2"
+            print("Box size defines the searchable receptor region: too small can exclude valid poses; too large can add alternate sites and search noise.")
             box_size = input("Docking-box edge length in Angstroms [26.0]: ").strip() or "26.0"
             try:
                 if not 10.0 <= float(box_size) <= 50.0:
