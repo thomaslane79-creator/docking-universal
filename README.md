@@ -62,7 +62,7 @@ The dispatcher and file-processing commands require Bash 3.2+, Python 3, and sta
 Check what is visible on the current workstation:
 
 ```bash
-./bin/docking-universal doctor
+./bin/docking-universal check-install
 ```
 
 Only dependencies used by the selected stage are required.
@@ -260,6 +260,16 @@ pose RMSD; state and formal-charge metadata remain available for interpretation.
 ## Test
 
 The complete option-coverage and real-tool validation record is documented in [Validation status](docs/validation-status.md).
+
+Three repeatable validation levels are included:
+
+```bash
+./bin/docking-universal validate quick
+./bin/docking-universal validate integration
+./bin/docking-universal validate release --background
+```
+
+`quick` checks every guided choice and software route without expensive docking. `integration` runs every distinct scientific component with real tools and representative inputs. `release` adds long multi-seed control-guided and ligand-free end-to-end workflows. Background runs write a timestamped folder under `validation_runs/` containing `run.log`, `pid`, `status.json`, and all retained outputs.
 
 ```bash
 make test

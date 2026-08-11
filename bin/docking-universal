@@ -46,7 +46,8 @@ Visualization:
   depict2d      Create generic 2D PNG/SVG depictions from coordinate files
 
 Utilities:
-  doctor        Report available required and optional tools
+  check-install Report available required and optional tools (`doctor` alias)
+  validate      Run quick, integration, or long release validation suites
   version       Print the package version
   help          Show this message
 
@@ -99,8 +100,12 @@ case "$command_name" in
   -V|--version|version)
     printf 'Docking Universal %s\n' "$VERSION"
     ;;
-  doctor)
+  doctor|check-install)
     doctor
+    ;;
+  validate)
+    shift
+    exec "$LIBEXEC_DIR/docking-universal-validate" "$@"
     ;;
   control)
     shift

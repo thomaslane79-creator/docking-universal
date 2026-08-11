@@ -9,7 +9,7 @@ git clone YOUR_REPOSITORY_URL
 cd Docking_Universal
 conda env create -f environment.yml
 conda activate docking-universal
-./bin/docking-universal doctor
+./bin/docking-universal check-install
 make test
 ```
 

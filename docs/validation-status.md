@@ -21,6 +21,16 @@ Run the automated suite with:
 make test
 ```
 
+The same checks and the real-tool suites are available through the public interface:
+
+```bash
+./bin/docking-universal validate quick
+./bin/docking-universal validate integration
+./bin/docking-universal validate release --background
+```
+
+The release suite is intentionally slow. It first repeats the integration probes, then runs the 1HVR/XK2 multi-seed pose-recovery control, a protocol-locked Rilpivirine screen, and a ligand-free 2R8N/Indinavir exploratory study. Every invocation creates a new timestamped directory in `validation_runs/` and writes `status.json`; `PASSED` means the expected software stages and artifacts completed, not that every predicted pose is biologically correct.
+
 ## Real-tool smoke checks
 
 The maintained macOS Apple Silicon environment has been checked with fpocket, Meeko, MolScrub, RDKit, Open Babel, PLIP, PyMOL Open-Source, and AutoDock Vina 1.2.7. Real fixture-based checks cover:
