@@ -2,6 +2,14 @@
 
 Docking Universal 0.4.0 is a research preview. Validation distinguishes software-path testing from scientific validation: a command completing successfully does not establish that a predicted pose or cavity is biologically correct.
 
+## Platform compatibility
+
+Docking Universal is compatible with Apple-silicon macOS and Ubuntu Linux. The
+full retained real-tool integration record is maintained on macOS arm64. Ubuntu
+CI runs the portable command, shell syntax, Python syntax, routing, installation,
+and unit-test suite. A new Ubuntu scientific environment should additionally run
+`validate integration` because compiled Conda packages can vary by platform.
+
 ## Automated option coverage
 
 The test suite exercises:

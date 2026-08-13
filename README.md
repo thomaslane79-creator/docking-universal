@@ -14,7 +14,12 @@ The current release supports **rigid-receptor docking only**: receptor coordinat
 
 It consolidates a series of working research scripts behind one consistent command while retaining the provenance and diagnostics that made the original workflow auditable.
 
-The project was created in part to make this compiled scientific toolchain practical and reproducible on Apple-silicon M-series computers. Its current reference platform is an M2 Mac (`osx-arm64`); portability to other platforms remains a tested goal rather than an assumed guarantee.
+Docking Universal is compatible with Apple-silicon macOS and Ubuntu Linux. The
+current full scientific reference platform is an M2 Mac (`osx-arm64`), while the
+portable command, installation, and routing paths are continuously tested on
+GitHub Actions' current Ubuntu runner. Platform-specific Conda builds can still
+produce scientific-tool differences, so every workstation should run the supplied
+validation levels before production use.
 
 ## Why I built it: a scientist's perspective
 
@@ -28,7 +33,7 @@ The comparison is deliberately described as target-specific retrospective eviden
 
 ## Project status
 
-**Research preview.** The core workflow has produced useful outputs across the author's working structural-docking cases. A matched public 1HVR/XK2 case passes raw preparation, ligand-free pocket recovery, Vina execution, score collection, PLIP processing, and visual rendering on an M2 Mac. Its five-seed Vina ensemble control passed the target-specific 2 Å sampling/ranking rule. This single retrospective case is not broad accuracy validation. See [Validation](docs/validation.md).
+**Research preview.** The core workflow has produced useful outputs across the author's working structural-docking cases. A matched public 1HVR/XK2 case passes raw preparation, ligand-free pocket recovery, Vina execution, score collection, PLIP processing, and visual rendering on an M2 Mac. Its five-seed Vina ensemble control passed the target-specific 2 Å sampling/ranking rule. The command and installation suite also passes on Ubuntu CI. This single retrospective case is not broad accuracy validation. See [Validation](docs/validation.md).
 
 ![Two end-to-end Docking Universal pathways: control-guided screening and ligand-free exploratory screening](docs/assets/end-to-end-workflows-and-outputs-mockup.png)
 

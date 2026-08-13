@@ -5,16 +5,23 @@ set -eu
 # resolves the package-local implementation and forwards user arguments.
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-VERSION_FILE="$SCRIPT_DIR/../VERSION"
-VERSION=$(sed -n '1p' "$VERSION_FILE" 2>/dev/null || printf 'unknown')
 PYTHON_COMMAND="${DOCKING_UNIVERSAL_PYTHON:-python}"
 if [ -n "${DOCKING_UNIVERSAL_LIBEXEC:-}" ]; then
   LIBEXEC_DIR="$DOCKING_UNIVERSAL_LIBEXEC"
 elif [ -x "$SCRIPT_DIR/../libexec/docking-universal-prepare" ]; then
   LIBEXEC_DIR="$SCRIPT_DIR/../libexec"
+elif [ -x "$SCRIPT_DIR/../libexec/docking-universal/libexec/docking-universal-prepare" ]; then
+  LIBEXEC_DIR="$SCRIPT_DIR/../libexec/docking-universal/libexec"
 else
+  # Compatibility with the pre-0.4.0 user-local layout.
   LIBEXEC_DIR="$SCRIPT_DIR/../libexec/docking-universal"
 fi
+if [ -f "$SCRIPT_DIR/../VERSION" ]; then
+  VERSION_FILE="$SCRIPT_DIR/../VERSION"
+else
+  VERSION_FILE="$SCRIPT_DIR/../libexec/docking-universal/VERSION"
+fi
+VERSION=$(sed -n '1p' "$VERSION_FILE" 2>/dev/null || printf 'unknown')
 
 usage() {
   cat <<'EOF'

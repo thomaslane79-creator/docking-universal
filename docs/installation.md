@@ -46,6 +46,12 @@ On Linux, use `environment.yml` and `environments/vina.yml`. Do not use the
 `osx-arm64` lock files; those reproduce the tested Apple-silicon builds and are not
 portable to Ubuntu.
 
+Docking Universal is compatible with Ubuntu Linux. Its command interface,
+portable routing, and installation layout are tested on GitHub Actions' Ubuntu
+runner. Run `./bin/docking-universal validate integration` after installing the
+scientific dependencies on a new Ubuntu workstation to verify the exact Conda
+builds available there.
+
 The environments do not modify or replace existing environments. To remove them later:
 
 ```bash
