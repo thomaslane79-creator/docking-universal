@@ -1674,7 +1674,7 @@ else
     log "  pocket selection diagnostics: not generated - no non-ligand pocket selection was completed"
   fi
 fi
-if [ "${#SORTED[@]:-0}" -eq 0 ] 2>/dev/null; then
+if [ "${#SORTED[@]}" -eq 0 ] 2>/dev/null; then
   log "  selected cavities: 0"
   log "  WARNING: no cavities were selected. Inspect diagnostics and consider lower SCORE_THRESHOLD, ligand-centered mode, or different fpocket mode."
 else

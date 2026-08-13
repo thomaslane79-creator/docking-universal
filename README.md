@@ -14,7 +14,12 @@ The current release supports **rigid-receptor docking only**: receptor coordinat
 
 It consolidates a series of working research scripts behind one consistent command while retaining the provenance and diagnostics that made the original workflow auditable.
 
-The project was created in part to make this compiled scientific toolchain practical and reproducible on Apple-silicon M-series computers. Its current reference platform is an M2 Mac (`osx-arm64`); portability to other platforms remains a tested goal rather than an assumed guarantee.
+Docking Universal is compatible with Apple-silicon macOS and Ubuntu Linux. The
+current full scientific reference platform is an M2 Mac (`osx-arm64`), while the
+portable command, installation, and routing paths are continuously tested on
+GitHub Actions' current Ubuntu runner. Platform-specific Conda builds can still
+produce scientific-tool differences, so every workstation should run the supplied
+validation levels before production use.
 
 ## Why I built it: a scientist's perspective
 
@@ -28,7 +33,7 @@ The comparison is deliberately described as target-specific retrospective eviden
 
 ## Project status
 
-**Research preview.** The core workflow has produced useful outputs across the author's working structural-docking cases. A matched public 1HVR/XK2 case passes raw preparation, ligand-free pocket recovery, Vina execution, score collection, PLIP processing, and visual rendering on an M2 Mac. Its five-seed Vina ensemble control passed the target-specific 2 Å sampling/ranking rule. This single retrospective case is not broad accuracy validation. See [Validation](docs/validation.md).
+**Research preview.** The core workflow has produced useful outputs across the author's working structural-docking cases. A matched public 1HVR/XK2 case passes raw preparation, ligand-free pocket recovery, Vina execution, score collection, PLIP processing, and visual rendering on an M2 Mac. Its five-seed Vina ensemble control passed the target-specific 2 Å sampling/ranking rule. The command and installation suite also passes on Ubuntu CI. This single retrospective case is not broad accuracy validation. See [Validation](docs/validation.md).
 
 ![Two end-to-end Docking Universal pathways: control-guided screening and ligand-free exploratory screening](docs/assets/end-to-end-workflows-and-outputs-mockup.png)
 
@@ -81,22 +86,30 @@ The direct versions verified in a fresh macOS arm64 environment are pinned in [e
 
 ## Install
 
-Create the tested scientific environment:
+Create both required Conda environments. The main preparation, analysis, and
+visualization environment uses Python 3.9; the isolated AutoDock Vina engine
+environment uses Python 3.10 because the two compiled dependency stacks are not
+compatible in one environment:
 
 ```bash
 conda env create -f environment.yml
+conda env create -f environments/vina.yml
+```
+
+Activate only the main environment, then verify that it can discover Vina in the
+separate `docking-universal-vina` environment:
+
+```bash
 conda activate docking-universal
 ./bin/docking-universal check-install
 make test
 ```
 
-Create the small AutoDock Vina engine environment:
-
-```bash
-conda env create -f environments/vina.yml
-```
-
-The `dock` command discovers Vina there automatically and records the executable source, version, receptor, ligand directory, box, and search settings.
+The docking-engine section of `check-install` should report `available vina
+(Conda environment: docking-universal-vina)`. The `dock` command discovers Vina
+there automatically and records the executable source, version, receptor, ligand
+directory, box, and search settings. Users do not activate the Vina environment
+for normal operation.
 
 For exact reproduction of the M2 Vina test environment, use `environments/vina-lock-osx-arm64.txt`; use the readable YAML for normal installation.
 

@@ -144,9 +144,32 @@ run_integration() {
   "$CLI" collect "$out/vina_smoke" --out "$out/vina_smoke_scores.csv"
   [ "$(wc -l < "$out/vina_smoke_scores.csv" | tr -d ' ')" -ge 3 ]
 
-  current_stage="approved-protocol batch planning and report"; write_status "RUNNING"
+  current_stage="synthetic approved-protocol fixture generation"; write_status "RUNNING"
+  fixture_root="$out/synthetic_approved_protocol_fixture"
+  mkdir -p "$fixture_root"
+  comparison_args=""
+  seed_args=""
+  for seed in 101 102 103 104 105; do
+    comparison_dir="$fixture_root/control_$seed/example_comparison"
+    mkdir -p "$comparison_dir"
+    printf '{"pose_count": 3, "top_score_affinity_kcal_per_mol": -7.0, "top_score_rmsd_angstrom": 1.2, "best_rmsd_angstrom": 0.8}\n' \
+      > "$comparison_dir/comparison_summary.json"
+    comparison_args="$comparison_args $fixture_root/control_$seed"
+    seed_args="$seed_args --seed $seed"
+  done
+  # This synthetic passing record tests software gates, locked-input hashes,
+  # batch planning, and reporting. It is not scientific control evidence.
+  # Word splitting is intentional: generated paths contain no spaces.
+  # shellcheck disable=SC2086
+  "$CLI" evaluate-control $comparison_args --engine vina \
+    --out "$fixture_root/protocol.json" --receptor "$receptor" --box "$box" \
+    --threshold 2 --exhaustiveness 16 --num-modes 15 --energy-range 8 \
+    $seed_args --min-seeds 5 --conformers 3 \
+    --macrocycle-treatment flexible_meeko --no-prompt
+
+  current_stage="synthetic approved-protocol batch planning and report"; write_status "RUNNING"
   "$CLI" run --mode screen \
-    --protocol "$PROJECT/examples/tutorials/01_bound_ligand/study/control/04_redocking/vina/repeatability/protocol.json" \
+    --protocol "$fixture_root/protocol.json" \
     --ligands "$PROJECT/examples/test_inputs/two_compounds.sdf" --out "$out/approved_screen_plan" \
     --name validation_screen --plan-only --non-interactive
   find "$out/approved_screen_plan/report" -type f -name '*.pdf' -size +1000c | grep -q .
