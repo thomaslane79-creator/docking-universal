@@ -39,11 +39,18 @@ The maintained macOS Apple Silicon environment has been checked with fpocket, Me
 - 2R8N ligand-free preparation in conservative, expanded, and permissive fpocket modes;
 - deepest-pocket and centroid box centers, including whole-protein and per-chain centroid scope;
 - automatic documented fallback from fpocket score threshold 0.10 to 0.0 when no candidate passes, while retaining geometry and overlap filters;
-- a two-compound approved-protocol screen plan with locked-input hash verification;
+- a two-compound approved-protocol screen plan with locked-input hash verification,
+  using a clearly labeled synthetic passing protocol generated inside the validation
+  run to test software behavior rather than claim scientific control evidence;
 - MMFF94, MMFF94s, and UFF ensemble generation with custom pH, seeds, and tautomer policies;
 - automatic HTML, JSON, Markdown, and PDF report generation, followed by rendered-page inspection.
 
 Completed example studies retain evidence for actual multi-seed Vina redocking, ligand-free cavity analysis, unknown-compound docking, pose clustering, PyMOL sessions, interaction diagrams, and final reports.
+
+The slower release suite generates the genuine 1HVR/XK2 control protocol used for
+its subsequent screen. Only that computed control path tests scientific protocol
+approval; the integration fixture tests fail-closed software gating and report
+plumbing.
 
 ## Scope and limitations
 

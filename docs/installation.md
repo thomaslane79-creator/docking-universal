@@ -2,29 +2,55 @@
 
 ## Recommended Conda installation
 
-Docking Universal uses external scientific programs as composable stages. The repository's `environment.yml` contains the smallest direct dependency set verified together on macOS arm64.
+Docking Universal uses external scientific programs as composable stages. A complete
+installation requires two Conda environments because the compiled scientific stack
+and AutoDock Vina require different Python and library generations:
+
+| Environment | Python | Purpose |
+| --- | ---: | --- |
+| `docking-universal` | 3.9 | Preparation, analysis, reporting, RDKit, PLIP, and PyMOL |
+| `docking-universal-vina` | 3.10 | Isolated AutoDock Vina docking engine |
+
+Create both environments from the repository root:
 
 ```bash
-git clone YOUR_REPOSITORY_URL
-cd Docking_Universal
+git clone https://github.com/thomaslane79-creator/docking-universal.git
+cd docking-universal
 conda env create -f environment.yml
+conda env create -f environments/vina.yml
+```
+
+Activate only the main environment and verify the complete installation:
+
+```bash
 conda activate docking-universal
 ./bin/docking-universal check-install
 make test
 ```
 
-AutoDock Vina is kept in a small engine environment so its compiled dependencies do not destabilize the preparation, analysis, and PyMOL stack:
+The docking-engine section should report:
 
-```bash
-conda env create -f environments/vina.yml
+```text
+available  vina (Conda environment: docking-universal-vina)
 ```
 
-No manual activation is required for normal package use. If `vina` is not already on `PATH`, Docking Universal automatically looks for it in `docking-universal-vina`.
+No manual activation of `docking-universal-vina` is required for normal use. If
+`vina` is not already on `PATH`, Docking Universal automatically runs it from that
+environment.
 
-The environment does not modify or replace an existing environment. To remove it later:
+`check-install` may report the legacy ADFRsuite commands `prepare_receptor` and
+`prepare_ligand` as absent. This is expected when the supported Meeko commands
+`mk_prepare_receptor.py` and `mk_prepare_ligand.py` are available.
+
+On Linux, use `environment.yml` and `environments/vina.yml`. Do not use the
+`osx-arm64` lock files; those reproduce the tested Apple-silicon builds and are not
+portable to Ubuntu.
+
+The environments do not modify or replace existing environments. To remove them later:
 
 ```bash
 conda env remove -n docking-universal
+conda env remove -n docking-universal-vina
 ```
 
 ## Apple silicon and PyMOL
