@@ -179,7 +179,20 @@ grep -q '"unknown_docking_allowed": true' "$mock_dir/protocol.json" || fail "pro
 # A complete approved protocol must validate its locked inputs and drive the
 # high-level screen planner, not merely contain an approval boolean.
 approved_ligand="$project_dir/examples/tutorials/01_bound_ligand/inputs/rilpivirine_pubchem.sdf"
-"$cli" screen --protocol "$mock_dir/protocol.json" --ligand "$approved_ligand" \
+mkdir -p "$mock_dir/python_modules/rdkit"
+cat > "$mock_dir/python_modules/rdkit/__init__.py" <<'EOF'
+from . import Chem
+EOF
+cat > "$mock_dir/python_modules/rdkit/Chem.py" <<'EOF'
+from pathlib import Path
+
+
+def SDMolSupplier(path, removeHs=False):
+    del removeHs
+    return [object() for record in Path(path).read_text().split("$$$$") if record.strip()]
+EOF
+PYTHONPATH="$mock_dir/python_modules${PYTHONPATH:+:$PYTHONPATH}" \
+  "$cli" screen --protocol "$mock_dir/protocol.json" --ligand "$approved_ligand" \
   --out "$mock_dir/approved_check" --check-only --non-interactive >/dev/null \
   || fail "approved protocol check"
 "$cli" run --mode screen --protocol "$mock_dir/protocol.json" --ligands "$approved_ligand" \
