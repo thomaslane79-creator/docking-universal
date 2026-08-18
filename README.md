@@ -81,6 +81,11 @@ The direct versions verified in a fresh macOS arm64 environment are pinned in [e
 
 ## Install
 
+New to GitHub or to obtaining research software from a repository? See the
+[GitHub essentials guide for scientific users](docs/assets/github-essentials-for-docking-universal.pdf)
+for cloning, version tracking, controlled updates, issue reporting, and the
+separation of software files from study records.
+
 Create the tested scientific environment:
 
 ```bash

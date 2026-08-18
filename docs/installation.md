@@ -1,5 +1,10 @@
 # Installation
 
+If GitHub is new to you, begin with the
+[GitHub essentials guide for Docking Universal](assets/github-essentials-for-docking-universal.pdf).
+It explains how to obtain and update the repository, record an exact software
+state for reproducibility, and report problems without exposing research data.
+
 ## Recommended Conda installation
 
 Docking Universal uses external scientific programs as composable stages. The repository's `environment.yml` contains the smallest direct dependency set verified together on macOS arm64.
