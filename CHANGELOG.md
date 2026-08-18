@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — 2026-08-18
+
+- Added active-Conda installation and self-contained installed validation.
+- Added clearer preparation/protocol routing and guided low-level docking selection.
+- Added portable, hash-verified `.duprotocol` bundles for approved-protocol reuse.
+- Reworked control-backed, new-ligand, and ligand-free cavity reports for clearer scientific roles and concise defaults.
+- Added an always-present control-to-new-run scientific software comparison table.
+- Expanded unit, CLI, integration, release, installed-command, and visual PDF validation.
+
+See [Changes completed on 2026-08-18](docs/changes-2026-08-18.md) for the complete inventory.
+
 ## 0.4.0 — 2026-08-09
 
 - Narrowed the research preview to AutoDock Vina only. The earlier experimental smina comparison path and dependency were removed from the interface; a new backend may be evaluated in a future release.

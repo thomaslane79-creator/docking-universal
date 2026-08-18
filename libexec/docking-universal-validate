@@ -41,10 +41,17 @@ done
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PROJECT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
-CLI="$PROJECT/bin/docking-universal"
+CLI="${DOCKING_UNIVERSAL_CLI:-$PROJECT/bin/docking-universal}"
 PYTHON_COMMAND="${DOCKING_UNIVERSAL_PYTHON:-python}"
+if [ -f "$PROJECT/Makefile" ] && [ -d "$PROJECT/tests" ] && [ -d "$PROJECT/examples" ]; then
+  SOURCE_TREE=1
+  ASSETS="$PROJECT/examples"
+else
+  SOURCE_TREE=0
+  ASSETS="$SCRIPT_DIR/validation-assets"
+fi
 timestamp=$(date '+%Y%m%d_%H%M%S')
-[ -n "$out" ] || out="$PROJECT/validation_runs/${level}_${timestamp}"
+[ -n "$out" ] || out="$PWD/validation_runs/${level}_${timestamp}"
 case "$out" in /*) ;; *) out="$PWD/$out" ;; esac
 
 if [ "$background" -eq 1 ]; then
@@ -90,7 +97,20 @@ write_status "RUNNING"
 
 run_quick() {
   current_stage="fast interface and routing tests"; write_status "RUNNING"
-  (cd "$PROJECT" && make test)
+  if [ "$SOURCE_TREE" -eq 1 ]; then
+    (cd "$PROJECT" && make test)
+  else
+    [ -x "$CLI" ]
+    [ -x "$SCRIPT_DIR/docking-universal-prepare" ]
+    [ -f "$ASSETS/tutorials/01_bound_ligand/inputs/1HVR.pdb" ]
+    [ -f "$ASSETS/tutorials/01_bound_ligand/inputs/rilpivirine_pubchem.sdf" ]
+    [ -f "$ASSETS/tutorials/02_ligand_free_cavity/inputs/2R8N.pdb" ]
+    [ -f "$ASSETS/tutorials/02_ligand_free_cavity/inputs/indinavir_pubchem_5362440.sdf" ]
+    [ -f "$ASSETS/test_inputs/two_compounds.sdf" ]
+    "$CLI" --help > "$out/cli-help.txt"
+    "$CLI" version > "$out/version.txt"
+    "$CLI" validate --help > "$out/validate-help.txt"
+  fi
 }
 
 run_integration() {
@@ -98,7 +118,7 @@ run_integration() {
   current_stage="installed-tool discovery"; write_status "RUNNING"
   "$CLI" doctor > "$out/doctor.txt"
 
-  input_sdf="$PROJECT/examples/tutorials/01_bound_ligand/inputs/rilpivirine_pubchem.sdf"
+  input_sdf="$ASSETS/tutorials/01_bound_ligand/inputs/rilpivirine_pubchem.sdf"
   for forcefield in mmff94 mmff94s uff; do
     current_stage="real $forcefield ensemble generation"; write_status "RUNNING"
     if [ "$forcefield" = "mmff94s" ]; then
@@ -120,7 +140,7 @@ run_integration() {
   mkdir -p "$out/ligand_centered"
   (cd "$out/ligand_centered" && env FEEDBACK_LEVEL=concise DOCKING_UNIVERSAL_SITE_MODE=ligand \
     DOCKING_UNIVERSAL_LIGAND_RESNAME=XK2 BOX_SIZE=26 DOCKING_UNIVERSAL_LOG_MODE=file \
-    "$CLI" prepare "$PROJECT/examples/tutorials/01_bound_ligand/inputs/1HVR.pdb")
+    "$CLI" prepare "$ASSETS/tutorials/01_bound_ligand/inputs/1HVR.pdb")
 
   for cavity_mode in 1 2 3; do
     current_stage="fpocket cavity mode $cavity_mode"; write_status "RUNNING"
@@ -132,7 +152,7 @@ run_integration() {
       DOCKING_UNIVERSAL_CAVITY_MODE="$cavity_mode" DOCKING_UNIVERSAL_MAX_POCKETS=5 \
       DOCKING_UNIVERSAL_CENTER_MODE="$center_mode" DOCKING_UNIVERSAL_CENTROID_MODE="$centroid_mode" \
       SCORE_THRESHOLD=0.0 STRICT_LOCAL_POCKETS=1 DOCKING_UNIVERSAL_LOG_MODE=file \
-      "$CLI" prepare "$PROJECT/examples/tutorials/02_ligand_free_cavity/inputs/2R8N.pdb")
+      "$CLI" prepare "$ASSETS/tutorials/02_ligand_free_cavity/inputs/2R8N.pdb")
   done
 
   current_stage="real AutoDock Vina smoke docking"; write_status "RUNNING"
@@ -144,17 +164,36 @@ run_integration() {
   "$CLI" collect "$out/vina_smoke" --out "$out/vina_smoke_scores.csv"
   [ "$(wc -l < "$out/vina_smoke_scores.csv" | tr -d ' ')" -ge 3 ]
 
+  current_stage="approved-protocol transfer fixture"; write_status "RUNNING"
+  comparison_args=""
+  seed_args=""
+  for seed in 41001 41002 41003 41004 41005; do
+    comparison_dir="$out/protocol_fixture/control_$seed/reference_comparison"
+    mkdir -p "$comparison_dir"
+    printf '{"pose_count":3,"top_score_affinity_kcal_per_mol":-7.0,"top_score_rmsd_angstrom":1.2,"best_rmsd_angstrom":0.8}\n' \
+      > "$comparison_dir/comparison_summary.json"
+    comparison_args="$comparison_args $out/protocol_fixture/control_$seed"
+    seed_args="$seed_args --seed $seed"
+  done
+  # Word splitting is intentional: generated validation paths contain no spaces.
+  # shellcheck disable=SC2086
+  "$CLI" evaluate-control $comparison_args --engine vina \
+    --out "$out/protocol_fixture/protocol.json" --receptor "$receptor" --box "$box" \
+    --threshold 2 --exhaustiveness 16 --num-modes 20 --energy-range 8 \
+    $seed_args --min-seeds 5 --conformers 3 \
+    --macrocycle-treatment flexible_meeko --no-prompt
+
   current_stage="approved-protocol batch planning and report"; write_status "RUNNING"
   "$CLI" run --mode screen \
-    --protocol "$PROJECT/examples/tutorials/01_bound_ligand/study/control/04_redocking/vina/repeatability/protocol.json" \
-    --ligands "$PROJECT/examples/test_inputs/two_compounds.sdf" --out "$out/approved_screen_plan" \
+    --protocol "$out/protocol_fixture/protocol.json" \
+    --ligands "$ASSETS/test_inputs/two_compounds.sdf" --out "$out/approved_screen_plan" \
     --name validation_screen --plan-only --non-interactive
   find "$out/approved_screen_plan/report" -type f -name '*.pdf' -size +1000c | grep -q .
 
   current_stage="ligand-free planning, fallback, and report"; write_status "RUNNING"
   "$CLI" run --mode exploratory \
-    --complex "$PROJECT/examples/tutorials/02_ligand_free_cavity/inputs/2R8N.pdb" \
-    --ligands "$PROJECT/examples/tutorials/02_ligand_free_cavity/inputs/indinavir_pubchem_5362440.sdf" \
+    --complex "$ASSETS/tutorials/02_ligand_free_cavity/inputs/2R8N.pdb" \
+    --ligands "$ASSETS/tutorials/02_ligand_free_cavity/inputs/indinavir_pubchem_5362440.sdf" \
     --out "$out/exploratory_plan" --name validation_exploratory --plan-only --non-interactive
   find "$out/exploratory_plan/report" -type f -name '*.pdf' -size +1000c | grep -q .
 }
@@ -162,7 +201,7 @@ run_integration() {
 run_release() {
   run_integration
   current_stage="repeatable bound-ligand control"; write_status "RUNNING"
-  "$CLI" control --complex "$PROJECT/examples/tutorials/01_bound_ligand/inputs/1HVR.pdb" \
+  "$CLI" control --complex "$ASSETS/tutorials/01_bound_ligand/inputs/1HVR.pdb" \
     --ligand-id XK2:A:263 --engine vina --control-tier repeatability \
     --out "$out/control_1HVR_XK2" --non-interactive
   protocol=$(find "$out/control_1HVR_XK2/04_redocking/vina" -name protocol.json -type f | sort | tail -1)
@@ -176,7 +215,7 @@ PY
 
   current_stage="approved-protocol held-out compound docking"; write_status "RUNNING"
   "$CLI" run --mode screen --protocol "$protocol" \
-    --ligands "$PROJECT/examples/tutorials/01_bound_ligand/inputs/rilpivirine_pubchem.sdf" \
+    --ligands "$ASSETS/tutorials/01_bound_ligand/inputs/rilpivirine_pubchem.sdf" \
     --out "$out/screen_1HVR_Rilpivirine" --name release_screen --non-interactive
 
   current_stage="ligand-free exploratory compound docking"; write_status "RUNNING"
@@ -186,7 +225,7 @@ PY
   exploratory_box=$(find "$prepared_root/cavity" -type f -name '*_pocket1.conf' | head -1)
   "$CLI" run --mode exploratory --receptor-pdb "$receptor_pdb" --receptor-pdbqt "$receptor_pdbqt" \
     --box "$exploratory_box" \
-    --ligands "$PROJECT/examples/tutorials/02_ligand_free_cavity/inputs/indinavir_pubchem_5362440.sdf" \
+    --ligands "$ASSETS/tutorials/02_ligand_free_cavity/inputs/indinavir_pubchem_5362440.sdf" \
     --out "$out/exploratory_2R8N_Indinavir" --name release_exploratory --non-interactive
 }
 

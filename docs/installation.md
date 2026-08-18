@@ -13,6 +13,17 @@ conda activate docking-universal
 make test
 ```
 
+Install the public command into the active environment:
+
+```bash
+conda activate docking-universal
+make install-conda
+which docking-universal
+docking-universal --help
+```
+
+`make install-conda` uses the active `CONDA_PREFIX`; it fails rather than guessing when no Conda environment is active. The installed command and its private helpers remain relocatable within that environment.
+
 AutoDock Vina is kept in a small engine environment so its compiled dependencies do not destabilize the preparation, analysis, and PyMOL stack:
 
 ```bash
@@ -20,6 +31,18 @@ conda env create -f environments/vina.yml
 ```
 
 No manual activation is required for normal package use. If `vina` is not already on `PATH`, Docking Universal automatically looks for it in `docking-universal-vina`.
+
+An installed copy can run validation from any writable directory:
+
+```bash
+conda activate docking-universal
+mkdir -p validation-work
+cd validation-work
+docking-universal validate quick
+docking-universal validate integration
+```
+
+Installed validation uses packaged scientific fixtures and writes a new `validation_runs/` directory below the invocation directory. It does not write inside the Conda installation. Source checkouts additionally run the repository's developer unit tests.
 
 The environment does not modify or replace an existing environment. To remove it later:
 

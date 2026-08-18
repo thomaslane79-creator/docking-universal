@@ -1,5 +1,11 @@
 # Raw-input validation
 
+## Installed-command validation
+
+The installed Conda command was validated outside the source repository. `docking-universal validate integration` used packaged fixtures, wrote to a caller-owned directory, and passed real MolScrub/RDKit ensemble generation, Meeko ligand preparation, ligand-centered receptor preparation, fpocket cavity modes, AutoDock Vina smoke docking, control evaluation, approved-protocol planning, exploratory planning, and PDF generation. This specifically verifies that installed validation no longer depends on a writable source checkout.
+
+The longer release suite also passed the repeatable 1HVR/XK2 control, a held-out approved-protocol screen, a ligand-free 2R8N/Indinavir exploratory screen, clustering, PLIP, PyMOL rendering, and reports. These are software/workflow checks on representative cases, not general biological validation.
+
 The packaged ligand-free tutorial input, unbound RCSB 2R8N, was also passed through the quick fpocket route on the macOS arm64 reference environment. The run completed and wrote five ranked candidate cavities with positive dimensions and Vina configuration files. This verifies tutorial execution through cavity generation; it does not validate any cavity as a biological binding site.
 
 ## Reference case

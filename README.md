@@ -90,6 +90,15 @@ conda activate docking-universal
 make test
 ```
 
+Install the command into the active Conda environment so it is available from any directory:
+
+```bash
+conda activate docking-universal
+make install-conda
+which docking-universal
+docking-universal --help
+```
+
 Create the small AutoDock Vina engine environment:
 
 ```bash
@@ -119,7 +128,7 @@ On Apple silicon, install the conda-forge package named `pymol-open-source`, not
 ```text
 docking-universal run
 docking-universal run --mode control --complex 1HVR --download-pdb --out control_study --non-interactive
-docking-universal run --mode screen --protocol protocol.json --ligands library.sdf --out study
+docking-universal run --mode screen --protocol approved.duprotocol --ligands library.sdf --out study
 docking-universal run --mode exploratory --receptor-pdb receptor.pdb --receptor-pdbqt receptor.pdbqt --box pocket.conf --ligands library.sdf --out study
 docking-universal run --mode exploratory --complex protein_only.pdb --ligands library.sdf --review-pockets --out study
 docking-universal control --complex bound_complex.pdb
@@ -143,7 +152,9 @@ Every subcommand provides `--help`.
 
 The guided command also offers **recommended defaults** or a **custom ligand ensemble**. Custom mode presents pH, conformers per chemical state, deterministic base seed, MMFF94/MMFF94s/UFF selection, conformer RMSD pruning, tautomer enumeration, charge model, and—during exploration—independent docking-seed count. These choices are passed to the actual ensemble and docking stages and recorded in protocol or screening manifests. An approved-protocol screen displays and reuses its locked ensemble settings rather than allowing an inconsistent override.
 
-The approved-protocol screen is the supported restart path after a completed control. If `--protocol` is omitted interactively, the runner can select `protocol.json` with Finder or discover approved protocols inside a selected control/study folder before asking for the new compound SDF input.
+The approved-protocol screen is the supported restart path after a completed control. A passing high-level control writes a portable `.duprotocol` ZIP containing the approved protocol, locked receptor and box, control reference/evidence, and a hash manifest. If `--protocol` is omitted interactively, the runner can select that bundle, a legacy `protocol.json`, or a completed control/study folder before asking for the new compound SDF input.
+
+The standard combined PDF keeps reused control evidence concise: control date, ligand, PASS/REVIEW status, RMSD and threshold, locked pocket/box, and one control overlay. New-ligand results follow in a separate section. The final reproducibility section always compares the control and new-run Docking Universal, Python, RDKit, MolScrub, Meeko, and AutoDock Vina versions. Detailed retained control interaction figures and provenance remain in `.duprotocol` and can be included in an audit appendix.
 
 Default completed control folders use the readable form `control_<PDB>_<ligand>_<YYYYMMDD_HHMMSS>`, such as `control_1HVR_XK2_20260811_143025`. Explicit `--out` folder names remain unchanged.
 

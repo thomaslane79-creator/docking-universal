@@ -11,6 +11,25 @@ SPEC.loader.exec_module(REPORT)
 
 
 class CavityReportTests(unittest.TestCase):
+    def test_scientific_version_comparison(self):
+        recorded = {key: "1.0" for key in ("docking_universal", "python", "rdkit", "molscrub", "meeko", "engine_version")}
+        comparison = REPORT.compare_scientific_versions(recorded, dict(recorded))
+        self.assertEqual(comparison["overall"], "SAME")
+        changed = dict(recorded, meeko="2.0")
+        comparison = REPORT.compare_scientific_versions(recorded, changed)
+        self.assertEqual(comparison["overall"], "NOT THE SAME")
+        self.assertEqual(next(row for row in comparison["entries"] if row["software"] == "Meeko")["status"], "DIFFERENT")
+
+    def test_pubchem_source_suffix_is_not_part_of_compound_name(self):
+        self.assertEqual(
+            REPORT.display_compound_name("Rilpivirine Pubchem", "rilpivirine_pubchem.sdf"),
+            "Rilpivirine",
+        )
+        self.assertEqual(
+            REPORT.display_compound_name("6451164", "rilpivirine_pubchem_6451164.sdf"),
+            "Rilpivirine",
+        )
+
     def test_fpocket_descriptors_and_box_volume_inputs(self):
         with tempfile.TemporaryDirectory() as temporary:
             cavity = Path(temporary)

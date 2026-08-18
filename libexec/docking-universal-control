@@ -8,7 +8,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PROJECT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
-CLI="$PROJECT_DIR/bin/docking-universal"
+CLI="${DOCKING_UNIVERSAL_CLI:-$PROJECT_DIR/bin/docking-universal}"
 PYTHON_COMMAND="${DOCKING_UNIVERSAL_PYTHON:-python}"
 
 usage() {

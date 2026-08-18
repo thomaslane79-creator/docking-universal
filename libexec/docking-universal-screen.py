@@ -14,9 +14,13 @@ import argparse
 import csv
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from docking_universal_bundle import extract_bundle, resolve_locked_path
 
 
 def sha256(path):
@@ -35,7 +39,7 @@ def run(command):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     authority = parser.add_mutually_exclusive_group(required=True)
-    authority.add_argument("--protocol", type=Path, help="approved target-locked protocol")
+    authority.add_argument("--protocol", type=Path, help="approved .duprotocol bundle or legacy protocol.json")
     authority.add_argument("--exploratory", action="store_true", help="explicitly run without an approved pose-recovery control")
     parser.add_argument("--ligand", required=True, type=Path, help="one compound SDF with authoritative chemistry")
     parser.add_argument("--out", required=True, type=Path)
@@ -82,6 +86,12 @@ def main():
         protocol_path = args.protocol.expanduser().resolve()
         if not protocol_path.is_file():
             parser.error("protocol file does not exist")
+        if protocol_path.suffix.lower() == ".duprotocol":
+            try:
+                protocol_path = extract_bundle(protocol_path)
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                raise SystemExit(f"Invalid Docking Universal protocol bundle: {exc}") from None
+            print(f"Verified portable protocol bundle: {protocol_path}")
         protocol = json.loads(protocol_path.read_text())
         if protocol.get("schema_name") != "docking-universal-protocol" or protocol.get("schema_version") != 1:
             raise SystemExit("Protocol is missing the supported docking-universal-protocol v1 schema")
@@ -102,8 +112,12 @@ def main():
         expected_macrocycle = "flexible_meeko" if engine == "vina" else "rigid_conformer_ensemble"
         if protocol["parameters"].get("macrocycle_treatment") != expected_macrocycle:
             raise SystemExit("Protocol macrocycle treatment does not match the recorded engine")
-        receptor = (args.receptor or Path(protocol["locked_inputs"]["receptor"])).expanduser().resolve()
-        box = (args.box or Path(protocol["locked_inputs"]["box"])).expanduser().resolve()
+        receptor = args.receptor.expanduser().resolve() if args.receptor else resolve_locked_path(
+            protocol_path, protocol["locked_inputs"]["receptor"]
+        )
+        box = args.box.expanduser().resolve() if args.box else resolve_locked_path(
+            protocol_path, protocol["locked_inputs"]["box"]
+        )
         for path, key, label in ((receptor, "receptor_sha256", "receptor"), (box, "box_sha256", "box")):
             if not path.is_file():
                 raise SystemExit(f"Locked {label} not found: {path}")
@@ -147,10 +161,12 @@ def main():
     out = args.out.expanduser().resolve()
     out.mkdir(parents=True, exist_ok=True)
     project = Path(__file__).resolve().parent.parent
+    cli = Path(os.environ.get("DOCKING_UNIVERSAL_CLI", project / "bin/docking-universal"))
+    libexec = Path(os.environ.get("DOCKING_UNIVERSAL_LIBEXEC", project / "libexec"))
     # A 2D depiction documents the submitted chemical graph independently of
     # any docking pose. Its filename follows the authoritative input SDF.
     run([
-        project / "bin/docking-universal", "depict2d", ligand,
+        cli, "depict2d", ligand,
         "--out-dir", out / "depiction", "--format", "png",
     ])
     conformers = int(parameters["conformers_per_state"])
@@ -165,7 +181,7 @@ def main():
 
     ensemble = out / "independent_ensemble.sdf"
     ensemble_command = [
-        sys.executable, project / "libexec/docking-universal-ensemble.py", ligand,
+        sys.executable, libexec / "docking-universal-ensemble.py", ligand,
         "--out", ensemble, "--ph", parameters["ph"], "--conformers", conformers,
         "--seed", parameters.get("ensemble_seed", seeds[0]),
         "--forcefield", parameters.get("forcefield", "mmff94"),
@@ -176,7 +192,7 @@ def main():
     run(ensemble_command)
     prep = out / "ligand_preparation"
     run([
-        project / "bin/docking-universal", "ligands", ensemble, "--out", prep,
+        cli, "ligands", ensemble, "--out", prep,
         "--target-engines", engine, "--geometry-mode", "preserve",
         "--charge-model", parameters["charge_model"],
     ])
@@ -184,7 +200,7 @@ def main():
     for seed in seeds:
         docking = out / f"seed_{seed}" / "docking"
         command = [
-            project / "bin/docking-universal", "dock", "--engine", engine,
+            cli, "dock", "--engine", engine,
             "--receptor", receptor, "--ligands", prep / "pdbqt_ligands",
             "--config", box, "--out", docking,
             "--exhaustiveness", parameters["exhaustiveness"],
@@ -197,7 +213,7 @@ def main():
             command += ["--engine-env", args.engine_env]
         run(command)
         scores = docking.parent / "scores.csv"
-        run([project / "bin/docking-universal", "collect", docking, "--out", scores])
+        run([cli, "collect", docking, "--out", scores])
         score_files.append(scores)
 
     combined = out / "all_scores.csv"
@@ -240,7 +256,7 @@ def main():
     if args.analysis != "none":
         analysis = out / "pose_analysis"
         run([
-            project / "bin/docking-universal", "cluster-poses", "--docking-root", out,
+            cli, "cluster-poses", "--docking-root", out,
             "--ligand-work", prep / "ligand_work", "--engine", engine,
             "--receptor", args.receptor_pdb.expanduser().resolve() if args.receptor_pdb else (receptor.with_suffix(".pdb") if receptor.with_suffix(".pdb").is_file() else receptor),
             "--out", analysis, "--cluster-rmsd", args.cluster_rmsd,
@@ -248,7 +264,7 @@ def main():
         ])
         if args.analysis == "representatives":
             run([
-                project / "bin/docking-universal", "render3d", analysis / "representative_browser.pml",
+                cli, "render3d", analysis / "representative_browser.pml",
                 "--out", analysis / "representative_browser.png",
                 "--session-out", analysis / "representative_browser.pse", "--pymol", args.pymol,
             ])
@@ -256,12 +272,12 @@ def main():
                 if not cluster_dir.is_dir():
                     continue
                 run([
-                    project / "bin/docking-universal", "render3d", cluster_dir / "representative.pml",
+                    cli, "render3d", cluster_dir / "representative.pml",
                     "--out", cluster_dir / "representative.png",
                     "--session-out", cluster_dir / "representative.pse", "--pymol", args.pymol,
                 ])
                 run([
-                    project / "bin/docking-universal", "interactions", cluster_dir / "complex.pdb",
+                    cli, "interactions", cluster_dir / "complex.pdb",
                     "--out-dir", cluster_dir / "interactions", "--plip-command", args.plip_command,
                     "--skip-native-visuals", "--typed-ligand-sdf", cluster_dir / "representative.sdf",
                     "--ligand-resname", "UNL", "--ligand-chain", "Z", "--ligand-position", "1",
@@ -269,7 +285,7 @@ def main():
                 interaction_scene = cluster_dir / "interactions" / "complex_plip_all_in_one.pml"
                 if interaction_scene.is_file():
                     run([
-                        project / "bin/docking-universal", "render3d", interaction_scene,
+                        cli, "render3d", interaction_scene,
                         "--out", cluster_dir / "interactions" / "complex_plip_all_in_one.png",
                         "--session-out", cluster_dir / "interactions" / "complex_plip_all_in_one.pse",
                         "--pymol", args.pymol,
