@@ -55,11 +55,11 @@ engine_command=""
 engine_env=""
 
 if [ "$#" -eq 0 ]; then
-  [ "$(uname -s)" = "Darwin" ] || {
+  OSASCRIPT_COMMAND="${DOCKING_UNIVERSAL_OSASCRIPT:-osascript}"
+  [ "$(uname -s)" = "Darwin" ] || [ -n "${DOCKING_UNIVERSAL_OSASCRIPT:-}" ] || {
     echo "ERROR: interactive Finder selection is available on macOS only; provide --receptor, --ligands, --config, and --out." >&2
     exit 2
   }
-  OSASCRIPT_COMMAND="${DOCKING_UNIVERSAL_OSASCRIPT:-osascript}"
   command -v "$OSASCRIPT_COMMAND" >/dev/null 2>&1 || [ -x "$OSASCRIPT_COMMAND" ] || {
     echo "ERROR: Finder selection requires osascript; provide explicit dock options instead." >&2
     exit 2
