@@ -33,9 +33,11 @@ The release suite is intentionally slow. It first repeats the integration probes
 
 ## Real-tool smoke checks
 
-The maintained macOS Apple Silicon environment has been checked with fpocket, Meeko, MolScrub, RDKit, Open Babel, PLIP, PyMOL Open-Source, and AutoDock Vina 1.2.7. Real fixture-based checks cover:
+The maintained macOS Apple Silicon environment has been checked with fpocket, Meeko, PDBFixer 1.11, MolScrub, RDKit, Open Babel, PLIP, PyMOL Open-Source, and AutoDock Vina 1.2.7. Real fixture-based checks cover:
 
 - ligand-centered 1HVR/XK2 receptor preparation and box generation;
+- strict-Meeko-first receptor conversion, conservative PDBFixer fallback auditing, and final Meeko batch-cleanup fallback behavior;
+- unchanged prepared PDBQT hashes for the existing 1HVR and 2R8N examples when strict Meeko succeeds, plus matching selected boxes and downstream docking results;
 - 2R8N ligand-free preparation in conservative, expanded, and permissive fpocket modes;
 - deepest-pocket and centroid box centers, including whole-protein and per-chain centroid scope;
 - automatic documented fallback from fpocket score threshold 0.10 to 0.0 when no candidate passes, while retaining geometry and overlap filters;

@@ -83,7 +83,7 @@ Check what is visible on the current workstation:
 
 Only dependencies used by the selected stage are required.
 
-The direct versions verified in a fresh macOS arm64 environment are pinned in [environment.yml](environment.yml), with a complete historical conda build snapshot in `environment-lock-osx-arm64.txt` and a Python distribution snapshot in `requirements-pip-lock.txt`. See the [installation guide](docs/installation.md) and [working scientific environment](docs/environment.md). Receptor and ligand conversion in the original workflow used ADFRsuite 1.0 as a separate installation; a portable Meeko backend is included in the clean environment while compatibility work is completed.
+The direct versions verified in a fresh macOS arm64 environment are pinned in [environment.yml](environment.yml), with a complete historical conda build snapshot in `environment-lock-osx-arm64.txt` and a Python distribution snapshot in `requirements-pip-lock.txt`. See the [installation guide](docs/installation.md) and [working scientific environment](docs/environment.md). Receptor preparation tries strict Meeko first and uses conservative PDBFixer repair only when the original receptor is rejected; ADFRsuite remains the legacy alternative backend.
 
 ## Install
 
@@ -109,6 +109,8 @@ make install-conda
 which docking-universal
 docking-universal --help
 ```
+
+`environment.yml` installs PDBFixer 1.11 and its OpenMM dependency. `make install-conda` then installs the Docking Universal command into that active environment; it does not solve dependencies itself. Existing environments should be refreshed with `conda env update -f environment.yml --prune` before reinstalling the command.
 
 Create the small AutoDock Vina engine environment:
 
@@ -165,7 +167,7 @@ The guided command also offers **recommended defaults** or a **custom ligand ens
 
 The approved-protocol screen is the supported restart path after a completed control. A passing high-level control writes a portable `.duprotocol` ZIP containing the approved protocol, locked receptor and box, control reference/evidence, and a hash manifest. This allows a previously determined target-specific protocol - including receptor preparation, the selected pocket and docking box, ligand-ensemble policy, exhaustiveness, independent seeds, requested pose count, and energy range - to be applied unchanged when docking new sets of compounds. If `--protocol` is omitted interactively, the runner can select that bundle, a legacy `protocol.json`, or a completed control/study folder before asking for the new compound SDF input. Pocket selection or search effort alone does not create approval; reusable approved screening still requires the recorded bound-ligand control to pass.
 
-The standard combined PDF keeps reused control evidence concise: control date, ligand, PASS/REVIEW status, RMSD and threshold, locked pocket/box, and one control overlay. New-ligand results follow in a separate section. The final reproducibility section always compares the control and new-run Docking Universal, Python, RDKit, MolScrub, Meeko, and AutoDock Vina versions. Detailed retained control interaction figures and provenance remain in `.duprotocol` and can be included in an audit appendix.
+The standard combined PDF keeps reused control evidence concise: control date, ligand, PASS/REVIEW status, RMSD and threshold, receptor-preparation path, locked pocket/box, and one control overlay. New-ligand results follow in a separate section. The final reproducibility section always compares the control and new-run Docking Universal, Python, RDKit, MolScrub, Meeko, PDBFixer, and AutoDock Vina versions. It states whether strict Meeko preparation succeeded directly, conservative PDBFixer repair was used, or the documented Meeko batch-cleanup fallback was required. The same preparation record, including the retained PDBFixer audit location when applicable, is written to the machine-readable report provenance. Detailed retained control interaction figures and provenance remain in `.duprotocol` and can be included in an audit appendix.
 
 Default completed control folders use the readable form `control_<PDB>_<ligand>_<YYYYMMDD_HHMMSS>`, such as `control_1HVR_XK2_20260811_143025`. Explicit `--out` folder names remain unchanged.
 
@@ -323,6 +325,6 @@ MIT. See [LICENSE](LICENSE).
 
 ## Citation
 
-If Docking Universal contributes to your research, please cite the repository release used and all applicable underlying software and methods. Docking Universal integrates established scientific tools; citing this repository recognizes the workflow and its implementation, but does not replace citation of the original work behind AutoDock Vina, fpocket, RDKit, Meeko, Open Babel, PLIP, PyMOL Open-Source, or any other tool used in the relevant stages.
+If Docking Universal contributes to your research, please cite the repository release used and all applicable underlying software and methods. Docking Universal integrates established scientific tools; citing this repository recognizes the workflow and its implementation, but does not replace citation of the original work behind AutoDock Vina, fpocket, RDKit, Meeko, PDBFixer/OpenMM, Open Babel, PLIP, PyMOL Open-Source, or any other tool used in the relevant stages. PDBFixer should be reported with its exact software version and repository; its OpenMM foundation can be cited using Eastman et al., *PLOS Computational Biology* 2017, DOI `10.1371/journal.pcbi.1005659`.
 
 Run-specific reports record software versions and applicable references to make this attribution easier. Machine-readable project citation metadata is provided in [CITATION.cff](CITATION.cff), and the primary references for the underlying methods are listed in the generated reports and documentation.

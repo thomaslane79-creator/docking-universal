@@ -93,6 +93,11 @@ doctor() {
       printf '  absent     %s\n' "$tool"
     fi
   done
+  if "$PYTHON_COMMAND" -c 'import pdbfixer, openmm' >/dev/null 2>&1; then
+    printf '  available  PDBFixer (receptor pre-cleaning)\n'
+  else
+    printf '  absent     PDBFixer (receptor pre-cleaning)\n'
+  fi
 
   printf '\nOnly tools used by the selected command are required.\n'
   return "$missing"

@@ -26,7 +26,7 @@ The downloaded raw inputs are not redistributed in this repository. The checksum
 
 The raw PDB and SDF were processed on an M2 Mac using the clean main environment and the isolated Vina environment:
 
-1. Receptor atoms and `MODRES`-declared polymer residues were selected from the raw PDB and converted strictly with Meeko; no permissive bad-residue deletion was used. Meeko fetched the official CSO chemical-component definition from RCSB to type the two modified cysteines.
+1. Receptor atoms and `MODRES`-declared polymer residues were selected from the raw PDB and converted strictly with Meeko; no permissive bad-residue deletion was used. Meeko fetched the official CSO chemical-component definition from RCSB to type the two modified cysteines. Under the new strict-first pipeline, this case and the existing 2R8N example produced byte-identical receptor PDBQT files without invoking PDBFixer. Their selected boxes and paired downstream docking scores also matched the earlier direct-Meeko path.
 2. XK2 was prepared from the raw SDF with Open Babel and Meeko.
 3. Meeko prepared AutoDock Vina PDBQT input while retaining the recorded ligand chemistry and conformer provenance.
 4. For the ligand-free tests, XK2 was withheld from fpocket. Both the guided conservative workflow and the standalone robust command ranked and boxed sites from protein coordinates alone.
@@ -34,6 +34,8 @@ The raw PDB and SDF were processed on an M2 Mac using the clean main environment
 6. Vina output was collected to CSV with its score and RMSD-bound fields retained explicitly.
 7. The top Vina pose was combined with receptor coordinates for PLIP analysis, custom PML generation, headless PyMOL rendering, and generic RDKit depiction.
 8. The confirmed `XK2:A:263` instance was also processed through the complete retrospective `control` command: automatic CCD-backed experimental-coordinate SDF creation, Vina docking at the package defaults, pose comparison, filtered PLIP analysis, and PNG/PSE rendering.
+
+Separately, ten varied public PDB structures were used as a preparation robustness sample. All ten produced prepared receptors through strict Meeko, conservative PDBFixer repair followed by strict Meeko, or the documented final Meeko batch-cleanup fallback. This is a software-path stress test rather than biological validation. PDBFixer repair is limited to alternate-location resolution, recognized nonstandard-residue mappings, and missing side-chain heavy atoms; it does not construct missing loops or terminal atoms, and every invocation retains `pdbfixer_audit.json` for review.
 
 ## Ligand-centered preparation result
 

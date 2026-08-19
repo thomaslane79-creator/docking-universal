@@ -192,6 +192,34 @@ def installed_version(*distribution_names):
             continue
     return "not detected"
 
+def receptor_preparation_record(study):
+    """Describe the receptor-conversion path from retained preparation artifacts."""
+    audit_path = first(study, ["preparation/**/receptor/pdbfixer_audit.json", "**/receptor/pdbfixer_audit.json"])
+    post_fix_log = first(study, ["preparation/**/receptor/receptor_after_pdbfixer.log", "**/receptor/receptor_after_pdbfixer.log"])
+    batch_log = first(study, ["preparation/**/receptor/receptor_retry.log", "**/receptor/receptor_retry.log"])
+    receptor_dir = first(study, ["preparation/**/receptor", "**/receptor"])
+    if batch_log and batch_log.stat().st_size:
+        path = "Meeko batch-cleanup fallback after strict preparation failed"
+        used = bool(audit_path)
+    elif post_fix_log and post_fix_log.stat().st_size:
+        path = "conservative PDBFixer repair followed by strict Meeko"
+        used = True
+    elif audit_path:
+        path = "PDBFixer repair attempted; inspect the retained audit and preparation logs"
+        used = True
+    elif receptor_dir:
+        path = "strict Meeko succeeded; PDBFixer was not needed"
+        used = False
+    else:
+        path = "not recorded in this run (a prepared receptor may have been supplied or reused)"
+        used = None
+    return {
+        "path": path,
+        "pdbfixer_used": used,
+        "pdbfixer_audit": str(audit_path) if audit_path else None,
+        "batch_cleanup_log": str(batch_log) if batch_log else None,
+    }
+
 def pymol_version():
     try:
         result = subprocess.run(
@@ -230,6 +258,7 @@ def compare_scientific_versions(recorded, current):
         ("RDKit", "rdkit"),
         ("MolScrub", "molscrub"),
         ("Meeko", "meeko"),
+        ("PDBFixer", "pdbfixer"),
         ("AutoDock Vina", "engine_version"),
     ]
     entries = []
@@ -256,12 +285,14 @@ def reproducibility_record(protocol, study, control):
     figure_manifest = read_json(study / "report" / "report_figure_manifest.json")
     clustering = read_json(first(study, ["compounds/*/pose_analysis/clustering_manifest.json", "**/clustering_manifest.json"]))
     docking_manifest = read_key_value_tsv(first(study, ["compounds/*/seed_*/docking/run_manifest.tsv", "**/docking/run_manifest.tsv"]))
+    receptor_preparation = receptor_preparation_record(study)
     current = {
         "docking_universal": package_version(),
         "python": sys.version.split()[0],
         "rdkit": installed_version("rdkit", "rdkit-pypi"),
         "molscrub": installed_version("molscrub"),
         "meeko": installed_version("meeko"),
+        "pdbfixer": installed_version("pdbfixer"),
         "engine_version": docking_manifest.get("engine_version", "not recorded"),
     }
     engine_version = current["engine_version"]
@@ -273,6 +304,7 @@ def reproducibility_record(protocol, study, control):
         {"role": "Ligand-free cavity detection", "software": "fpocket", "version": fpocket_version()},
         {"role": "Docking scores and poses", "software": "AutoDock Vina", "version": engine_version},
         {"role": "Docking parameterization", "software": "Meeko", "version": current["meeko"]},
+        {"role": "Conditional conservative receptor repair", "software": "PDBFixer", "version": current["pdbfixer"]},
         {"role": "Protonation/conformer preparation", "software": "MolScrub", "version": current["molscrub"]},
         {"role": "Molecular graph, RMSD, clustering", "software": "RDKit", "version": current["rdkit"]},
         {"role": "Molecular conversion/PLIP backend", "software": "Open Babel", "version": openbabel_version()},
@@ -286,6 +318,8 @@ def reproducibility_record(protocol, study, control):
         {"citation": "Eberhardt J, Santos-Martins D, Tillack AF, Forli S. AutoDock Vina 1.2.0: New Docking Methods, Expanded Force Field, and Python Bindings. J Chem Inf Model. 2021;61:3891-3898.", "url": "https://doi.org/10.1021/acs.jcim.1c00203"},
         {"citation": "Le Guilloux V, Schmidtke P, Tuffery P. Fpocket: an open source platform for ligand pocket detection. BMC Bioinformatics. 2009;10:168.", "url": "https://doi.org/10.1186/1471-2105-10-168"},
         {"citation": "Santos-Martins D, He Y, Eberhardt J, et al. Meeko: molecule parameterization and software interoperability for docking and beyond. J Chem Inf Model. 2025;65:13045-13050.", "url": "https://doi.org/10.1021/acs.jcim.5c02271"},
+        {"citation": "PDBFixer: a tool for preparing PDB files for molecular simulation (version recorded above).", "url": "https://github.com/openmm/pdbfixer"},
+        {"citation": "Eastman P, Swails J, Chodera JD, et al. OpenMM 7: Rapid development of high performance algorithms for molecular dynamics. PLoS Comput Biol. 2017;13:e1005659.", "url": "https://doi.org/10.1371/journal.pcbi.1005659"},
         {"citation": "Salentin S, Schreiber S, Haupt VJ, Adasme MF, Schroeder M. PLIP: fully automated protein-ligand interaction profiler. Nucleic Acids Res. 2015;43:W443-W447.", "url": "https://doi.org/10.1093/nar/gkv315"},
         {"citation": "Butina D. Unsupervised Data Base Clustering Based on Daylight's Fingerprint and Tanimoto Similarity: A Fast and Automated Way To Cluster Small and Large Data Sets. J Chem Inf Comput Sci. 1999;39:747-750.", "url": "https://doi.org/10.1021/ci9803381"},
         {"citation": "O'Boyle NM, Banck M, James CA, Morley C, Vandermeersch T, Hutchison GR. Open Babel: An open chemical toolbox. J Cheminform. 2011;3:33.", "url": "https://doi.org/10.1186/1758-2946-3-33"},
@@ -296,6 +330,7 @@ def reproducibility_record(protocol, study, control):
         "schema_name": "docking-universal-report-provenance", "schema_version": 1,
         "study": str(study), "control": str(control) if control else None,
         "software": software,
+        "receptor_preparation": receptor_preparation,
         "control_to_new_run_version_check": compare_scientific_versions(recorded, current) if protocol else None,
         "methods": {
             "cavity_detection": "fpocket geometric cavity detection, descriptor calculation, and recorded geometry/overlap filtering" if discover_cavity_record(study) else "not used in the retained report study",
@@ -305,6 +340,7 @@ def reproducibility_record(protocol, study, control):
             "rmsd_and_clustering": clustering.get("method", "RDKit symmetry-aware heavy-atom CalcRMS without fitting; Butina clustering"),
             "cluster_cutoff_angstrom": clustering.get("cluster_rmsd_angstrom", 2.0),
             "single_cluster_policy": "Use the lowest-energy member as the sole representative",
+            "receptor_preparation": receptor_preparation["path"],
         },
         "references": references,
     }
@@ -510,9 +546,9 @@ def main():
 
     if cavity and not has_docking:
         provenance = reproducibility_record(protocol, args.study, args.control)
-        allowed_roles = {"Workflow", "Ligand-free cavity detection", "3D rendering", "Plots", "PDF generation", "Runtime"}
+        allowed_roles = {"Workflow", "Conditional conservative receptor repair", "Ligand-free cavity detection", "3D rendering", "Plots", "PDF generation", "Runtime"}
         software = [item for item in provenance["software"] if item["role"] in allowed_roles]
-        references = [item for item in provenance["references"] if "Fpocket" in item["citation"] or "PyMOL" in item["citation"]]
+        references = [item for item in provenance["references"] if any(name in item["citation"] for name in ("Fpocket", "PyMOL", "PDBFixer", "OpenMM"))]
         provenance["software"] = software
         provenance["references"] = references
         (args.study / "report" / "software_versions_and_references.json").write_text(json.dumps(provenance, indent=2) + "\n")
@@ -521,7 +557,7 @@ def main():
             provenance_rows.append([Paragraph(item["role"], styles["SmallDU"]), Paragraph(item["software"], styles["SmallDU"]), Paragraph(str(item["version"]), styles["SmallDU"])])
         story += [
             Paragraph(f"{section_number}. Reproducibility, software, and references", styles["Heading1"]),
-            Paragraph("This preparation-only report records fpocket cavity detection, candidate filtering, the selected review box, and PyMOL structural rendering. No ligand docking, scoring, pose clustering, or interaction analysis was performed.", styles["BodyText"]),
+            Paragraph(f"This preparation-only report records fpocket cavity detection, candidate filtering, the selected review box, and PyMOL structural rendering. Receptor preparation path: {provenance['receptor_preparation']['path']}. No ligand docking, scoring, pose clustering, or interaction analysis was performed.", styles["BodyText"]),
             Spacer(1,8), Paragraph("Software versions used for this report", styles["Heading2"]),
             table(provenance_rows, [2.35*inch, 1.55*inch, 2.8*inch], compact=True),
             Spacer(1,10), Paragraph("Scientific and software references", styles["Heading2"]),
@@ -550,6 +586,7 @@ def main():
           ["Control ligand",control_ligand_name],
           ["Control ligand RMSD (best sampled)",f"{b.get('best_rmsd_angstrom','NA')} A"],
           ["Acceptance threshold",f"{a.get('threshold_angstrom','NA')} A"],
+          ["Control receptor preparation",protocol.get("receptor_preparation", {}).get("path", "not recorded by this older protocol")],
           ["Locked docking box / pocket",Path(locked_inputs.get("box", "NA")).name]]
         story += [
           Paragraph(f"{section_number}. Configured docking protocol", styles["Heading1"]),
@@ -610,6 +647,7 @@ def main():
             ["RDKit (control)", recorded_software.get("rdkit", "not recorded")],
             ["MolScrub (control)", recorded_software.get("molscrub", "not recorded")],
             ["Meeko (control)", recorded_software.get("meeko", "not recorded")],
+            ["PDBFixer (control)", recorded_software.get("pdbfixer", "not recorded")],
             ["Docking engine (control)", f"{recorded_software.get('engine', protocol.get('engine', 'NA'))} {recorded_software.get('engine_version', 'not recorded')}"],
         ]
         if args.include_control_appendix:
@@ -762,6 +800,7 @@ def main():
         PageBreak(), Paragraph(f"{result_number + 1}. Reproducibility, software, and references", styles["Heading1"]),
         Paragraph(
             ("fpocket supplied ligand-free geometric cavity candidates, volumes, and druggability descriptors; the report separately records the selected docking box. " if cavity else "") +
+            f"Receptor preparation path: {provenance['receptor_preparation']['path']}. PDBFixer is a conservative fallback after strict Meeko rejection; it is not applied routinely. "
             "Docking scores and poses were produced by AutoDock Vina. PLIP supplied rule-based protein-ligand interaction calls; the retained PLIP XML is the authoritative interaction record. RDKit supplied the retained molecular graph handling and symmetry-aware, no-fit heavy-atom RMSD matrix used by Butina clustering. The clustering cutoff was "
             f"{method['cluster_cutoff_angstrom']} A. If only one cluster is present, its lowest-energy member is reported as the sole representative. PyMOL produced the 3D molecular panels; ReportLab assembled this PDF.",
             styles["BodyText"],

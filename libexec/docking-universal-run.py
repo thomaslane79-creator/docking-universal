@@ -942,6 +942,27 @@ def relative_to_study(path, study):
         return str(path)
 
 
+def receptor_preparation_summary(study):
+    """Summarize the observed or protocol-carried receptor preparation path."""
+    audit_paths = sorted(study.glob("preparation/**/receptor/pdbfixer_audit.json"))
+    post_fix_logs = sorted(study.glob("preparation/**/receptor/receptor_after_pdbfixer.log"))
+    batch_logs = [path for path in sorted(study.glob("preparation/**/receptor/receptor_retry.log")) if path.stat().st_size]
+    if batch_logs:
+        return "Meeko batch-cleanup fallback after strict preparation failed"
+    if post_fix_logs:
+        return "conservative PDBFixer repair followed by strict Meeko"
+    if list(study.glob("preparation/**/receptor")):
+        return "strict Meeko succeeded; PDBFixer was not needed"
+    for manifest_path in sorted(study.glob("compounds/*/screen_manifest.json")):
+        screen_manifest = read_json(manifest_path) or {}
+        protocol_path = Path(str(screen_manifest.get("protocol", ""))).expanduser()
+        protocol = read_json(protocol_path) or {}
+        recorded = protocol.get("receptor_preparation", {}).get("path")
+        if recorded:
+            return f"reused control protocol: {recorded}"
+    return "not recorded; a prepared receptor may have been supplied directly"
+
+
 def write_run_details(study, manifest, compounds, report_dir):
     """Consolidate retained run decisions into one human-readable Markdown record."""
     lines = [
@@ -953,6 +974,9 @@ def write_run_details(study, manifest, compounds, report_dir):
         f"- Scientific status: `{manifest['study_status']}`",
         f"- Completion status: `{manifest.get('completion_status', 'UNKNOWN')}`",
         f"- Created: `{manifest.get('created_utc', 'unknown')}`", "",
+        "## Receptor preparation", "",
+        f"- Path: {receptor_preparation_summary(study)}",
+        "- Policy: strict Meeko first; conservative PDBFixer repair only after rejection; documented Meeko batch cleanup last.", "",
         "## Scientific model", "",
         "- Rigid receptor: receptor coordinates are fixed during docking.",
         "- Ligands: chemical states/conformers are prepared independently; input 3D coordinates are not used to seed the default ensemble.",
@@ -1070,7 +1094,8 @@ def write_reports(study, manifest, compounds):
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
         writer.writerows(rows)
-    report = {**manifest, "compounds": rows}
+    preparation_summary = receptor_preparation_summary(study)
+    report = {**manifest, "receptor_preparation": preparation_summary, "compounds": rows}
     (report_dir / "study_summary.json").write_text(json.dumps(report, indent=2) + "\n")
 
     lines = [
@@ -1079,6 +1104,8 @@ def write_reports(study, manifest, compounds):
         f"**Completion status:** `{manifest.get('completion_status', 'UNKNOWN')}`", "",
         f"**Workflow:** {manifest['workflow']}", "",
         f"**Compounds:** {len(rows)}", "",
+        "## Receptor preparation", "",
+        f"{preparation_summary}. PDBFixer is used only after strict Meeko rejects the filtered receptor.", "",
     ]
     if manifest["study_status"] == "EXPLORATORY_NO_CONTROL":
         lines += ["> **Exploratory result:** no approved bound-ligand pose-recovery control was available. Generated poses and scores are hypotheses for structural review.", ""]
@@ -1098,7 +1125,7 @@ def write_reports(study, manifest, compounds):
         "<tr>" + "".join(f"<td>{html.escape(str(row[field]))}</td>" for field in fields) + "</tr>" for row in rows
     )
     warning_html = "<p><strong>Exploratory:</strong> no approved target-specific pose-recovery control was available.</p>" if manifest["study_status"] == "EXPLORATORY_NO_CONTROL" else ""
-    document = f"""<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>{html.escape(manifest['study_name'])}</title><style>body{{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#18202a}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #ccd3da;padding:.55rem;text-align:left}}th{{background:#eef3f6}}code{{background:#eef3f6;padding:.15rem .3rem}}.note{{border-left:4px solid #b87900;padding:.8rem;background:#fff6df}}</style></head><body><h1>{html.escape(manifest['study_name'])}</h1><p>Scientific status: <code>{manifest['study_status']}</code><br>Completion status: <code>{manifest.get('completion_status', 'UNKNOWN')}</code></p><div class=\"note\">{warning_html or 'Target-specific protocol gate passed. This remains computational evidence, not experimental validation.'}</div><h2>Compound summary</h2><table><thead><tr>{''.join(f'<th>{html.escape(field)}</th>' for field in fields)}</tr></thead><tbody>{html_rows}</tbody></table><h2>Scientific limits</h2><p>Scores are ranking outputs. Pose clustering and seed support describe search convergence and require structural and experimental interpretation.</p></body></html>"""
+    document = f"""<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>{html.escape(manifest['study_name'])}</title><style>body{{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#18202a}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #ccd3da;padding:.55rem;text-align:left}}th{{background:#eef3f6}}code{{background:#eef3f6;padding:.15rem .3rem}}.note{{border-left:4px solid #b87900;padding:.8rem;background:#fff6df}}</style></head><body><h1>{html.escape(manifest['study_name'])}</h1><p>Scientific status: <code>{manifest['study_status']}</code><br>Completion status: <code>{manifest.get('completion_status', 'UNKNOWN')}</code></p><div class=\"note\">{warning_html or 'Target-specific protocol gate passed. This remains computational evidence, not experimental validation.'}</div><h2>Receptor preparation</h2><p>{html.escape(preparation_summary)}. PDBFixer is used only after strict Meeko rejects the filtered receptor.</p><h2>Compound summary</h2><table><thead><tr>{''.join(f'<th>{html.escape(field)}</th>' for field in fields)}</tr></thead><tbody>{html_rows}</tbody></table><h2>Scientific limits</h2><p>Scores are ranking outputs. Pose clustering and seed support describe search convergence and require structural and experimental interpretation.</p></body></html>"""
     (report_dir / "index.html").write_text(document)
     write_run_details(study, manifest, compounds, report_dir)
     # PDF is a presentation artifact; keep it optional so core report generation

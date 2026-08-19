@@ -25,13 +25,25 @@ class CavityReportTests(unittest.TestCase):
             REPORT.__file__ = original_file
 
     def test_scientific_version_comparison(self):
-        recorded = {key: "1.0" for key in ("docking_universal", "python", "rdkit", "molscrub", "meeko", "engine_version")}
+        recorded = {key: "1.0" for key in ("docking_universal", "python", "rdkit", "molscrub", "meeko", "pdbfixer", "engine_version")}
         comparison = REPORT.compare_scientific_versions(recorded, dict(recorded))
         self.assertEqual(comparison["overall"], "SAME")
         changed = dict(recorded, meeko="2.0")
         comparison = REPORT.compare_scientific_versions(recorded, changed)
         self.assertEqual(comparison["overall"], "NOT THE SAME")
         self.assertEqual(next(row for row in comparison["entries"] if row["software"] == "Meeko")["status"], "DIFFERENT")
+
+    def test_receptor_preparation_record_distinguishes_pdbfixer_use(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            study = Path(temporary)
+            receptor = study / "preparation" / "target_receptor_prep" / "receptor"
+            receptor.mkdir(parents=True)
+            self.assertFalse(REPORT.receptor_preparation_record(study)["pdbfixer_used"])
+            (receptor / "pdbfixer_audit.json").write_text('{"status": "completed"}\n')
+            (receptor / "receptor_after_pdbfixer.log").write_text("success\n")
+            record = REPORT.receptor_preparation_record(study)
+            self.assertTrue(record["pdbfixer_used"])
+            self.assertIn("PDBFixer", record["path"])
 
     def test_pubchem_source_suffix_is_not_part_of_compound_name(self):
         self.assertEqual(

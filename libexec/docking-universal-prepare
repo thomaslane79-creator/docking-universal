@@ -16,6 +16,7 @@ set -e
 ###############################################################################
 PACKAGE_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 PACKAGE_VERSION=$(sed -n '1p' "$PACKAGE_ROOT/VERSION" 2>/dev/null || printf 'unknown')
+PYTHON_COMMAND="${DOCKING_UNIVERSAL_PYTHON:-python3}"
 SCRIPT_VERSION="1.35.13_surface_local_pockets_patch1"
 
 print_help() {
@@ -31,7 +32,7 @@ fpocket, and writes AutoDock Vina configuration plus PyMOL review files.
 The main workflow is guided interactively.
 
 Required tools:
-  fpocket, awk, grep, sort, tee, and one receptor backend:
+  fpocket, awk, grep, sort, tee, PDBFixer, and one receptor backend:
   mk_prepare_receptor.py (Meeko) or prepare_receptor (ADFRsuite)
 
 Optional tool:
@@ -54,6 +55,7 @@ Common environment settings:
   DOCKING_UNIVERSAL_MAX_POCKETS    number of ligand-free cavities to retain
   DOCKING_UNIVERSAL_CENTER_MODE    deepest or centroid for ligand-free review
   DOCKING_UNIVERSAL_CENTROID_MODE  1 whole protein or 2 per-chain centroid
+  DOCKING_UNIVERSAL_PDBFIXER=auto  auto, required, or off
   MEEKO_ALLOW_BAD_RES=0         Set 1 to delete unmatched residues (review output)
   MEEKO_DEFAULT_ALTLOC          Optional default alternate location, e.g. A
 
@@ -79,6 +81,13 @@ doctor() {
       missing=1
     fi
   done
+
+  if "$PYTHON_COMMAND" -c 'import pdbfixer, openmm' >/dev/null 2>&1; then
+    printf 'ok       PDBFixer receptor pre-cleaning\n'
+  else
+    printf 'missing  PDBFixer receptor pre-cleaning\n'
+    missing=1
+  fi
 
   if command -v mk_prepare_receptor.py >/dev/null 2>&1; then
     printf 'ok       mk_prepare_receptor.py (Meeko backend)\n'
@@ -438,8 +447,15 @@ feedback_verbose && print_parameter_guidance
 # STEP 1: RECEPTOR PREP
 ###############################################################################
 RECEPTOR_PDB="$RECEPTOR_DIR/${CANONICAL}.pdb"
+RECEPTOR_FILTERED_PDB="$RECEPTOR_DIR/${CANONICAL}_filtered.pdb"
+PDBFIXER_PDB="$RECEPTOR_DIR/${CANONICAL}_pdbfixer.pdb"
 RECEPTOR_PDBQT="$RECEPTOR_DIR/${CANONICAL}.pdbqt"
 RECEPTOR_BACKEND_LOG="$RECEPTOR_DIR/receptor_backend.log"
+PDBFIXER_LOG="$RECEPTOR_DIR/pdbfixer.log"
+PDBFIXER_AUDIT="$RECEPTOR_DIR/pdbfixer_audit.json"
+PDBFIXER_MEEKO_LOG="$RECEPTOR_DIR/receptor_after_pdbfixer.log"
+RECEPTOR_RETRY_LOG="$RECEPTOR_DIR/receptor_retry.log"
+PDBFIXER_USED=0
 
 # Receptor (protein + supported metal atoms). PDB element identity comes from
 # columns 77-78; searching an entire HETATM line for "CA" can accidentally
@@ -469,7 +485,23 @@ awk '
     if (element == "ZN" || element == "MG" || element == "MN" ||
         element == "CA" || element == "FE" || element == "CU") print
   }
-' "$INPUT_PDB" "$INPUT_PDB" > "$RECEPTOR_PDB"
+' "$INPUT_PDB" "$INPUT_PDB" > "$RECEPTOR_FILTERED_PDB"
+
+PDBFIXER_MODE="${DOCKING_UNIVERSAL_PDBFIXER:-auto}"
+case "$PDBFIXER_MODE" in
+  auto|required|off) ;;
+  *) echo "ERROR: DOCKING_UNIVERSAL_PDBFIXER must be auto, required, or off" >&2; exit 2 ;;
+esac
+PDBFIXER_HELPER="$PACKAGE_ROOT/libexec/docking-universal-pdbfixer.py"
+PDBFIXER_AVAILABLE=0
+if "$PYTHON_COMMAND" -c 'import pdbfixer, openmm' >/dev/null 2>&1; then
+  PDBFIXER_AVAILABLE=1
+elif [ "$PDBFIXER_MODE" = "required" ]; then
+  echo "ERROR: PDBFixer is required but unavailable in $PYTHON_COMMAND" >&2
+  exit 1
+fi
+cp "$RECEPTOR_FILTERED_PDB" "$RECEPTOR_PDB"
+
 if [ "$PREP_BACKEND" = "meeko" ]; then
   MEEKO_ALLOW_BAD_RES="${MEEKO_ALLOW_BAD_RES:-0}"
   MEEKO_DEFAULT_ALTLOC="${MEEKO_DEFAULT_ALTLOC:-}"
@@ -486,11 +518,48 @@ else
   PREP_COMMAND=("$PREP_RECEPTOR_BIN" -r "$RECEPTOR_PDB" -o "$RECEPTOR_PDBQT" -A none -U waters)
 fi
 
-log "Preparing receptor with $PREP_BACKEND; detailed output -> $RECEPTOR_BACKEND_LOG"
-if ! "${PREP_COMMAND[@]}" > "$RECEPTOR_BACKEND_LOG" 2>&1; then
-  echo "ERROR: receptor preparation failed. Last backend messages:" >&2
-  tail -40 "$RECEPTOR_BACKEND_LOG" >&2
-  echo "Full backend log: $RECEPTOR_BACKEND_LOG" >&2
+log "Preparing the filtered original receptor with $PREP_BACKEND; detailed output -> $RECEPTOR_BACKEND_LOG"
+PREP_SUCCESS=0
+if "${PREP_COMMAND[@]}" > "$RECEPTOR_BACKEND_LOG" 2>&1; then
+  PREP_SUCCESS=1
+  log "Initial receptor preparation succeeded; PDBFixer was not needed"
+elif [ "$PREP_BACKEND" = "meeko" ]; then
+  log "Initial Meeko preparation failed; preserving its diagnostics before attempting quick repairs"
+  if [ "$PDBFIXER_MODE" != "off" ] && [ "$PDBFIXER_AVAILABLE" = "1" ]; then
+    log "Repairing receptor with PDBFixer; audit -> $PDBFIXER_AUDIT"
+    if "$PYTHON_COMMAND" "$PDBFIXER_HELPER" "$RECEPTOR_FILTERED_PDB" "$PDBFIXER_PDB" "$PDBFIXER_AUDIT" > "$PDBFIXER_LOG" 2>&1; then
+      PDBFIXER_USED=1
+      cp "$PDBFIXER_PDB" "$RECEPTOR_PDB"
+      PDBFIXER_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT")
+      log "Retrying strict Meeko after PDBFixer; detailed output -> $PDBFIXER_MEEKO_LOG"
+      if "${PDBFIXER_COMMAND[@]}" > "$PDBFIXER_MEEKO_LOG" 2>&1; then
+        PREP_SUCCESS=1
+        log "PDBFixer repair followed by strict Meeko preparation succeeded"
+      else
+        log "Strict Meeko still rejected the PDBFixer output"
+      fi
+    else
+      log "PDBFixer could not repair this receptor; continuing to the documented batch retry"
+    fi
+  fi
+
+  if [ "$PREP_SUCCESS" = "0" ] && [ "${DOCKING_UNIVERSAL_AUTO_RECEPTOR_RETRY:-1}" = "1" ]; then
+    log "Retrying the filtered original with Meeko batch cleanup (unmatched residues omitted; default altloc A)"
+    RETRY_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_FILTERED_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --allow_bad_res --default_altloc A)
+    if "${RETRY_COMMAND[@]}" > "$RECEPTOR_RETRY_LOG" 2>&1; then
+      PREP_SUCCESS=1
+      cp "$RECEPTOR_FILTERED_PDB" "$RECEPTOR_PDB"
+      log "Meeko batch-cleanup retry succeeded; review $RECEPTOR_RETRY_LOG"
+    fi
+  fi
+fi
+
+if [ "$PREP_SUCCESS" = "0" ]; then
+  echo "ERROR: receptor preparation failed after all enabled quick attempts." >&2
+  tail -40 "$RECEPTOR_RETRY_LOG" 2>/dev/null || tail -40 "$PDBFIXER_MEEKO_LOG" 2>/dev/null || tail -40 "$RECEPTOR_BACKEND_LOG" >&2
+  echo "Initial backend log: $RECEPTOR_BACKEND_LOG" >&2
+  [ "$PDBFIXER_USED" = "0" ] || echo "Post-PDBFixer backend log: $PDBFIXER_MEEKO_LOG" >&2
+  [ -s "$RECEPTOR_RETRY_LOG" ] && echo "Batch-retry backend log: $RECEPTOR_RETRY_LOG" >&2
   exit 1
 fi
 

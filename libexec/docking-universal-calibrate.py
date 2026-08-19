@@ -14,6 +14,7 @@ flexible-macrocycle representation.
 """
 
 import argparse
+import hashlib
 import importlib.metadata
 import json
 import os
@@ -32,6 +33,14 @@ TIERS = {
     "conformers": dict(conformers=5, seeds=3, exhaustiveness=32, modes=20, energy_range=8.0),
     "robust": dict(conformers=5, seeds=5, exhaustiveness=32, modes=20, energy_range=8.0),
 }
+
+
+def sha256(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def tier_settings(args, tier_name):
@@ -287,9 +296,26 @@ def run_tier(args, tier_name, cli, libexec, tier_root):
         "rdkit": distribution_version("rdkit"),
         "molscrub": distribution_version("molscrub"),
         "meeko": distribution_version("meeko"),
+        "pdbfixer": distribution_version("pdbfixer"),
         "engine": engine_manifest.get("engine", args.engine),
         "engine_version": engine_manifest.get("engine_version", "unknown"),
         "engine_source": engine_manifest.get("engine_source", "unknown"),
+    }
+    receptor_dir = args.receptor_pdbqt.parent
+    pdbfixer_audit = receptor_dir / "pdbfixer_audit.json"
+    post_pdbfixer_log = receptor_dir / "receptor_after_pdbfixer.log"
+    batch_cleanup_log = receptor_dir / "receptor_retry.log"
+    if batch_cleanup_log.is_file() and batch_cleanup_log.stat().st_size:
+        preparation_path = "Meeko batch-cleanup fallback after strict preparation failed"
+    elif post_pdbfixer_log.is_file() and post_pdbfixer_log.stat().st_size:
+        preparation_path = "conservative PDBFixer repair followed by strict Meeko"
+    else:
+        preparation_path = "strict Meeko; PDBFixer was not needed"
+    result["receptor_preparation"] = {
+        "path": preparation_path,
+        "pdbfixer_used": pdbfixer_audit.is_file(),
+        "pdbfixer_audit_sha256": sha256(pdbfixer_audit) if pdbfixer_audit.is_file() else None,
+        "policy": "strict Meeko, then conservative PDBFixer plus strict Meeko, then documented Meeko batch cleanup",
     }
     result["created_utc"] = datetime.now(timezone.utc).isoformat()
     protocol.write_text(json.dumps(result, indent=2) + "\n")
