@@ -4,7 +4,7 @@
 
 - Added active-Conda installation and self-contained installed validation.
 - Added clearer preparation/protocol routing and guided low-level docking selection.
-- Added portable, hash-verified `.duprotocol` bundles for approved-protocol reuse.
+- Added portable, hash-verified `.duprotocol` bundles so a previously determined and control-approved target protocol - including receptor preparation, selected pocket/docking box, ligand-ensemble policy, exhaustiveness, seeds, pose count, and energy range - can be applied unchanged to new sets of compounds.
 - Reworked control-backed, new-ligand, and ligand-free cavity reports for clearer scientific roles and concise defaults.
 - Added an always-present control-to-new-run scientific software comparison table.
 - Expanded unit, CLI, integration, release, installed-command, and visual PDF validation.
