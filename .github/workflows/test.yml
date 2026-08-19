@@ -23,7 +23,8 @@ jobs:
           miniforge-version: latest
           activate-environment: docking-universal
           environment-file: environment.yml
-          auto-activate-base: false
+          auto-activate: false
+          conda-remove-defaults: true
 
       - name: Run CLI checks
         shell: bash -el {0}
