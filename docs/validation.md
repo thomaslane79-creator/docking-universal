@@ -35,7 +35,7 @@ The raw PDB and SDF were processed on an M2 Mac using the clean main environment
 7. The top Vina pose was combined with receptor coordinates for PLIP analysis, custom PML generation, headless PyMOL rendering, and generic RDKit depiction.
 8. The confirmed `XK2:A:263` instance was also processed through the complete retrospective `control` command: automatic CCD-backed experimental-coordinate SDF creation, Vina docking at the package defaults, pose comparison, filtered PLIP analysis, and PNG/PSE rendering.
 
-Separately, ten varied public PDB structures were used as a preparation robustness sample. All ten produced prepared receptors through strict Meeko, conservative PDBFixer repair followed by strict Meeko, or the documented final Meeko batch-cleanup fallback. This is a software-path stress test rather than biological validation. PDBFixer repair is limited to alternate-location resolution, recognized nonstandard-residue mappings, and missing side-chain heavy atoms; it does not construct missing loops or terminal atoms, and every invocation retains `pdbfixer_audit.json` for review.
+Separately, 10 randomly selected public PDB structures were used as a preparation robustness sample. All 10/10 successfully produced prepared receptors through strict Meeko, conservative PDBFixer repair followed by strict Meeko, or the documented final Meeko batch-cleanup fallback. This is a software-path stress test rather than biological validation. PDBFixer repair is limited to alternate-location resolution, recognized nonstandard-residue mappings, and missing side-chain heavy atoms; it does not construct missing loops or terminal atoms, and every invocation retains `pdbfixer_audit.json` for review.
 
 ## Ligand-centered preparation result
 
