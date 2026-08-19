@@ -11,6 +11,19 @@ SPEC.loader.exec_module(REPORT)
 
 
 class CavityReportTests(unittest.TestCase):
+    def test_package_version_uses_source_or_installed_version_file(self):
+        expected = (SCRIPT.parent.parent / "VERSION").read_text().strip()
+        self.assertEqual(REPORT.package_version(), expected)
+        original_file = REPORT.__file__
+        try:
+            with tempfile.TemporaryDirectory() as temporary:
+                installed_dir = Path(temporary)
+                REPORT.__file__ = str(installed_dir / "docking-universal-pdf-report.py")
+                (installed_dir / "VERSION").write_text(expected + "\n")
+                self.assertEqual(REPORT.package_version(), expected)
+        finally:
+            REPORT.__file__ = original_file
+
     def test_scientific_version_comparison(self):
         recorded = {key: "1.0" for key in ("docking_universal", "python", "rdkit", "molscrub", "meeko", "engine_version")}
         comparison = REPORT.compare_scientific_versions(recorded, dict(recorded))

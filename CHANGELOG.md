@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — 2026-08-18
+## 0.5.0 — 2026-08-18
 
 - Added active-Conda installation and self-contained installed validation.
 - Added clearer preparation/protocol routing and guided low-level docking selection.
@@ -8,6 +8,8 @@
 - Reworked control-backed, new-ligand, and ligand-free cavity reports for clearer scientific roles and concise defaults.
 - Added an always-present control-to-new-run scientific software comparison table.
 - Expanded unit, CLI, integration, release, installed-command, and visual PDF validation.
+- Added a scientist-focused GitHub essentials PDF and linked it from the README and installation manual.
+- Corrected Linux CI coverage for the mocked Finder interface and installed the pinned RDKit dependency used by screening tests.
 
 See [Changes completed on 2026-08-18](docs/changes-2026-08-18.md) for the complete inventory.
 

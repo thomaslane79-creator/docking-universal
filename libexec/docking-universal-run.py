@@ -522,7 +522,7 @@ def download_pdb_entry(pdb_id, destination):
     destination.mkdir(parents=True, exist_ok=True)
     output = destination / f"{pdb_id}.pdb"
     try:
-        request = urllib.request.Request(url, headers={"User-Agent": "Docking-Universal/0.4.0"})
+        request = urllib.request.Request(url, headers={"User-Agent": f"Docking-Universal/{package_version()}"})
         with urllib.request.urlopen(request, timeout=30) as response:
             payload = response.read()
     except (urllib.error.URLError, TimeoutError) as exc:

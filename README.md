@@ -1,6 +1,6 @@
 # Docking Universal
 
-**Current research-preview release: v0.4.0**
+**Current research-preview release: v0.5.0**
 
 **Docking Universal is a scientific workflow orchestration, validation, analysis, visualization, and reporting system built around AutoDock Vina and established open-source structural-bioinformatics tools.**
 

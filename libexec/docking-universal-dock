@@ -15,7 +15,7 @@ With no options on macOS, Finder selects the prepared receptor, docking box,
 ligand input, and output directory. An SDF ligand input is prepared automatically.
 
 Options:
-  --engine vina            Docking engine (only Vina is supported in 0.4.x)
+  --engine vina            Docking engine (only Vina is supported in 0.5.x)
   --engine-command PATH    Explicit engine executable
   --engine-env NAME        Conda environment containing the engine
   --exhaustiveness N       Forwarded to the selected engine when provided

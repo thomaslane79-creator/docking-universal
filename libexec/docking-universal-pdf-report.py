@@ -25,10 +25,13 @@ def sha256(path):
     return digest.hexdigest()
 
 def package_version():
-    try:
-        return (Path(__file__).resolve().parent.parent / "VERSION").read_text().strip()
-    except OSError:
-        return "unknown"
+    script_dir = Path(__file__).resolve().parent
+    for version_file in (script_dir / "VERSION", script_dir.parent / "VERSION"):
+        try:
+            return version_file.read_text().strip()
+        except OSError:
+            pass
+    return "unknown"
 
 def read_key_value_tsv(path):
     data = {}

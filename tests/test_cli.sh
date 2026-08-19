@@ -19,7 +19,7 @@ esac
 
 version_output=$("$cli" --version)
 case "$version_output" in
-  "Docking Universal 0.4.0"*) ;;
+  "Docking Universal 0.5.0"*) ;;
   *) fail "version output" ;;
 esac
 
