@@ -37,7 +37,8 @@ The maintained macOS Apple Silicon environment has been checked with fpocket, Me
 
 - ligand-centered 1HVR/XK2 receptor preparation and box generation;
 - strict-Meeko-first receptor conversion, conservative PDBFixer fallback auditing, and final Meeko batch-cleanup fallback behavior;
-- preparation robustness sampling across 10 randomly selected public PDB structures, with 10/10 successfully producing prepared receptors;
+- receptor-preparation robustness sampling across 50 public PDB structures, with 46/50 producing prepared receptors: 10/10 in the original cohort and 36/40 in an additional reproducibly selected cohort;
+- explicit review stops for the four additional-cohort structures involving a heme/cofactor template, protein-DNA template conflicts, linked glycans, or ambiguous histidine protonation rather than silent component deletion or state guessing;
 - unchanged prepared PDBQT hashes for the existing 1HVR and 2R8N examples when strict Meeko succeeds, plus matching selected boxes and downstream docking results;
 - 2R8N ligand-free preparation in conservative, expanded, and permissive fpocket modes;
 - deepest-pocket and centroid box centers, including whole-protein and per-chain centroid scope;

@@ -493,11 +493,16 @@ case "$PDBFIXER_MODE" in
   *) echo "ERROR: DOCKING_UNIVERSAL_PDBFIXER must be auto, required, or off" >&2; exit 2 ;;
 esac
 PDBFIXER_HELPER="$PACKAGE_ROOT/libexec/docking-universal-pdbfixer.py"
+if [ ! -f "$PDBFIXER_HELPER" ] && [ -f "$(dirname "$0")/docking-universal-pdbfixer.py" ]; then
+  # Installed helpers live together under PREFIX/libexec/docking-universal,
+  # while source-tree helpers live below PACKAGE_ROOT/libexec.
+  PDBFIXER_HELPER="$(dirname "$0")/docking-universal-pdbfixer.py"
+fi
 PDBFIXER_AVAILABLE=0
-if "$PYTHON_COMMAND" -c 'import pdbfixer, openmm' >/dev/null 2>&1; then
+if [ -f "$PDBFIXER_HELPER" ] && "$PYTHON_COMMAND" -c 'import pdbfixer, openmm' >/dev/null 2>&1; then
   PDBFIXER_AVAILABLE=1
 elif [ "$PDBFIXER_MODE" = "required" ]; then
-  echo "ERROR: PDBFixer is required but unavailable in $PYTHON_COMMAND" >&2
+  echo "ERROR: PDBFixer or its Docking Universal helper is unavailable in the active installation" >&2
   exit 1
 fi
 cp "$RECEPTOR_FILTERED_PDB" "$RECEPTOR_PDB"

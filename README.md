@@ -83,7 +83,7 @@ Check what is visible on the current workstation:
 
 Only dependencies used by the selected stage are required.
 
-The direct versions verified in a fresh macOS arm64 environment are pinned in [environment.yml](environment.yml), with a complete historical conda build snapshot in `environment-lock-osx-arm64.txt` and a Python distribution snapshot in `requirements-pip-lock.txt`. See the [installation guide](docs/installation.md) and [working scientific environment](docs/environment.md). Receptor preparation tries strict Meeko first and uses conservative PDBFixer repair only when the original receptor is rejected; ADFRsuite remains the legacy alternative backend. In a preparation robustness sample, 10/10 randomly selected public PDB structures successfully produced prepared receptors through the documented strict, repair, or final fallback paths.
+The direct versions verified in a fresh macOS arm64 environment are pinned in [environment.yml](environment.yml), with a complete historical conda build snapshot in `environment-lock-osx-arm64.txt` and a Python distribution snapshot in `requirements-pip-lock.txt`. See the [installation guide](docs/installation.md) and [working scientific environment](docs/environment.md). Receptor preparation tries strict Meeko first and uses conservative PDBFixer repair only when the original receptor is rejected; ADFRsuite remains the legacy alternative backend. Across 50 sampled public PDB structures, 46/50 successfully produced prepared receptors through the documented strict, repair, or final fallback paths; four structurally consequential cases stopped for manual review rather than silently deleting or guessing cofactors, linked polymers, or protonation states.
 
 ## Install
 
