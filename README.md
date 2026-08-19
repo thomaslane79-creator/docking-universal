@@ -4,7 +4,7 @@
 
 ## What v0.5.0 changes
 
-**The defining change in v0.5.0 is reusable, portable target protocols.** After a bound-ligand control passes, Docking Universal can package the previously determined receptor preparation, selected pocket and docking box, ligand-ensemble policy, exhaustiveness, seeds, pose count, energy range, software provenance, hashes, and retained control evidence into one `.duprotocol` file. That validated configuration can then be applied unchanged to new sets of compounds without repeating protocol development for every ligand set.
+**The defining change in v0.5.0 is reusable, portable target protocols.** After a bound-ligand control passes, Docking Universal can package the previously determined receptor preparation, selected pocket and docking box, ligand-ensemble policy, exhaustiveness, seeds, pose count, energy range, software provenance, hashes, and retained control evidence into one `.duprotocol` file. That validated configuration can then be applied unchanged to new sets of compounds without repeating protocol development for every ligand set. Reports generated for those later compound sets carry forward a readable synopsis of the reused protocol and its validation: control status and date, control ligand, recovered-pose RMSD and acceptance threshold, locked pocket/box, and the control-to-new-run software comparison.
 
 This is a continuation mechanism for a target-specific, control-approved protocol. Pocket determination or increased exhaustiveness alone does not constitute approval, and reuse does not establish prospective pose or affinity accuracy.
 
