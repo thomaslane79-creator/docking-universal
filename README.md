@@ -2,6 +2,12 @@
 
 **Current research-preview release: v0.5.0**
 
+## What v0.5.0 changes
+
+**The defining change in v0.5.0 is reusable, portable target protocols.** After a bound-ligand control passes, Docking Universal can package the previously determined receptor preparation, selected pocket and docking box, ligand-ensemble policy, exhaustiveness, seeds, pose count, energy range, software provenance, hashes, and retained control evidence into one `.duprotocol` file. That validated configuration can then be applied unchanged to new sets of compounds without repeating protocol development for every ligand set.
+
+This is a continuation mechanism for a target-specific, control-approved protocol. Pocket determination or increased exhaustiveness alone does not constitute approval, and reuse does not establish prospective pose or affinity accuracy.
+
 **Docking Universal is a scientific workflow orchestration, validation, analysis, visualization, and reporting system built around AutoDock Vina and established open-source structural-bioinformatics tools.**
 
 It provides one guided, configurable Bash interface for control-guided or ligand-free docking studies while retaining independently composable commands, complete provenance, PyMOL Open-Source visualizations, and automatic scientific PDF reports.

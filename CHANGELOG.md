@@ -2,9 +2,11 @@
 
 ## 0.5.0 — 2026-08-18
 
+**Defining release change:** A previously determined, control-approved target protocol can now be packaged and reused unchanged to dock new sets of compounds.
+
+- Added portable, hash-verified `.duprotocol` bundles containing receptor preparation, the selected pocket/docking box, ligand-ensemble policy, exhaustiveness, seeds, pose count, energy range, software provenance, hashes, and retained control evidence.
 - Added active-Conda installation and self-contained installed validation.
 - Added clearer preparation/protocol routing and guided low-level docking selection.
-- Added portable, hash-verified `.duprotocol` bundles so a previously determined and control-approved target protocol - including receptor preparation, selected pocket/docking box, ligand-ensemble policy, exhaustiveness, seeds, pose count, and energy range - can be applied unchanged to new sets of compounds.
 - Reworked control-backed, new-ligand, and ligand-free cavity reports for clearer scientific roles and concise defaults.
 - Added an always-present control-to-new-run scientific software comparison table.
 - Expanded unit, CLI, integration, release, installed-command, and visual PDF validation.
