@@ -630,7 +630,77 @@ EOF
 fi
 
 if [ "$PREP_SUCCESS" = "0" ]; then
+  FAILURE_DIAGNOSIS="$RECEPTOR_DIR/receptor_failure_diagnosis.txt"
+  FAILURE_LOGS=("$RECEPTOR_RETRY_LOG" "$PDBFIXER_MEEKO_LOG" "$RECEPTOR_BACKEND_LOG")
+  FAILURE_CATEGORY="Unclassified receptor-template failure"
+  FAILURE_WHY="The available preparation logs do not match a safely recognized failure category."
+  FAILURE_NEXT="Inspect the retained backend logs and receptor chemistry before changing or deleting residues."
+  NUCLEIC_ACID_DETAIL=$(awk '
+    /^(ATOM  |HETATM)/ {
+      name=substr($0,18,3); gsub(/ /,"",name)
+      if (name !~ /^(A|C|G|U|I|DA|DC|DG|DT|DU|DI)$/) next
+      chain=substr($0,22,1); gsub(/ /,"",chain)
+      seq=substr($0,23,4); gsub(/ /,"",seq)
+      key=chain ":" seq "=" name
+      if (!seen[key]++) found[++n]=key
+    }
+    END { for (i=1; i<=n && i<=12; i++) printf "%s%s", (i>1 ? ", " : ""), found[i]; if (n>12) printf ", ... (%d total)", n }
+  ' "$RECEPTOR_FILTERED_PDB")
+  NONSTANDARD_AMINO_DETAIL=$(awk '
+    /^MODRES/ {
+      name=substr($0,13,3); gsub(/ /,"",name)
+      chain=substr($0,17,1); gsub(/ /,"",chain)
+      seq=substr($0,19,4); gsub(/ /,"",seq)
+      standard=substr($0,25,3); gsub(/ /,"",standard)
+      key=chain ":" seq "=" name " (declared as " standard ")"
+      if (!seen[key]++) found[++n]=key
+    }
+    END { for (i=1; i<=n && i<=12; i++) printf "%s%s", (i>1 ? ", " : ""), found[i]; if (n>12) printf ", ... (%d total)", n }
+  ' "$INPUT_PDB")
+  if grep -qs "tied for fewest missing H: HIE HID" "${FAILURE_LOGS[@]}"; then
+    FAILURE_CATEGORY="Ambiguous histidine protonation"
+    FAILURE_WHY="More than one histidine tautomer fits the coordinates; the biologically appropriate state depends on the local environment."
+    FAILURE_NEXT="Review nearby hydrogen bonds or catalytic chemistry, then rerun interactively or provide an explicit MEEKO_SET_TEMPLATE assignment."
+  elif grep -qs "linking fragments\|modified backbones" "${FAILURE_LOGS[@]}"; then
+    FAILURE_CATEGORY="Covalently linked nonstandard residues or glycans"
+    FAILURE_WHY="The receptor contains linked fragments whose attachment chemistry cannot be inferred safely by the standard templates."
+    FAILURE_NEXT="Review the linkage and use validated custom templates, or deliberately remove the component only if it is irrelevant to the docking site."
+  elif grep -qs "resname='HEM'\|'HEM'.*not in residue_templates" "${FAILURE_LOGS[@]}"; then
+    FAILURE_CATEGORY="Unsupported heme or cofactor template"
+    FAILURE_WHY="A specialized cofactor requires charge, bonding, and often metal-coordination treatment beyond generic protein repair."
+    FAILURE_NEXT="Use a validated cofactor-aware template or preparation method; do not silently delete a site-relevant cofactor."
+  elif [ -n "$NUCLEIC_ACID_DETAIL" ] && grep -qs "Template matching failed\|Requested altlocs not found" "${FAILURE_LOGS[@]}"; then
+    FAILURE_CATEGORY="DNA/RNA or mixed protein-nucleic-acid template conflict"
+    FAILURE_WHY="DNA or RNA residues are present and do not match the preparation templates or alternate-location choices expected by this protein-focused workflow."
+    FAILURE_NEXT="Review whether nucleic acid is part of the intended receptor, select justified alternate locations, and use a nucleic-acid-capable preparation method or validated templates when it must be retained."
+  elif grep -qs "Requested altlocs not found\|Residues with alternate location" "${FAILURE_LOGS[@]}" && grep -qs "Template matching failed" "${FAILURE_LOGS[@]}"; then
+    FAILURE_CATEGORY="Alternate-location and residue-template conflict"
+    FAILURE_WHY="The structure contains competing coordinate variants together with residues that do not match the expected templates."
+    FAILURE_NEXT="Select biologically justified alternate locations and review the affected residue identities before preparation."
+  elif [ -n "$NONSTANDARD_AMINO_DETAIL" ] && grep -qs "not in residue_templates\|unknown residues\|Template matching failed" "${FAILURE_LOGS[@]}"; then
+    FAILURE_CATEGORY="Unsupported non-standard amino acid"
+    FAILURE_WHY="A polymer residue declared as a modified amino acid lacks a usable preparation template; automatic replacement could alter its chemistry or connectivity."
+    FAILURE_NEXT="Review the PDB MODRES mapping and choose a documented standard-amino-acid conversion, validated custom template, or deliberate exclusion."
+  elif grep -qs "not in residue_templates\|unknown residues" "${FAILURE_LOGS[@]}"; then
+    FAILURE_CATEGORY="Unsupported non-standard residue"
+    FAILURE_WHY="One or more residue names lack a usable standard preparation template; automatic conversion could change their chemistry."
+    FAILURE_NEXT="Review each named residue and choose a documented standard-residue mapping, validated custom template, or deliberate exclusion."
+  elif grep -qs "heavy_miss=\|Template matching failed" "${FAILURE_LOGS[@]}"; then
+    FAILURE_CATEGORY="Incomplete or template-mismatched residue"
+    FAILURE_WHY="Observed atoms or bonds do not match the expected residue template, even after conservative PDBFixer repair."
+    FAILURE_NEXT="Inspect missing atoms, connectivity, residue identity, and alternate locations near the intended docking site."
+  fi
+  {
+    printf 'Receptor preparation failure category: %s\n' "$FAILURE_CATEGORY"
+    printf 'Why this matters: %s\n' "$FAILURE_WHY"
+    printf 'Recommended next step: %s\n' "$FAILURE_NEXT"
+    [ -z "$NUCLEIC_ACID_DETAIL" ] || printf 'Detected DNA/RNA residues: %s\n' "$NUCLEIC_ACID_DETAIL"
+    [ -z "$NONSTANDARD_AMINO_DETAIL" ] || printf 'Detected modified amino acids: %s\n' "$NONSTANDARD_AMINO_DETAIL"
+    grep -h -m1 "^Input residues .*not in residue_templates\|Template generation failed for unknown residues\|Template matching failed for:" "${FAILURE_LOGS[@]}" 2>/dev/null | head -1 | sed 's/^/Detected detail: /'
+  } > "$FAILURE_DIAGNOSIS"
   echo "ERROR: receptor preparation failed after all enabled quick attempts." >&2
+  cat "$FAILURE_DIAGNOSIS" >&2
+  echo "Failure explanation saved to: $FAILURE_DIAGNOSIS" >&2
   tail -40 "$RECEPTOR_RETRY_LOG" 2>/dev/null || tail -40 "$PDBFIXER_MEEKO_LOG" 2>/dev/null || tail -40 "$RECEPTOR_BACKEND_LOG" >&2
   echo "Initial backend log: $RECEPTOR_BACKEND_LOG" >&2
   [ "$PDBFIXER_USED" = "0" ] || echo "Post-PDBFixer backend log: $PDBFIXER_MEEKO_LOG" >&2
