@@ -192,12 +192,16 @@ def installed_version(*distribution_names):
             continue
     return "not detected"
 
-def receptor_preparation_record(study):
+def receptor_preparation_record(study, control=None):
     """Describe the receptor-conversion path from retained preparation artifacts."""
-    audit_path = first(study, ["preparation/**/receptor/pdbfixer_audit.json", "**/receptor/pdbfixer_audit.json"])
-    post_fix_log = first(study, ["preparation/**/receptor/receptor_after_pdbfixer.log", "**/receptor/receptor_after_pdbfixer.log"])
-    batch_log = first(study, ["preparation/**/receptor/receptor_retry.log", "**/receptor/receptor_retry.log"])
-    receptor_dir = first(study, ["preparation/**/receptor", "**/receptor"])
+    roots = [root for root in (study, control) if root]
+    def retained(patterns):
+        return next((path for root in roots if (path := first(root, patterns))), None)
+    audit_path = retained(["preparation/**/receptor/pdbfixer_audit.json", "**/receptor/pdbfixer_audit.json", "**/assets/pdbfixer_audit.json"])
+    post_fix_log = retained(["preparation/**/receptor/receptor_after_pdbfixer.log", "**/receptor/receptor_after_pdbfixer.log"])
+    batch_log = retained(["preparation/**/receptor/receptor_retry.log", "**/receptor/receptor_retry.log"])
+    receptor_dir = retained(["preparation/**/receptor", "**/receptor"])
+    audit = read_json(audit_path)
     if batch_log and batch_log.stat().st_size:
         path = "Meeko batch-cleanup fallback after strict preparation failed"
         used = bool(audit_path)
@@ -218,7 +222,35 @@ def receptor_preparation_record(study):
         "pdbfixer_used": used,
         "pdbfixer_audit": str(audit_path) if audit_path else None,
         "batch_cleanup_log": str(batch_log) if batch_log else None,
+        "changes": audit,
     }
+
+def pdbfixer_report_note(record, out, styles):
+    """Create a concise repair summary; detailed changes remain in the JSON audit."""
+    from reportlab.platypus import Paragraph, Spacer
+    if not record.get("pdbfixer_used") or not record.get("pdbfixer_audit"):
+        return []
+    audit = record.get("changes", {})
+    added = audit.get("missing_heavy_atoms_added", "not recorded")
+    terminal = audit.get("missing_terminal_atoms_detected_not_added", "not recorded")
+    replacements = len(audit.get("nonstandard_residue_replacements", []))
+    gaps = len(audit.get("missing_residue_segments_detected_not_built", []))
+    if record.get("batch_cleanup_log"):
+        disposition = "The repaired intermediate was rejected by strict Meeko, so these changes were not used in the final receptor; the final batch-cleanup attempt used the filtered original."
+    else:
+        disposition = "The repaired structure was accepted by strict Meeko and used to create the final receptor."
+    changes = []
+    if isinstance(added, int) and added:
+        changes.append(f"added {added} missing side-chain heavy atoms")
+    if replacements:
+        changes.append(f"replaced {replacements} recognized nonstandard residues")
+    if gaps:
+        changes.append(f"reported but did not build {gaps} missing residue segments")
+    if isinstance(terminal, int) and terminal:
+        changes.append(f"detected but did not add {terminal} terminal atoms")
+    change_text = "; ".join(changes) if changes else "no structural changes were recorded"
+    text = f"<b>PDBFixer audit:</b> {change_text}. {disposition}"
+    return [Paragraph(text, styles["BodyText"]), Spacer(1, 8)]
 
 def pymol_version():
     try:
@@ -285,7 +317,7 @@ def reproducibility_record(protocol, study, control):
     figure_manifest = read_json(study / "report" / "report_figure_manifest.json")
     clustering = read_json(first(study, ["compounds/*/pose_analysis/clustering_manifest.json", "**/clustering_manifest.json"]))
     docking_manifest = read_key_value_tsv(first(study, ["compounds/*/seed_*/docking/run_manifest.tsv", "**/docking/run_manifest.tsv"]))
-    receptor_preparation = receptor_preparation_record(study)
+    receptor_preparation = receptor_preparation_record(study, control)
     current = {
         "docking_universal": package_version(),
         "python": sys.version.split()[0],
@@ -381,6 +413,7 @@ def main():
     compounds = summary.get("compounds", [])
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name="SmallDU", parent=styles["BodyText"], fontSize=8, leading=10))
+    styles.add(ParagraphStyle(name="ReferenceDU", parent=styles["BodyText"], fontSize=7.5, leading=9))
     styles.add(ParagraphStyle(name="CaptionDU", parent=styles["Heading2"], alignment=TA_CENTER, fontSize=11, leading=14))
 
     def image(path, width=7.0, height=4.5):
@@ -558,7 +591,10 @@ def main():
         story += [
             Paragraph(f"{section_number}. Reproducibility, software, and references", styles["Heading1"]),
             Paragraph(f"This preparation-only report records fpocket cavity detection, candidate filtering, the selected review box, and PyMOL structural rendering. Receptor preparation path: {provenance['receptor_preparation']['path']}. No ligand docking, scoring, pose clustering, or interaction analysis was performed.", styles["BodyText"]),
-            Spacer(1,8), Paragraph("Software versions used for this report", styles["Heading2"]),
+            Spacer(1,8),
+        ]
+        story += pdbfixer_report_note(provenance["receptor_preparation"], out, styles)
+        story += [Paragraph("Software versions used for this report", styles["Heading2"]),
             table(provenance_rows, [2.35*inch, 1.55*inch, 2.8*inch], compact=True),
             Spacer(1,10), Paragraph("Scientific and software references", styles["Heading2"]),
         ]
@@ -806,6 +842,7 @@ def main():
             styles["BodyText"],
         ), Spacer(1,8),
     ]
+    story += pdbfixer_report_note(provenance["receptor_preparation"], out, styles)
     if version_check:
         verdict = version_check["overall"]
         verdict_text = (
@@ -825,14 +862,14 @@ def main():
     story += [
         Paragraph("Additional software used for analysis and reporting", styles["Heading2"]),
         table(provenance_rows, [2.35*inch, 1.55*inch, 2.8*inch], compact=True),
-        Spacer(1,10), Paragraph("Scientific and software references", styles["Heading2"]),
+        Spacer(1,6), Paragraph("Scientific and software references", styles["Heading2"]),
     ]
     for index, reference in enumerate(provenance["references"], start=1):
         story += [
             Paragraph(
                 f"{index}. {reference['citation']} <link href=\"{reference['url']}\"><font color=\"#1f4e79\">{reference['url']}</font></link>",
-                styles["SmallDU"],
-            ), Spacer(1,4),
+                styles["ReferenceDU"],
+            ), Spacer(1,1),
         ]
 
     SimpleDocTemplate(str(out),pagesize=letter,leftMargin=.65*inch,rightMargin=.65*inch,topMargin=.6*inch,bottomMargin=.6*inch,title="Docking Universal report").build(story)

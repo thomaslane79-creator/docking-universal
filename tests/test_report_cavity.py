@@ -44,6 +44,7 @@ class CavityReportTests(unittest.TestCase):
             record = REPORT.receptor_preparation_record(study)
             self.assertTrue(record["pdbfixer_used"])
             self.assertIn("PDBFixer", record["path"])
+            self.assertEqual(record["changes"]["status"], "completed")
 
     def test_pubchem_source_suffix_is_not_part_of_compound_name(self):
         self.assertEqual(

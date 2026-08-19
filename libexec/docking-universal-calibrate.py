@@ -314,6 +314,7 @@ def run_tier(args, tier_name, cli, libexec, tier_root):
     result["receptor_preparation"] = {
         "path": preparation_path,
         "pdbfixer_used": pdbfixer_audit.is_file(),
+        "pdbfixer_audit": str(pdbfixer_audit) if pdbfixer_audit.is_file() else None,
         "pdbfixer_audit_sha256": sha256(pdbfixer_audit) if pdbfixer_audit.is_file() else None,
         "policy": "strict Meeko, then conservative PDBFixer plus strict Meeko, then documented Meeko batch cleanup",
     }

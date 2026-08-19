@@ -43,6 +43,12 @@ def create_bundle(protocol_path, control_root, output, control_compound=None):
             "receptor": f"assets/{receptor_copy.name}",
             "box": f"assets/{box_copy.name}",
         })
+        audit_value = protocol.get("receptor_preparation", {}).get("pdbfixer_audit")
+        if audit_value:
+            audit_source = Path(audit_value).expanduser().resolve()
+            if audit_source.is_file():
+                audit_copy = _copy(audit_source, assets / "pdbfixer_audit.json")
+                protocol["receptor_preparation"]["pdbfixer_audit"] = f"assets/{audit_copy.name}"
 
         evidence = packaged_control / "evidence"
         evidence_files = []
