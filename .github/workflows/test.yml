@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   cli:
-    runs-on: ubuntu-latest
+    runs-on: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
