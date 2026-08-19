@@ -88,6 +88,7 @@ Open Babel splits ordinary SDF input and can generate an optimized 3D representa
 - Alternate locations and insertion codes are not modeled explicitly.
 - Ligand detection relies on residue-name exclusions and atom count.
 - Protein preparation behavior depends on the selected PDBFixer, Meeko, or ADFRsuite version and on available residue templates. Every repair or fallback path requires review near the selected docking site.
+- When Meeko finds a histidine tied between valid HID/HIE templates, guided preparation identifies the residue and asks for HIE (NE2 protonated), HID (ND1 protonated), HIP (doubly protonated, positive), or a review stop. The selected assignment is retained in `histidine_template_selection.tsv`; unattended use must provide an explicit `MEEKO_SET_TEMPLATE`, because the workflow does not guess a biologically correct histidine state.
 - Protein-centroid proximity is only a proxy for pocket interiority.
 - A fixed cubic box may be too small for large ligands or too large for compact sites.
 - The workflow does not choose biologically correct protonation states, perform experimental validation, or establish that a docking score implies biological activity.

@@ -58,6 +58,7 @@ Common environment settings:
   DOCKING_UNIVERSAL_PDBFIXER=auto  auto, required, or off
   MEEKO_ALLOW_BAD_RES=0         Set 1 to delete unmatched residues (review output)
   MEEKO_DEFAULT_ALTLOC          Optional default alternate location, e.g. A
+  MEEKO_SET_TEMPLATE            Explicit residue template, e.g. A:36=HIE
 
 Example:
   FEEDBACK_LEVEL=guided docking-universal prepare receptor_complex.pdb
@@ -510,14 +511,17 @@ cp "$RECEPTOR_FILTERED_PDB" "$RECEPTOR_PDB"
 if [ "$PREP_BACKEND" = "meeko" ]; then
   MEEKO_ALLOW_BAD_RES="${MEEKO_ALLOW_BAD_RES:-0}"
   MEEKO_DEFAULT_ALTLOC="${MEEKO_DEFAULT_ALTLOC:-}"
+  MEEKO_SET_TEMPLATE="${MEEKO_SET_TEMPLATE:-}"
+  MEEKO_TEMPLATE_ARGS=()
+  [ -z "$MEEKO_SET_TEMPLATE" ] || MEEKO_TEMPLATE_ARGS=(--set_template "$MEEKO_SET_TEMPLATE")
   if [ "$MEEKO_ALLOW_BAD_RES" = "1" ] && [ -n "$MEEKO_DEFAULT_ALTLOC" ]; then
-    PREP_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --allow_bad_res --default_altloc "$MEEKO_DEFAULT_ALTLOC")
+    PREP_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --allow_bad_res --default_altloc "$MEEKO_DEFAULT_ALTLOC" "${MEEKO_TEMPLATE_ARGS[@]}")
   elif [ "$MEEKO_ALLOW_BAD_RES" = "1" ]; then
-    PREP_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --allow_bad_res)
+    PREP_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --allow_bad_res "${MEEKO_TEMPLATE_ARGS[@]}")
   elif [ -n "$MEEKO_DEFAULT_ALTLOC" ]; then
-    PREP_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --default_altloc "$MEEKO_DEFAULT_ALTLOC")
+    PREP_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --default_altloc "$MEEKO_DEFAULT_ALTLOC" "${MEEKO_TEMPLATE_ARGS[@]}")
   else
-    PREP_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT")
+    PREP_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" "${MEEKO_TEMPLATE_ARGS[@]}")
   fi
 else
   PREP_COMMAND=("$PREP_RECEPTOR_BIN" -r "$RECEPTOR_PDB" -o "$RECEPTOR_PDBQT" -A none -U waters)
@@ -535,7 +539,7 @@ elif [ "$PREP_BACKEND" = "meeko" ]; then
     if "$PYTHON_COMMAND" "$PDBFIXER_HELPER" "$RECEPTOR_FILTERED_PDB" "$PDBFIXER_PDB" "$PDBFIXER_AUDIT" > "$PDBFIXER_LOG" 2>&1; then
       PDBFIXER_USED=1
       cp "$PDBFIXER_PDB" "$RECEPTOR_PDB"
-      PDBFIXER_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT")
+      PDBFIXER_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" "${MEEKO_TEMPLATE_ARGS[@]}")
       log "Retrying strict Meeko after PDBFixer; detailed output -> $PDBFIXER_MEEKO_LOG"
       if "${PDBFIXER_COMMAND[@]}" > "$PDBFIXER_MEEKO_LOG" 2>&1; then
         PREP_SUCCESS=1
@@ -550,12 +554,78 @@ elif [ "$PREP_BACKEND" = "meeko" ]; then
 
   if [ "$PREP_SUCCESS" = "0" ] && [ "${DOCKING_UNIVERSAL_AUTO_RECEPTOR_RETRY:-1}" = "1" ]; then
     log "Retrying the filtered original with Meeko batch cleanup (unmatched residues omitted; default altloc A)"
-    RETRY_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_FILTERED_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --allow_bad_res --default_altloc A)
+    RETRY_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_FILTERED_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --allow_bad_res --default_altloc A "${MEEKO_TEMPLATE_ARGS[@]}")
     if "${RETRY_COMMAND[@]}" > "$RECEPTOR_RETRY_LOG" 2>&1; then
       PREP_SUCCESS=1
       cp "$RECEPTOR_FILTERED_PDB" "$RECEPTOR_PDB"
       log "Meeko batch-cleanup retry succeeded; review $RECEPTOR_RETRY_LOG"
     fi
+  fi
+
+  if [ "$PREP_SUCCESS" = "0" ] && [ -z "$MEEKO_SET_TEMPLATE" ]; then
+    HISTIDINE_SOURCE="$RECEPTOR_FILTERED_PDB"
+    [ "$PDBFIXER_USED" = "0" ] || HISTIDINE_SOURCE="$PDBFIXER_PDB"
+    HISTIDINE_RETRY_LOG="$RECEPTOR_DIR/receptor_histidine_retry.log"
+    HISTIDINE_SELECTION_LOG="$RECEPTOR_DIR/histidine_template_selection.tsv"
+    HISTIDINE_DIAGNOSTIC_LOGS=("$PDBFIXER_MEEKO_LOG" "$RECEPTOR_RETRY_LOG" "$RECEPTOR_BACKEND_LOG")
+    while [ "$PREP_SUCCESS" = "0" ]; do
+      HISTIDINE_RESIDUE=$(sed -n "s/.*for residue_key='\([^']*\)'.*tied for fewest missing H: HIE HID.*/\1/p" "${HISTIDINE_DIAGNOSTIC_LOGS[@]}" 2>/dev/null | tail -1)
+      [ -n "$HISTIDINE_RESIDUE" ] || break
+      if [ -t 0 ]; then
+        cat <<EOF
+
+Meeko found an ambiguous histidine protonation state at $HISTIDINE_RESIDUE.
+Choose the state justified by the local hydrogen-bonding and catalytic environment:
+  1) HIE - neutral histidine, proton on NE2
+  2) HID - neutral histidine, proton on ND1
+  3) HIP - positively charged histidine, protons on both nitrogens
+  4) Stop for structural review
+EOF
+        read -r -p "Select histidine state [4]: " HISTIDINE_CHOICE
+        case "${HISTIDINE_CHOICE:-4}" in
+          1) HISTIDINE_TEMPLATE=HIE ;;
+          2) HISTIDINE_TEMPLATE=HID ;;
+          3) HISTIDINE_TEMPLATE=HIP ;;
+          *) HISTIDINE_TEMPLATE="" ;;
+        esac
+        [ -n "$HISTIDINE_TEMPLATE" ] || break
+        read -r -p "Apply $HISTIDINE_TEMPLATE to 1) only $HISTIDINE_RESIDUE or 2) all histidines without an explicit HD1/HE2 proton? [1]: " HISTIDINE_SCOPE
+        HISTIDINE_KEYS="$HISTIDINE_RESIDUE"
+        if [ "${HISTIDINE_SCOPE:-1}" = "2" ]; then
+          HISTIDINE_KEYS=$(awk '
+            /^(ATOM  |HETATM)/ {
+              res=substr($0,18,3); gsub(/ /,"",res)
+              if (res != "HIS") next
+              chain=substr($0,22,1); gsub(/ /,"",chain)
+              seq=substr($0,23,4); gsub(/ /,"",seq)
+              key=chain ":" seq
+              atom=substr($0,13,4); gsub(/ /,"",atom)
+              seen[key]=1
+              if (atom == "HD1" || atom == "HE2") ring_h[key]=1
+            }
+            END { for (key in seen) if (!(key in ring_h)) print key }
+          ' "$RECEPTOR_FILTERED_PDB" | sort)
+        fi
+        [ -s "$HISTIDINE_SELECTION_LOG" ] || printf 'residue\ttemplate\treason\n' > "$HISTIDINE_SELECTION_LOG"
+        for HISTIDINE_KEY in $HISTIDINE_KEYS; do
+          [ -z "$MEEKO_SET_TEMPLATE" ] || MEEKO_SET_TEMPLATE="$MEEKO_SET_TEMPLATE,"
+          MEEKO_SET_TEMPLATE="$MEEKO_SET_TEMPLATE$HISTIDINE_KEY=$HISTIDINE_TEMPLATE"
+          printf '%s\t%s\t%s\n' "$HISTIDINE_KEY" "$HISTIDINE_TEMPLATE" "user-selected after Meeko tautomer ambiguity" >> "$HISTIDINE_SELECTION_LOG"
+        done
+        log "Retrying Meeko with user-selected template assignment(s) $MEEKO_SET_TEMPLATE; detailed output -> $HISTIDINE_RETRY_LOG"
+        HISTIDINE_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$HISTIDINE_SOURCE" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --set_template "$MEEKO_SET_TEMPLATE")
+        if "${HISTIDINE_COMMAND[@]}" > "$HISTIDINE_RETRY_LOG" 2>&1; then
+          PREP_SUCCESS=1
+          cp "$HISTIDINE_SOURCE" "$RECEPTOR_PDB"
+          log "Meeko preparation succeeded with user-selected histidine template assignment(s)"
+        else
+          HISTIDINE_DIAGNOSTIC_LOGS=("$HISTIDINE_RETRY_LOG")
+        fi
+      else
+        echo "Meeko requires a histidine template for $HISTIDINE_RESIDUE. Review the local structure and rerun with MEEKO_SET_TEMPLATE=$HISTIDINE_RESIDUE=HIE, HID, or HIP." >&2
+        break
+      fi
+    done
   fi
 fi
 

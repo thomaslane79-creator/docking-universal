@@ -135,6 +135,8 @@ Docking Universal tries the filtered original receptor with strict Meeko first. 
 
 If strict Meeko also rejects the PDBFixer result, Docking Universal makes one documented quick retry against the filtered original using Meeko's batch cleanup. This may omit unmatched residues and therefore requires review, especially near a docking pocket. Disable this retry with `DOCKING_UNIVERSAL_AUTO_RECEPTOR_RETRY=0`.
 
+If the remaining error is specifically an ambiguous histidine tautomer, guided preparation explains HIE, HID, and HIP and asks which template to use before retrying. The choice is recorded. For unattended execution, set an exact Meeko assignment such as `MEEKO_SET_TEMPLATE=A:36=HIE`; no histidine state is chosen silently.
+
 The original validated receptor and ligand PDBQT outputs used ADFRsuite 1.0, installed separately. Meeko 0.6.1 is included in the clean Conda environment because it is the portable preparation tool maintained with AutoDock Vina. Preparation backend changes can affect atom typing, protonation, charge assignment, and therefore scientific results; the backend and version should always be recorded.
 
 Meeko now passes an end-to-end raw 1HVR/XK2 test, including strict handling of RCSB `MODRES` chemical-component metadata. That establishes a verified portable path for this case; it does not prove Meeko and ADFRsuite produce scientifically equivalent structures. Use ADFRsuite to reproduce original preparation behavior and record the selected backend for every study.
