@@ -92,10 +92,13 @@ New to GitHub or to obtaining research software from a repository? See the
 for cloning, version tracking, controlled updates, issue reporting, and the
 separation of software files from study records.
 
-Create the tested scientific environment:
+Create the two Conda environments. The main `docking-universal` environment
+contains preparation, analysis, and reporting tools; the isolated
+`docking-universal-vina` environment supplies the compiled Vina engine.
 
 ```bash
 conda env create -f environment.yml
+conda env create -f environments/vina.yml
 conda activate docking-universal
 ./bin/docking-universal check-install
 make test
@@ -112,13 +115,11 @@ docking-universal --help
 
 `environment.yml` installs PDBFixer 1.11 and its OpenMM dependency. `make install-conda` then installs the Docking Universal command into that active environment; it does not solve dependencies itself. Existing environments should be refreshed with `conda env update -f environment.yml --prune` before reinstalling the command.
 
-Create the small AutoDock Vina engine environment:
-
-```bash
-conda env create -f environments/vina.yml
-```
-
-The `dock` command discovers Vina there automatically and records the executable source, version, receptor, ligand directory, box, and search settings.
+The `dock` command discovers Vina there automatically; the Vina section of
+`check-install` should report it as available from the
+`docking-universal-vina` Conda environment. Normal use requires activation of
+only the main environment. The run record retains the executable source,
+version, receptor, ligand directory, box, and search settings.
 
 For exact reproduction of the M2 Vina test environment, use `environments/vina-lock-osx-arm64.txt`; use the readable YAML for normal installation.
 

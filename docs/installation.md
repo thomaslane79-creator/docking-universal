@@ -7,7 +7,7 @@ state for reproducibility, and report problems without exposing research data.
 
 ## Recommended Conda installation
 
-Docking Universal uses external scientific programs as composable stages. The repository's `environment.yml` contains the smallest direct dependency set verified together on macOS arm64.
+Docking Universal uses external scientific programs as composable stages. The repository's `environment.yml` contains the smallest direct dependency set verified together on macOS arm64. The automated 0.5 test suite is also exercised on current Ubuntu and macOS GitHub runners using this declared environment. macOS arm64 remains the reference platform for retained scientific validation; run the full integration or release validation on the intended workstation before production use.
 
 ```bash
 git clone YOUR_REPOSITORY_URL

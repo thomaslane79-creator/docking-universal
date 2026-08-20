@@ -5,6 +5,7 @@ LIBEXECDIR ?= $(PREFIX)/libexec/docking-universal
 .PHONY: test test-integration test-release install install-conda uninstall
 
 test:
+	./tests/test_install.sh
 	./tests/test_cli.sh
 	$${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_run_selection.py tests/test_guided_options.py tests/test_report_cavity.py tests/test_pdbfixer_preclean.py
 

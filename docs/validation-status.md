@@ -21,6 +21,8 @@ Run the automated suite with:
 make test
 ```
 
+The current automated suite is exercised in GitHub Actions on both current Ubuntu and macOS runners after creating the declared Conda environment. That supports platform portability at the software-test level. The retained full scientific validation remains referenced to macOS arm64, because compiled scientific tools can differ across platforms; run integration or release validation on the target workstation before production use.
+
 The same checks and the real-tool suites are available through the public interface:
 
 ```bash
@@ -48,6 +50,8 @@ The maintained macOS Apple Silicon environment has been checked with fpocket, Me
 - automatic HTML, JSON, Markdown, and PDF report generation, followed by rendered-page inspection.
 
 Completed example studies retain evidence for actual multi-seed Vina redocking, ligand-free cavity analysis, unknown-compound docking, pose clustering, PyMOL sessions, interaction diagrams, and final reports.
+
+The integration suite builds a clearly labelled synthetic passing protocol to test fail-closed software gates, input hashes, planning, and report plumbing. It is not scientific pose-recovery evidence. The longer release suite produces the genuine bound-ligand control used for its subsequent screen; only that computed control path can establish target-specific protocol approval.
 
 ## Scope and limitations
 

@@ -12,7 +12,6 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
-
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -25,7 +24,6 @@ jobs:
           environment-file: environment.yml
           auto-activate: false
           conda-remove-defaults: true
-
       - name: Run CLI checks
         shell: bash -el {0}
         run: make test
