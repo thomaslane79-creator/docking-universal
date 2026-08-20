@@ -2,7 +2,7 @@
 
 The pipeline was developed against a specific macOS arm64 conda environment. `environment.yml` now records the minimal direct packages and versions recreated and checked in a fresh `docking-universal-test` environment on 2026-08-08.
 
-This platform focus is intentional: the package was created in part to make the combined PyMOL, chemistry-toolkit, and docking stack reproducible on Apple-silicon M-series computers. The current reference system is an M2 Mac. Linux and Windows/WSL support should be verified independently before being advertised as equivalent.
+This platform focus is intentional: the package was created in part to make the combined PyMOL, chemistry-toolkit, and docking stack reproducible on Apple-silicon M-series computers. The current full scientific reference system is an M2 Mac. Docking Universal is also compatible with Ubuntu Linux: its portable shell behavior, command routing, installation layout, and automated tests run on GitHub Actions' Ubuntu runner. Because compiled chemistry packages may differ across platforms, a fresh Ubuntu workstation should still run `validate integration` before production use. Windows/WSL support has not been established as equivalent.
 
 Three levels of environment information are included:
 
