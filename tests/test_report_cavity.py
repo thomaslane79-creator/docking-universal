@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -45,6 +46,29 @@ class CavityReportTests(unittest.TestCase):
             self.assertTrue(record["pdbfixer_used"])
             self.assertIn("PDBFixer", record["path"])
             self.assertEqual(record["changes"]["status"], "completed")
+
+    def test_receptor_preparation_record_distinguishes_legacy_linked_component_fallback(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            study = Path(temporary)
+            receptor = study / "preparation" / "target_receptor_prep" / "receptor"
+            receptor.mkdir(parents=True)
+            (receptor / "receptor_adfr_fallback.log").write_text("legacy preparation succeeded\n")
+            record = REPORT.receptor_preparation_record(study)
+            self.assertIn("ADFRsuite", record["path"])
+            self.assertTrue(record["adfr_fallback_log"].endswith("receptor_adfr_fallback.log"))
+
+    def test_receptor_preparation_record_includes_ccd_audit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            study = Path(temporary)
+            receptor = study / "preparation" / "target_receptor_prep" / "receptor"
+            receptor.mkdir(parents=True)
+            (receptor / "ccd_modification_audit.json").write_text(json.dumps({
+                "modified_polymer_residue_count": 1,
+                "residues": [{"residue": "A:67", "component": "CSO"}],
+            }) + "\n")
+            record = REPORT.receptor_preparation_record(study)
+            self.assertEqual(record["ccd_modifications"]["modified_polymer_residue_count"], 1)
+            self.assertTrue(record["ccd_modification_audit"].endswith("ccd_modification_audit.json"))
 
     def test_pubchem_source_suffix_is_not_part_of_compound_name(self):
         self.assertEqual(

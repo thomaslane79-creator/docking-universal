@@ -1,7 +1,7 @@
 biopython==1.79
 gemmi==0.7.3
 matplotlib==3.9.4
-meeko==0.6.1
+meeko==0.7.1
 munkres==1.1.4
 numpy==1.23.5
 pdb-tools==2.5.0

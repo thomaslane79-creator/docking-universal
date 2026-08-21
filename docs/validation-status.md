@@ -38,8 +38,8 @@ The release suite is intentionally slow. It first repeats the integration probes
 The maintained macOS Apple Silicon environment has been checked with fpocket, Meeko, PDBFixer 1.11, MolScrub, RDKit, Open Babel, PLIP, PyMOL Open-Source, and AutoDock Vina 1.2.7. Real fixture-based checks cover:
 
 - ligand-centered 1HVR/XK2 receptor preparation and box generation;
-- strict-Meeko-first receptor conversion, conservative PDBFixer fallback auditing, and final Meeko batch-cleanup fallback behavior;
-- receptor-preparation robustness sampling across 50 public PDB structures, with 47/50 producing prepared receptors through the current pipeline: 10/10 in the original cohort and 37/40 in an additional reproducibly selected cohort; 46 were unattended and one used the recorded guided histidine selection;
+- strict-Meeko-first receptor conversion, conservative PDBFixer fallback auditing, and explicit user-approved component-removal behavior after safe attempts fail;
+- historical receptor-preparation robustness sampling across 50 public PDB structures: 47/50 produced a PDBQT under the then-current pipeline (10/10 in the original cohort and 37/40 in an additional reproducibly selected cohort). Of those, 41 completed without unmatched-component removal, one used the recorded guided histidine selection, and five used the former automatic Meeko cleanup that omitted unmatched components. The current workflow requires explicit approval for that model-changing step;
 - explicit review stops for the four additional-cohort structures involving a heme/cofactor template, protein-DNA template conflicts, linked glycans, or ambiguous histidine protonation rather than silent component deletion or state guessing;
 - unchanged prepared PDBQT hashes for the existing 1HVR and 2R8N examples when strict Meeko succeeds, plus matching selected boxes and downstream docking results;
 - 2R8N ligand-free preparation in conservative, expanded, and permissive fpocket modes;

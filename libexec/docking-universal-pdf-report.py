@@ -198,12 +198,19 @@ def receptor_preparation_record(study, control=None):
     def retained(patterns):
         return next((path for root in roots if (path := first(root, patterns))), None)
     audit_path = retained(["preparation/**/receptor/pdbfixer_audit.json", "**/receptor/pdbfixer_audit.json", "**/assets/pdbfixer_audit.json"])
+    ccd_audit_path = retained(["preparation/**/receptor/ccd_modification_audit.json", "**/receptor/ccd_modification_audit.json", "**/assets/ccd_modification_audit.json"])
     post_fix_log = retained(["preparation/**/receptor/receptor_after_pdbfixer.log", "**/receptor/receptor_after_pdbfixer.log"])
-    batch_log = retained(["preparation/**/receptor/receptor_retry.log", "**/receptor/receptor_retry.log"])
+    removal_log = retained(["preparation/**/receptor/receptor_user_approved_removal.log", "**/receptor/receptor_user_approved_removal.log", "**/assets/receptor_user_approved_removal.log"])
+    removal_record = retained(["preparation/**/receptor/user_approved_component_removal.txt", "**/receptor/user_approved_component_removal.txt", "**/assets/user_approved_component_removal.txt"])
+    adfr_log = retained(["preparation/**/receptor/receptor_adfr_fallback.log", "**/receptor/receptor_adfr_fallback.log", "**/assets/receptor_adfr_fallback.log"])
     receptor_dir = retained(["preparation/**/receptor", "**/receptor"])
     audit = read_json(audit_path)
-    if batch_log and batch_log.stat().st_size:
-        path = "Meeko batch-cleanup fallback after strict preparation failed"
+    ccd_audit = read_json(ccd_audit_path)
+    if adfr_log and adfr_log.stat().st_size:
+        path = "legacy ADFRsuite fallback after Meeko rejected a linked deposited component"
+        used = bool(audit_path)
+    elif removal_log and removal_log.stat().st_size:
+        path = "user-approved removal of unmatched receptor components after safe preparation fallbacks failed"
         used = bool(audit_path)
     elif post_fix_log and post_fix_log.stat().st_size:
         path = "conservative PDBFixer repair followed by strict Meeko"
@@ -221,8 +228,12 @@ def receptor_preparation_record(study, control=None):
         "path": path,
         "pdbfixer_used": used,
         "pdbfixer_audit": str(audit_path) if audit_path else None,
-        "batch_cleanup_log": str(batch_log) if batch_log else None,
+        "user_approved_component_removal_log": str(removal_log) if removal_log else None,
+        "user_approved_component_removal_record": str(removal_record) if removal_record else None,
+        "adfr_fallback_log": str(adfr_log) if adfr_log else None,
         "changes": audit,
+        "ccd_modification_audit": str(ccd_audit_path) if ccd_audit_path else None,
+        "ccd_modifications": ccd_audit,
     }
 
 def pdbfixer_report_note(record, out, styles):
@@ -235,8 +246,8 @@ def pdbfixer_report_note(record, out, styles):
     terminal = audit.get("missing_terminal_atoms_detected_not_added", "not recorded")
     replacements = len(audit.get("nonstandard_residue_replacements", []))
     gaps = len(audit.get("missing_residue_segments_detected_not_built", []))
-    if record.get("batch_cleanup_log"):
-        disposition = "The repaired intermediate was rejected by strict Meeko, so these changes were not used in the final receptor; the final batch-cleanup attempt used the filtered original."
+    if record.get("user_approved_component_removal_log"):
+        disposition = "The repaired intermediate was rejected by strict Meeko, so these changes were not used in the final receptor; the user explicitly approved removal of unmatched components from the filtered original."
     else:
         disposition = "The repaired structure was accepted by strict Meeko and used to create the final receptor."
     changes = []
@@ -250,6 +261,44 @@ def pdbfixer_report_note(record, out, styles):
         changes.append(f"detected but did not add {terminal} terminal atoms")
     change_text = "; ".join(changes) if changes else "no structural changes were recorded"
     text = f"<b>PDBFixer audit:</b> {change_text}. {disposition}"
+    return [Paragraph(text, styles["BodyText"]), Spacer(1, 8)]
+
+def adfr_fallback_report_note(record, out, styles):
+    """State the limited legacy route explicitly in generated reports."""
+    from reportlab.platypus import Paragraph, Spacer
+    if not record.get("adfr_fallback_log"):
+        return []
+    text = ("<b>Linked-component preparation fallback:</b> strict Meeko rejected a deposited, "
+            "covalently linked component, so legacy ADFRsuite created the final receptor PDBQT. "
+            "This compatibility route is limited to that diagnosed case; a target-matched control "
+            "redocking is required before the protocol can be approved.")
+    return [Paragraph(text, styles["BodyText"]), Spacer(1, 8)]
+
+def user_approved_removal_report_note(record, out, styles):
+    """Make model-changing component removal unambiguous in every report."""
+    from reportlab.platypus import Paragraph, Spacer
+    if not record.get("user_approved_component_removal_log"):
+        return []
+    text = ("<b>User-approved receptor component removal:</b> safe preparation fallbacks failed, "
+            "and the user explicitly approved Meeko's removal of unmatched components. The final "
+            "receptor model may omit deposited material; inspect the retained removal log and run a "
+            "target-matched bound-ligand control before prospective screening.")
+    return [Paragraph(text, styles["BodyText"]), Spacer(1, 8)]
+
+def ccd_modification_report_note(record, out, styles):
+    """Summarize retained MODRES/CCD handling without expanding the report."""
+    from reportlab.platypus import Paragraph, Spacer
+    audit = record.get("ccd_modifications") or {}
+    residues = audit.get("residues", [])
+    if not residues:
+        return []
+    summaries = []
+    for item in residues:
+        summaries.append(
+            f"{item.get('residue', '?')} {item.get('component', '?')} → "
+            f"{item.get('standard_parent', '?')} ({item.get('resolution', 'not recorded')})"
+        )
+    text = "<b>CCD/MODRES audit:</b> " + "; ".join(summaries) + "."
     return [Paragraph(text, styles["BodyText"]), Spacer(1, 8)]
 
 def pymol_version():
@@ -594,6 +643,9 @@ def main():
             Spacer(1,8),
         ]
         story += pdbfixer_report_note(provenance["receptor_preparation"], out, styles)
+        story += adfr_fallback_report_note(provenance["receptor_preparation"], out, styles)
+        story += user_approved_removal_report_note(provenance["receptor_preparation"], out, styles)
+        story += ccd_modification_report_note(provenance["receptor_preparation"], out, styles)
         story += [Paragraph("Software versions used for this report", styles["Heading2"]),
             table(provenance_rows, [2.35*inch, 1.55*inch, 2.8*inch], compact=True),
             Spacer(1,10), Paragraph("Scientific and software references", styles["Heading2"]),
@@ -836,13 +888,16 @@ def main():
         PageBreak(), Paragraph(f"{result_number + 1}. Reproducibility, software, and references", styles["Heading1"]),
         Paragraph(
             ("fpocket supplied ligand-free geometric cavity candidates, volumes, and druggability descriptors; the report separately records the selected docking box. " if cavity else "") +
-            f"Receptor preparation path: {provenance['receptor_preparation']['path']}. PDBFixer is a conservative fallback after strict Meeko rejection; it is not applied routinely. "
+            f"Receptor preparation path: {provenance['receptor_preparation']['path']}. PDBFixer is a conservative fallback after strict Meeko rejection; it is not applied routinely. ADFRsuite, when explicitly recorded, is a narrow compatibility fallback after Meeko rejects a linked deposited component. Unmatched receptor components are removed only when the user explicitly approves the final model-changing attempt. "
             "Docking scores and poses were produced by AutoDock Vina. PLIP supplied rule-based protein-ligand interaction calls; the retained PLIP XML is the authoritative interaction record. RDKit supplied the retained molecular graph handling and symmetry-aware, no-fit heavy-atom RMSD matrix used by Butina clustering. The clustering cutoff was "
             f"{method['cluster_cutoff_angstrom']} A. If only one cluster is present, its lowest-energy member is reported as the sole representative. PyMOL produced the 3D molecular panels; ReportLab assembled this PDF.",
             styles["BodyText"],
         ), Spacer(1,8),
     ]
     story += pdbfixer_report_note(provenance["receptor_preparation"], out, styles)
+    story += adfr_fallback_report_note(provenance["receptor_preparation"], out, styles)
+    story += user_approved_removal_report_note(provenance["receptor_preparation"], out, styles)
+    story += ccd_modification_report_note(provenance["receptor_preparation"], out, styles)
     if version_check:
         verdict = version_check["overall"]
         verdict_text = (

@@ -12,7 +12,7 @@ The same preparation and search protocol can be applied to one compound, a multi
 
 ## 1. Receptor preparation
 
-Docking Universal reads a PDB structure, retains protein atoms, `MODRES`-declared polymer modifications, and a small set of supported metal elements, and removes waters and unrelated heteroatoms from the receptor. It first attempts strict Meeko conversion of that filtered receptor. If strict conversion fails, conservative PDBFixer repair resolves alternate locations and missing side-chain atoms without building missing loops or terminal atoms, after which strict Meeko is retried. A final documented Meeko batch-cleanup attempt may omit unmatched residues. ADFRsuite remains a selectable legacy PDBQT backend. Fixed-width PDB coordinate and element columns are used throughout.
+Docking Universal reads a PDB structure, retains protein atoms, `MODRES`-declared polymer modifications, and a small set of supported metal elements, and removes waters and unrelated heteroatoms from the receptor. It first attempts strict Meeko conversion of that filtered receptor. If strict conversion fails, conservative PDBFixer repair resolves alternate locations and missing side-chain atoms without building missing loops or terminal atoms, after which strict Meeko is retried. For a depositor-annotated disulfide that causes Meeko's padding error, paired cysteines are retried as `CYX` templates so the bridge is preserved and auditable rather than removed. If safe fallbacks fail, unmatched components are omitted only after an explicit interactive user approval, with the decision retained in the preparation record. ADFRsuite remains a selectable legacy PDBQT backend. Fixed-width PDB coordinate and element columns are used throughout.
 
 ## 2. Ligand detection
 

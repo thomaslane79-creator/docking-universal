@@ -946,9 +946,12 @@ def receptor_preparation_summary(study):
     """Summarize the observed or protocol-carried receptor preparation path."""
     audit_paths = sorted(study.glob("preparation/**/receptor/pdbfixer_audit.json"))
     post_fix_logs = sorted(study.glob("preparation/**/receptor/receptor_after_pdbfixer.log"))
-    batch_logs = [path for path in sorted(study.glob("preparation/**/receptor/receptor_retry.log")) if path.stat().st_size]
-    if batch_logs:
-        return "Meeko batch-cleanup fallback after strict preparation failed"
+    removal_logs = [path for path in sorted(study.glob("preparation/**/receptor/receptor_user_approved_removal.log")) if path.stat().st_size]
+    adfr_logs = [path for path in sorted(study.glob("preparation/**/receptor/receptor_adfr_fallback.log")) if path.stat().st_size]
+    if adfr_logs:
+        return "legacy ADFRsuite fallback after Meeko rejected a linked deposited component"
+    if removal_logs:
+        return "user-approved removal of unmatched receptor components after safe preparation fallbacks failed"
     if post_fix_logs:
         return "conservative PDBFixer repair followed by strict Meeko"
     if list(study.glob("preparation/**/receptor")):
@@ -976,7 +979,7 @@ def write_run_details(study, manifest, compounds, report_dir):
         f"- Created: `{manifest.get('created_utc', 'unknown')}`", "",
         "## Receptor preparation", "",
         f"- Path: {receptor_preparation_summary(study)}",
-        "- Policy: strict Meeko first; conservative PDBFixer repair only after rejection; documented Meeko batch cleanup last.", "",
+        "- Policy: strict Meeko first; conservative PDBFixer repair only after rejection; documented Meeko retries; then a narrow ADFRsuite fallback only for Meeko-diagnosed linked deposited components.", "",
         "## Scientific model", "",
         "- Rigid receptor: receptor coordinates are fixed during docking.",
         "- Ligands: chemical states/conformers are prepared independently; input 3D coordinates are not used to seed the default ensemble.",
@@ -1283,7 +1286,7 @@ def main():
     else:
         study = requested_study
     if study.exists() and mode != "control":
-        existing = read_json(study / "study_manifest.json")
+        existing = read_json(study / "study_manifest.json") or {}
         resume_planned = bool(
             not args.plan_only
             and existing.get("completion_status") == "PLANNED"
