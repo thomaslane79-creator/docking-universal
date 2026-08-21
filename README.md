@@ -36,6 +36,8 @@ The comparison is deliberately described as target-specific retrospective eviden
 
 **Research preview.** The core workflow has produced useful outputs across the author's working structural-docking cases. A matched public 1HVR/XK2 case passes raw preparation, ligand-free pocket recovery, Vina execution, score collection, PLIP processing, and visual rendering on an M2 Mac. Its five-seed Vina ensemble control passed the target-specific 2 Å sampling/ranking rule. This single retrospective case is not broad accuracy validation. See [Validation](docs/validation.md).
 
+**Preparation validation and limitations.** Two 50-PDB public receptor-preparation cohorts (a general sample and a deliberately difficult covalent-linkage panel) have been tested. Known limitations include some covalent adducts, linked glycans, metals/heme, modified backbones, and nucleic-acid complexes. Complete outcomes, retained test evidence, safeguards, and documented failures are in the [100-PDB receptor-preparation validation record](docs/receptor-preparation-validation-2026-08-21.md) and [validation index](docs/validation.md).
+
 ![Two end-to-end Docking Universal pathways: control-guided screening and ligand-free exploratory screening](docs/assets/end-to-end-workflows-and-outputs-mockup.png)
 
 ## Example scientific report
