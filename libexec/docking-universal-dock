@@ -8,10 +8,14 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
+  docking-universal dock
   docking-universal dock --receptor receptor.pdbqt --ligands DIR --config box.conf --out DIR [options]
 
+With no options on macOS, Finder selects the prepared receptor, docking box,
+ligand input, and output directory. An SDF ligand input is prepared automatically.
+
 Options:
-  --engine vina            Docking engine (only Vina is supported in 0.4.x)
+  --engine vina            Docking engine (only Vina is supported in 0.5.x)
   --engine-command PATH    Explicit engine executable
   --engine-env NAME        Conda environment containing the engine
   --exhaustiveness N       Forwarded to the selected engine when provided
@@ -21,6 +25,20 @@ Options:
   --skip-existing          Preserve existing output files
   -h, --help               Show this help
 EOF
+}
+
+choose_with_finder() {
+  prompt="$1"
+  kind="$2"
+  chooser="choose file"
+  [ "$kind" = "folder" ] && chooser="choose folder"
+  printf '%s in Finder now.\n' "$prompt" >&2
+  result=$("$OSASCRIPT_COMMAND" -e "POSIX path of ($chooser with prompt \"$prompt\")" 2>/dev/null) || {
+    echo "ERROR: Finder selection cancelled: $prompt" >&2
+    exit 2
+  }
+  [ -n "$result" ] || { echo "ERROR: Finder returned no selection: $prompt" >&2; exit 2; }
+  printf '%s\n' "$result"
 }
 
 engine="vina"
@@ -35,6 +53,58 @@ seed=""
 skip_existing=0
 engine_command=""
 engine_env=""
+
+if [ "$#" -eq 0 ]; then
+  OSASCRIPT_COMMAND="${DOCKING_UNIVERSAL_OSASCRIPT:-osascript}"
+  [ "$(uname -s)" = "Darwin" ] || [ -n "${DOCKING_UNIVERSAL_OSASCRIPT:-}" ] || {
+    echo "ERROR: interactive Finder selection is available on macOS only; provide --receptor, --ligands, --config, and --out." >&2
+    exit 2
+  }
+  command -v "$OSASCRIPT_COMMAND" >/dev/null 2>&1 || [ -x "$OSASCRIPT_COMMAND" ] || {
+    echo "ERROR: Finder selection requires osascript; provide explicit dock options instead." >&2
+    exit 2
+  }
+
+  receptor=$(choose_with_finder "Choose the prepared receptor PDBQT" file)
+  config=$(choose_with_finder "Choose the prepared docking-box configuration (.conf file)" file)
+  case "$receptor" in *.pdbqt) ;; *) echo "ERROR: prepared receptor must be a .pdbqt file: $receptor" >&2; exit 2 ;; esac
+  case "$config" in *.conf) ;; *) echo "ERROR: docking-box configuration must be a .conf file: $config" >&2; exit 2 ;; esac
+
+  echo "Choose the ligand input:"
+  echo "  1) Raw ligand SDF (prepare it automatically)"
+  echo "  2) One prepared ligand PDBQT"
+  echo "  3) Directory of prepared ligand PDBQT files"
+  read -r ligand_choice
+  case "$ligand_choice" in
+    1)
+      ligand_sdf=$(choose_with_finder "Choose the ligand SDF" file)
+      case "$ligand_sdf" in *.sdf) ;; *) echo "ERROR: raw ligand input must be a .sdf file: $ligand_sdf" >&2; exit 2 ;; esac
+      ;;
+    2)
+      ligand_file=$(choose_with_finder "Choose the prepared ligand PDBQT" file)
+      case "$ligand_file" in *.pdbqt) ;; *) echo "ERROR: prepared ligand must be a .pdbqt file: $ligand_file" >&2; exit 2 ;; esac
+      ;;
+    3)
+      ligand_dir=$(choose_with_finder "Choose the prepared ligand PDBQT directory" folder)
+      ;;
+    *) echo "ERROR: choose ligand input 1, 2, or 3" >&2; exit 2 ;;
+  esac
+  out_dir=$(choose_with_finder "Choose the docking output directory" folder)
+
+  if [ "$ligand_choice" = "1" ]; then
+    cli_command="${DOCKING_UNIVERSAL_CLI:-}"
+    [ -n "$cli_command" ] || cli_command=$(command -v docking-universal || true)
+    [ -n "$cli_command" ] || { echo "ERROR: docking-universal launcher not found for ligand preparation" >&2; exit 1; }
+    echo "Cleaning and optimizing the selected SDF before docking..."
+    "$cli_command" ligands "$ligand_sdf" --out "$out_dir/ligand_preparation" \
+      --target-engines vina --geometry-mode optimize
+    ligand_dir="$out_dir/ligand_preparation/pdbqt_ligands"
+  elif [ "$ligand_choice" = "2" ]; then
+    ligand_dir="$out_dir/selected_ligands"
+    mkdir -p "$ligand_dir"
+    cp "$ligand_file" "$ligand_dir/"
+  fi
+fi
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -56,6 +126,8 @@ while [ "$#" -gt 0 ]; do
 done
 
 [ -n "$receptor" ] && [ -n "$ligand_dir" ] && [ -n "$config" ] && [ -n "$out_dir" ] || {
+  echo "ERROR: prepared docking inputs are required. Run 'docking-universal prepare' first." >&2
+  echo "Then prepare the compounds with 'docking-universal ligands' before running dock." >&2
   usage >&2
   exit 2
 }
@@ -88,9 +160,9 @@ else
   engine_source="conda environment $engine_env"
 fi
 
-[ -f "$receptor" ] || { echo "ERROR: receptor not found: $receptor" >&2; exit 1; }
-[ -f "$config" ] || { echo "ERROR: config not found: $config" >&2; exit 1; }
-[ -d "$ligand_dir" ] || { echo "ERROR: ligand directory not found: $ligand_dir" >&2; exit 1; }
+[ -f "$receptor" ] || { echo "ERROR: prepared receptor not found: $receptor. Run 'docking-universal prepare' first." >&2; exit 1; }
+[ -f "$config" ] || { echo "ERROR: prepared docking-box config not found: $config. Run 'docking-universal prepare' first." >&2; exit 1; }
+[ -d "$ligand_dir" ] || { echo "ERROR: prepared ligand directory not found: $ligand_dir. Run 'docking-universal ligands' first." >&2; exit 1; }
 
 mkdir -p "$out_dir"
 version_output=$("${engine_cmd[@]}" --version 2>&1 || true)

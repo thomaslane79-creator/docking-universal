@@ -1,6 +1,12 @@
 # Docking Universal
 
-**Current research-preview release: v0.4.0**
+**Current research-preview release: v0.5.0**
+
+## What v0.5.0 changes
+
+**The defining change in v0.5.0 is reusable, portable target protocols.** After a bound-ligand control passes, Docking Universal can package the previously determined receptor preparation, selected pocket and docking box, ligand-ensemble policy, exhaustiveness, seeds, pose count, energy range, software provenance, hashes, and retained control evidence into one `.duprotocol` file. That validated configuration can then be applied unchanged to new sets of compounds without repeating protocol development for every ligand set. Reports generated for those later compound sets carry forward a readable synopsis of the reused protocol and its validation: control status and date, control ligand, recovered-pose RMSD and acceptance threshold, locked pocket/box, and the control-to-new-run software comparison.
+
+This is a continuation mechanism for a target-specific, control-approved protocol. Pocket determination or increased exhaustiveness alone does not constitute approval, and reuse does not establish prospective pose or affinity accuracy.
 
 **Docking Universal is a scientific workflow orchestration, validation, analysis, visualization, and reporting system built around AutoDock Vina and established open-source structural-bioinformatics tools.**
 
@@ -14,12 +20,7 @@ The current release supports **rigid-receptor docking only**: receptor coordinat
 
 It consolidates a series of working research scripts behind one consistent command while retaining the provenance and diagnostics that made the original workflow auditable.
 
-Docking Universal is compatible with Apple-silicon macOS and Ubuntu Linux. The
-current full scientific reference platform is an M2 Mac (`osx-arm64`), while the
-portable command, installation, and routing paths are continuously tested on
-GitHub Actions' current Ubuntu runner. Platform-specific Conda builds can still
-produce scientific-tool differences, so every workstation should run the supplied
-validation levels before production use.
+The project was created in part to make this compiled scientific toolchain practical and reproducible on Apple-silicon M-series computers. Its current reference platform is an M2 Mac (`osx-arm64`); portability to other platforms remains a tested goal rather than an assumed guarantee.
 
 ## Why I built it: a scientist's perspective
 
@@ -33,7 +34,7 @@ The comparison is deliberately described as target-specific retrospective eviden
 
 ## Project status
 
-**Research preview.** The core workflow has produced useful outputs across the author's working structural-docking cases. A matched public 1HVR/XK2 case passes raw preparation, ligand-free pocket recovery, Vina execution, score collection, PLIP processing, and visual rendering on an M2 Mac. Its five-seed Vina ensemble control passed the target-specific 2 Å sampling/ranking rule. The command and installation suite also passes on Ubuntu CI. This single retrospective case is not broad accuracy validation. See [Validation](docs/validation.md).
+**Research preview.** The core workflow has produced useful outputs across the author's working structural-docking cases. A matched public 1HVR/XK2 case passes raw preparation, ligand-free pocket recovery, Vina execution, score collection, PLIP processing, and visual rendering on an M2 Mac. Its five-seed Vina ensemble control passed the target-specific 2 Å sampling/ranking rule. This single retrospective case is not broad accuracy validation. See [Validation](docs/validation.md).
 
 ![Two end-to-end Docking Universal pathways: control-guided screening and ligand-free exploratory screening](docs/assets/end-to-end-workflows-and-outputs-mockup.png)
 
@@ -82,34 +83,43 @@ Check what is visible on the current workstation:
 
 Only dependencies used by the selected stage are required.
 
-The direct versions verified in a fresh macOS arm64 environment are pinned in [environment.yml](environment.yml), with a complete historical conda build snapshot in `environment-lock-osx-arm64.txt` and a Python distribution snapshot in `requirements-pip-lock.txt`. See the [installation guide](docs/installation.md) and [working scientific environment](docs/environment.md). Receptor and ligand conversion in the original workflow used ADFRsuite 1.0 as a separate installation; a portable Meeko backend is included in the clean environment while compatibility work is completed.
+The direct versions verified in a fresh macOS arm64 environment are pinned in [environment.yml](environment.yml), with a complete historical conda build snapshot in `environment-lock-osx-arm64.txt` and a Python distribution snapshot in `requirements-pip-lock.txt`. See the [installation guide](docs/installation.md) and [working scientific environment](docs/environment.md). Receptor preparation tries strict Meeko first and uses conservative PDBFixer repair only when the original receptor is rejected; ADFRsuite remains the legacy alternative backend. Across 50 sampled public PDB structures, 47/50 successfully produced prepared receptors through the current pipeline: 46 automatically and one after guided histidine-template selection. Three structurally consequential cases stopped rather than silently deleting or guessing cofactors, linked polymers, or mixed protein–nucleic-acid chemistry.
 
 ## Install
 
-Create both required Conda environments. The main preparation, analysis, and
-visualization environment uses Python 3.9; the isolated AutoDock Vina engine
-environment uses Python 3.10 because the two compiled dependency stacks are not
-compatible in one environment:
+New to GitHub or to obtaining research software from a repository? See the
+[GitHub essentials guide for scientific users](docs/assets/github-essentials-for-docking-universal.pdf)
+for cloning, version tracking, controlled updates, issue reporting, and the
+separation of software files from study records.
+
+Create the two Conda environments. The main `docking-universal` environment
+contains preparation, analysis, and reporting tools; the isolated
+`docking-universal-vina` environment supplies the compiled Vina engine.
 
 ```bash
 conda env create -f environment.yml
 conda env create -f environments/vina.yml
-```
-
-Activate only the main environment, then verify that it can discover Vina in the
-separate `docking-universal-vina` environment:
-
-```bash
 conda activate docking-universal
 ./bin/docking-universal check-install
 make test
 ```
 
-The docking-engine section of `check-install` should report `available vina
-(Conda environment: docking-universal-vina)`. The `dock` command discovers Vina
-there automatically and records the executable source, version, receptor, ligand
-directory, box, and search settings. Users do not activate the Vina environment
-for normal operation.
+Install the command into the active Conda environment so it is available from any directory:
+
+```bash
+conda activate docking-universal
+make install-conda
+which docking-universal
+docking-universal --help
+```
+
+`environment.yml` installs PDBFixer 1.11 and its OpenMM dependency. `make install-conda` then installs the Docking Universal command into that active environment; it does not solve dependencies itself. Existing environments should be refreshed with `conda env update -f environment.yml --prune` before reinstalling the command.
+
+The `dock` command discovers Vina there automatically; the Vina section of
+`check-install` should report it as available from the
+`docking-universal-vina` Conda environment. Normal use requires activation of
+only the main environment. The run record retains the executable source,
+version, receptor, ligand directory, box, and search settings.
 
 For exact reproduction of the M2 Vina test environment, use `environments/vina-lock-osx-arm64.txt`; use the readable YAML for normal installation.
 
@@ -132,7 +142,7 @@ On Apple silicon, install the conda-forge package named `pymol-open-source`, not
 ```text
 docking-universal run
 docking-universal run --mode control --complex 1HVR --download-pdb --out control_study --non-interactive
-docking-universal run --mode screen --protocol protocol.json --ligands library.sdf --out study
+docking-universal run --mode screen --protocol approved.duprotocol --ligands library.sdf --out study
 docking-universal run --mode exploratory --receptor-pdb receptor.pdb --receptor-pdbqt receptor.pdbqt --box pocket.conf --ligands library.sdf --out study
 docking-universal run --mode exploratory --complex protein_only.pdb --ligands library.sdf --review-pockets --out study
 docking-universal control --complex bound_complex.pdb
@@ -156,7 +166,9 @@ Every subcommand provides `--help`.
 
 The guided command also offers **recommended defaults** or a **custom ligand ensemble**. Custom mode presents pH, conformers per chemical state, deterministic base seed, MMFF94/MMFF94s/UFF selection, conformer RMSD pruning, tautomer enumeration, charge model, and—during exploration—independent docking-seed count. These choices are passed to the actual ensemble and docking stages and recorded in protocol or screening manifests. An approved-protocol screen displays and reuses its locked ensemble settings rather than allowing an inconsistent override.
 
-The approved-protocol screen is the supported restart path after a completed control. If `--protocol` is omitted interactively, the runner can select `protocol.json` with Finder or discover approved protocols inside a selected control/study folder before asking for the new compound SDF input.
+The approved-protocol screen is the supported restart path after a completed control. A passing high-level control writes a portable `.duprotocol` ZIP containing the approved protocol, locked receptor and box, control reference/evidence, and a hash manifest. This allows a previously determined target-specific protocol - including receptor preparation, the selected pocket and docking box, ligand-ensemble policy, exhaustiveness, independent seeds, requested pose count, and energy range - to be applied unchanged when docking new sets of compounds. If `--protocol` is omitted interactively, the runner can select that bundle, a legacy `protocol.json`, or a completed control/study folder before asking for the new compound SDF input. Pocket selection or search effort alone does not create approval; reusable approved screening still requires the recorded bound-ligand control to pass.
+
+The standard combined PDF keeps reused control evidence concise: control date, ligand, PASS/REVIEW status, RMSD and threshold, receptor-preparation path, locked pocket/box, and one control overlay. New-ligand results follow in a separate section. The final reproducibility section always compares the control and new-run Docking Universal, Python, RDKit, MolScrub, Meeko, PDBFixer, and AutoDock Vina versions. It states whether strict Meeko preparation succeeded directly, conservative PDBFixer repair was used, or the documented Meeko batch-cleanup fallback was required. When PDBFixer ran, the PDF gives a short change summary and states whether the repaired intermediate entered the final receptor. Detailed changes remain in `pdbfixer_audit.json`, which is also retained in portable protocol bundles when applicable. Detailed retained control interaction figures and provenance remain in `.duprotocol` and can be included in an audit appendix.
 
 Default completed control folders use the readable form `control_<PDB>_<ligand>_<YYYYMMDD_HHMMSS>`, such as `control_1HVR_XK2_20260811_143025`. Explicit `--out` folder names remain unchanged.
 
@@ -314,6 +326,6 @@ MIT. See [LICENSE](LICENSE).
 
 ## Citation
 
-If Docking Universal contributes to your research, please cite the repository release used and all applicable underlying software and methods. Docking Universal integrates established scientific tools; citing this repository recognizes the workflow and its implementation, but does not replace citation of the original work behind AutoDock Vina, fpocket, RDKit, Meeko, Open Babel, PLIP, PyMOL Open-Source, or any other tool used in the relevant stages.
+If Docking Universal contributes to your research, please cite the repository release used and all applicable underlying software and methods. Docking Universal integrates established scientific tools; citing this repository recognizes the workflow and its implementation, but does not replace citation of the original work behind AutoDock Vina, fpocket, RDKit, Meeko, PDBFixer/OpenMM, Open Babel, PLIP, PyMOL Open-Source, or any other tool used in the relevant stages. PDBFixer should be reported with its exact software version and repository; its OpenMM foundation can be cited using Eastman et al., *PLOS Computational Biology* 2017, DOI `10.1371/journal.pcbi.1005659`.
 
 Run-specific reports record software versions and applicable references to make this attribution easier. Machine-readable project citation metadata is provided in [CITATION.cff](CITATION.cff), and the primary references for the underlying methods are listed in the generated reports and documentation.

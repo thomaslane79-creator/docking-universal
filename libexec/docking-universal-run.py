@@ -30,6 +30,9 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from docking_universal_bundle import create_bundle, extract_bundle
+
 
 STATUSES = {
     "control": "CONTROL_WORKFLOW",
@@ -41,16 +44,27 @@ COMMON_ADDITIVES = {"HOH", "WAT", "EDO", "GOL", "PEG", "MPD", "DMS", "IPA", "EOH
 COMMON_IONS = {"ZN", "MG", "MN", "CA", "FE", "CU", "NA", "K", "CL"}
 
 
+class StartControlRequested(Exception):
+    """Signal that interactive screening should switch to protocol calibration."""
+
+
+class StartExploratoryRequested(Exception):
+    """Signal that interactive screening should continue without control approval."""
+
+
 def run(command, cwd=None):
     print("+ " + " ".join(map(str, command)), flush=True)
     subprocess.run([str(value) for value in command], cwd=cwd, check=True)
 
 
 def package_version():
-    try:
-        return (Path(__file__).resolve().parent.parent / "VERSION").read_text().strip()
-    except OSError:
-        return "unknown"
+    script_dir = Path(__file__).resolve().parent
+    for version_file in (script_dir / "VERSION", script_dir.parent / "VERSION"):
+        try:
+            return version_file.read_text().strip()
+        except OSError:
+            pass
+    return "unknown"
 
 
 def safe_id(value, fallback="compound"):
@@ -143,8 +157,8 @@ def choose_mode():
     print("Choose a study pathway:")
     print("  1) Bound-ligand control — calibrate against an experimental pose")
     print("     Tests whether the selected preparation and search protocol can reproducibly recover a withheld known pose.")
-    print("  2) Approved-protocol screen — dock unknown compounds reproducibly")
-    print("     Applies target-matched settings unchanged; scores rank modeled poses but do not establish binding or activity.")
+    print("  2) Screen additional compounds with a validated protocol")
+    print("     Choose its portable .duprotocol bundle and apply the target-locked settings unchanged.")
     print("  3) Exploratory ligand-free docking — no pose-recovery control available")
     print("     Uses predicted cavities and must be interpreted as hypothesis generation without target-specific pose validation.")
     choice = input("Select [1]: ").strip() or "1"
@@ -374,13 +388,49 @@ def approved_protocols_under(path):
     return [candidate for candidate in candidates if protocol_allows_screening(candidate)]
 
 
+def materialize_protocol(path):
+    path = path.expanduser().resolve()
+    if path.suffix.lower() == ".duprotocol":
+        try:
+            path = extract_bundle(path)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise SystemExit(f"Invalid Docking Universal protocol bundle: {exc}") from None
+        print(f"Verified portable protocol bundle: {path}")
+    return path
+
+
+def offer_protocol_control(reason):
+    """Explain why screening cannot start and offer scientifically distinct paths."""
+    print(reason)
+    print("Approved screening requires a protocol produced by a passing bound-ligand control.")
+    print("You do not need to run prepare separately; the control workflow prepares the receptor and site.")
+    print("If no bound-ligand control is possible, exploratory docking can prepare fpocket cavities without creating approval.")
+    print("  1) Run a bound-ligand control now to generate and validate a protocol")
+    print("  2) Continue as explicitly uncalibrated exploratory docking")
+    print("  3) Stop without docking")
+    answer = input("Select [3]: ").strip() or "3"
+    if answer == "1":
+        raise StartControlRequested
+    if answer == "2":
+        raise StartExploratoryRequested
+    if answer != "3":
+        raise SystemExit("Choose 1, 2, or 3")
+    raise SystemExit("Screening stopped; no approved protocol was selected.")
+
+
 def choose_approved_protocol_from(path):
     """Validate or disambiguate approved protocols found at a file/folder selection."""
+    path = path.expanduser().resolve()
+    if not path.exists():
+        offer_protocol_control(f"Protocol does not exist: {path}")
+    if path.is_file() and path.suffix.lower() == ".duprotocol":
+        path = materialize_protocol(path)
     protocols = approved_protocols_under(path)
     if not protocols:
-        raise SystemExit(
+        offer_protocol_control(
             f"No approved Docking Universal protocol.json was found at: {path}\n"
-            "An approved protocol must retain passing sampling, ranking, and independent-seed criteria."
+            "Any retained protocol there failed or lacks passing sampling, ranking, "
+            "and independent-seed criteria."
         )
     if len(protocols) == 1:
         selected = protocols[0]
@@ -406,19 +456,19 @@ def choose_approved_protocol_from(path):
 def choose_approved_protocol():
     """Resume screening from a previously approved target-specific protocol."""
     finder_available = platform.system() == "Darwin" and bool(shutil.which("osascript"))
-    print("Resume from an existing approved protocol:")
+    print("Choose the validated portable protocol to reuse:")
     if finder_available:
-        print("  1) Choose protocol.json with Finder")
-        print("  2) Choose its control/study folder with Finder")
+        print("  1) Choose a .duprotocol bundle or protocol.json with Finder")
+        print("  2) Choose its completed control/study folder with Finder")
         print("  3) Enter an exact protocol.json path")
-        print("  4) Enter a control/study folder path and discover approved protocols")
+        print("  4) Enter a control/study folder path")
     else:
         print("  1) Enter an exact protocol.json path")
-        print("  2) Enter a control/study folder path and discover approved protocols")
+        print("  2) Enter a control/study folder path")
     choice = input("Select [1]: ").strip() or "1"
     if finder_available and choice == "1":
         return choose_approved_protocol_from(
-            choose_path_with_finder("Choose the approved Docking Universal protocol.json")
+            choose_path_with_finder("Choose the approved .duprotocol bundle or protocol.json")
         )
     if finder_available and choice == "2":
         return choose_approved_protocol_from(
@@ -472,7 +522,7 @@ def download_pdb_entry(pdb_id, destination):
     destination.mkdir(parents=True, exist_ok=True)
     output = destination / f"{pdb_id}.pdb"
     try:
-        request = urllib.request.Request(url, headers={"User-Agent": "Docking-Universal/0.4.0"})
+        request = urllib.request.Request(url, headers={"User-Agent": f"Docking-Universal/{package_version()}"})
         with urllib.request.urlopen(request, timeout=30) as response:
             payload = response.read()
     except (urllib.error.URLError, TimeoutError) as exc:
@@ -674,7 +724,7 @@ def split_compounds(source, destination):
         for index, molecule in enumerate(molecules, start=1):
             raw_name = molecule.GetProp("_Name").strip() if molecule.HasProp("_Name") else ""
             property_name = molecule.GetProp("Name").strip() if molecule.HasProp("Name") else ""
-            descriptive_stem = re.sub(r"(?i)_pubchem_?\d+$", "", path.stem)
+            descriptive_stem = re.sub(r"(?i)_pubchem(?:_?\d+)?$", "", path.stem)
             filename_name = descriptive_stem.replace("_", " ").strip().title()
             compound_name = (
                 raw_name if raw_name and not raw_name.isdigit()
@@ -892,6 +942,27 @@ def relative_to_study(path, study):
         return str(path)
 
 
+def receptor_preparation_summary(study):
+    """Summarize the observed or protocol-carried receptor preparation path."""
+    audit_paths = sorted(study.glob("preparation/**/receptor/pdbfixer_audit.json"))
+    post_fix_logs = sorted(study.glob("preparation/**/receptor/receptor_after_pdbfixer.log"))
+    batch_logs = [path for path in sorted(study.glob("preparation/**/receptor/receptor_retry.log")) if path.stat().st_size]
+    if batch_logs:
+        return "Meeko batch-cleanup fallback after strict preparation failed"
+    if post_fix_logs:
+        return "conservative PDBFixer repair followed by strict Meeko"
+    if list(study.glob("preparation/**/receptor")):
+        return "strict Meeko succeeded; PDBFixer was not needed"
+    for manifest_path in sorted(study.glob("compounds/*/screen_manifest.json")):
+        screen_manifest = read_json(manifest_path) or {}
+        protocol_path = Path(str(screen_manifest.get("protocol", ""))).expanduser()
+        protocol = read_json(protocol_path) or {}
+        recorded = protocol.get("receptor_preparation", {}).get("path")
+        if recorded:
+            return f"reused control protocol: {recorded}"
+    return "not recorded; a prepared receptor may have been supplied directly"
+
+
 def write_run_details(study, manifest, compounds, report_dir):
     """Consolidate retained run decisions into one human-readable Markdown record."""
     lines = [
@@ -903,6 +974,9 @@ def write_run_details(study, manifest, compounds, report_dir):
         f"- Scientific status: `{manifest['study_status']}`",
         f"- Completion status: `{manifest.get('completion_status', 'UNKNOWN')}`",
         f"- Created: `{manifest.get('created_utc', 'unknown')}`", "",
+        "## Receptor preparation", "",
+        f"- Path: {receptor_preparation_summary(study)}",
+        "- Policy: strict Meeko first; conservative PDBFixer repair only after rejection; documented Meeko batch cleanup last.", "",
         "## Scientific model", "",
         "- Rigid receptor: receptor coordinates are fixed during docking.",
         "- Ligands: chemical states/conformers are prepared independently; input 3D coordinates are not used to seed the default ensemble.",
@@ -1020,7 +1094,8 @@ def write_reports(study, manifest, compounds):
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
         writer.writerows(rows)
-    report = {**manifest, "compounds": rows}
+    preparation_summary = receptor_preparation_summary(study)
+    report = {**manifest, "receptor_preparation": preparation_summary, "compounds": rows}
     (report_dir / "study_summary.json").write_text(json.dumps(report, indent=2) + "\n")
 
     lines = [
@@ -1029,6 +1104,8 @@ def write_reports(study, manifest, compounds):
         f"**Completion status:** `{manifest.get('completion_status', 'UNKNOWN')}`", "",
         f"**Workflow:** {manifest['workflow']}", "",
         f"**Compounds:** {len(rows)}", "",
+        "## Receptor preparation", "",
+        f"{preparation_summary}. PDBFixer is used only after strict Meeko rejects the filtered receptor.", "",
     ]
     if manifest["study_status"] == "EXPLORATORY_NO_CONTROL":
         lines += ["> **Exploratory result:** no approved bound-ligand pose-recovery control was available. Generated poses and scores are hypotheses for structural review.", ""]
@@ -1048,7 +1125,7 @@ def write_reports(study, manifest, compounds):
         "<tr>" + "".join(f"<td>{html.escape(str(row[field]))}</td>" for field in fields) + "</tr>" for row in rows
     )
     warning_html = "<p><strong>Exploratory:</strong> no approved target-specific pose-recovery control was available.</p>" if manifest["study_status"] == "EXPLORATORY_NO_CONTROL" else ""
-    document = f"""<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>{html.escape(manifest['study_name'])}</title><style>body{{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#18202a}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #ccd3da;padding:.55rem;text-align:left}}th{{background:#eef3f6}}code{{background:#eef3f6;padding:.15rem .3rem}}.note{{border-left:4px solid #b87900;padding:.8rem;background:#fff6df}}</style></head><body><h1>{html.escape(manifest['study_name'])}</h1><p>Scientific status: <code>{manifest['study_status']}</code><br>Completion status: <code>{manifest.get('completion_status', 'UNKNOWN')}</code></p><div class=\"note\">{warning_html or 'Target-specific protocol gate passed. This remains computational evidence, not experimental validation.'}</div><h2>Compound summary</h2><table><thead><tr>{''.join(f'<th>{html.escape(field)}</th>' for field in fields)}</tr></thead><tbody>{html_rows}</tbody></table><h2>Scientific limits</h2><p>Scores are ranking outputs. Pose clustering and seed support describe search convergence and require structural and experimental interpretation.</p></body></html>"""
+    document = f"""<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>{html.escape(manifest['study_name'])}</title><style>body{{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#18202a}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #ccd3da;padding:.55rem;text-align:left}}th{{background:#eef3f6}}code{{background:#eef3f6;padding:.15rem .3rem}}.note{{border-left:4px solid #b87900;padding:.8rem;background:#fff6df}}</style></head><body><h1>{html.escape(manifest['study_name'])}</h1><p>Scientific status: <code>{manifest['study_status']}</code><br>Completion status: <code>{manifest.get('completion_status', 'UNKNOWN')}</code></p><div class=\"note\">{warning_html or 'Target-specific protocol gate passed. This remains computational evidence, not experimental validation.'}</div><h2>Receptor preparation</h2><p>{html.escape(preparation_summary)}. PDBFixer is used only after strict Meeko rejects the filtered receptor.</p><h2>Compound summary</h2><table><thead><tr>{''.join(f'<th>{html.escape(field)}</th>' for field in fields)}</tr></thead><tbody>{html_rows}</tbody></table><h2>Scientific limits</h2><p>Scores are ranking outputs. Pose clustering and seed support describe search convergence and require structural and experimental interpretation.</p></body></html>"""
     (report_dir / "index.html").write_text(document)
     write_run_details(study, manifest, compounds, report_dir)
     # PDF is a presentation artifact; keep it optional so core report generation
@@ -1129,7 +1206,7 @@ def parse_args():
 def main():
     args = parse_args()
     project = Path(__file__).resolve().parent.parent
-    cli = project / "bin/docking-universal"
+    cli = Path(os.environ.get("DOCKING_UNIVERSAL_CLI", project / "bin/docking-universal"))
     mode = args.mode
     if not mode:
         if args.non_interactive:
@@ -1137,22 +1214,50 @@ def main():
         mode = choose_mode()
         if not mode:
             raise SystemExit("Invalid workflow selection")
+    if mode == "screen":
+        try:
+            if not args.protocol:
+                if args.non_interactive:
+                    raise SystemExit("--protocol is required with --mode screen --non-interactive")
+                args.protocol = choose_approved_protocol()
+            else:
+                args.protocol = args.protocol.expanduser().resolve()
+                if not args.protocol.is_file():
+                    message = f"Protocol does not exist: {args.protocol}"
+                    if args.non_interactive:
+                        raise SystemExit(message)
+                    offer_protocol_control(message)
+                args.protocol = materialize_protocol(args.protocol)
+                if not protocol_allows_screening(args.protocol):
+                    message = (
+                        f"Protocol exists but is not approved for screening: {args.protocol}\n"
+                        "It cannot authorize unknown-compound docking."
+                    )
+                    if args.non_interactive:
+                        raise SystemExit(message)
+                    offer_protocol_control(message)
+                print(f"Selected approved protocol: {args.protocol}")
+        except StartControlRequested:
+            mode = "control"
+            args.protocol = None
+            print("Switching to the bound-ligand control workflow.")
+        except StartExploratoryRequested:
+            mode = "exploratory"
+            args.protocol = None
+            print("Switching to explicitly uncalibrated exploratory docking.")
     explain_workflow(mode)
     if not args.non_interactive:
         choose_ensemble_settings(args, mode)
     run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if mode == "control" and not args.complex and not args.non_interactive:
         args.complex = choose_complex_source()
+    if (
+        mode == "exploratory" and not args.complex
+        and not (args.receptor_pdb and args.receptor_pdbqt and args.box)
+        and not args.non_interactive
+    ):
+        args.complex = choose_complex_source()
     if mode == "screen":
-        if not args.protocol:
-            if args.non_interactive:
-                raise SystemExit("--protocol is required with --mode screen --non-interactive")
-            args.protocol = choose_approved_protocol()
-        else:
-            args.protocol = args.protocol.expanduser().resolve()
-            if not protocol_allows_screening(args.protocol):
-                raise SystemExit(f"Protocol is not approved for screening: {args.protocol}")
-            print(f"Selected approved protocol: {args.protocol}")
         locked_parameters = (read_json(args.protocol) or {}).get("parameters", {})
         print("Locked ligand ensemble from approved protocol:")
         print(f"  pH: {locked_parameters.get('ph', 'NA')}")
@@ -1278,6 +1383,26 @@ def main():
         }
         (study / "study_manifest.json").write_text(json.dumps(control_study_manifest, indent=2) + "\n")
         report_dir = write_reports(study, control_study_manifest, [])
+        approved_protocol_paths = [
+            path for path in (study / "control").glob("**/protocol.json")
+            if protocol_allows_screening(path)
+        ]
+        if approved_protocol_paths:
+            control_manifest = read_key_value_tsv(study / "control" / "run_manifest.tsv")
+            control_compound = control_manifest.get("ligand_id", "not recorded").split(":", 1)[0]
+            approved_record = read_json(approved_protocol_paths[0]) or {}
+            receptor_name = Path(approved_record.get("locked_inputs", {}).get("receptor", "protein")).stem
+            target = re.sub(r"(?i)(?:_receptor|_prepared|_protein)+$", "", receptor_name) or "protein"
+            bundle = create_bundle(
+                approved_protocol_paths[0], study,
+                study / (
+                    f"{safe_id(target, 'protein')}_"
+                    f"{safe_id(control_compound, 'control-ligand')}_"
+                    f"{run_timestamp}.duprotocol"
+                ),
+                control_compound=control_compound,
+            )
+            print(f"Portable approved protocol: {bundle}")
         print(f"Control study complete: {study}")
         print(f"Run details: {report_dir / 'run_details.md'}")
         if control_approved and not args.non_interactive:

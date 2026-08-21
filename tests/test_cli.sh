@@ -19,7 +19,7 @@ esac
 
 version_output=$("$cli" --version)
 case "$version_output" in
-  "Docking Universal 0.4.0"*) ;;
+  "Docking Universal 0.5.0"*) ;;
   *) fail "version output" ;;
 esac
 
@@ -82,6 +82,75 @@ done
 
 "$cli" check-install >/dev/null || fail "check-install alias"
 
+mock_osascript="$mock_dir/osascript"
+cat > "$mock_osascript" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  *"prepared receptor PDBQT"*) printf '%s\n' "$DOCK_TEST_RECEPTOR" ;;
+  *"docking-box configuration (.conf file)"*) printf '%s\n' "$DOCK_TEST_CONFIG" ;;
+  *"ligand SDF"*) printf '%s\n' "$DOCK_TEST_SDF" ;;
+  *"prepared ligand PDBQT directory"*) printf '%s\n' "$DOCK_TEST_LIGAND_DIR" ;;
+  *"docking output directory"*) printf '%s\n' "$DOCK_TEST_OUTPUT" ;;
+  *) exit 2 ;;
+esac
+EOF
+chmod +x "$mock_osascript"
+
+mkdir -p "$mock_dir/finder_prepared_results"
+finder_prepared_output=$(printf '3\n' | env DOCKING_UNIVERSAL_OSASCRIPT="$mock_osascript" \
+  DOCKING_UNIVERSAL_VINA="$mock_vina" DOCK_TEST_RECEPTOR="$mock_dir/receptor.pdbqt" \
+  DOCK_TEST_CONFIG="$mock_dir/box.conf" DOCK_TEST_LIGAND_DIR="$mock_dir/ligands" \
+  DOCK_TEST_OUTPUT="$mock_dir/finder_prepared_results" "$cli" dock 2>&1) \
+  || fail "Finder prepared-ligand dock"
+[ -s "$mock_dir/finder_prepared_results/example_vina.pdbqt" ] || fail "Finder prepared-ligand output"
+case "$finder_prepared_output" in
+  "Choose the prepared receptor PDBQT in Finder now."*) ;;
+  *) fail "Finder receptor pre-launch feedback" ;;
+esac
+case "$finder_prepared_output" in
+  *"Choose the prepared docking-box configuration (.conf file) in Finder now."*) ;;
+  *) fail "Finder docking-box file-type feedback" ;;
+esac
+
+mock_ligand_cli="$mock_dir/mock-ligand-cli"
+cat > "$mock_ligand_cli" <<'EOF'
+#!/usr/bin/env bash
+[ "${1:-}" = "ligands" ] || exit 2
+shift
+original_args="$*"
+out=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --out) out="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+[ -n "$out" ] || exit 2
+mkdir -p "$out/pdbqt_ligands"
+printf 'MODEL\n' > "$out/pdbqt_ligands/from_sdf.pdbqt"
+[ -z "${DOCK_TEST_LIGAND_LOG:-}" ] || printf '%s\n' "$original_args" > "$DOCK_TEST_LIGAND_LOG"
+EOF
+chmod +x "$mock_ligand_cli"
+printf 'ligand\n$$$$\n' > "$mock_dir/ligand.sdf"
+mkdir -p "$mock_dir/finder_sdf_results"
+printf '1\n' | env DOCKING_UNIVERSAL_OSASCRIPT="$mock_osascript" \
+  DOCKING_UNIVERSAL_CLI="$mock_ligand_cli" DOCKING_UNIVERSAL_VINA="$mock_vina" \
+  DOCK_TEST_RECEPTOR="$mock_dir/receptor.pdbqt" DOCK_TEST_CONFIG="$mock_dir/box.conf" \
+  DOCK_TEST_SDF="$mock_dir/ligand.sdf" DOCK_TEST_OUTPUT="$mock_dir/finder_sdf_results" \
+  DOCK_TEST_LIGAND_LOG="$mock_dir/finder_sdf_ligand_args.txt" \
+  "$cli" dock >/dev/null || fail "Finder SDF dock"
+[ -s "$mock_dir/finder_sdf_results/from_sdf_vina.pdbqt" ] || fail "Finder SDF output"
+grep -q -- '--geometry-mode optimize' "$mock_dir/finder_sdf_ligand_args.txt" || fail "Finder SDF optimization mode"
+
+dock_prerequisite_output=""
+if dock_prerequisite_output=$("$cli" dock --engine vina 2>&1); then
+  fail "low-level dock without prepared inputs was accepted"
+fi
+case "$dock_prerequisite_output" in
+  *"Run 'docking-universal prepare' first."*) ;;
+  *) fail "dock preparation prerequisite feedback" ;;
+esac
+
 PYTHONPYCACHEPREFIX="$mock_dir/pycache" "${DOCKING_UNIVERSAL_PYTHON:-python}" -m py_compile "$project_dir"/libexec/*.py || fail "Python syntax"
 
 "$cli" evaluate-control --help | grep -q -- '--no-prompt' || fail "evaluate-control no-prompt help"
@@ -106,6 +175,27 @@ done
   --conformers 3 --macrocycle-treatment flexible_meeko --no-prompt >/dev/null || fail "protocol evaluation"
 grep -q '"schema_name": "docking-universal-protocol"' "$mock_dir/protocol.json" || fail "protocol schema"
 grep -q '"unknown_docking_allowed": true' "$mock_dir/protocol.json" || fail "protocol approval"
+
+# A complete approved protocol must validate its locked inputs and drive the
+# high-level screen planner, not merely contain an approval boolean.
+approved_ligand="$project_dir/examples/tutorials/01_bound_ligand/inputs/rilpivirine_pubchem.sdf"
+"$cli" screen --protocol "$mock_dir/protocol.json" --ligand "$approved_ligand" \
+  --out "$mock_dir/approved_check" --check-only --non-interactive >/dev/null \
+  || fail "approved protocol check"
+"$cli" run --mode screen --protocol "$mock_dir/protocol.json" --ligands "$approved_ligand" \
+  --out "$mock_dir/approved_plan" --name approved_protocol_test --plan-only --non-interactive >/dev/null \
+  || fail "approved protocol screen planning"
+[ -s "$mock_dir/approved_plan/study_manifest.json" ] || fail "approved protocol study manifest"
+
+missing_protocol_output=""
+if missing_protocol_output=$("$cli" run --mode screen --protocol "$mock_dir/missing_protocol.json" \
+  --ligands "$approved_ligand" --out "$mock_dir/missing_plan" --plan-only --non-interactive 2>&1); then
+  fail "missing protocol was accepted"
+fi
+case "$missing_protocol_output" in
+  *"Protocol does not exist:"*) ;;
+  *) fail "missing protocol feedback" ;;
+esac
 
 # Screening must fail closed before launching chemistry tools when a protocol is
 # unapproved. This protects automation from accidentally bypassing calibration.

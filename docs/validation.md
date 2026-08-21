@@ -1,5 +1,11 @@
 # Raw-input validation
 
+## Installed-command validation
+
+The installed Conda command was validated outside the source repository. `docking-universal validate integration` used packaged fixtures, wrote to a caller-owned directory, and passed real MolScrub/RDKit ensemble generation, Meeko ligand preparation, ligand-centered receptor preparation, fpocket cavity modes, AutoDock Vina smoke docking, control evaluation, approved-protocol planning, exploratory planning, and PDF generation. This specifically verifies that installed validation no longer depends on a writable source checkout.
+
+The longer release suite also passed the repeatable 1HVR/XK2 control, a held-out approved-protocol screen, a ligand-free 2R8N/Indinavir exploratory screen, clustering, PLIP, PyMOL rendering, and reports. These are software/workflow checks on representative cases, not general biological validation.
+
 The packaged ligand-free tutorial input, unbound RCSB 2R8N, was also passed through the quick fpocket route on the macOS arm64 reference environment. The run completed and wrote five ranked candidate cavities with positive dimensions and Vina configuration files. This verifies tutorial execution through cavity generation; it does not validate any cavity as a biological binding site.
 
 ## Reference case
@@ -20,7 +26,7 @@ The downloaded raw inputs are not redistributed in this repository. The checksum
 
 The raw PDB and SDF were processed on an M2 Mac using the clean main environment and the isolated Vina environment:
 
-1. Receptor atoms and `MODRES`-declared polymer residues were selected from the raw PDB and converted strictly with Meeko; no permissive bad-residue deletion was used. Meeko fetched the official CSO chemical-component definition from RCSB to type the two modified cysteines.
+1. Receptor atoms and `MODRES`-declared polymer residues were selected from the raw PDB and converted strictly with Meeko; no permissive bad-residue deletion was used. Meeko fetched the official CSO chemical-component definition from RCSB to type the two modified cysteines. Under the new strict-first pipeline, this case and the existing 2R8N example produced byte-identical receptor PDBQT files without invoking PDBFixer. Their selected boxes and paired downstream docking scores also matched the earlier direct-Meeko path.
 2. XK2 was prepared from the raw SDF with Open Babel and Meeko.
 3. Meeko prepared AutoDock Vina PDBQT input while retaining the recorded ligand chemistry and conformer provenance.
 4. For the ligand-free tests, XK2 was withheld from fpocket. Both the guided conservative workflow and the standalone robust command ranked and boxed sites from protein coordinates alone.
@@ -28,6 +34,10 @@ The raw PDB and SDF were processed on an M2 Mac using the clean main environment
 6. Vina output was collected to CSV with its score and RMSD-bound fields retained explicitly.
 7. The top Vina pose was combined with receptor coordinates for PLIP analysis, custom PML generation, headless PyMOL rendering, and generic RDKit depiction.
 8. The confirmed `XK2:A:263` instance was also processed through the complete retrospective `control` command: automatic CCD-backed experimental-coordinate SDF creation, Vina docking at the package defaults, pose comparison, filtered PLIP analysis, and PNG/PSE rendering.
+
+Receptor preparation was tested across 50 sampled public PDB structures. The original cohort passed 10/10. A second reproducible cohort used the current RCSB entry-ID holdings list, excluded the original ten, and selected 40 downloadable legacy-format PDB entries with random seed `20260819`; 37/40 produced prepared receptors through the current pipeline. Of those 37, 12 passed strict Meeko, 19 passed conservative PDBFixer repair followed by strict Meeko, 5 passed the documented final Meeko batch cleanup, and 1 passed after guided histidine-template selection. Combined current-pipeline performance was therefore 47/50: 46 unattended plus one scientifically reviewed interactive selection.
+
+The three remaining second-cohort stops require specialized handling rather than another generic automatic cleanup: a heme/cofactor CCD-template parsing failure, protein-DNA alternate-location/template conflicts, and linked glycan templates. The former histidine stop, 5NBX, completed after the current guided interaction recorded the user's HIE selection for all 12 unresolved histidines. Docking Universal did not silently delete components or guess chemistry to increase the pass count. This is a software-path stress test rather than biological validation. PDBFixer repair is limited to alternate-location resolution, recognized nonstandard-residue mappings, and missing side-chain heavy atoms; it does not construct missing loops or terminal atoms, and every invocation retains `pdbfixer_audit.json` for review.
 
 ## Ligand-centered preparation result
 

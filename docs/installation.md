@@ -1,62 +1,69 @@
 # Installation
 
+If GitHub is new to you, begin with the
+[GitHub essentials guide for Docking Universal](assets/github-essentials-for-docking-universal.pdf).
+It explains how to obtain and update the repository, record an exact software
+state for reproducibility, and report problems without exposing research data.
+
 ## Recommended Conda installation
 
-Docking Universal uses external scientific programs as composable stages. A complete
-installation requires two Conda environments because the compiled scientific stack
-and AutoDock Vina require different Python and library generations:
-
-| Environment | Python | Purpose |
-| --- | ---: | --- |
-| `docking-universal` | 3.9 | Preparation, analysis, reporting, RDKit, PLIP, and PyMOL |
-| `docking-universal-vina` | 3.10 | Isolated AutoDock Vina docking engine |
-
-Create both environments from the repository root:
+Docking Universal uses external scientific programs as composable stages. The repository's `environment.yml` contains the smallest direct dependency set verified together on macOS arm64. The automated 0.5 test suite is also exercised on current Ubuntu and macOS GitHub runners using this declared environment. macOS arm64 remains the reference platform for retained scientific validation; run the full integration or release validation on the intended workstation before production use.
 
 ```bash
-git clone https://github.com/thomaslane79-creator/docking-universal.git
-cd docking-universal
+git clone YOUR_REPOSITORY_URL
+cd Docking_Universal
 conda env create -f environment.yml
-conda env create -f environments/vina.yml
-```
-
-Activate only the main environment and verify the complete installation:
-
-```bash
 conda activate docking-universal
 ./bin/docking-universal check-install
 make test
 ```
 
-The docking-engine section should report:
+Install the public command into the active environment:
 
-```text
-available  vina (Conda environment: docking-universal-vina)
+```bash
+conda activate docking-universal
+make install-conda
+which docking-universal
+docking-universal --help
 ```
 
-No manual activation of `docking-universal-vina` is required for normal use. If
-`vina` is not already on `PATH`, Docking Universal automatically runs it from that
-environment.
+`make install-conda` uses the active `CONDA_PREFIX`; it fails rather than guessing when no Conda environment is active. The installed command and its private helpers remain relocatable within that environment.
 
-`check-install` may report the legacy ADFRsuite commands `prepare_receptor` and
-`prepare_ligand` as absent. This is expected when the supported Meeko commands
-`mk_prepare_receptor.py` and `mk_prepare_ligand.py` are available.
+`make install-conda` installs the Docking Universal files; it does not independently install or change scientific packages. A new environment created from `environment.yml` receives PDBFixer 1.11 and its OpenMM dependency automatically. To update an existing Docking Universal environment after pulling this release, run:
 
-On Linux, use `environment.yml` and `environments/vina.yml`. Do not use the
-`osx-arm64` lock files; those reproduce the tested Apple-silicon builds and are not
-portable to Ubuntu.
+```bash
+conda activate docking-universal
+conda env update -f environment.yml --prune
+make install-conda
+docking-universal check-install
+```
 
-Docking Universal is compatible with Ubuntu Linux. Its command interface,
-portable routing, and installation layout are tested on GitHub Actions' Ubuntu
-runner. Run `./bin/docking-universal validate integration` after installing the
-scientific dependencies on a new Ubuntu workstation to verify the exact Conda
-builds available there.
+The final check reports whether PDBFixer is available. The strict Meeko path remains first, but PDBFixer must be installed so the documented automatic repair path is available when a receptor needs it.
 
-The environments do not modify or replace existing environments. To remove them later:
+AutoDock Vina is kept in a small engine environment so its compiled dependencies do not destabilize the preparation, analysis, and PyMOL stack:
+
+```bash
+conda env create -f environments/vina.yml
+```
+
+No manual activation is required for normal package use. If `vina` is not already on `PATH`, Docking Universal automatically looks for it in `docking-universal-vina`.
+
+An installed copy can run validation from any writable directory:
+
+```bash
+conda activate docking-universal
+mkdir -p validation-work
+cd validation-work
+docking-universal validate quick
+docking-universal validate integration
+```
+
+Installed validation uses packaged scientific fixtures and writes a new `validation_runs/` directory below the invocation directory. It does not write inside the Conda installation. Source checkouts additionally run the repository's developer unit tests.
+
+The environment does not modify or replace an existing environment. To remove it later:
 
 ```bash
 conda env remove -n docking-universal
-conda env remove -n docking-universal-vina
 ```
 
 ## Apple silicon and PyMOL
@@ -78,7 +85,8 @@ Conda installs Qt, Cairo, OpenGL support libraries, and other low-level PyMOL de
 
 | Pipeline stage | Required package | Purpose |
 | --- | --- | --- |
-| Receptor preparation | ADFRsuite `prepare_receptor` (legacy) or Meeko | Create docking-ready receptor PDBQT |
+| Receptor pre-cleaning | PDBFixer | Resolve alternate locations, repair missing side-chain atoms, and standardize recognized modified residues before PDBQT conversion |
+| Receptor preparation | ADFRsuite `prepare_receptor` (legacy) or Meeko | Validate chemistry and create docking-ready receptor PDBQT |
 | Compound preparation | Open Babel plus ADFRsuite `prepare_ligand` (legacy) or Meeko | Split, convert, optimize, and create ligand PDBQT |
 | Chemical states + conformers | MolScrub 0.2.2 plus RDKit | pH-aware protomer/tautomer enumeration and independent seeded ETKDG/MMFF ensembles |
 | Pocket discovery | fpocket | Detect and rank candidate cavities |
@@ -122,6 +130,16 @@ The final PDF includes SDF-aware PLIP interaction diagrams for the three top ene
 The separately licensed customized `plip_to_2D` runner remains an optional fallback. Docking Universal can detect `DOCKING_UNIVERSAL_PLIP2D_RUNNER`, a script on `PATH`, or `~/tools/plip_to_2D/plip_2D_direct_unl.py`, but it is no longer the preferred report renderer. In every path, retained PLIP `report.xml` and `report.txt` files remain the authoritative interaction records.
 
 ## Preparation backends
+
+Docking Universal tries the filtered original receptor with strict Meeko first. PDBFixer runs only if that attempt fails. It selects one alternate location, repairs missing side-chain heavy atoms, and applies recognized nonstandard-residue mappings. It deliberately reports rather than builds missing loops or terminal atoms. Its full audit is retained as `receptor/pdbfixer_audit.json`. Set `DOCKING_UNIVERSAL_PDBFIXER=off` to disable this repair attempt, or `required` to fail when PDBFixer is unavailable.
+
+If strict Meeko also rejects the PDBFixer result, Docking Universal makes one documented quick retry against the filtered original using Meeko's batch cleanup. This may omit unmatched residues and therefore requires review, especially near a docking pocket. Disable this retry with `DOCKING_UNIVERSAL_AUTO_RECEPTOR_RETRY=0`.
+
+If the remaining error is specifically an ambiguous histidine tautomer, guided preparation explains HIE, HID, and HIP and asks which template to use before retrying. The choice is recorded. For unattended execution, set an exact Meeko assignment such as `MEEKO_SET_TEMPLATE=A:36=HIE`; no histidine state is chosen silently.
+
+If preparation still stops, both the interactive terminal and `receptor_failure_diagnosis.txt` report a likely failure category, why it cannot be resolved safely, and the next review step. Recognized categories include unsupported non-standard amino acids, DNA/RNA or mixed protein–nucleic-acid template conflicts, heme/cofactor templates, linked glycans or other covalent fragments, alternate-location conflicts, incomplete residues, and histidine ambiguity. Detected residue identifiers are included where the PDB and backend logs expose them. This explanation supplements—not replaces—the retained Meeko and PDBFixer logs.
+
+An earlier installed-copy problem prevented the PDBFixer helper from being found at its packaged location; that path-resolution defect is fixed. A later Meeko rejection does not mean PDBFixer failed to run: PDBFixer may successfully repair ordinary missing atoms or alternate locations while leaving specialized cofactors, covalent linkages, or unsupported templates unresolved.
 
 The original validated receptor and ligand PDBQT outputs used ADFRsuite 1.0, installed separately. Meeko 0.6.1 is included in the clean Conda environment because it is the portable preparation tool maintained with AutoDock Vina. Preparation backend changes can affect atom typing, protonation, charge assignment, and therefore scientific results; the backend and version should always be recorded.
 

@@ -18,11 +18,11 @@ For a scientific release, retain:
 1. original input checksums and provenance;
 2. Docking Universal version and external-tool versions;
 3. the generated run manifest/log;
-4. receptor and compound-preparation outputs;
+4. receptor and compound-preparation outputs, including `pdbfixer_audit.json` whenever conservative receptor repair ran;
 5. pocket diagnostics and the selected box configuration;
 6. representative PyMOL and 2D images used for review;
 7. any manual acceptance/rejection rationale.
-8. the versioned control protocol, its receptor/box hashes, software versions, per-seed outcomes, and any escalation history;
+8. the versioned control protocol, its receptor/box hashes, receptor-preparation path, Meeko/PDBFixer versions, per-seed outcomes, and any escalation history;
 
 ## Interpretation boundaries
 

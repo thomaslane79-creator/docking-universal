@@ -47,16 +47,46 @@ class ApprovedProtocolSelectionTests(unittest.TestCase):
             '"calibration_tier":"repeatability","parameters":{"seeds":[1,2,3,4,5]}}'
         )
 
-    def test_macos_default_routes_to_protocol_finder(self):
+    def test_macos_default_routes_to_protocol_file(self):
         with tempfile.TemporaryDirectory() as directory:
-            protocol = Path(directory) / "protocol.json"
+            protocol = Path(directory) / "study" / "control" / "protocol.json"
             self.write_protocol(protocol)
             with patch.object(RUNNER.platform, "system", return_value="Darwin"), \
                  patch.object(RUNNER.shutil, "which", return_value="/usr/bin/osascript"), \
                  patch.object(RUNNER, "choose_path_with_finder", return_value=protocol) as finder, \
                  patch("builtins.input", return_value=""):
                 self.assertEqual(RUNNER.choose_approved_protocol(), protocol.resolve())
-                finder.assert_called_once()
+                finder.assert_called_once_with(
+                    "Choose the approved .duprotocol bundle or protocol.json"
+                )
+
+    def test_portable_bundle_round_trip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            receptor = root / "receptor.pdbqt"
+            box = root / "pocket.conf"
+            receptor.write_text("RECEPTOR\n")
+            box.write_text("center_x = 1\n")
+            protocol = root / "control" / "protocol.json"
+            protocol.parent.mkdir()
+            import hashlib, json
+            digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+            protocol.write_text(json.dumps({
+                "schema_name": "docking-universal-protocol", "schema_version": 1,
+                "control_status": "approved", "unknown_docking_allowed": True,
+                "locked_inputs": {
+                    "receptor": str(receptor), "receptor_sha256": digest(receptor),
+                    "box": str(box), "box_sha256": digest(box),
+                },
+            }))
+            bundle = RUNNER.create_bundle(
+                protocol, root, root / "test.duprotocol", control_compound="Known inhibitor"
+            )
+            extracted = RUNNER.materialize_protocol(bundle)
+            record = json.loads(extracted.read_text())
+            self.assertEqual(record["control_evidence"]["compound"], "Known inhibitor")
+            self.assertTrue((extracted.parent / record["locked_inputs"]["receptor"]).is_file())
+            self.assertTrue((extracted.parent / record["locked_inputs"]["box"]).is_file())
 
     def test_control_folder_discovers_approved_protocol(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -65,6 +95,31 @@ class ApprovedProtocolSelectionTests(unittest.TestCase):
             self.assertEqual(
                 RUNNER.choose_approved_protocol_from(Path(directory)), protocol.resolve()
             )
+
+    def test_missing_protocol_offers_to_start_control(self):
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "missing" / "protocol.json"
+            with patch("builtins.input", return_value="1"), \
+                 self.assertRaises(RUNNER.StartControlRequested):
+                RUNNER.choose_approved_protocol_from(missing)
+
+    def test_missing_protocol_can_switch_to_exploratory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "missing" / "protocol.json"
+            with patch("builtins.input", return_value="2"), \
+                 self.assertRaises(RUNNER.StartExploratoryRequested):
+                RUNNER.choose_approved_protocol_from(missing)
+
+    def test_unapproved_protocol_is_distinct_from_missing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            protocol = Path(directory) / "protocol.json"
+            protocol.write_text(
+                '{"schema_name":"docking-universal-protocol","schema_version":1,'
+                '"control_status":"failed","unknown_docking_allowed":false}'
+            )
+            with patch("builtins.input", return_value="3"), \
+                 self.assertRaisesRegex(SystemExit, "no approved protocol"):
+                RUNNER.choose_approved_protocol_from(protocol)
 
 
 class ControlFolderNamingTests(unittest.TestCase):

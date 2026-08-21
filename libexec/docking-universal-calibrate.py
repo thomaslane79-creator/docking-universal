@@ -14,12 +14,15 @@ flexible-macrocycle representation.
 """
 
 import argparse
+import hashlib
 import importlib.metadata
 import json
+import os
 import platform
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -30,6 +33,14 @@ TIERS = {
     "conformers": dict(conformers=5, seeds=3, exhaustiveness=32, modes=20, energy_range=8.0),
     "robust": dict(conformers=5, seeds=5, exhaustiveness=32, modes=20, energy_range=8.0),
 }
+
+
+def sha256(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def tier_settings(args, tier_name):
@@ -51,6 +62,16 @@ def distribution_version(name):
         return importlib.metadata.version(name)
     except importlib.metadata.PackageNotFoundError:
         return "not_detected"
+
+
+def package_version():
+    script_dir = Path(__file__).resolve().parent
+    for version_file in (script_dir / "VERSION", script_dir.parent / "VERSION"):
+        try:
+            return version_file.read_text().strip()
+        except OSError:
+            pass
+    return "unknown"
 
 
 def read_tsv_manifest(path):
@@ -176,7 +197,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def run_tier(args, tier_name, project, tier_root):
+def run_tier(args, tier_name, cli, libexec, tier_root):
     started = time.monotonic()
     settings = tier_settings(args, tier_name)
     tier_root.mkdir(parents=True, exist_ok=True)
@@ -186,7 +207,7 @@ def run_tier(args, tier_name, project, tier_root):
     seeds = [args.base_seed + index for index in range(settings["seeds"])]
 
     ensemble_command = [
-        sys.executable, project / "libexec/docking-universal-ensemble.py", args.reference_sdf,
+        sys.executable, libexec / "docking-universal-ensemble.py", args.reference_sdf,
         "--out", ensemble, "--ph", args.ph, "--conformers", settings["conformers"],
         "--seed", args.base_seed, "--forcefield", args.forcefield,
         "--rmsd-prune", args.rmsd_prune,
@@ -195,7 +216,7 @@ def run_tier(args, tier_name, project, tier_root):
         ensemble_command.append("--skip-tautomers")
     run(ensemble_command)
     run([
-        project / "bin/docking-universal", "ligands", ensemble, "--out", prep,
+        cli, "ligands", ensemble, "--out", prep,
         "--target-engines", args.engine, "--geometry-mode", "preserve",
         "--charge-model", args.charge_model,
     ])
@@ -204,7 +225,7 @@ def run_tier(args, tier_name, project, tier_root):
         seed_root = tier_root / f"seed_{seed}"
         docking = seed_root / "docking"
         command = [
-            project / "bin/docking-universal", "dock", "--engine", args.engine,
+            cli, "dock", "--engine", args.engine,
             "--receptor", args.receptor_pdbqt, "--ligands", prep / "pdbqt_ligands",
             "--config", args.box, "--out", docking,
             "--exhaustiveness", settings["exhaustiveness"], "--num-modes", settings["modes"],
@@ -223,7 +244,7 @@ def run_tier(args, tier_name, project, tier_root):
             if not chemistry.is_file():
                 raise SystemExit(f"No matching chemistry SDF for {docked.name}: {chemistry}")
             run([
-                sys.executable, project / "libexec/docking-universal-redock-compare.py",
+                sys.executable, libexec / "docking-universal-redock-compare.py",
                 "--reference-sdf", chemistry, "--crystal-ligand", args.crystal_ligand,
                 "--docked-pdbqt", docked, "--receptor-pdb", args.receptor_pdb,
                 "--out", comparison_root / f"{ligand_id}_comparison",
@@ -233,7 +254,7 @@ def run_tier(args, tier_name, project, tier_root):
 
     protocol = tier_root / "protocol.json"
     evaluate = [
-        sys.executable, project / "libexec/docking-universal-calibration-evaluate.py",
+        sys.executable, libexec / "docking-universal-calibration-evaluate.py",
         *comparisons, "--engine", args.engine, "--out", protocol,
         "--receptor", args.receptor_pdbqt, "--box", args.box,
         "--threshold", args.rmsd_threshold, "--exhaustiveness", settings["exhaustiveness"],
@@ -270,15 +291,34 @@ def run_tier(args, tier_name, project, tier_root):
         )
     engine_manifest = read_tsv_manifest(tier_root / f"seed_{seeds[0]}" / "docking" / "run_manifest.tsv")
     result["software"] = {
-        "docking_universal": (project / "VERSION").read_text().strip(),
+        "docking_universal": package_version(),
         "python": platform.python_version(),
         "rdkit": distribution_version("rdkit"),
         "molscrub": distribution_version("molscrub"),
         "meeko": distribution_version("meeko"),
+        "pdbfixer": distribution_version("pdbfixer"),
         "engine": engine_manifest.get("engine", args.engine),
         "engine_version": engine_manifest.get("engine_version", "unknown"),
         "engine_source": engine_manifest.get("engine_source", "unknown"),
     }
+    receptor_dir = args.receptor_pdbqt.parent
+    pdbfixer_audit = receptor_dir / "pdbfixer_audit.json"
+    post_pdbfixer_log = receptor_dir / "receptor_after_pdbfixer.log"
+    batch_cleanup_log = receptor_dir / "receptor_retry.log"
+    if batch_cleanup_log.is_file() and batch_cleanup_log.stat().st_size:
+        preparation_path = "Meeko batch-cleanup fallback after strict preparation failed"
+    elif post_pdbfixer_log.is_file() and post_pdbfixer_log.stat().st_size:
+        preparation_path = "conservative PDBFixer repair followed by strict Meeko"
+    else:
+        preparation_path = "strict Meeko; PDBFixer was not needed"
+    result["receptor_preparation"] = {
+        "path": preparation_path,
+        "pdbfixer_used": pdbfixer_audit.is_file(),
+        "pdbfixer_audit": str(pdbfixer_audit) if pdbfixer_audit.is_file() else None,
+        "pdbfixer_audit_sha256": sha256(pdbfixer_audit) if pdbfixer_audit.is_file() else None,
+        "policy": "strict Meeko, then conservative PDBFixer plus strict Meeko, then documented Meeko batch cleanup",
+    }
+    result["created_utc"] = datetime.now(timezone.utc).isoformat()
     protocol.write_text(json.dumps(result, indent=2) + "\n")
 
     # Render only the globally top-ranked and globally best-sampled comparisons.
@@ -294,14 +334,14 @@ def run_tier(args, tier_name, project, tier_root):
         for label, record in selected.items():
             comparison = Path(record["summary"]).parent
             run([
-                project / "bin/docking-universal", "render3d", comparison / "crystal_pose_browser.pml",
+                cli, "render3d", comparison / "crystal_pose_browser.pml",
                 "--out", visuals / f"{label}.png", "--session-out", visuals / f"{label}.pse",
                 "--pymol", args.pymol,
             ])
         top_comparison = Path(result["global_top_ranked_pose"]["summary"]).parent
         interactions = visuals / "top_ranked_interactions"
         run([
-            project / "bin/docking-universal", "interactions", top_comparison / "top_score_complex.pdb",
+            cli, "interactions", top_comparison / "top_score_complex.pdb",
             "--out-dir", interactions, "--plip-command", args.plip_command,
             "--skip-native-visuals", "--typed-ligand-sdf", top_comparison / "top_score_pose.sdf",
             "--ligand-resname", "UNL", "--ligand-chain", "Z", "--ligand-position", "1",
@@ -315,14 +355,14 @@ def run_tier(args, tier_name, project, tier_root):
         )
         if not same_selected_pose and not best_interactions.exists():
             run([
-                project / "bin/docking-universal", "interactions", best_comparison / "best_rmsd_complex.pdb",
+                cli, "interactions", best_comparison / "best_rmsd_complex.pdb",
                 "--out-dir", best_interactions, "--plip-command", args.plip_command,
                 "--skip-native-visuals", "--typed-ligand-sdf", best_comparison / "best_rmsd_pose.sdf",
                 "--ligand-resname", "UNL", "--ligand-chain", "Z", "--ligand-position", "1",
             ])
         pml = interactions / "top_score_complex_plip_all_in_one.pml"
         run([
-            project / "bin/docking-universal", "render3d", pml,
+            cli, "render3d", pml,
             "--out", visuals / "top_ranked_interactions.png",
             "--session-out", visuals / "top_ranked_interactions.pse", "--pymol", args.pymol,
         ])
@@ -341,6 +381,8 @@ def main():
         if not path.expanduser().is_file():
             raise SystemExit(f"Required input not found: {path}")
     project = Path(__file__).resolve().parent.parent
+    cli = Path(os.environ.get("DOCKING_UNIVERSAL_CLI", project / "bin/docking-universal"))
+    libexec = Path(os.environ.get("DOCKING_UNIVERSAL_LIBEXEC", project / "libexec"))
     output = args.out.expanduser().resolve()
     output.mkdir(parents=True, exist_ok=True)
 
@@ -399,7 +441,7 @@ def main():
             if confirmation not in {"", "y", "yes"}:
                 print("Calibration stopped before the selected tier. Unknown docking remains blocked.")
                 break
-        protocol, result = run_tier(args, tier, project, output / tier)
+        protocol, result = run_tier(args, tier, cli, libexec, output / tier)
         escalation_history.append({
             "tier": tier,
             "approved": bool(result["unknown_docking_allowed"]),

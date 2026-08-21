@@ -1,14 +1,6 @@
 # Validation status
 
-Docking Universal 0.4.0 is a research preview. Validation distinguishes software-path testing from scientific validation: a command completing successfully does not establish that a predicted pose or cavity is biologically correct.
-
-## Platform compatibility
-
-Docking Universal is compatible with Apple-silicon macOS and Ubuntu Linux. The
-full retained real-tool integration record is maintained on macOS arm64. Ubuntu
-CI runs the portable command, shell syntax, Python syntax, routing, installation,
-and unit-test suite. A new Ubuntu scientific environment should additionally run
-`validate integration` because compiled Conda packages can vary by platform.
+Docking Universal 0.5.0 is a research preview. Validation distinguishes software-path testing from scientific validation: a command completing successfully does not establish that a predicted pose or cavity is biologically correct.
 
 ## Automated option coverage
 
@@ -29,6 +21,8 @@ Run the automated suite with:
 make test
 ```
 
+The current automated suite is exercised in GitHub Actions on both current Ubuntu and macOS runners after creating the declared Conda environment. That supports platform portability at the software-test level. The retained full scientific validation remains referenced to macOS arm64, because compiled scientific tools can differ across platforms; run integration or release validation on the target workstation before production use.
+
 The same checks and the real-tool suites are available through the public interface:
 
 ```bash
@@ -41,24 +35,23 @@ The release suite is intentionally slow. It first repeats the integration probes
 
 ## Real-tool smoke checks
 
-The maintained macOS Apple Silicon environment has been checked with fpocket, Meeko, MolScrub, RDKit, Open Babel, PLIP, PyMOL Open-Source, and AutoDock Vina 1.2.7. Real fixture-based checks cover:
+The maintained macOS Apple Silicon environment has been checked with fpocket, Meeko, PDBFixer 1.11, MolScrub, RDKit, Open Babel, PLIP, PyMOL Open-Source, and AutoDock Vina 1.2.7. Real fixture-based checks cover:
 
 - ligand-centered 1HVR/XK2 receptor preparation and box generation;
+- strict-Meeko-first receptor conversion, conservative PDBFixer fallback auditing, and final Meeko batch-cleanup fallback behavior;
+- receptor-preparation robustness sampling across 50 public PDB structures, with 47/50 producing prepared receptors through the current pipeline: 10/10 in the original cohort and 37/40 in an additional reproducibly selected cohort; 46 were unattended and one used the recorded guided histidine selection;
+- explicit review stops for the four additional-cohort structures involving a heme/cofactor template, protein-DNA template conflicts, linked glycans, or ambiguous histidine protonation rather than silent component deletion or state guessing;
+- unchanged prepared PDBQT hashes for the existing 1HVR and 2R8N examples when strict Meeko succeeds, plus matching selected boxes and downstream docking results;
 - 2R8N ligand-free preparation in conservative, expanded, and permissive fpocket modes;
 - deepest-pocket and centroid box centers, including whole-protein and per-chain centroid scope;
 - automatic documented fallback from fpocket score threshold 0.10 to 0.0 when no candidate passes, while retaining geometry and overlap filters;
-- a two-compound approved-protocol screen plan with locked-input hash verification,
-  using a clearly labeled synthetic passing protocol generated inside the validation
-  run to test software behavior rather than claim scientific control evidence;
+- a two-compound approved-protocol screen plan with locked-input hash verification;
 - MMFF94, MMFF94s, and UFF ensemble generation with custom pH, seeds, and tautomer policies;
 - automatic HTML, JSON, Markdown, and PDF report generation, followed by rendered-page inspection.
 
 Completed example studies retain evidence for actual multi-seed Vina redocking, ligand-free cavity analysis, unknown-compound docking, pose clustering, PyMOL sessions, interaction diagrams, and final reports.
 
-The slower release suite generates the genuine 1HVR/XK2 control protocol used for
-its subsequent screen. Only that computed control path tests scientific protocol
-approval; the integration fixture tests fail-closed software gating and report
-plumbing.
+The integration suite builds a clearly labelled synthetic passing protocol to test fail-closed software gates, input hashes, planning, and report plumbing. It is not scientific pose-recovery evidence. The longer release suite produces the genuine bound-ligand control used for its subsequent screen; only that computed control path can establish target-specific protocol approval.
 
 ## Scope and limitations
 

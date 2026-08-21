@@ -10,18 +10,17 @@ if [ -n "${DOCKING_UNIVERSAL_LIBEXEC:-}" ]; then
   LIBEXEC_DIR="$DOCKING_UNIVERSAL_LIBEXEC"
 elif [ -x "$SCRIPT_DIR/../libexec/docking-universal-prepare" ]; then
   LIBEXEC_DIR="$SCRIPT_DIR/../libexec"
-elif [ -x "$SCRIPT_DIR/../libexec/docking-universal/libexec/docking-universal-prepare" ]; then
-  LIBEXEC_DIR="$SCRIPT_DIR/../libexec/docking-universal/libexec"
 else
-  # Compatibility with the pre-0.4.0 user-local layout.
   LIBEXEC_DIR="$SCRIPT_DIR/../libexec/docking-universal"
 fi
 if [ -f "$SCRIPT_DIR/../VERSION" ]; then
   VERSION_FILE="$SCRIPT_DIR/../VERSION"
 else
-  VERSION_FILE="$SCRIPT_DIR/../libexec/docking-universal/VERSION"
+  VERSION_FILE="$LIBEXEC_DIR/VERSION"
 fi
 VERSION=$(sed -n '1p' "$VERSION_FILE" 2>/dev/null || printf 'unknown')
+export DOCKING_UNIVERSAL_CLI="${DOCKING_UNIVERSAL_CLI:-$SCRIPT_DIR/docking-universal}"
+export DOCKING_UNIVERSAL_LIBEXEC="$LIBEXEC_DIR"
 
 usage() {
   cat <<'EOF'
@@ -94,6 +93,11 @@ doctor() {
       printf '  absent     %s\n' "$tool"
     fi
   done
+  if "$PYTHON_COMMAND" -c 'import pdbfixer, openmm' >/dev/null 2>&1; then
+    printf '  available  PDBFixer (receptor pre-cleaning)\n'
+  else
+    printf '  absent     PDBFixer (receptor pre-cleaning)\n'
+  fi
 
   printf '\nOnly tools used by the selected command are required.\n'
   return "$missing"

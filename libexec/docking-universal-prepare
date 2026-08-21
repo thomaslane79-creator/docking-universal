@@ -16,6 +16,7 @@ set -e
 ###############################################################################
 PACKAGE_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 PACKAGE_VERSION=$(sed -n '1p' "$PACKAGE_ROOT/VERSION" 2>/dev/null || printf 'unknown')
+PYTHON_COMMAND="${DOCKING_UNIVERSAL_PYTHON:-python3}"
 SCRIPT_VERSION="1.35.13_surface_local_pockets_patch1"
 
 print_help() {
@@ -31,7 +32,7 @@ fpocket, and writes AutoDock Vina configuration plus PyMOL review files.
 The main workflow is guided interactively.
 
 Required tools:
-  fpocket, awk, grep, sort, tee, and one receptor backend:
+  fpocket, awk, grep, sort, tee, PDBFixer, and one receptor backend:
   mk_prepare_receptor.py (Meeko) or prepare_receptor (ADFRsuite)
 
 Optional tool:
@@ -54,8 +55,10 @@ Common environment settings:
   DOCKING_UNIVERSAL_MAX_POCKETS    number of ligand-free cavities to retain
   DOCKING_UNIVERSAL_CENTER_MODE    deepest or centroid for ligand-free review
   DOCKING_UNIVERSAL_CENTROID_MODE  1 whole protein or 2 per-chain centroid
+  DOCKING_UNIVERSAL_PDBFIXER=auto  auto, required, or off
   MEEKO_ALLOW_BAD_RES=0         Set 1 to delete unmatched residues (review output)
   MEEKO_DEFAULT_ALTLOC          Optional default alternate location, e.g. A
+  MEEKO_SET_TEMPLATE            Explicit residue template, e.g. A:36=HIE
 
 Example:
   FEEDBACK_LEVEL=guided docking-universal prepare receptor_complex.pdb
@@ -79,6 +82,13 @@ doctor() {
       missing=1
     fi
   done
+
+  if "$PYTHON_COMMAND" -c 'import pdbfixer, openmm' >/dev/null 2>&1; then
+    printf 'ok       PDBFixer receptor pre-cleaning\n'
+  else
+    printf 'missing  PDBFixer receptor pre-cleaning\n'
+    missing=1
+  fi
 
   if command -v mk_prepare_receptor.py >/dev/null 2>&1; then
     printf 'ok       mk_prepare_receptor.py (Meeko backend)\n'
@@ -438,8 +448,15 @@ feedback_verbose && print_parameter_guidance
 # STEP 1: RECEPTOR PREP
 ###############################################################################
 RECEPTOR_PDB="$RECEPTOR_DIR/${CANONICAL}.pdb"
+RECEPTOR_FILTERED_PDB="$RECEPTOR_DIR/${CANONICAL}_filtered.pdb"
+PDBFIXER_PDB="$RECEPTOR_DIR/${CANONICAL}_pdbfixer.pdb"
 RECEPTOR_PDBQT="$RECEPTOR_DIR/${CANONICAL}.pdbqt"
 RECEPTOR_BACKEND_LOG="$RECEPTOR_DIR/receptor_backend.log"
+PDBFIXER_LOG="$RECEPTOR_DIR/pdbfixer.log"
+PDBFIXER_AUDIT="$RECEPTOR_DIR/pdbfixer_audit.json"
+PDBFIXER_MEEKO_LOG="$RECEPTOR_DIR/receptor_after_pdbfixer.log"
+RECEPTOR_RETRY_LOG="$RECEPTOR_DIR/receptor_retry.log"
+PDBFIXER_USED=0
 
 # Receptor (protein + supported metal atoms). PDB element identity comes from
 # columns 77-78; searching an entire HETATM line for "CA" can accidentally
@@ -469,28 +486,225 @@ awk '
     if (element == "ZN" || element == "MG" || element == "MN" ||
         element == "CA" || element == "FE" || element == "CU") print
   }
-' "$INPUT_PDB" "$INPUT_PDB" > "$RECEPTOR_PDB"
+' "$INPUT_PDB" "$INPUT_PDB" > "$RECEPTOR_FILTERED_PDB"
+
+PDBFIXER_MODE="${DOCKING_UNIVERSAL_PDBFIXER:-auto}"
+case "$PDBFIXER_MODE" in
+  auto|required|off) ;;
+  *) echo "ERROR: DOCKING_UNIVERSAL_PDBFIXER must be auto, required, or off" >&2; exit 2 ;;
+esac
+PDBFIXER_HELPER="$PACKAGE_ROOT/libexec/docking-universal-pdbfixer.py"
+if [ ! -f "$PDBFIXER_HELPER" ] && [ -f "$(dirname "$0")/docking-universal-pdbfixer.py" ]; then
+  # Installed helpers live together under PREFIX/libexec/docking-universal,
+  # while source-tree helpers live below PACKAGE_ROOT/libexec.
+  PDBFIXER_HELPER="$(dirname "$0")/docking-universal-pdbfixer.py"
+fi
+PDBFIXER_AVAILABLE=0
+if [ -f "$PDBFIXER_HELPER" ] && "$PYTHON_COMMAND" -c 'import pdbfixer, openmm' >/dev/null 2>&1; then
+  PDBFIXER_AVAILABLE=1
+elif [ "$PDBFIXER_MODE" = "required" ]; then
+  echo "ERROR: PDBFixer or its Docking Universal helper is unavailable in the active installation" >&2
+  exit 1
+fi
+cp "$RECEPTOR_FILTERED_PDB" "$RECEPTOR_PDB"
+
 if [ "$PREP_BACKEND" = "meeko" ]; then
   MEEKO_ALLOW_BAD_RES="${MEEKO_ALLOW_BAD_RES:-0}"
   MEEKO_DEFAULT_ALTLOC="${MEEKO_DEFAULT_ALTLOC:-}"
+  MEEKO_SET_TEMPLATE="${MEEKO_SET_TEMPLATE:-}"
+  MEEKO_TEMPLATE_ARGS=()
+  [ -z "$MEEKO_SET_TEMPLATE" ] || MEEKO_TEMPLATE_ARGS=(--set_template "$MEEKO_SET_TEMPLATE")
   if [ "$MEEKO_ALLOW_BAD_RES" = "1" ] && [ -n "$MEEKO_DEFAULT_ALTLOC" ]; then
-    PREP_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --allow_bad_res --default_altloc "$MEEKO_DEFAULT_ALTLOC")
+    PREP_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --allow_bad_res --default_altloc "$MEEKO_DEFAULT_ALTLOC" "${MEEKO_TEMPLATE_ARGS[@]}")
   elif [ "$MEEKO_ALLOW_BAD_RES" = "1" ]; then
-    PREP_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --allow_bad_res)
+    PREP_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --allow_bad_res "${MEEKO_TEMPLATE_ARGS[@]}")
   elif [ -n "$MEEKO_DEFAULT_ALTLOC" ]; then
-    PREP_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --default_altloc "$MEEKO_DEFAULT_ALTLOC")
+    PREP_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --default_altloc "$MEEKO_DEFAULT_ALTLOC" "${MEEKO_TEMPLATE_ARGS[@]}")
   else
-    PREP_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT")
+    PREP_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" "${MEEKO_TEMPLATE_ARGS[@]}")
   fi
 else
   PREP_COMMAND=("$PREP_RECEPTOR_BIN" -r "$RECEPTOR_PDB" -o "$RECEPTOR_PDBQT" -A none -U waters)
 fi
 
-log "Preparing receptor with $PREP_BACKEND; detailed output -> $RECEPTOR_BACKEND_LOG"
-if ! "${PREP_COMMAND[@]}" > "$RECEPTOR_BACKEND_LOG" 2>&1; then
-  echo "ERROR: receptor preparation failed. Last backend messages:" >&2
-  tail -40 "$RECEPTOR_BACKEND_LOG" >&2
-  echo "Full backend log: $RECEPTOR_BACKEND_LOG" >&2
+log "Preparing the filtered original receptor with $PREP_BACKEND; detailed output -> $RECEPTOR_BACKEND_LOG"
+PREP_SUCCESS=0
+if "${PREP_COMMAND[@]}" > "$RECEPTOR_BACKEND_LOG" 2>&1; then
+  PREP_SUCCESS=1
+  log "Initial receptor preparation succeeded; PDBFixer was not needed"
+elif [ "$PREP_BACKEND" = "meeko" ]; then
+  log "Initial Meeko preparation failed; preserving its diagnostics before attempting quick repairs"
+  if [ "$PDBFIXER_MODE" != "off" ] && [ "$PDBFIXER_AVAILABLE" = "1" ]; then
+    log "Repairing receptor with PDBFixer; audit -> $PDBFIXER_AUDIT"
+    if "$PYTHON_COMMAND" "$PDBFIXER_HELPER" "$RECEPTOR_FILTERED_PDB" "$PDBFIXER_PDB" "$PDBFIXER_AUDIT" > "$PDBFIXER_LOG" 2>&1; then
+      PDBFIXER_USED=1
+      cp "$PDBFIXER_PDB" "$RECEPTOR_PDB"
+      PDBFIXER_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" "${MEEKO_TEMPLATE_ARGS[@]}")
+      log "Retrying strict Meeko after PDBFixer; detailed output -> $PDBFIXER_MEEKO_LOG"
+      if "${PDBFIXER_COMMAND[@]}" > "$PDBFIXER_MEEKO_LOG" 2>&1; then
+        PREP_SUCCESS=1
+        log "PDBFixer repair followed by strict Meeko preparation succeeded"
+      else
+        log "Strict Meeko still rejected the PDBFixer output"
+      fi
+    else
+      log "PDBFixer could not repair this receptor; continuing to the documented batch retry"
+    fi
+  fi
+
+  if [ "$PREP_SUCCESS" = "0" ] && [ "${DOCKING_UNIVERSAL_AUTO_RECEPTOR_RETRY:-1}" = "1" ]; then
+    log "Retrying the filtered original with Meeko batch cleanup (unmatched residues omitted; default altloc A)"
+    RETRY_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_FILTERED_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --allow_bad_res --default_altloc A "${MEEKO_TEMPLATE_ARGS[@]}")
+    if "${RETRY_COMMAND[@]}" > "$RECEPTOR_RETRY_LOG" 2>&1; then
+      PREP_SUCCESS=1
+      cp "$RECEPTOR_FILTERED_PDB" "$RECEPTOR_PDB"
+      log "Meeko batch-cleanup retry succeeded; review $RECEPTOR_RETRY_LOG"
+    fi
+  fi
+
+  if [ "$PREP_SUCCESS" = "0" ] && [ -z "$MEEKO_SET_TEMPLATE" ]; then
+    HISTIDINE_SOURCE="$RECEPTOR_FILTERED_PDB"
+    [ "$PDBFIXER_USED" = "0" ] || HISTIDINE_SOURCE="$PDBFIXER_PDB"
+    HISTIDINE_RETRY_LOG="$RECEPTOR_DIR/receptor_histidine_retry.log"
+    HISTIDINE_SELECTION_LOG="$RECEPTOR_DIR/histidine_template_selection.tsv"
+    HISTIDINE_DIAGNOSTIC_LOGS=("$PDBFIXER_MEEKO_LOG" "$RECEPTOR_RETRY_LOG" "$RECEPTOR_BACKEND_LOG")
+    while [ "$PREP_SUCCESS" = "0" ]; do
+      HISTIDINE_RESIDUE=$(sed -n "s/.*for residue_key='\([^']*\)'.*tied for fewest missing H: HIE HID.*/\1/p" "${HISTIDINE_DIAGNOSTIC_LOGS[@]}" 2>/dev/null | tail -1)
+      [ -n "$HISTIDINE_RESIDUE" ] || break
+      if [ -t 0 ]; then
+        cat <<EOF
+
+Meeko found an ambiguous histidine protonation state at $HISTIDINE_RESIDUE.
+Choose the state justified by the local hydrogen-bonding and catalytic environment:
+  1) HIE - neutral histidine, proton on NE2
+  2) HID - neutral histidine, proton on ND1
+  3) HIP - positively charged histidine, protons on both nitrogens
+  4) Stop for structural review
+EOF
+        read -r -p "Select histidine state [4]: " HISTIDINE_CHOICE
+        case "${HISTIDINE_CHOICE:-4}" in
+          1) HISTIDINE_TEMPLATE=HIE ;;
+          2) HISTIDINE_TEMPLATE=HID ;;
+          3) HISTIDINE_TEMPLATE=HIP ;;
+          *) HISTIDINE_TEMPLATE="" ;;
+        esac
+        [ -n "$HISTIDINE_TEMPLATE" ] || break
+        read -r -p "Apply $HISTIDINE_TEMPLATE to 1) only $HISTIDINE_RESIDUE or 2) all histidines without an explicit HD1/HE2 proton? [1]: " HISTIDINE_SCOPE
+        HISTIDINE_KEYS="$HISTIDINE_RESIDUE"
+        if [ "${HISTIDINE_SCOPE:-1}" = "2" ]; then
+          HISTIDINE_KEYS=$(awk '
+            /^(ATOM  |HETATM)/ {
+              res=substr($0,18,3); gsub(/ /,"",res)
+              if (res != "HIS") next
+              chain=substr($0,22,1); gsub(/ /,"",chain)
+              seq=substr($0,23,4); gsub(/ /,"",seq)
+              key=chain ":" seq
+              atom=substr($0,13,4); gsub(/ /,"",atom)
+              seen[key]=1
+              if (atom == "HD1" || atom == "HE2") ring_h[key]=1
+            }
+            END { for (key in seen) if (!(key in ring_h)) print key }
+          ' "$RECEPTOR_FILTERED_PDB" | sort)
+        fi
+        [ -s "$HISTIDINE_SELECTION_LOG" ] || printf 'residue\ttemplate\treason\n' > "$HISTIDINE_SELECTION_LOG"
+        for HISTIDINE_KEY in $HISTIDINE_KEYS; do
+          [ -z "$MEEKO_SET_TEMPLATE" ] || MEEKO_SET_TEMPLATE="$MEEKO_SET_TEMPLATE,"
+          MEEKO_SET_TEMPLATE="$MEEKO_SET_TEMPLATE$HISTIDINE_KEY=$HISTIDINE_TEMPLATE"
+          printf '%s\t%s\t%s\n' "$HISTIDINE_KEY" "$HISTIDINE_TEMPLATE" "user-selected after Meeko tautomer ambiguity" >> "$HISTIDINE_SELECTION_LOG"
+        done
+        log "Retrying Meeko with user-selected template assignment(s) $MEEKO_SET_TEMPLATE; detailed output -> $HISTIDINE_RETRY_LOG"
+        HISTIDINE_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$HISTIDINE_SOURCE" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --set_template "$MEEKO_SET_TEMPLATE")
+        if "${HISTIDINE_COMMAND[@]}" > "$HISTIDINE_RETRY_LOG" 2>&1; then
+          PREP_SUCCESS=1
+          cp "$HISTIDINE_SOURCE" "$RECEPTOR_PDB"
+          log "Meeko preparation succeeded with user-selected histidine template assignment(s)"
+        else
+          HISTIDINE_DIAGNOSTIC_LOGS=("$HISTIDINE_RETRY_LOG")
+        fi
+      else
+        echo "Meeko requires a histidine template for $HISTIDINE_RESIDUE. Review the local structure and rerun with MEEKO_SET_TEMPLATE=$HISTIDINE_RESIDUE=HIE, HID, or HIP." >&2
+        break
+      fi
+    done
+  fi
+fi
+
+if [ "$PREP_SUCCESS" = "0" ]; then
+  FAILURE_DIAGNOSIS="$RECEPTOR_DIR/receptor_failure_diagnosis.txt"
+  FAILURE_LOGS=("$RECEPTOR_RETRY_LOG" "$PDBFIXER_MEEKO_LOG" "$RECEPTOR_BACKEND_LOG")
+  FAILURE_CATEGORY="Unclassified receptor-template failure"
+  FAILURE_WHY="The available preparation logs do not match a safely recognized failure category."
+  FAILURE_NEXT="Inspect the retained backend logs and receptor chemistry before changing or deleting residues."
+  NUCLEIC_ACID_DETAIL=$(awk '
+    /^(ATOM  |HETATM)/ {
+      name=substr($0,18,3); gsub(/ /,"",name)
+      if (name !~ /^(A|C|G|U|I|DA|DC|DG|DT|DU|DI)$/) next
+      chain=substr($0,22,1); gsub(/ /,"",chain)
+      seq=substr($0,23,4); gsub(/ /,"",seq)
+      key=chain ":" seq "=" name
+      if (!seen[key]++) found[++n]=key
+    }
+    END { for (i=1; i<=n && i<=12; i++) printf "%s%s", (i>1 ? ", " : ""), found[i]; if (n>12) printf ", ... (%d total)", n }
+  ' "$RECEPTOR_FILTERED_PDB")
+  NONSTANDARD_AMINO_DETAIL=$(awk '
+    /^MODRES/ {
+      name=substr($0,13,3); gsub(/ /,"",name)
+      chain=substr($0,17,1); gsub(/ /,"",chain)
+      seq=substr($0,19,4); gsub(/ /,"",seq)
+      standard=substr($0,25,3); gsub(/ /,"",standard)
+      key=chain ":" seq "=" name " (declared as " standard ")"
+      if (!seen[key]++) found[++n]=key
+    }
+    END { for (i=1; i<=n && i<=12; i++) printf "%s%s", (i>1 ? ", " : ""), found[i]; if (n>12) printf ", ... (%d total)", n }
+  ' "$INPUT_PDB")
+  if grep -qs "tied for fewest missing H: HIE HID" "${FAILURE_LOGS[@]}"; then
+    FAILURE_CATEGORY="Ambiguous histidine protonation"
+    FAILURE_WHY="More than one histidine tautomer fits the coordinates; the biologically appropriate state depends on the local environment."
+    FAILURE_NEXT="Review nearby hydrogen bonds or catalytic chemistry, then rerun interactively or provide an explicit MEEKO_SET_TEMPLATE assignment."
+  elif grep -qs "linking fragments\|modified backbones" "${FAILURE_LOGS[@]}"; then
+    FAILURE_CATEGORY="Covalently linked nonstandard residues or glycans"
+    FAILURE_WHY="The receptor contains linked fragments whose attachment chemistry cannot be inferred safely by the standard templates."
+    FAILURE_NEXT="Review the linkage and use validated custom templates, or deliberately remove the component only if it is irrelevant to the docking site."
+  elif grep -qs "resname='HEM'\|'HEM'.*not in residue_templates" "${FAILURE_LOGS[@]}"; then
+    FAILURE_CATEGORY="Unsupported heme or cofactor template"
+    FAILURE_WHY="A specialized cofactor requires charge, bonding, and often metal-coordination treatment beyond generic protein repair."
+    FAILURE_NEXT="Use a validated cofactor-aware template or preparation method; do not silently delete a site-relevant cofactor."
+  elif [ -n "$NUCLEIC_ACID_DETAIL" ] && grep -qs "Template matching failed\|Requested altlocs not found" "${FAILURE_LOGS[@]}"; then
+    FAILURE_CATEGORY="DNA/RNA or mixed protein-nucleic-acid template conflict"
+    FAILURE_WHY="DNA or RNA residues are present and do not match the preparation templates or alternate-location choices expected by this protein-focused workflow."
+    FAILURE_NEXT="Review whether nucleic acid is part of the intended receptor, select justified alternate locations, and use a nucleic-acid-capable preparation method or validated templates when it must be retained."
+  elif grep -qs "Requested altlocs not found\|Residues with alternate location" "${FAILURE_LOGS[@]}" && grep -qs "Template matching failed" "${FAILURE_LOGS[@]}"; then
+    FAILURE_CATEGORY="Alternate-location and residue-template conflict"
+    FAILURE_WHY="The structure contains competing coordinate variants together with residues that do not match the expected templates."
+    FAILURE_NEXT="Select biologically justified alternate locations and review the affected residue identities before preparation."
+  elif [ -n "$NONSTANDARD_AMINO_DETAIL" ] && grep -qs "not in residue_templates\|unknown residues\|Template matching failed" "${FAILURE_LOGS[@]}"; then
+    FAILURE_CATEGORY="Unsupported non-standard amino acid"
+    FAILURE_WHY="A polymer residue declared as a modified amino acid lacks a usable preparation template; automatic replacement could alter its chemistry or connectivity."
+    FAILURE_NEXT="Review the PDB MODRES mapping and choose a documented standard-amino-acid conversion, validated custom template, or deliberate exclusion."
+  elif grep -qs "not in residue_templates\|unknown residues" "${FAILURE_LOGS[@]}"; then
+    FAILURE_CATEGORY="Unsupported non-standard residue"
+    FAILURE_WHY="One or more residue names lack a usable standard preparation template; automatic conversion could change their chemistry."
+    FAILURE_NEXT="Review each named residue and choose a documented standard-residue mapping, validated custom template, or deliberate exclusion."
+  elif grep -qs "heavy_miss=\|Template matching failed" "${FAILURE_LOGS[@]}"; then
+    FAILURE_CATEGORY="Incomplete or template-mismatched residue"
+    FAILURE_WHY="Observed atoms or bonds do not match the expected residue template, even after conservative PDBFixer repair."
+    FAILURE_NEXT="Inspect missing atoms, connectivity, residue identity, and alternate locations near the intended docking site."
+  fi
+  {
+    printf 'Receptor preparation failure category: %s\n' "$FAILURE_CATEGORY"
+    printf 'Why this matters: %s\n' "$FAILURE_WHY"
+    printf 'Recommended next step: %s\n' "$FAILURE_NEXT"
+    [ -z "$NUCLEIC_ACID_DETAIL" ] || printf 'Detected DNA/RNA residues: %s\n' "$NUCLEIC_ACID_DETAIL"
+    [ -z "$NONSTANDARD_AMINO_DETAIL" ] || printf 'Detected modified amino acids: %s\n' "$NONSTANDARD_AMINO_DETAIL"
+    grep -h -m1 "^Input residues .*not in residue_templates\|Template generation failed for unknown residues\|Template matching failed for:" "${FAILURE_LOGS[@]}" 2>/dev/null | head -1 | sed 's/^/Detected detail: /'
+  } > "$FAILURE_DIAGNOSIS"
+  echo "ERROR: receptor preparation failed after all enabled quick attempts." >&2
+  cat "$FAILURE_DIAGNOSIS" >&2
+  echo "Failure explanation saved to: $FAILURE_DIAGNOSIS" >&2
+  tail -40 "$RECEPTOR_RETRY_LOG" 2>/dev/null || tail -40 "$PDBFIXER_MEEKO_LOG" 2>/dev/null || tail -40 "$RECEPTOR_BACKEND_LOG" >&2
+  echo "Initial backend log: $RECEPTOR_BACKEND_LOG" >&2
+  [ "$PDBFIXER_USED" = "0" ] || echo "Post-PDBFixer backend log: $PDBFIXER_MEEKO_LOG" >&2
+  [ -s "$RECEPTOR_RETRY_LOG" ] && echo "Batch-retry backend log: $RECEPTOR_RETRY_LOG" >&2
   exit 1
 fi
 
