@@ -14,5 +14,5 @@ dependencies:
   - pycairo=1.27.0
   - pip
   - pip:
-      - meeko==0.6.1
+      - meeko==0.7.1
       - reportlab==4.2.5

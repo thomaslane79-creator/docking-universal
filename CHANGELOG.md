@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.0 — 2026-08-21
+
+**Defining release change:** A material receptor-preparation compatibility expansion enables many more real deposited PDB structures to proceed to Vina-style PDBQT workflows, backed by a public 100-PDB validation record.
+
+- Updated Meeko to 0.7.1 and added an iterative, least-invasive receptor-preparation sequence: strict Meeko first; conservative PDBFixer repair only after rejection; diagnosed disulfide/histidine handling only when needed; then a narrow ADFRsuite fallback for Meeko-diagnosed linked deposited chemistry. Together these routes substantially broaden preparation coverage, including many linked small-molecule adducts without applying unnecessary model-changing fixes.
+- Removed automatic unmatched-component deletion. When safe routes fail, component removal is a final explicit user choice; its decision and logs are retained and it cannot itself approve a screening protocol.
+- Added a complete two-cohort, 100-public-PDB receptor-preparation validation record, including manifests, outcomes, safeguards, known limitations, and links to retained automated evidence.
+- Added concise public README and GitHub repository metadata describing the validation scope and limitations.
+
+See the [receptor-preparation validation record](docs/receptor-preparation-validation-2026-08-21.md) for complete outcomes and limitations.
+
 ## 0.5.0 — 2026-08-18
 
 **Defining release change:** A previously determined, control-approved target protocol can now be packaged and reused unchanged to dock new sets of compounds.

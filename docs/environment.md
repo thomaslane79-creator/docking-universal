@@ -24,12 +24,12 @@ Key tested versions:
 | RDKit | 2023.09.6 |
 | pycairo | 1.27.0 |
 | Pillow | 11.3.0 |
-| Meeko | 0.6.1 |
+| Meeko | 0.7.1 |
 | PDBFixer | 1.11 |
 
 AutoDock Vina 1.2.7 is intentionally separated from the main compatibility matrix. Its current macOS arm64 conda package may require a different Python/libboost generation than parts of the preparation and visualization stack. Docking Universal invokes it from `docking-universal-vina` and records that environment in the run manifest.
 
-Receptor and ligand PDBQT preparation in the original workflow used the `prepare_receptor` and `prepare_ligand` executables from **ADFRsuite 1.0**, installed separately from conda. The packaged commands now try strict Meeko receptor conversion first. Only after rejection do they apply conservative PDBFixer repair—alternate-location resolution, recognized nonstandard-residue mapping, and missing side-chain heavy atoms, without constructing missing loops or terminal atoms—and retry strict Meeko. A final documented Meeko batch-cleanup fallback may omit unmatched residues. Reports identify the path actually used and record both Meeko and PDBFixer versions. `--backend adfr` and the `DOCKING_UNIVERSAL_PREP_*` variables preserve the legacy path. Preparation backends and repair paths must not be treated as scientifically interchangeable without comparison.
+Receptor and ligand PDBQT preparation in the original workflow used the `prepare_receptor` and `prepare_ligand` executables from **ADFRsuite 1.0**, installed separately from conda. The packaged commands now try strict Meeko receptor conversion first. Only after rejection do they apply conservative PDBFixer repair—alternate-location resolution, recognized nonstandard-residue mapping, and missing side-chain heavy atoms, without constructing missing loops or terminal atoms—and retry strict Meeko. If a depositor-annotated disulfide causes Meeko's padding error, the workflow retries with paired `CYX` templates and records the retained bridge; it does not remove the cysteines. If Meeko specifically rejects linked deposited chemistry, a final, logged ADFRsuite fallback can be tried to retain the component; approval still requires target-matched control redocking. When safe options fail, the interactive workflow offers a final explicit component-removal attempt; it is never automatic, and the decision and log are retained. Reports identify the path actually used and record both Meeko and PDBFixer versions. `--backend adfr` and the `DOCKING_UNIVERSAL_PREP_*` variables preserve the legacy path. Preparation backends and repair paths must not be treated as scientifically interchangeable without comparison.
 
 The Apple-silicon PyMOL route uses conda-forge's `pymol-open-source`, together with the compatible Python 3.9, PyCairo 1.27, and RDKit 2023.09 matrix. Conda resolves the lower-level Qt, Cairo, and graphics libraries. A headless PNG render was verified in a clean native `osx-arm64` environment.
 

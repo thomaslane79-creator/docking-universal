@@ -2,8 +2,8 @@ cff-version: 1.2.0
 message: "If Docking Universal contributes to your research, please cite this repository release and all applicable underlying software and methods. Citing this workflow does not replace citation of the original scientific work."
 title: "Docking Universal"
 type: software
-version: 0.5.0
-date-released: 2026-08-18
+version: 0.6.0
+date-released: 2026-08-21
 license: MIT
 authors:
   - family-names: "Lane"

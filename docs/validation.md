@@ -1,5 +1,23 @@
 # Raw-input validation
 
+This page is the index for validation performed on Docking Universal. Each record distinguishes software execution from scientific validation: a command can complete while a target-specific control fails, and only a passing control supports an approved screening protocol.
+
+## Validation inventory
+
+| Validation area | What was exercised | Result and detailed record |
+| --- | --- | --- |
+| Installed Conda command | `make install-conda`, command discovery outside the repository, CLI help, and installed integration validation | Passed; installed validation writes to caller-owned output and does not require a writable source checkout. |
+| Automated regression suite | CLI checks plus Python unit/integration tests for workflow selection, guided options, reports, PDBFixer precleaning, and CCD audit handling | Passed: 45 tests in the final local regression run. |
+| Continuous integration | Shell/CLI checks on macOS and Ubuntu | Passed on both operating systems for the reconciled release branch. Windows is not a supported target in this release. |
+| Bound-ligand reference workflow | Public HIV-1 protease complex `1HVR` with inhibitor XK2, including preparation, control, docking, analysis, visualisation, and reports | Passed; details below. |
+| Ligand-free reference workflow | Public unbound `2R8N` preparation and Indinavir exploratory workflow | Completed as exploratory; details below. |
+| General receptor-preparation robustness | Historical 50-entry public-PDB sample plus final-policy reruns of the five former cleanup cases | Reconciled result: 46/50 PDBQTs; complete cohort record: [100-PDB receptor-preparation validation record](receptor-preparation-validation-2026-08-21.md). |
+| Linked-chemistry/adduct robustness | 50 RCSB structures selected for covalent-linkage annotations, explicit-removal reruns, and two downstream workflow examples | 39/50 historical PDBQTs; full 100-receptor manifest, implemented safeguards, failures/limitations, and evidence links: [100-PDB receptor-preparation validation record](receptor-preparation-validation-2026-08-21.md). |
+
+## How to read these results
+
+Preparation success means a PDBQT was created by the recorded route. It does not establish that every deposited cofactor, adduct, charge state, or metal site is scientifically suitable for docking. A completed docking run produces inspectable poses and scores. A passing bound-ligand control is the separate requirement for marking a target protocol approved for screening. Failed controls remain useful diagnostic results and may be continued only as explicitly uncalibrated exploratory docking.
+
 ## Installed-command validation
 
 The installed Conda command was validated outside the source repository. `docking-universal validate integration` used packaged fixtures, wrote to a caller-owned directory, and passed real MolScrub/RDKit ensemble generation, Meeko ligand preparation, ligand-centered receptor preparation, fpocket cavity modes, AutoDock Vina smoke docking, control evaluation, approved-protocol planning, exploratory planning, and PDF generation. This specifically verifies that installed validation no longer depends on a writable source checkout.
@@ -35,7 +53,7 @@ The raw PDB and SDF were processed on an M2 Mac using the clean main environment
 7. The top Vina pose was combined with receptor coordinates for PLIP analysis, custom PML generation, headless PyMOL rendering, and generic RDKit depiction.
 8. The confirmed `XK2:A:263` instance was also processed through the complete retrospective `control` command: automatic CCD-backed experimental-coordinate SDF creation, Vina docking at the package defaults, pose comparison, filtered PLIP analysis, and PNG/PSE rendering.
 
-Receptor preparation was tested across 50 sampled public PDB structures. The original cohort passed 10/10. A second reproducible cohort used the current RCSB entry-ID holdings list, excluded the original ten, and selected 40 downloadable legacy-format PDB entries with random seed `20260819`; 37/40 produced prepared receptors through the current pipeline. Of those 37, 12 passed strict Meeko, 19 passed conservative PDBFixer repair followed by strict Meeko, 5 passed the documented final Meeko batch cleanup, and 1 passed after guided histidine-template selection. Combined current-pipeline performance was therefore 47/50: 46 unattended plus one scientifically reviewed interactive selection.
+Receptor preparation was tested across 50 sampled public PDB structures. The original cohort passed 10/10. A second reproducible cohort used the current RCSB entry-ID holdings list, excluded the original ten, and selected 40 downloadable legacy-format PDB entries with random seed `20260819`; 37/40 produced prepared receptors through the then-current pipeline. Of those 37, 12 passed strict Meeko, 19 passed conservative PDBFixer repair followed by strict Meeko, 5 used the then-automatic Meeko cleanup, and 1 passed after guided histidine-template selection. The current workflow no longer performs that cleanup automatically: after safe fallbacks fail, it requires explicit interactive approval and records the removal. The historical result was therefore 47/50 PDBQTs: 41 without unmatched-component removal, five with the former automatic removal, and one after a scientifically reviewed histidine selection.
 
 The three remaining second-cohort stops require specialized handling rather than another generic automatic cleanup: a heme/cofactor CCD-template parsing failure, protein-DNA alternate-location/template conflicts, and linked glycan templates. The former histidine stop, 5NBX, completed after the current guided interaction recorded the user's HIE selection for all 12 unresolved histidines. Docking Universal did not silently delete components or guess chemistry to increase the pass count. This is a software-path stress test rather than biological validation. PDBFixer repair is limited to alternate-location resolution, recognized nonstandard-residue mappings, and missing side-chain heavy atoms; it does not construct missing loops or terminal atoms, and every invocation retains `pdbfixer_audit.json` for review.
 

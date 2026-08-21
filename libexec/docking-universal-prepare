@@ -56,6 +56,7 @@ Common environment settings:
   DOCKING_UNIVERSAL_CENTER_MODE    deepest or centroid for ligand-free review
   DOCKING_UNIVERSAL_CENTROID_MODE  1 whole protein or 2 per-chain centroid
   DOCKING_UNIVERSAL_PDBFIXER=auto  auto, required, or off
+  DOCKING_UNIVERSAL_ADFR_FALLBACK=1 Try legacy ADFRsuite only after Meeko rejects linked chemistry
   MEEKO_ALLOW_BAD_RES=0         Set 1 to delete unmatched residues (review output)
   MEEKO_DEFAULT_ALTLOC          Optional default alternate location, e.g. A
   MEEKO_SET_TEMPLATE            Explicit residue template, e.g. A:36=HIE
@@ -384,6 +385,14 @@ esac
 FPOCKET_BIN="${DOCKING_UNIVERSAL_FPOCKET:-$(command -v fpocket 2>/dev/null || true)}"
 PREP_BACKEND="${DOCKING_UNIVERSAL_PREP_BACKEND:-auto}"
 PREP_RECEPTOR_BIN="${DOCKING_UNIVERSAL_PREP_RECEPTOR:-}"
+ADFR_FALLBACK_BIN="${DOCKING_UNIVERSAL_ADFR_FALLBACK_BIN:-$(command -v prepare_receptor 2>/dev/null || true)}"
+# ADFRsuite commonly has no shell activation script. Discover the conventional
+# per-user installation when it is present, while keeping the explicit variable
+# authoritative for nonstandard locations.
+if [ -z "$ADFR_FALLBACK_BIN" ] && [ -x "$HOME/ADFRsuite-1.0/bin/prepare_receptor" ]; then
+  ADFR_FALLBACK_BIN="$HOME/ADFRsuite-1.0/bin/prepare_receptor"
+fi
+ADFR_FALLBACK="${DOCKING_UNIVERSAL_ADFR_FALLBACK:-1}"
 
 case "$PREP_BACKEND" in
   auto)
@@ -403,6 +412,7 @@ case "$PREP_BACKEND" in
 esac
 [ -n "$FPOCKET_BIN" ] && [ -x "$FPOCKET_BIN" ] || { echo "ERROR: fpocket not found (run 'docking-universal doctor')"; exit 1; }
 [ -n "$PREP_RECEPTOR_BIN" ] && [ -x "$PREP_RECEPTOR_BIN" ] || { echo "ERROR: receptor preparation backend not found (install Meeko or configure ADFRsuite)"; exit 1; }
+case "$ADFR_FALLBACK" in 0|1) ;; *) echo "ERROR: DOCKING_UNIVERSAL_ADFR_FALLBACK must be 0 or 1" >&2; exit 2 ;; esac
 
 ###############################################################################
 # INPUT
@@ -456,7 +466,29 @@ PDBFIXER_LOG="$RECEPTOR_DIR/pdbfixer.log"
 PDBFIXER_AUDIT="$RECEPTOR_DIR/pdbfixer_audit.json"
 PDBFIXER_MEEKO_LOG="$RECEPTOR_DIR/receptor_after_pdbfixer.log"
 RECEPTOR_RETRY_LOG="$RECEPTOR_DIR/receptor_retry.log"
+DISULFIDE_RETRY_LOG="$RECEPTOR_DIR/receptor_disulfide_retry.log"
+DISULFIDE_SELECTION_LOG="$RECEPTOR_DIR/disulfide_template_selection.tsv"
+ADFR_FALLBACK_LOG="$RECEPTOR_DIR/receptor_adfr_fallback.log"
+CCD_AUDIT_JSON="$RECEPTOR_DIR/ccd_modification_audit.json"
+CCD_AUDIT_TSV="$RECEPTOR_DIR/ccd_modification_audit.tsv"
 PDBFIXER_USED=0
+
+# Meeko represents an intact disulfide as CYX on both cysteines. Preserve
+# depositor-annotated SSBOND pairs for a targeted retry when ordinary CYS
+# templates leave Meeko with only one side of the required padding.
+DISULFIDE_TEMPLATE_ASSIGNMENTS=$(awk '
+  function trim(value) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", value); return value }
+  /^SSBOND/ {
+    name1=trim(substr($0, 12, 3)); chain1=trim(substr($0, 16, 1)); seq1=trim(substr($0, 18, 4)); icode1=trim(substr($0, 22, 1))
+    name2=trim(substr($0, 26, 3)); chain2=trim(substr($0, 30, 1)); seq2=trim(substr($0, 32, 4)); icode2=trim(substr($0, 36, 1))
+    if (name1 == "CYS" && name2 == "CYS" && seq1 != "" && seq2 != "") {
+      key1=(chain1 == "" ? ":" : chain1 ":") seq1 icode1
+      key2=(chain2 == "" ? ":" : chain2 ":") seq2 icode2
+      print key1 "=CYX"
+      print key2 "=CYX"
+    }
+  }
+' "$INPUT_PDB" | sort -u | paste -sd, -)
 
 # Receptor (protein + supported metal atoms). PDB element identity comes from
 # columns 77-78; searching an entire HETATM line for "CA" can accidentally
@@ -467,11 +499,26 @@ awk '
       modified=substr($0,13,3); gsub(/ /,"",modified)
       if (modified != "") is_modified[modified]=1
     }
+    if (/^LINK  /) {
+      name1=substr($0,18,3); gsub(/ /,"",name1)
+      chain1=substr($0,22,1); gsub(/ /,"",chain1)
+      seq1=substr($0,23,4); gsub(/ /,"",seq1)
+      icode1=substr($0,27,1); gsub(/ /,"",icode1)
+      name2=substr($0,48,3); gsub(/ /,"",name2)
+      chain2=substr($0,52,1); gsub(/ /,"",chain2)
+      seq2=substr($0,53,4); gsub(/ /,"",seq2)
+      icode2=substr($0,57,1); gsub(/ /,"",icode2)
+      linked[name1 SUBSEP chain1 SUBSEP seq1 icode1]=1
+      linked[name2 SUBSEP chain2 SUBSEP seq2 icode2]=1
+    }
     next
   }
   /^ATOM  / { print; next }
   /^HETATM/ {
     resname=substr($0,18,3); gsub(/ /,"",resname)
+    chain=substr($0,22,1); gsub(/ /,"",chain)
+    seq=substr($0,23,4); gsub(/ /,"",seq)
+    icode=substr($0,27,1); gsub(/ /,"",icode)
     if (resname in is_modified) {
       # MODRES entries are covalently integrated polymer residues even when
       # deposited as HETATM. Normalize only the record label so downstream
@@ -479,6 +526,13 @@ awk '
       normalized=$0
       sub(/^HETATM/, "ATOM  ", normalized)
       print normalized
+      next
+    }
+    if (resname SUBSEP chain SUBSEP seq icode in linked) {
+      # Retain directly protein-linked hetero components for the documented
+      # legacy ADFRsuite fallback. Meeko will still reject unsupported linked
+      # chemistry rather than silently guessing it.
+      print
       next
     }
     element = toupper(substr($0, 77, 2))
@@ -529,8 +583,10 @@ fi
 
 log "Preparing the filtered original receptor with $PREP_BACKEND; detailed output -> $RECEPTOR_BACKEND_LOG"
 PREP_SUCCESS=0
+PREP_ROUTE=not_completed
 if "${PREP_COMMAND[@]}" > "$RECEPTOR_BACKEND_LOG" 2>&1; then
   PREP_SUCCESS=1
+  PREP_ROUTE=strict_meeko
   log "Initial receptor preparation succeeded; PDBFixer was not needed"
 elif [ "$PREP_BACKEND" = "meeko" ]; then
   log "Initial Meeko preparation failed; preserving its diagnostics before attempting quick repairs"
@@ -543,6 +599,7 @@ elif [ "$PREP_BACKEND" = "meeko" ]; then
       log "Retrying strict Meeko after PDBFixer; detailed output -> $PDBFIXER_MEEKO_LOG"
       if "${PDBFIXER_COMMAND[@]}" > "$PDBFIXER_MEEKO_LOG" 2>&1; then
         PREP_SUCCESS=1
+        PREP_ROUTE=pdbfixer_then_strict_meeko
         log "PDBFixer repair followed by strict Meeko preparation succeeded"
       else
         log "Strict Meeko still rejected the PDBFixer output"
@@ -552,13 +609,22 @@ elif [ "$PREP_BACKEND" = "meeko" ]; then
     fi
   fi
 
-  if [ "$PREP_SUCCESS" = "0" ] && [ "${DOCKING_UNIVERSAL_AUTO_RECEPTOR_RETRY:-1}" = "1" ]; then
-    log "Retrying the filtered original with Meeko batch cleanup (unmatched residues omitted; default altloc A)"
-    RETRY_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_FILTERED_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --allow_bad_res --default_altloc A "${MEEKO_TEMPLATE_ARGS[@]}")
-    if "${RETRY_COMMAND[@]}" > "$RECEPTOR_RETRY_LOG" 2>&1; then
+  if [ "$PREP_SUCCESS" = "0" ] && [ -n "$DISULFIDE_TEMPLATE_ASSIGNMENTS" ]; then
+    DISULFIDE_TEMPLATES="$DISULFIDE_TEMPLATE_ASSIGNMENTS"
+    [ -z "$MEEKO_SET_TEMPLATE" ] || DISULFIDE_TEMPLATES="$MEEKO_SET_TEMPLATE,$DISULFIDE_TEMPLATES"
+    log "Retrying Meeko with CYX templates for depositor-annotated disulfides; detailed output -> $DISULFIDE_RETRY_LOG"
+    DISULFIDE_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_FILTERED_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --allow_bad_res --default_altloc A --set_template "$DISULFIDE_TEMPLATES")
+    if "${DISULFIDE_COMMAND[@]}" > "$DISULFIDE_RETRY_LOG" 2>&1; then
       PREP_SUCCESS=1
+      PREP_ROUTE=meeko_disulfide_templates
       cp "$RECEPTOR_FILTERED_PDB" "$RECEPTOR_PDB"
-      log "Meeko batch-cleanup retry succeeded; review $RECEPTOR_RETRY_LOG"
+      {
+        printf 'residue\ttemplate\treason\n'
+        printf '%s\n' "$DISULFIDE_TEMPLATE_ASSIGNMENTS" | tr ',' '\n' | while IFS= read -r assignment; do
+          printf '%s\tCYX\tdepositor-annotated SSBOND pair retained after Meeko padding retry\n' "${assignment%=CYX}"
+        done
+      } > "$DISULFIDE_SELECTION_LOG"
+      log "Meeko preserved depositor-annotated disulfide bridge(s); review $DISULFIDE_SELECTION_LOG"
     fi
   fi
 
@@ -616,6 +682,7 @@ EOF
         HISTIDINE_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$HISTIDINE_SOURCE" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --set_template "$MEEKO_SET_TEMPLATE")
         if "${HISTIDINE_COMMAND[@]}" > "$HISTIDINE_RETRY_LOG" 2>&1; then
           PREP_SUCCESS=1
+          PREP_ROUTE=guided_histidine_template
           cp "$HISTIDINE_SOURCE" "$RECEPTOR_PDB"
           log "Meeko preparation succeeded with user-selected histidine template assignment(s)"
         else
@@ -627,11 +694,29 @@ EOF
       fi
     done
   fi
+
+  # ADFRsuite is intentionally a narrow final fallback: Meeko has already
+  # diagnosed an unsupported *linked* component, and the legacy preparer can
+  # retain many such deposited adducts in a Vina-readable PDBQT. It is not a
+  # generic rescue for glycans, nucleic acids, or metal/cofactor chemistry.
+  if [ "$PREP_SUCCESS" = "0" ] && [ "$ADFR_FALLBACK" = "1" ] && [ -n "$ADFR_FALLBACK_BIN" ] && [ -x "$ADFR_FALLBACK_BIN" ] && \
+     grep -qs "linking fragments" "$RECEPTOR_BACKEND_LOG" "$PDBFIXER_MEEKO_LOG" "$RECEPTOR_RETRY_LOG" "$DISULFIDE_RETRY_LOG" 2>/dev/null; then
+    log "Meeko rejected linked deposited chemistry; trying the legacy ADFRsuite receptor-preparation fallback; detailed output -> $ADFR_FALLBACK_LOG"
+    ADFR_FALLBACK_COMMAND=("$ADFR_FALLBACK_BIN" -r "$RECEPTOR_FILTERED_PDB" -o "$RECEPTOR_PDBQT" -A checkhydrogens)
+    if "${ADFR_FALLBACK_COMMAND[@]}" > "$ADFR_FALLBACK_LOG" 2>&1 && [ -s "$RECEPTOR_PDBQT" ]; then
+      PREP_SUCCESS=1
+      PREP_ROUTE=adfr_legacy_linked_component_fallback
+      cp "$RECEPTOR_FILTERED_PDB" "$RECEPTOR_PDB"
+      log "Legacy ADFRsuite preparation succeeded after Meeko's linked-component rejection; control redocking is required before protocol approval"
+    else
+      log "Legacy ADFRsuite fallback did not produce a receptor PDBQT; retaining Meeko diagnostics for structural review"
+    fi
+  fi
 fi
 
 if [ "$PREP_SUCCESS" = "0" ]; then
   FAILURE_DIAGNOSIS="$RECEPTOR_DIR/receptor_failure_diagnosis.txt"
-  FAILURE_LOGS=("$RECEPTOR_RETRY_LOG" "$PDBFIXER_MEEKO_LOG" "$RECEPTOR_BACKEND_LOG")
+  FAILURE_LOGS=("$ADFR_FALLBACK_LOG" "$DISULFIDE_RETRY_LOG" "$RECEPTOR_RETRY_LOG" "$PDBFIXER_MEEKO_LOG" "$RECEPTOR_BACKEND_LOG")
   FAILURE_CATEGORY="Unclassified receptor-template failure"
   FAILURE_WHY="The available preparation logs do not match a safely recognized failure category."
   FAILURE_NEXT="Inspect the retained backend logs and receptor chemistry before changing or deleting residues."
@@ -698,14 +783,60 @@ if [ "$PREP_SUCCESS" = "0" ]; then
     [ -z "$NONSTANDARD_AMINO_DETAIL" ] || printf 'Detected modified amino acids: %s\n' "$NONSTANDARD_AMINO_DETAIL"
     grep -h -m1 "^Input residues .*not in residue_templates\|Template generation failed for unknown residues\|Template matching failed for:" "${FAILURE_LOGS[@]}" 2>/dev/null | head -1 | sed 's/^/Detected detail: /'
   } > "$FAILURE_DIAGNOSIS"
+
+  # Omitting unmatched components changes the receptor model. It is a final,
+  # explicit user choice, never an automatic preparation retry.
+  if [ "$PREP_BACKEND" = "meeko" ] && [ -t 0 ] && [ "${DOCKING_UNIVERSAL_REMOVAL_PROMPT:-1}" = "1" ]; then
+    cat >&2 <<EOF
+
+No further safe automatic receptor-preparation fallback succeeded.
+Docking Universal can make one final, model-changing attempt by omitting
+unmatched residues/components and selecting alternate location A. This can
+remove biologically relevant material; inspect the saved diagnosis and run a
+bound-ligand control before screening.
+EOF
+    printf 'Proceed with user-approved component removal? [y/N] ' >&2
+    read -r USER_APPROVES_REMOVAL || USER_APPROVES_REMOVAL=""
+    case "$USER_APPROVES_REMOVAL" in
+      y|Y|yes|YES|Yes)
+        USER_REMOVAL_LOG="$RECEPTOR_DIR/receptor_user_approved_removal.log"
+        USER_REMOVAL_RECORD="$RECEPTOR_DIR/user_approved_component_removal.txt"
+        USER_REMOVAL_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_FILTERED_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --allow_bad_res --default_altloc A "${MEEKO_TEMPLATE_ARGS[@]}")
+        log "Running user-approved component-removal attempt."
+        if "${USER_REMOVAL_COMMAND[@]}" > "$USER_REMOVAL_LOG" 2>&1; then
+          PREP_SUCCESS=1
+          PREP_ROUTE=meeko_user_approved_component_removal
+          cp "$RECEPTOR_FILTERED_PDB" "$RECEPTOR_PDB"
+          {
+            printf 'User approved component removal after safe preparation fallbacks failed.\n'
+            printf 'Command: '
+            printf '%q ' "${USER_REMOVAL_COMMAND[@]}"
+            printf '\nLog: %s\n' "$USER_REMOVAL_LOG"
+            printf 'Control redocking is required before prospective screening.\n'
+          } > "$USER_REMOVAL_RECORD"
+          log "User-approved component-removal attempt succeeded; control redocking is required before screening."
+        else
+          log "User-approved component-removal attempt did not succeed; retaining the original failure."
+        fi
+        ;;
+      *) log "User declined component removal; receptor preparation remains stopped." ;;
+    esac
+  fi
+
+  if [ "$PREP_SUCCESS" = "1" ]; then
+    :
+  else
   echo "ERROR: receptor preparation failed after all enabled quick attempts." >&2
   cat "$FAILURE_DIAGNOSIS" >&2
   echo "Failure explanation saved to: $FAILURE_DIAGNOSIS" >&2
-  tail -40 "$RECEPTOR_RETRY_LOG" 2>/dev/null || tail -40 "$PDBFIXER_MEEKO_LOG" 2>/dev/null || tail -40 "$RECEPTOR_BACKEND_LOG" >&2
+  tail -40 "$ADFR_FALLBACK_LOG" 2>/dev/null || tail -40 "$DISULFIDE_RETRY_LOG" 2>/dev/null || tail -40 "$RECEPTOR_RETRY_LOG" 2>/dev/null || tail -40 "$PDBFIXER_MEEKO_LOG" 2>/dev/null || tail -40 "$RECEPTOR_BACKEND_LOG" >&2
   echo "Initial backend log: $RECEPTOR_BACKEND_LOG" >&2
   [ "$PDBFIXER_USED" = "0" ] || echo "Post-PDBFixer backend log: $PDBFIXER_MEEKO_LOG" >&2
   [ -s "$RECEPTOR_RETRY_LOG" ] && echo "Batch-retry backend log: $RECEPTOR_RETRY_LOG" >&2
+  [ -s "$DISULFIDE_RETRY_LOG" ] && echo "Disulfide-template retry log: $DISULFIDE_RETRY_LOG" >&2
+  [ -s "$ADFR_FALLBACK_LOG" ] && echo "Legacy ADFRsuite fallback log: $ADFR_FALLBACK_LOG" >&2
   exit 1
+  fi
 fi
 
 if feedback_verbose; then
@@ -715,6 +846,35 @@ elif grep -q "not in residue_templates" "$RECEPTOR_BACKEND_LOG"; then
 fi
 [ -s "$RECEPTOR_PDBQT" ] || { echo "ERROR: receptor backend did not create PDBQT: $RECEPTOR_PDBQT"; exit 1; }
 log "Prepared receptor PDBQT written to $RECEPTOR_PDBQT"
+
+CCD_AUDIT_HELPER="$PACKAGE_ROOT/libexec/docking-universal-ccd-audit.py"
+if [ ! -f "$CCD_AUDIT_HELPER" ] && [ -f "$(dirname "$0")/docking-universal-ccd-audit.py" ]; then
+  CCD_AUDIT_HELPER="$(dirname "$0")/docking-universal-ccd-audit.py"
+fi
+if [ -f "$CCD_AUDIT_HELPER" ]; then
+  CCD_ROUTE="$PREP_ROUTE"
+  if [ "$PREP_ROUTE" = "guided_histidine_template" ]; then
+    CCD_EVIDENCE_LOG="$HISTIDINE_RETRY_LOG"
+  elif [ "$PREP_ROUTE" = "meeko_user_approved_component_removal" ]; then
+    CCD_EVIDENCE_LOG="$RECEPTOR_DIR/receptor_user_approved_removal.log"
+  elif [ "$PREP_ROUTE" = "meeko_disulfide_templates" ]; then
+    CCD_EVIDENCE_LOG="$DISULFIDE_RETRY_LOG"
+  elif [ "$PREP_ROUTE" = "adfr_legacy_linked_component_fallback" ]; then
+    CCD_EVIDENCE_LOG="$ADFR_FALLBACK_LOG"
+  elif [ "$PREP_ROUTE" = "pdbfixer_then_strict_meeko" ]; then
+    CCD_EVIDENCE_LOG="$PDBFIXER_MEEKO_LOG"
+  else
+    CCD_EVIDENCE_LOG="$RECEPTOR_BACKEND_LOG"
+  fi
+  "$PYTHON_COMMAND" "$CCD_AUDIT_HELPER" "$INPUT_PDB" "$RECEPTOR_PDBQT" "$CCD_EVIDENCE_LOG" "$CCD_ROUTE" "$CCD_AUDIT_JSON" "$CCD_AUDIT_TSV" >/dev/null
+  CCD_COUNT=$("$PYTHON_COMMAND" -c 'import json,sys; print(json.load(open(sys.argv[1]))["modified_polymer_residue_count"])' "$CCD_AUDIT_JSON")
+  if [ "$CCD_COUNT" -gt 0 ]; then
+    log "CCD/MODRES audit recorded $CCD_COUNT modified polymer residue(s): $CCD_AUDIT_TSV"
+    awk -F '\t' 'NR > 1 { printf "  %s %s -> %s: %s\n", $1, $2, $3, $5 }' "$CCD_AUDIT_TSV"
+  else
+    log "CCD/MODRES audit: no MODRES-declared polymer modifications detected"
+  fi
+fi
 
 CHAIN_SUMMARY="$ROOT/chain_summary.tsv"
 summarize_chains "$RECEPTOR_PDB" "$CHAIN_SUMMARY"

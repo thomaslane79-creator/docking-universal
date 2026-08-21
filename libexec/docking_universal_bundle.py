@@ -49,6 +49,30 @@ def create_bundle(protocol_path, control_root, output, control_compound=None):
             if audit_source.is_file():
                 audit_copy = _copy(audit_source, assets / "pdbfixer_audit.json")
                 protocol["receptor_preparation"]["pdbfixer_audit"] = f"assets/{audit_copy.name}"
+        ccd_audit_value = protocol.get("receptor_preparation", {}).get("ccd_modification_audit")
+        if ccd_audit_value:
+            ccd_audit_source = Path(ccd_audit_value).expanduser().resolve()
+            if ccd_audit_source.is_file():
+                ccd_audit_copy = _copy(ccd_audit_source, assets / "ccd_modification_audit.json")
+                protocol["receptor_preparation"]["ccd_modification_audit"] = f"assets/{ccd_audit_copy.name}"
+        adfr_log_value = protocol.get("receptor_preparation", {}).get("adfr_fallback_log")
+        if adfr_log_value:
+            adfr_log_source = Path(adfr_log_value).expanduser().resolve()
+            if adfr_log_source.is_file():
+                adfr_log_copy = _copy(adfr_log_source, assets / "receptor_adfr_fallback.log")
+                protocol["receptor_preparation"]["adfr_fallback_log"] = f"assets/{adfr_log_copy.name}"
+        removal_log_value = protocol.get("receptor_preparation", {}).get("user_approved_component_removal_log")
+        if removal_log_value:
+            removal_log_source = Path(removal_log_value).expanduser().resolve()
+            if removal_log_source.is_file():
+                removal_log_copy = _copy(removal_log_source, assets / "receptor_user_approved_removal.log")
+                protocol["receptor_preparation"]["user_approved_component_removal_log"] = f"assets/{removal_log_copy.name}"
+        removal_record_value = protocol.get("receptor_preparation", {}).get("user_approved_component_removal_record")
+        if removal_record_value:
+            removal_record_source = Path(removal_record_value).expanduser().resolve()
+            if removal_record_source.is_file():
+                removal_record_copy = _copy(removal_record_source, assets / "user_approved_component_removal.txt")
+                protocol["receptor_preparation"]["user_approved_component_removal_record"] = f"assets/{removal_record_copy.name}"
 
         evidence = packaged_control / "evidence"
         evidence_files = []
