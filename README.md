@@ -1,10 +1,12 @@
 # Docking Universal
 
-**Current research-preview release: v0.5.0**
+**Current research-preview release: v0.6.0**
 
-## What v0.5.0 changes
+## What v0.6.0 changes
 
-**The defining change in v0.5.0 is reusable, portable target protocols.** After a bound-ligand control passes, Docking Universal can package the previously determined receptor preparation, selected pocket and docking box, ligand-ensemble policy, exhaustiveness, seeds, pose count, energy range, software provenance, hashes, and retained control evidence into one `.duprotocol` file. That validated configuration can then be applied unchanged to new sets of compounds without repeating protocol development for every ligand set. Reports generated for those later compound sets carry forward a readable synopsis of the reused protocol and its validation: control status and date, control ligand, recovered-pose RMSD and acceptance threshold, locked pocket/box, and the control-to-new-run software comparison.
+**The defining changes in v0.6.0 are a material expansion of receptor-preparation compatibility and an explicit validation record.** Meeko 0.7.1 plus conservative PDBFixer repair, disulfide and histidine handling, and the narrow ADFRsuite fallback for Meeko-diagnosed linked deposited chemistry allow many more real deposited PDB structures—including many linked small-molecule adducts—to reach a Vina-style PDBQT workflow. These are an iterative, least-invasive sequence: strict Meeko is always attempted first; PDBFixer runs only after that rejection; disulfide/histidine handling is used only when diagnosed; and ADFRsuite is restricted to the linked-chemistry failure class. The release documents outcomes from two complementary 50-PDB public receptor-preparation cohorts and the remaining limitations for some covalent adducts, linked glycans, metals/heme, modified backbones, and nucleic-acid complexes. Retained audit evidence and explicit consent protect against silent model-changing deletion when no safe route succeeds.
+
+The v0.5 portable-protocol workflow remains: after a bound-ligand control passes, Docking Universal can package the previously determined receptor preparation, selected pocket and docking box, ligand-ensemble policy, exhaustiveness, seeds, pose count, energy range, software provenance, hashes, and retained control evidence into one `.duprotocol` file. That validated configuration can then be applied unchanged to new sets of compounds without repeating protocol development for every ligand set. Reports generated for those later compound sets carry forward a readable synopsis of the reused protocol and its validation: control status and date, control ligand, recovered-pose RMSD and acceptance threshold, locked pocket/box, and the control-to-new-run software comparison.
 
 This is a continuation mechanism for a target-specific, control-approved protocol. Pocket determination or increased exhaustiveness alone does not constitute approval, and reuse does not establish prospective pose or affinity accuracy.
 

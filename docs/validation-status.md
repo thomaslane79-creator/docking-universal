@@ -1,6 +1,6 @@
 # Validation status
 
-Docking Universal 0.5.0 is a research preview. Validation distinguishes software-path testing from scientific validation: a command completing successfully does not establish that a predicted pose or cavity is biologically correct.
+Docking Universal 0.6.0 is a research preview. Validation distinguishes software-path testing from scientific validation: a command completing successfully does not establish that a predicted pose or cavity is biologically correct.
 
 ## Automated option coverage
 
@@ -22,6 +22,8 @@ make test
 ```
 
 The current automated suite is exercised in GitHub Actions on both current Ubuntu and macOS runners after creating the declared Conda environment. That supports platform portability at the software-test level. The retained full scientific validation remains referenced to macOS arm64, because compiled scientific tools can differ across platforms; run integration or release validation on the target workstation before production use.
+
+The [complete two-cohort, 100-public-PDB receptor-preparation record](receptor-preparation-validation-2026-08-21.md) documents tested preparation paths, known limitations, public entry IDs, and retained evidence for the general and covalent-linkage stress-test cohorts.
 
 The same checks and the real-tool suites are available through the public interface:
 
