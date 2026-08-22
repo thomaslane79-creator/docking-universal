@@ -12,6 +12,11 @@ SPEC.loader.exec_module(REPORT)
 
 
 class CavityReportTests(unittest.TestCase):
+    def test_control_appendix_detail_break_is_conditional(self):
+        flowable = REPORT.docking_detail_section_break()
+        self.assertEqual(flowable.__class__.__name__, "CondPageBreak")
+        self.assertAlmostEqual(flowable.height, 7.6 * 72)
+
     def test_package_version_uses_source_or_installed_version_file(self):
         expected = (SCRIPT.parent.parent / "VERSION").read_text().strip()
         self.assertEqual(REPORT.package_version(), expected)
@@ -202,6 +207,35 @@ class CavityReportTests(unittest.TestCase):
             "Rilpivirine",
         )
 
+    def test_protocol_lookup_filename_prefers_recorded_bundle_name(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            study = Path(temporary)
+            summary = {"approved_protocol_file_name": "1HVR_XK2_2026-08-21.duprotocol"}
+            self.assertEqual(
+                REPORT.protocol_lookup_filename(
+                    study, None, study / "protocol.json", summary
+                ),
+                "1HVR_XK2_2026-08-21.duprotocol",
+            )
+
+    def test_standalone_control_discovers_its_approved_protocol(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            study = Path(temporary)
+            protocol = study / "control" / "04_redocking" / "vina" / "repeatability" / "protocol.json"
+            protocol.parent.mkdir(parents=True)
+            protocol.write_text(json.dumps({
+                "unknown_docking_allowed": True,
+                "acceptance": {
+                    "requires_both": True,
+                    "sampling_pass": True,
+                    "ranking_pass": True,
+                    "seed_requirement_pass": True,
+                    "independent_seed_count": 5,
+                },
+                "variant_count": 15,
+            }) + "\n")
+            self.assertEqual(REPORT.discover_control(study), study / "control")
+
     def test_multi_ligand_results_are_read_for_every_compound(self):
         with tempfile.TemporaryDirectory() as temporary:
             study = Path(temporary)
@@ -229,10 +263,12 @@ class CavityReportTests(unittest.TestCase):
             self.assertEqual(records[1]["cluster_count"], 3)
             self.assertEqual(records[1]["top_cluster_population"], "38")
             self.assertEqual(records[1]["top_cluster_seed_support"], "5")
-            summary_rows = REPORT.single_compound_summary_rows(records[1], protocol={"approved": True})
+            summary_rows = REPORT.single_compound_summary_rows(records[1])
             self.assertIn(["Ligand docked", "Ligand B"], summary_rows)
             self.assertIn(["Independent-seed support", "5"], summary_rows)
             self.assertIn(["Selected representatives", "3"], summary_rows)
+            self.assertNotIn("Scientific status", [row[0] for row in summary_rows])
+            self.assertNotIn("Protocol source", [row[0] for row in summary_rows])
 
     def test_fpocket_descriptors_and_box_volume_inputs(self):
         with tempfile.TemporaryDirectory() as temporary:

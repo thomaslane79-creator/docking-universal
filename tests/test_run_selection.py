@@ -84,6 +84,7 @@ class ApprovedProtocolSelectionTests(unittest.TestCase):
             )
             extracted = RUNNER.materialize_protocol(bundle)
             record = json.loads(extracted.read_text())
+            self.assertEqual(RUNNER.protocol_source_filename(extracted), "test.duprotocol")
             self.assertEqual(record["control_evidence"]["compound"], "Known inhibitor")
             self.assertTrue((extracted.parent / record["locked_inputs"]["receptor"]).is_file())
             self.assertTrue((extracted.parent / record["locked_inputs"]["box"]).is_file())
