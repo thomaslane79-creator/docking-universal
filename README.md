@@ -40,7 +40,7 @@ The comparison is deliberately described as target-specific retrospective eviden
 
 **Preparation validation and limitations.** Two 50-PDB public receptor-preparation cohorts (a general sample and a deliberately difficult covalent-linkage panel) have been tested. Known limitations include some covalent adducts, linked glycans, metals/heme, modified backbones, and nucleic-acid complexes. Complete outcomes, retained test evidence, safeguards, and documented failures are in the [100-PDB receptor-preparation validation record](docs/receptor-preparation-validation-2026-08-21.md) and [validation index](docs/validation.md).
 
-![Two end-to-end Docking Universal pathways: control-guided screening and ligand-free exploratory screening](docs/assets/end-to-end-workflows-and-outputs-mockup.png)
+![Two end-to-end Docking Universal pathways: control-guided screening and ligand-free exploratory screening](docs/assets/end-to-end-workflows-current-capabilities.png)
 
 ## Example scientific reports
 
