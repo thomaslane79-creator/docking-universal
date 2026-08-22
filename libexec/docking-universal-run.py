@@ -28,6 +28,7 @@ import sys
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+from importlib import metadata
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -65,6 +66,60 @@ def package_version():
         except OSError:
             pass
     return "unknown"
+
+
+def installed_version(*distribution_names):
+    for name in distribution_names:
+        try:
+            return metadata.version(name)
+        except metadata.PackageNotFoundError:
+            continue
+    return "not detected"
+
+
+def command_version(command):
+    try:
+        result = subprocess.run(command, check=True, capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return "not detected"
+    output = (result.stdout or result.stderr).strip().splitlines()
+    return output[-1] if output else "not detected"
+
+
+def conda_package_version(package_name):
+    records = sorted((Path(sys.prefix) / "conda-meta").glob(f"{package_name}-*.json"))
+    for record in records:
+        try:
+            value = json.loads(record.read_text()).get("version")
+        except (OSError, ValueError):
+            continue
+        if value:
+            return str(value)
+    return "not detected"
+
+
+def scientific_software_record(engine_version="not recorded"):
+    """Capture software that can change scientific run outputs.
+
+    Report-generation packages are recorded later by the PDF generator.  This
+    record stays with the study so regenerating a PDF in a newer environment
+    cannot rewrite the historical control-to-new-run comparison.
+    """
+    openbabel = command_version(["obabel", "-V"])
+    if openbabel.startswith("Open Babel "):
+        openbabel = openbabel.removeprefix("Open Babel ").split()[0]
+    return {
+        "docking_universal": package_version(),
+        "python": sys.version.split()[0],
+        "rdkit": installed_version("rdkit", "rdkit-pypi"),
+        "molscrub": installed_version("molscrub"),
+        "meeko": installed_version("meeko"),
+        "pdbfixer": installed_version("pdbfixer"),
+        "fpocket": conda_package_version("fpocket"),
+        "openbabel": openbabel,
+        "plip": installed_version("plip"),
+        "engine_version": engine_version,
+    }
 
 
 def safe_id(value, fallback="compound"):
@@ -1199,7 +1254,7 @@ def parse_args():
     parser.add_argument("--review-pockets", action="store_true", help="open the prepared exploratory cavity scene in PyMOL before docking")
     parser.add_argument("--pymol", default="pymol", help="PyMOL executable for --review-pockets")
     parser.add_argument("--cavity-mode", choices=("1", "2", "3"), default="1", help="ligand-free fpocket mode: conservative (default), expanded, or permissive")
-    parser.add_argument("--max-pockets", type=int, default=5, help="maximum ligand-free pockets to retain")
+    parser.add_argument("--max-pockets", type=int, default=3, help="maximum ligand-free pockets to retain")
     parser.add_argument("--center-mode", choices=("deepest", "centroid"), default="centroid", help="ligand-free cavity center strategy")
     parser.add_argument("--plan-only", action="store_true", help="validate/split inputs and write a study plan without docking")
     parser.add_argument("--stop-on-error", action="store_true", help="stop the library at the first failed compound")
@@ -1217,6 +1272,8 @@ def main():
         mode = choose_mode()
         if not mode:
             raise SystemExit("Invalid workflow selection")
+    if mode == "exploratory" and args.max_pockets < 3:
+        raise SystemExit("--max-pockets must be at least 3 for exploratory pocket review.")
     if mode == "screen":
         try:
             if not args.protocol:
@@ -1370,6 +1427,12 @@ def main():
             for path in (study / "control").glob("**/protocol.json")
         ]
         control_approved = any(protocol.get("unknown_docking_allowed") for protocol in completed_protocols)
+        control_software = scientific_software_record()
+        protocol_software = next(
+            (protocol.get("software", {}) for protocol in completed_protocols if protocol.get("software")),
+            {},
+        )
+        control_software.update({key: value for key, value in protocol_software.items() if value})
         control_study_manifest = {
             "schema_name": "docking-universal-study", "schema_version": 1,
             "docking_universal_version": package_version(),
@@ -1383,6 +1446,7 @@ def main():
             "approved_protocol_count": sum(
                 bool(protocol.get("unknown_docking_allowed")) for protocol in completed_protocols
             ),
+            "scientific_software": control_software,
         }
         (study / "study_manifest.json").write_text(json.dumps(control_study_manifest, indent=2) + "\n")
         report_dir = write_reports(study, control_study_manifest, [])
@@ -1552,6 +1616,9 @@ def main():
             },
             "protocol_validation_status": "Configured exploratory protocol; not evaluated by bound-ligand control",
         })
+    manifest["scientific_software"] = scientific_software_record(
+        manifest.get("configured_engine_version", "not recorded")
+    )
     (study / "study_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
     failures = 0
@@ -1604,6 +1671,15 @@ def main():
         manifest["completion_status"] = "COMPLETED_WITH_WARNINGS"
     else:
         manifest["completion_status"] = "COMPLETED"
+    completed_run_manifest = next(
+        study.glob("compounds/*/seed_*/docking/run_manifest.tsv"), None
+    )
+    completed_engine_version = (
+        read_key_value_tsv(completed_run_manifest).get("engine_version")
+        if completed_run_manifest else None
+    )
+    if completed_engine_version:
+        manifest["scientific_software"]["engine_version"] = completed_engine_version
     (study / "study_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     report_dir = write_reports(study, manifest, compounds)
     print(f"\nStudy complete: {study}")

@@ -109,6 +109,12 @@ def cavity_artifacts(study):
         "**/cavity/pocket_selection_diagnostics.tsv",
     ])
     if not diagnostics:
+        summary = read_json(study / "report" / "study_summary.json")
+        box = Path(str(summary.get("configured_locked_inputs", {}).get("box", ""))).expanduser()
+        candidate = box.parent / "pocket_selection_diagnostics.tsv"
+        if candidate.is_file():
+            diagnostics = candidate
+    if not diagnostics:
         return None, None, None
     manifest = read_key_value_tsv(first(study, [
         "compounds/*/seed_*/docking/run_manifest.tsv", "**/docking/run_manifest.tsv",
@@ -130,29 +136,32 @@ def plot_cavity_selection(diagnostics, selected_config, output):
     import matplotlib.pyplot as plt
 
     with Path(diagnostics).open(newline="") as handle:
-        rows = list(csv.DictReader(handle, delimiter="\t"))
+        selected_rows = list(csv.DictReader(handle, delimiter="\t"))
+    rows = [row for row in selected_rows if row.get("rank_score") not in {None, "", "NA"}]
     if not rows:
         return False
     selected_pocket = None
     match = __import__("re").search(r"pocket(\d+)", selected_config or "", __import__("re").I)
     if match:
-        retained_rows = [row for row in rows if row.get("decision") == "selected"]
+        retained_rows = [row for row in selected_rows if row.get("decision") == "selected"]
         selected_index = int(match.group(1)) - 1
         if selected_index < len(retained_rows):
             selected_pocket = retained_rows[selected_index].get("pocket_file")
-    ranks = [int(row.get("rank_order", index + 1)) for index, row in enumerate(rows)]
-    scores = [float(row.get("score", "nan")) for row in rows]
+    # Panel A records every eligible cavity candidate using the same weighted
+    # priority that selects the first docking box. Panel B is intentionally
+    # limited to the retained review candidates.
+    rows.sort(key=lambda row: int(row.get("rank_order", 999999)))
+    ranks = [int(row["rank_order"]) for row in rows]
+    scores = [float(row["rank_score"]) for row in rows]
     retained_palette = ["#1f77b4", "#d9a400", "#d627c1", "#00a6b2", "#f28e2b", "#9467bd", "#fa8072"]
-    colors, retained_index = [], 0
-    for row in rows:
+    retained_colors, retained_index = {}, 0
+    for row in selected_rows:
         if row.get("decision") != "selected":
-            colors.append("#b8c0c8")
             continue
-        if row.get("pocket_file") == selected_pocket:
-            colors.append("#d62728")
-        else:
-            colors.append(retained_palette[retained_index % len(retained_palette)])
+        pocket = row.get("pocket_file")
+        retained_colors[pocket] = "#d62728" if pocket == selected_pocket else retained_palette[retained_index % len(retained_palette)]
         retained_index += 1
+    colors = [retained_colors.get(row.get("pocket_file"), "#b8c0c8") for row in rows]
     fig, ax = plt.subplots(figsize=(10.5, 6.2))
     ax.scatter(ranks, scores, c=colors, s=105, edgecolor="black", linewidth=.6, zorder=3)
     for rank, score, row in zip(ranks, scores, rows):
@@ -164,15 +173,22 @@ def plot_cavity_selection(diagnostics, selected_config, output):
                 arrowprops=dict(arrowstyle="->", color="#d62728"),
             )
     ax.set_xticks(ranks)
-    ax.set_xlim(min(ranks) - 0.25, max(ranks) + 0.25)
-    ax.set_xlabel("Candidate evaluation order (1 = highest composite rank)", fontsize=14)
-    ax.set_ylabel("fpocket score", fontsize=14)
-    ax.set_title("Ligand-free cavity candidates and selected docking region", fontsize=16)
+    ax.set_xlim(min(ranks) - 0.4, max(ranks) + 0.4)
+    # Retained pockets in Panel B must all remain visible in Panel A.  In
+    # particular, the highest fpocket score can otherwise sit on or just above
+    # Matplotlib's automatic upper boundary and appear to be absent.
+    if scores:
+        span = max(scores) - min(scores)
+        margin = max(0.01, span * 0.12)
+        ax.set_ylim(min(scores) - margin, max(scores) + margin)
+    ax.set_xlabel("candidate priority order", fontsize=14)
+    ax.set_ylabel("weighted fpocket composite priority", fontsize=14)
+    ax.set_title("Eligible cavity candidates and selected docking region", fontsize=16)
     ax.grid(alpha=.25)
     ax.tick_params(labelsize=11)
     ax.text(
-        .98, .97, "Colors match Panel B\nRed = selected docking box\nGray = skipped overlapping candidate",
-        transform=ax.transAxes, ha="right", va="top", fontsize=10,
+        .98, .03, "Colors match Panel B\nRed = selected docking box\nGray = not retained for review",
+        transform=ax.transAxes, ha="right", va="bottom", fontsize=10,
         bbox=dict(fc="white", ec="0.6", alpha=.95),
     )
     fig.tight_layout()
@@ -209,6 +225,7 @@ def render_cavity_scene(scene, output, session, pymol, overview=False):
     wrapper.write_text(Path(scene).read_text(errors="replace") + "\n" + "\n".join([
         "bg_color white",
         "set ray_opaque_background, off", "set depth_cue, 0", *view_commands,
+        "hide sticks, (nearby_residues and hydro and neighbor elem C)",
         f"png {output_arg}, 1800, 1200, dpi=220, ray=1",
         f"save {session_arg}", "quit",
     ]) + "\n")
@@ -221,7 +238,7 @@ def render_cavity_scene(scene, output, session, pymol, overview=False):
 
 
 def render_all_cavity_candidates(diagnostics, selected_config, output, session, pymol):
-    """Show every retained non-overlapping pocket on the complete receptor."""
+    """Show the three highest-ranked retained pockets on the complete receptor."""
     if not pymol:
         return False
     receptor = first(diagnostics.parent.parent, ["receptor/*.pdb"])
@@ -229,11 +246,13 @@ def render_all_cavity_candidates(diagnostics, selected_config, output, session, 
         return False
     with Path(diagnostics).open(newline="") as handle:
         retained = [row for row in csv.DictReader(handle, delimiter="\t") if row.get("decision") == "selected"]
+    retained.sort(key=lambda row: int(row.get("rank_order", 999999)))
     if not retained:
         return False
     match = __import__("re").search(r"pocket(\d+)", selected_config or "", __import__("re").I)
     selected_index = int(match.group(1)) - 1 if match else 0
     selected_file = retained[selected_index].get("pocket_file") if selected_index < len(retained) else retained[0].get("pocket_file")
+    retained = retained[:3]
     palette = ["marine", "gold", "magenta", "cyan", "orange", "violet", "salmon"]
     lines = [
         "reinitialize", f'load "{receptor.resolve()}", receptor', "hide everything, all",
@@ -251,6 +270,7 @@ def render_all_cavity_candidates(diagnostics, selected_config, output, session, 
         ]
     lines += [
         "bg_color white", "set ray_opaque_background, off", "set depth_cue, 0",
+        "hide sticks, (nearby_residues and hydro and neighbor elem C)",
         "orient receptor", "zoom receptor, 8",
         f"png {output.resolve()}, 1800, 1200, dpi=220, ray=1",
         f"save {session.resolve()}", "quit",
@@ -372,6 +392,38 @@ def retained_cluster_representatives(analysis):
     return representatives
 
 
+def materialize_cluster_representatives(analysis, rows, report, compound_id):
+    """Return report-local SDFs for selected clusters, recovering pruned files.
+
+    Compact workflows may retain interaction files for fewer than three
+    clusters, even though ``all_poses.sdf`` still retains every clustered pose.
+    The report's A/B figure must nevertheless show the same selected clusters
+    as Panel A, so recover their representatives into the report directory.
+    """
+    from rdkit import Chem
+
+    recovered = retained_cluster_representatives(analysis)
+    paths = []
+    for row in rows[:3]:
+        try:
+            cluster_id = int(row["cluster_id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        source = analysis / f"cluster_{cluster_id:03d}" / "representative.sdf"
+        if source.is_file():
+            paths.append(source)
+            continue
+        molecule = recovered.get(cluster_id)
+        if molecule is None:
+            continue
+        destination = report / f"{compound_id}_cluster_{cluster_id:03d}_representative.sdf"
+        writer = Chem.SDWriter(str(destination))
+        writer.write(molecule)
+        writer.close()
+        paths.append(destination)
+    return paths
+
+
 def plot_clusters(analysis, output, reference_sdf=None, control_label=None):
     import math
     import matplotlib
@@ -441,23 +493,49 @@ def plot_clusters(analysis, output, reference_sdf=None, control_label=None):
     fig.tight_layout(rect=[.04, .06, .99, .97])
     fig.savefig(output, dpi=240)
     plt.close(fig)
+    # Keep a tabular record of exactly the values drawn in the cluster plot so
+    # PDF tables cannot silently diverge from their corresponding figure.
+    with output.with_suffix(".csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=[
+            "energy_rank", "cluster_id", "best_energy_kcal_per_mol",
+            "rmsd_angstrom", "pose_count",
+        ])
+        writer.writeheader()
+        for (row, _), rmsd in zip(entries, rmsds):
+            writer.writerow({
+                "energy_rank": row.get("energy_rank", ""),
+                "cluster_id": row.get("cluster_id", ""),
+                "best_energy_kcal_per_mol": row.get("best_energy_kcal_per_mol", ""),
+                "rmsd_angstrom": f"{rmsd:.6f}",
+                "pose_count": row.get("pose_count", ""),
+            })
     return True
 
 
-def render_overlay(receptor, ligands, colors, output, session, pymol):
+def render_overlay(receptor, ligands, colors, output, session, pymol, ligand_surfaces=False):
     if not pymol or not receptor or not Path(receptor).is_file() or any(not Path(path).is_file() for path in ligands):
         return False
     pml = output.with_suffix(".pml")
     objects = []
-    lines = ["reinitialize", f'load "{Path(receptor).resolve()}", receptor', "hide everything, all"]
+    lines = [
+        "reinitialize", f'load "{Path(receptor).resolve()}", receptor', "hide everything, all",
+        "remove (receptor and polymer.protein and hydro and neighbor elem C)",
+    ]
     for index, (ligand, color) in enumerate(zip(ligands, colors), start=1):
         obj = f"report_ligand_{index}"
         objects.append(obj)
-        lines += [f'load "{Path(ligand).resolve()}", {obj}', f"show sticks, {obj}", f"color {color}, {obj} and elem C", f"util.cnc {obj}"]
+        lines += [f'load "{Path(ligand).resolve()}", {obj}', f"color {color}, {obj} and elem C", f"util.cnc {obj}"]
+        if ligand_surfaces:
+            lines += [f"show surface, {obj}", f"set transparency, 0.20, {obj}"]
+        else:
+            lines += [f"show sticks, {obj}"]
     selection = " or ".join(objects)
     lines += [
         f"select nearby_residues, byres (receptor within 5 of ({selection}))",
         "show sticks, nearby_residues", "color gray60, nearby_residues",
+        # Keep the pocket readable without changing the receptor used for
+        # docking or interaction analysis. Polar hydrogens remain visible.
+        "hide sticks, (nearby_residues and hydro and neighbor elem C)",
         "set stick_radius, 0.18", "set ray_opaque_background, off", "bg_color white",
         f"orient {selection}", f"zoom {selection}, 8",
         f"png {output.resolve()}, 1800, 1200, dpi=220, ray=1",
@@ -788,6 +866,9 @@ def combine_panels(panel_a, panel_b, output, control=False):
     b = fit(b, right_w - 70, 700)
     canvas = Image.new("RGB", (canvas_w, canvas_h), "white")
     a_x, a_y = margin + (left_w - a.width) // 2, margin + label_h
+    # Preserve the approved compact control-panel spacing.  The final
+    # equal-padding crop below centers the complete A/B group on the page;
+    # centering must not be achieved by spreading the panels apart.
     b_x = margin + left_w + gap + (right_w - b.width) // 2 - (45 if control else 0)
     b_y = a_y + (a.height - b.height) // 2
     canvas.paste(a, (a_x, a_y))
@@ -799,7 +880,17 @@ def combine_panels(panel_a, panel_b, output, control=False):
     draw.text((b_x, 18), "B", fill="black", font=font)
     content = ImageChops.difference(canvas, Image.new("RGB", canvas.size, "white")).getbbox()
     if content:
-        canvas = canvas.crop((0, 0, canvas.width, min(canvas.height, content[3] + 35)))
+        # Trim the composite to equal visible padding on every horizontal side.
+        # ReportLab centers the resulting image frame; retaining the original
+        # 2400 px canvas here made unequal internal whitespace look like a page-
+        # placement error even when the frame itself was mathematically centered.
+        side_pad = 35
+        canvas = canvas.crop((
+            max(0, content[0] - side_pad),
+            0,
+            min(canvas.width, content[2] + side_pad),
+            min(canvas.height, content[3] + 35),
+        ))
     canvas.save(output, quality=95, dpi=(220, 220))
     return True
 
@@ -822,19 +913,25 @@ def combine_cluster_snapshots(analysis, rows, output):
         return False
 
     font_path = Path("/System/Library/Fonts/Helvetica.ttc")
-    label_font = ImageFont.truetype(str(font_path), 42) if font_path.is_file() else ImageFont.load_default()
-    caption_font = ImageFont.truetype(str(font_path), 30) if font_path.is_file() else ImageFont.load_default()
-    cell_w, cell_h, image_h = 760, 610, 500
+    label_font = ImageFont.truetype(str(font_path), 84) if font_path.is_file() else ImageFont.load_default()
+    caption_font = ImageFont.truetype(str(font_path), 60) if font_path.is_file() else ImageFont.load_default()
+    cell_w, cell_h, image_h = 1800, 1260, 1200
     if len(entries) == 1:
-        canvas_w, canvas_h = 1400, 920
+        canvas_w, canvas_h = 1400, 970
         positions = [(175, 70)]
         cell_w, cell_h, image_h = 1050, 780, 660
     elif len(entries) == 2:
-        canvas_w, canvas_h = 1600, 660
-        positions = [(30, 30), (810, 30)]
+        canvas_w, canvas_h = 3772, 1390
+        positions = [(10, 30), (1930, 30)]
     else:
-        canvas_w, canvas_h = 2400, 660
-        positions = [(30, 30), (820, 30), (1610, 30)]
+        # Three selected clusters need enough area for inspection.  Put two
+        # panels across the top and the third beneath them rather than making
+        # three unreadably narrow horizontal thumbnails.
+        # The 16 px border expands each 1800 px panel to 1832 px.  Use the
+        # same 88 px frame-to-frame spacing horizontally and vertically.
+        canvas_w, canvas_h = 3772, 2720
+        image_h = 1200
+        positions = [(10, 30), (1930, 30), (970, 1350)]
     canvas = Image.new("RGB", (canvas_w, canvas_h), "white")
     draw = ImageDraw.Draw(canvas)
     panel_letters = "ABC"
@@ -843,21 +940,29 @@ def combine_cluster_snapshots(analysis, rows, output):
         snapshot = Image.open(source).convert("RGB")
         content = ImageChops.difference(snapshot, Image.new("RGB", snapshot.size, "white")).getbbox()
         if content:
-            pad = 28
+            pad = 32
             snapshot = snapshot.crop((
                 max(0, content[0] - pad), max(0, content[1] - pad),
                 min(snapshot.width, content[2] + pad), min(snapshot.height, content[3] + pad),
             ))
-        snapshot.thumbnail((cell_w - 36, image_h - 24), Image.Resampling.LANCZOS)
+        # Fill the wide report panel instead of preserving the source aspect
+        # ratio and leaving large horizontal white bands.
+        inner_w = int((cell_w - 36) * 0.92)
+        inner_h = int((image_h - 24) * 0.92)
+        crop_center = (0.65, 0.5) if index == 1 else (0.5, 0.5)
+        snapshot = ImageOps.fit(
+            snapshot, (inner_w, inner_h),
+            method=Image.Resampling.LANCZOS, centering=crop_center,
+        )
         frame = Image.new("RGB", (cell_w, image_h), "white")
         frame.paste(snapshot, ((cell_w - snapshot.width) // 2, (image_h - snapshot.height) // 2))
-        frame = ImageOps.expand(frame, border=7, fill=color)
+        frame = ImageOps.expand(frame, border=16, fill=color)
         canvas.paste(frame, (x, y))
-        draw.text((x + 16, y + 12), panel_letters[index], fill=color, font=label_font)
+        draw.text((x + 32, y + 28), panel_letters[index], fill=color, font=label_font)
         score = row.get("best_energy_kcal_per_mol", "NA")
         caption = f"Energy rank {row.get('energy_rank', index + 1)} | Cluster {row.get('cluster_id', 'NA')} | Vina {score} kcal/mol"
         bounds = draw.textbbox((0, 0), caption, font=caption_font)
-        draw.text((x + (cell_w - (bounds[2] - bounds[0])) / 2, y + image_h + 28), caption, fill=color, font=caption_font)
+        draw.text((x + (cell_w - (bounds[2] - bounds[0])) / 2, y + image_h + 48), caption, fill=color, font=caption_font)
         sources.append(str(source.resolve()))
     output.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(output, dpi=(220, 220))
@@ -945,9 +1050,13 @@ def build_compound_figures(study, pymol, plip2d):
         if not plot_clusters(analysis, panel_a):
             continue
         selected = rows[:3]
-        ligands = [analysis / f"cluster_{int(row['cluster_id']):03d}" / "representative.sdf" for row in selected]
+        # Keep Panel B structurally synchronized with the selected clusters in
+        # Panel A even when a compact run did not preserve every cluster folder.
+        ligands = materialize_cluster_representatives(analysis, selected, report, cid)
         receptor = analysis / "receptor.pdb"
         panel_b = report / f"{cid}_panel_B_representatives.png"
+        # Docked compounds are shown as molecular sticks; only exploratory
+        # fpocket hypotheses are rendered as surfaces in their separate figure.
         render_overlay(receptor, ligands, ["red", "blue", "yellow"], panel_b, report / f"{cid}_panel_B_representatives.pse", pymol)
         combined = report / f"{cid}_panels_AB.png"
         if panel_b.is_file():
@@ -972,7 +1081,12 @@ def main():
     parser.add_argument("--plip2d-runner", type=Path, help="optional plip_to_2D direct runner")
     args = parser.parse_args()
     study = args.study.expanduser().resolve()
-    control = args.control.expanduser().resolve() if args.control else discover_control(study)
+    study_summary = read_json(study / "report" / "study_summary.json")
+    workflow_is_exploratory = (
+        study_summary.get("workflow") == "exploratory"
+        or study_summary.get("study_status") == "EXPLORATORY_NO_CONTROL"
+    )
+    control = args.control.expanduser().resolve() if args.control and not workflow_is_exploratory else (None if workflow_is_exploratory else discover_control(study))
     pymol = pymol_executable(args.pymol)
     plip2d = plip2d_executable(args.plip2d_runner)
     plip = plip_executable()
