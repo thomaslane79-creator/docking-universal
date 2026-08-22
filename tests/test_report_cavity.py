@@ -12,6 +12,11 @@ SPEC.loader.exec_module(REPORT)
 
 
 class CavityReportTests(unittest.TestCase):
+    def test_control_appendix_detail_break_is_conditional(self):
+        flowable = REPORT.docking_detail_section_break()
+        self.assertEqual(flowable.__class__.__name__, "CondPageBreak")
+        self.assertAlmostEqual(flowable.height, 7.6 * 72)
+
     def test_package_version_uses_source_or_installed_version_file(self):
         expected = (SCRIPT.parent.parent / "VERSION").read_text().strip()
         self.assertEqual(REPORT.package_version(), expected)

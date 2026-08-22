@@ -33,6 +33,12 @@ def package_version():
             pass
     return "unknown"
 
+def docking_detail_section_break():
+    """Reserve a full detail panel without forcing a blank fresh page."""
+    from reportlab.lib.units import inch
+    from reportlab.platypus import CondPageBreak
+    return CondPageBreak(7.6 * inch)
+
 def read_key_value_tsv(path):
     data = {}
     if not path:
@@ -1280,7 +1286,12 @@ def main():
                 rows.append([rank,label,row.get("best_energy_kcal_per_mol","NA"),row.get("rmsd_angstrom","NA"),row.get("pose_count","NA")])
         if len(rows) > 1:
             if protocol and args.include_control_appendix:
-                story.append(PageBreak())
+                # The preceding summary panel can end exactly at a page
+                # boundary.  An unconditional PageBreak would then consume
+                # the newly opened page and leave it blank.  Reserve enough
+                # space for the cluster table and snapshot panel, but do
+                # nothing when ReportLab has already advanced to a fresh page.
+                story.append(docking_detail_section_break())
             story += [Paragraph("Clusters represented in the docking plot",styles["Heading2"]),table(rows,[.6*inch,1.65*inch,1.45*inch,1.45*inch,1.35*inch],compact=True),Spacer(1,8)]
         cluster_path = compound_root / "pose_analysis" / "cluster_summary.csv"
         snapshot_panel = first(args.study, [f"report/{cid}_top3_3d_snapshots.png"])
