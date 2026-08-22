@@ -853,19 +853,12 @@ def main():
             ["Receptor SHA-256", locked_inputs.get("receptor_sha256", "NA")],
             ["Docking box", Path(locked_inputs.get("box", "NA")).name],
             ["Docking-box SHA-256", locked_inputs.get("box_sha256", "NA")],
-            ["Docking Universal (control)", recorded_software.get("docking_universal", "not recorded")],
-            ["Python (control)", recorded_software.get("python", "not recorded")],
-            ["RDKit (control)", recorded_software.get("rdkit", "not recorded")],
-            ["MolScrub (control)", recorded_software.get("molscrub", "not recorded")],
-            ["Meeko (control)", recorded_software.get("meeko", "not recorded")],
-            ["PDBFixer (control)", recorded_software.get("pdbfixer", "not recorded")],
-            ["Docking engine (control)", f"{recorded_software.get('engine', protocol.get('engine', 'NA'))} {recorded_software.get('engine_version', 'not recorded')}"],
         ]
         if args.include_control_appendix:
             story += [
                 Paragraph("Protocol provenance", styles["Heading2"]),
                 Paragraph("This identifies the earlier control that authorized this screen. The hashes bind the report to the exact approved protocol, receptor, and docking box.", styles["BodyText"]),
-                Spacer(1,6), table(protocol_provenance, [2.55*inch,4.15*inch], compact=True), PageBreak(),
+                Spacer(1,6), table(protocol_provenance, [2.55*inch,4.15*inch], compact=True), Spacer(1,10),
             ]
     elif not workflow_is_exploratory:
         manifest_path = first(args.study,["compounds/*/seed_*/docking/run_manifest.tsv","**/docking/run_manifest.tsv"])
@@ -937,6 +930,8 @@ def main():
                     label=Paragraph(f'<font color="{cluster_colors[rank]}"><b>{label}</b></font>',styles["SmallDU"])
                 rows.append([rank,label,row.get("best_energy_kcal_per_mol","NA"),row.get("rmsd_angstrom","NA"),row.get("pose_count","NA")])
         if len(rows) > 1:
+            if protocol and args.include_control_appendix:
+                story.append(PageBreak())
             story += [Paragraph("Clusters represented in the docking plot",styles["Heading2"]),table(rows,[.6*inch,1.65*inch,1.45*inch,1.45*inch,1.35*inch],compact=True),Spacer(1,8)]
         cluster_path = compound_root / "pose_analysis" / "cluster_summary.csv"
         snapshot_panel = first(args.study, [f"report/{cid}_top3_3d_snapshots.png"])
