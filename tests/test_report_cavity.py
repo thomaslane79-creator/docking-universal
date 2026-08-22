@@ -57,6 +57,22 @@ class CavityReportTests(unittest.TestCase):
             self.assertIn("ADFRsuite", record["path"])
             self.assertTrue(record["adfr_fallback_log"].endswith("receptor_adfr_fallback.log"))
 
+    def test_receptor_preparation_record_recovers_external_preparation_route(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary = Path(temporary)
+            prepared = temporary / "prepared" / "target_receptor_prep" / "receptor"
+            prepared.mkdir(parents=True)
+            receptor = prepared / "target.pdbqt"
+            receptor.write_text("REMARK prepared receptor\n")
+            (prepared / "receptor_disulfide_retry.log").write_text("CYX retry succeeded\n")
+            study = temporary / "study"
+            manifest = study / "compounds" / "ligand" / "seed_1" / "docking" / "run_manifest.tsv"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text(f"receptor\t{receptor}\n")
+            record = REPORT.receptor_preparation_record(study)
+            self.assertIn("CYX disulfide-template retry", record["path"])
+            self.assertTrue(record["disulfide_retry_log"].endswith("receptor_disulfide_retry.log"))
+
     def test_receptor_preparation_record_includes_ccd_audit(self):
         with tempfile.TemporaryDirectory() as temporary:
             study = Path(temporary)

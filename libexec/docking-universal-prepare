@@ -1016,8 +1016,10 @@ if [ "$LIG_PRESENT" -eq 1 ]; then
 else
   MODE="${DOCKING_UNIVERSAL_CAVITY_MODE:-}"
   MAX_POCKETS="${DOCKING_UNIVERSAL_MAX_POCKETS:-}"
+  UNATTENDED_CAVITY=0
   if [ -n "$MODE" ]; then
-    [ -n "$MAX_POCKETS" ] || MAX_POCKETS=5
+    UNATTENDED_CAVITY=1
+    [ -n "$MAX_POCKETS" ] || MAX_POCKETS=3
     log "Unattended cavity settings: mode $MODE; retaining $MAX_POCKETS cavities"
   elif feedback_at_least_guided; then
     echo "fpocket cavity mode guidance:"
@@ -1032,7 +1034,14 @@ else
   fi
   [ -n "$MODE" ] || read -p "Select cavity mode [1-3]: " MODE
   echo "Number of retained cavities controls how many site hypotheses proceed to review; it does not improve fpocket ranking."
-  [ -n "${DOCKING_UNIVERSAL_MAX_POCKETS:-}" ] || read -p "How many cavities to select? " MAX_POCKETS
+  if [ "$UNATTENDED_CAVITY" -eq 0 ] && [ -z "${DOCKING_UNIVERSAL_MAX_POCKETS:-}" ]; then
+    read -p "How many cavities to select? [3] " MAX_POCKETS
+    MAX_POCKETS="${MAX_POCKETS:-3}"
+  fi
+  if ! [[ "$MAX_POCKETS" =~ ^[0-9]+$ ]] || [ "$MAX_POCKETS" -lt 3 ]; then
+    echo "Exploratory pocket review retains at least three candidates; using 3."
+    MAX_POCKETS=3
+  fi
 fi
 
 
@@ -1043,6 +1052,10 @@ if [ "$LIG_PRESENT" -eq 1 ]; then
 else
   CENTER_MODE="${DOCKING_UNIVERSAL_CENTER_MODE:-}"
   CENTROID_SEL="${DOCKING_UNIVERSAL_CENTROID_MODE:-}"
+  if [ "$UNATTENDED_CAVITY" -eq 1 ] && [ -z "$CENTER_MODE" ]; then
+    CENTER_MODE="centroid"
+    CENTROID_SEL=1
+  fi
   if [ -n "$CENTER_MODE" ]; then
     [ "$CENTER_MODE" = "deepest" ] || [ "$CENTER_MODE" = "centroid" ] || { echo "ERROR: DOCKING_UNIVERSAL_CENTER_MODE must be deepest or centroid" >&2; exit 2; }
     [ -n "$CENTROID_SEL" ] || CENTROID_SEL=1
@@ -1058,7 +1071,7 @@ else
     echo "1) deepest"
     echo "2) centroid"
   fi
-  if [ -z "${DOCKING_UNIVERSAL_CENTER_MODE:-}" ]; then
+  if [ "$UNATTENDED_CAVITY" -eq 0 ] && [ -z "${DOCKING_UNIVERSAL_CENTER_MODE:-}" ]; then
     read -p "Select center mode [1-2]: " CSEL
     [ "$CSEL" = "2" ] && CENTER_MODE="centroid" || CENTER_MODE="deepest"
   fi
@@ -1075,7 +1088,9 @@ else
   else
     echo "Centroid mode: 1) Whole protein  2) Per-chain"
   fi
-  [ -n "${DOCKING_UNIVERSAL_CENTROID_MODE:-}" ] || read -p "Select centroid mode [1-2]: " CENTROID_SEL
+  if [ "$UNATTENDED_CAVITY" -eq 0 ] && [ -z "${DOCKING_UNIVERSAL_CENTROID_MODE:-}" ]; then
+    read -p "Select centroid mode [1-2]: " CENTROID_SEL
+  fi
 
   if [ "$CENTROID_SEL" = "2" ]; then
     read PROT_CX PROT_CY PROT_CZ <<< $(
@@ -1530,6 +1545,15 @@ else
   for REC in "${SORTED_BY_RANK[@]}"; do
     ORDER=$((ORDER+1))
     IFS='|' read RANK GEOM CX CY CZ SCORE <<< "$REC"
+    # Keep a complete ranked record for the report even after the requested
+    # number of pockets has been retained.  Later candidates were not tested
+    # as additional docking boxes; they remain available for transparent
+    # comparison of the selection metric.
+    if [ "${#SORTED[@]}" -ge "$MAX_POCKETS" ]; then
+      printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\tskipped\tnot_retained_after_max_pockets\tNA\n" \
+        "$ORDER" "$(basename "$GEOM")" "$SCORE" "$RANK" "$CX" "$CY" "$CZ" >> "$SELECTION_DIAG"
+      continue
+    fi
     SKIP=0
     SKIP_REASON="selected"
     MAX_OBS_OVL="0"
@@ -1568,8 +1592,6 @@ else
       printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\tskipped\t%s\t%s\n" \
         "$ORDER" "$(basename "$GEOM")" "$SCORE" "$RANK" "$CX" "$CY" "$CZ" "$SKIP_REASON" "$MAX_OBS_OVL" >> "$SELECTION_DIAG"
     fi
-
-    [ "${#SORTED[@]}" -ge "$MAX_POCKETS" ] && break
   done
 
   log "Pocket selection diagnostics written to $SELECTION_DIAG"

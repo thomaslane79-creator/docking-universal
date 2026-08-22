@@ -1199,7 +1199,7 @@ def parse_args():
     parser.add_argument("--review-pockets", action="store_true", help="open the prepared exploratory cavity scene in PyMOL before docking")
     parser.add_argument("--pymol", default="pymol", help="PyMOL executable for --review-pockets")
     parser.add_argument("--cavity-mode", choices=("1", "2", "3"), default="1", help="ligand-free fpocket mode: conservative (default), expanded, or permissive")
-    parser.add_argument("--max-pockets", type=int, default=5, help="maximum ligand-free pockets to retain")
+    parser.add_argument("--max-pockets", type=int, default=3, help="maximum ligand-free pockets to retain")
     parser.add_argument("--center-mode", choices=("deepest", "centroid"), default="centroid", help="ligand-free cavity center strategy")
     parser.add_argument("--plan-only", action="store_true", help="validate/split inputs and write a study plan without docking")
     parser.add_argument("--stop-on-error", action="store_true", help="stop the library at the first failed compound")
@@ -1217,6 +1217,8 @@ def main():
         mode = choose_mode()
         if not mode:
             raise SystemExit("Invalid workflow selection")
+    if mode == "exploratory" and args.max_pockets < 3:
+        raise SystemExit("--max-pockets must be at least 3 for exploratory pocket review.")
     if mode == "screen":
         try:
             if not args.protocol:
