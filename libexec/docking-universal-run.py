@@ -446,12 +446,25 @@ def approved_protocols_under(path):
 def materialize_protocol(path):
     path = path.expanduser().resolve()
     if path.suffix.lower() == ".duprotocol":
+        source_name = path.name
         try:
             path = extract_bundle(path)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             raise SystemExit(f"Invalid Docking Universal protocol bundle: {exc}") from None
         print(f"Verified portable protocol bundle: {path}")
+        (path.parent.parent / ".source_protocol_filename").write_text(source_name + "\n")
     return path
+
+
+def protocol_source_filename(path):
+    """Recover the selected bundle name after materialization, or protocol.json."""
+    path = Path(path).expanduser().resolve()
+    sidecar = path.parent.parent / ".source_protocol_filename"
+    if sidecar.is_file():
+        recorded = sidecar.read_text().strip()
+        if recorded:
+            return Path(recorded).name
+    return path.name
 
 
 def offer_protocol_control(reason):
@@ -1586,8 +1599,10 @@ def main():
     }
     if mode == "screen":
         approved_record = read_json(args.protocol) or {}
+        approved_protocol_file_name = protocol_source_filename(args.protocol)
         manifest.update({
             "approved_protocol": str(args.protocol),
+            "approved_protocol_file_name": approved_protocol_file_name,
             "configured_engine": approved_record.get("engine", "vina"),
             "configured_engine_version": approved_record.get("software", {}).get("engine_version", "not recorded"),
             "configured_docking_parameters": approved_record.get("parameters", {}),
@@ -1637,7 +1652,10 @@ def main():
             "--cluster-rmsd", args.cluster_rmsd, "--non-interactive",
         ]
         if mode == "screen":
-            command += ["--protocol", args.protocol]
+            command += [
+                "--protocol", args.protocol,
+                "--protocol-source-name", approved_protocol_file_name,
+            ]
         else:
             command += [
                 "--exploratory", "--receptor", receptor_pdbqt, "--receptor-pdb", receptor_pdb,

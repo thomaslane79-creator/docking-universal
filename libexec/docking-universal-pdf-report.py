@@ -157,7 +157,7 @@ def compound_result_records(study, compounds, ligand_names):
         })
     return records
 
-def single_compound_summary_rows(result, protocol):
+def single_compound_summary_rows(result):
     """Use one result-summary format in standalone and multi-ligand reports."""
     best_score = result["best_energy_kcal_per_mol"]
     return [
@@ -171,7 +171,6 @@ def single_compound_summary_rows(result, protocol):
         ["Conformer support", result["top_cluster_conformer_support"]],
         ["Distinct retained clusters", result["cluster_count"] or "Unavailable"],
         ["Selected representatives", result["selected_representatives"]],
-        ["Scientific status", "Approved protocol reused" if protocol else "Exploratory; not validated by a bound-ligand control"],
     ]
 
 def safe_filename_component(value, fallback):
@@ -258,8 +257,35 @@ def choose_protocol(root):
         )
     return max(candidates, key=rank)
 
+def protocol_lookup_filename(study, control, protocol_path, summary):
+    """Return the exact human-usable protocol filename retained for this run."""
+    recorded = str(summary.get("approved_protocol_file_name", "")).strip()
+    if recorded:
+        return Path(recorded).name
+    for manifest_path in sorted(study.glob("compounds/*/screen_manifest.json")):
+        manifest = read_json(manifest_path)
+        recorded = str(manifest.get("protocol_source_file_name", "")).strip()
+        if recorded:
+            return Path(recorded).name
+    if control:
+        bundle_roots = [control, control.parent]
+        bundles = []
+        for root in bundle_roots:
+            bundles.extend(path for path in root.glob("*.duprotocol") if path.is_file())
+        unique = sorted({path.resolve() for path in bundles}, key=lambda path: path.stat().st_mtime)
+        if len(unique) == 1:
+            return unique[0].name
+    return protocol_path.name if protocol_path else "not recorded by this older run"
+
 def discover_control(study):
     """Recover the control root recorded by a separately launched screen."""
+    # A standalone control study retains its protocol beneath `control/`.
+    # Discover it without requiring the caller to pass the study back to itself.
+    local_control = study / "control"
+    if choose_protocol(local_control):
+        return local_control
+    if choose_protocol(study):
+        return study
     for manifest_path in sorted(study.glob("compounds/*/screen_manifest.json")):
         protocol = Path(str(read_json(manifest_path).get("protocol", ""))).expanduser()
         if not protocol.is_file():
@@ -812,7 +838,7 @@ def main():
     ap.add_argument("study", type=Path)
     ap.add_argument("--control", type=Path)
     ap.add_argument("--out", type=Path)
-    ap.add_argument("--include-control-appendix", action="store_true", help="include detailed control interactions, protocol settings, hashes, and provenance")
+    ap.add_argument("--include-control-appendix", action="store_true", help="include detailed control interactions and protocol provenance")
     args = ap.parse_args()
 
     args.study = args.study.expanduser().resolve()
@@ -840,6 +866,11 @@ def main():
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle, PageBreak, KeepTogether
 
     summary = read_json(args.study / "report" / "study_summary.json")
+    # A standalone control report is the run that established the protocol and
+    # therefore carries the full control evidence automatically.  The same
+    # conditional detail break used by combined reports prevents blank pages.
+    if summary.get("workflow") == "control":
+        args.include_control_appendix = True
     compounds = summary.get("compounds", [])
     styles = getSampleStyleSheet()
     # One spacing system is shared by every report scenario.  Scenario logic
@@ -953,7 +984,7 @@ def main():
     if study_descriptor:
         story += [Paragraph(study_descriptor, styles["Heading2"]), Spacer(1,8)]
     if cavity:
-        story += [Paragraph("Scientific status: exploratory site selection without a bound-ligand pose-recovery control", styles["BodyText"]), Spacer(1,8)]
+        story += [Paragraph("Interpretive status: exploratory site selection without a bound-ligand pose-recovery control", styles["BodyText"]), Spacer(1,8)]
     # An exploratory report begins with the pocket configuration and its A/B
     # cavity figure.  A docking-at-a-glance table before that figure implies
     # an approved protocol and reverses the actual workflow order.
@@ -964,7 +995,7 @@ def main():
     if has_docking and compounds:
         compound_results = compound_result_records(args.study, compounds, ligand_names)
         if len(compound_results) == 1:
-            at_a_glance = single_compound_summary_rows(compound_results[0], protocol)
+            at_a_glance = single_compound_summary_rows(compound_results[0])
         else:
             at_a_glance = [["Ligand", "Best Vina score", "Top cluster", "Clusters", "Status"]]
             for result in compound_results:
@@ -1018,7 +1049,7 @@ def main():
             ), Spacer(1,6),
             table([
                 ["Pocket configuration", "Recorded value"],
-                ["Scientific status", "Exploratory - not control-validated"],
+                ["Interpretive status", "Exploratory; not evaluated by a bound-ligand pose-recovery control"],
                 ["Selected docking pocket", cavity["selected_file"] or "Not resolved"],
                 ["fpocket pocket score (Figure 1A)", selected.get("score", "NA")],
                 ["Composite selection priority", selected.get("rank_score", "NA")],
@@ -1110,7 +1141,12 @@ def main():
             if control_ligand_sdf
             else protocol.get("control_evidence", {}).get("compound", "unspecified ligand")
         )
+        approval_origin = "Approved during this run" if args.include_control_appendix else "Approved previously and reused for this run"
         rows=[["Approved docking protocol","Selected value"],
+          ["Protocol file name", protocol_lookup_filename(args.study, args.control, protocol_path, summary)],
+          ["Approval provenance", approval_origin],
+          ["Control approval date (UTC)", protocol.get("created_utc", "not recorded by this older protocol")],
+          ["Prepared receptor", Path(locked_inputs.get("receptor", "NA")).name],
           ["Locked docking box / pocket",Path(locked_inputs.get("box", "NA")).name],
           ["Engine",protocol.get("engine","NA")],
           ["Tier",protocol.get("calibration_tier","NA")],
@@ -1125,7 +1161,7 @@ def main():
           ["Conformer RMSD pruning",f"{p.get('rmsd_prune_angstrom',0.75)} A"]]
         story += [
           Paragraph(f"{section_number}. Configured docking protocol", styles["Heading1"]),
-          Paragraph("This table records the reusable target-matched docking settings. Control performance is reported with the control figure; preparation, software, and provenance are reported in the final section.", styles["BodyText"]), Spacer(1,6),
+          Paragraph("This table identifies the reusable target-matched protocol, records whether it was approved during this run or reused from an earlier run, and lists its locked docking settings.", styles["BodyText"]), Spacer(1,6),
           table(rows,[2.55*inch,4.15*inch], compact=True),
         ]
         if args.include_control_appendix:
@@ -1185,22 +1221,6 @@ def main():
             story.append(PageBreak())
         elif args.include_control_appendix:
             story.append(PageBreak())
-        protocol_provenance = [
-            ["Protocol provenance", "Recorded value"],
-            ["Control approved/recorded", protocol.get("created_utc", "not recorded by this older protocol")],
-            ["Protocol file", "protocol.json within the selected control or .duprotocol bundle"],
-            ["Protocol SHA-256", sha256(protocol_path) if protocol_path else "NA"],
-            ["Prepared receptor", Path(locked_inputs.get("receptor", "NA")).name],
-            ["Receptor SHA-256", locked_inputs.get("receptor_sha256", "NA")],
-            ["Docking box", Path(locked_inputs.get("box", "NA")).name],
-            ["Docking-box SHA-256", locked_inputs.get("box_sha256", "NA")],
-        ]
-        if args.include_control_appendix:
-            story += [
-                Paragraph("Protocol provenance", styles["Heading2"]),
-                Paragraph("This identifies the earlier control that authorized this screen. The hashes bind the report to the exact approved protocol, receptor, and docking box.", styles["BodyText"]),
-                Spacer(1,6), table(protocol_provenance, [2.55*inch,4.15*inch], compact=True), Spacer(1,10),
-            ]
     elif not workflow_is_exploratory:
         manifest_path = first(args.study,["compounds/*/seed_*/docking/run_manifest.tsv","**/docking/run_manifest.tsv"])
         manifest = read_key_value_tsv(manifest_path)
@@ -1239,7 +1259,11 @@ def main():
         cid=str(compound.get("compound_id", "")); inventory_row=inventory_by_id.get(cid, {}); name=display_compound_name(compound.get("compound_name") or inventory_row.get("compound_name") or cid, inventory_row.get("source"))
         display_names[cid] = name
         if protocol:
-            scope_text = "Docking used the approved target-matched protocol shown above."
+            scope_text = (
+                "Docking used the target-matched protocol established and approved by the control reported above."
+                if args.include_control_appendix
+                else "Docking used the existing approved target-matched protocol shown above."
+            )
         else:
             scope_text = "Docking used the configured protocol shown above. No target-specific bound-ligand control was supplied, so pose-recovery performance for this target was not evaluated."
         result_subject = f"Target: {target_name} | Ligand: {name}" if protocol else f"Ligand: {name}"
@@ -1248,7 +1272,11 @@ def main():
             ligand_result = compound_results_by_id[cid]
             story += [
                 Paragraph("Summary of docking results", styles["Heading2"]),
-                table(single_compound_summary_rows(ligand_result, protocol), [2.55*inch, 4.15*inch], compact=True),
+                table(
+                    single_compound_summary_rows(ligand_result),
+                    [2.55*inch, 4.15*inch],
+                    compact=True,
+                ),
                 Spacer(1,8),
             ]
         compound_root = args.study / "compounds" / cid

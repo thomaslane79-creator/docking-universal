@@ -48,6 +48,7 @@ def main():
     parser.add_argument("--box", type=Path, help="override stored box path; hash must still match")
     parser.add_argument("--engine-command")
     parser.add_argument("--engine-env")
+    parser.add_argument("--protocol-source-name", help=argparse.SUPPRESS)
     parser.add_argument("--non-interactive", action="store_true")
     parser.add_argument("--check-only", action="store_true", help="validate protocol, ligand, receptor, and box without docking")
     parser.add_argument("--analysis", choices=("none", "summary", "representatives"), default="representatives", help="none: docking only; summary: cluster tables; representatives: tables plus selected PLIP/PyMOL output (default)")
@@ -84,6 +85,7 @@ def main():
 
     if args.protocol:
         protocol_path = args.protocol.expanduser().resolve()
+        protocol_source_file_name = args.protocol_source_name or protocol_path.name
         if not protocol_path.is_file():
             parser.error("protocol file does not exist")
         if protocol_path.suffix.lower() == ".duprotocol":
@@ -233,6 +235,7 @@ def main():
         "workflow": "target_locked_unknown_docking" if protocol_path else "exploratory_unknown_docking",
         "completion_status": workflow_status,
         "protocol": str(protocol_path) if protocol_path else None,
+        "protocol_source_file_name": protocol_source_file_name if protocol_path else None,
         "protocol_sha256": sha256(protocol_path) if protocol_path else None,
         "ligand": str(ligand),
         "ligand_sha256": sha256(ligand),
