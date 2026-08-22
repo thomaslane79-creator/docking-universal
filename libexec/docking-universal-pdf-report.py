@@ -529,7 +529,7 @@ def main():
     compounds = summary.get("compounds", [])
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name="SmallDU", parent=styles["BodyText"], fontSize=8, leading=10))
-    styles.add(ParagraphStyle(name="ReferenceDU", parent=styles["BodyText"], fontSize=7.5, leading=7.5))
+    styles.add(ParagraphStyle(name="ReferenceDU", parent=styles["BodyText"], fontSize=7, leading=7))
     styles.add(ParagraphStyle(name="CaptionDU", parent=styles["Heading2"], alignment=TA_CENTER, fontSize=11, leading=14))
 
     def image(path, width=7.0, height=4.5):
@@ -601,7 +601,13 @@ def main():
         study_descriptor = f"Target: {target_name}"
 
     cavity = discover_cavity_record(args.study) if workflow_is_exploratory or not protocol else None
-    has_docking = bool(protocol or title_manifest_path or compounds)
+    # Inventories and study manifests describe intended inputs, not completed
+    # docking.  Require retained pose-cluster results before adding docking
+    # sections to a preparation-only report.
+    has_docking = any(
+        path.is_file() and path.stat().st_size > 0
+        for path in args.study.glob("compounds/*/pose_analysis/cluster_summary.csv")
+    )
     report_title = (
         "Docking Universal - Ligand-Free Cavity and Docking Report" if cavity and has_docking
         else "Docking Universal - Ligand-Free Cavity Report" if cavity
@@ -746,7 +752,7 @@ def main():
             Spacer(1,10), Paragraph("Scientific and software references", styles["Heading2"]),
         ]
         for index, reference in enumerate(references, start=1):
-            story += [Paragraph(f"{index}. {reference['citation']} <link href=\"{reference['url']}\"><font color=\"#1f4e79\">{reference['url']}</font></link>", styles["ReferenceDU"]), Spacer(1,1)]
+            story += [Paragraph(f"{index}. {reference['citation']} <link href=\"{reference['url']}\"><font color=\"#1f4e79\">{reference['url']}</font></link>", styles["ReferenceDU"])]
         SimpleDocTemplate(str(out),pagesize=letter,leftMargin=.65*inch,rightMargin=.65*inch,topMargin=.6*inch,bottomMargin=.6*inch,title="Docking Universal ligand-free cavity report").build(story)
         print(f"PDF report: {out}")
         return
@@ -1079,7 +1085,7 @@ def main():
             Paragraph(
                 f"{index}. {reference['citation']} <link href=\"{reference['url']}\"><font color=\"#1f4e79\">{reference['url']}</font></link>",
                 styles["ReferenceDU"],
-            ), Spacer(1,1),
+            ),
         ]
 
     SimpleDocTemplate(str(out),pagesize=letter,leftMargin=.65*inch,rightMargin=.65*inch,topMargin=.6*inch,bottomMargin=.6*inch,title="Docking Universal report").build(story)
