@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Generate the polished Docking Universal PDF from completed run artifacts."""
-import argparse, csv, hashlib, json, subprocess, sys
+import argparse, csv, hashlib, json, re, subprocess, sys
 from importlib import metadata
 from pathlib import Path
 
@@ -115,6 +115,59 @@ def display_compound_name(name, source=None):
     descriptive = re.sub(r"(?i)_pubchem(?:_?\d+)?$", "", stem).replace("_", " ").strip()
     return descriptive.title() if descriptive and not descriptive.isdigit() else (value or "Ligand")
 
+def compound_result_records(study, compounds, ligand_names):
+    """Read the retained cluster result independently for every ligand."""
+    records = []
+    for index, compound in enumerate(compounds):
+        cid = str(compound.get("compound_id", ""))
+        name = (
+            ligand_names[index]
+            if index < len(ligand_names)
+            else display_compound_name(compound.get("compound_name"), cid)
+        )
+        cluster_path = study / "compounds" / cid / "pose_analysis" / "cluster_summary.csv"
+        try:
+            with cluster_path.open(newline="") as handle:
+                clusters = list(csv.DictReader(handle))
+        except OSError:
+            clusters = []
+        clusters.sort(key=lambda row: int(row.get("energy_rank", 999999) or 999999))
+        leading = clusters[0] if clusters else {}
+        records.append({
+            "compound_id": cid,
+            "name": name,
+            "status": str(compound.get("status", "Unavailable") or "Unavailable"),
+            "best_energy_kcal_per_mol": str(
+                leading.get("best_energy_kcal_per_mol", "Unavailable") or "Unavailable"
+            ),
+            "top_cluster": str(leading.get("cluster_id", "Unavailable") or "Unavailable"),
+            "top_cluster_population": str(leading.get("pose_count", "Unavailable") or "Unavailable"),
+            "top_cluster_seed_support": str(leading.get("seed_support", "Unavailable") or "Unavailable"),
+            "top_cluster_conformer_support": str(leading.get("conformer_support", "Unavailable") or "Unavailable"),
+            "cluster_count": len(clusters),
+            "selected_representatives": str(
+                compound.get("selected_representatives", "Unavailable") or "Unavailable"
+            ),
+        })
+    return records
+
+def single_compound_summary_rows(result, protocol):
+    """Use one result-summary format in standalone and multi-ligand reports."""
+    best_score = result["best_energy_kcal_per_mol"]
+    return [
+        ["Summary of docking results", "Recorded result"],
+        ["Ligand docked", result["name"]],
+        ["Completion status", result["status"]],
+        ["Best retained Vina score", f"{best_score} kcal/mol" if best_score != "Unavailable" else best_score],
+        ["Top-ranked cluster", result["top_cluster"]],
+        ["Top-cluster population", result["top_cluster_population"]],
+        ["Independent-seed support", result["top_cluster_seed_support"]],
+        ["Conformer support", result["top_cluster_conformer_support"]],
+        ["Distinct retained clusters", result["cluster_count"] or "Unavailable"],
+        ["Selected representatives", result["selected_representatives"]],
+        ["Scientific status", "Approved protocol reused" if protocol else "Exploratory; not validated by a bound-ligand control"],
+    ]
+
 def safe_filename_component(value, fallback):
     import re
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value).strip()).strip("._-")
@@ -217,6 +270,123 @@ def installed_version(*distribution_names):
         except metadata.PackageNotFoundError:
             continue
     return "not detected"
+
+
+SCIENTIFIC_VERSION_LABELS = {
+    "Docking Universal": "docking_universal",
+    "Python": "python",
+    "RDKit": "rdkit",
+    "MolScrub": "molscrub",
+    "Meeko": "meeko",
+    "PDBFixer": "pdbfixer",
+    "AutoDock Vina": "engine_version",
+}
+
+SCIENTIFIC_SOFTWARE_KEYS = {
+    "Docking Universal": "docking_universal",
+    "Python": "python",
+    "RDKit": "rdkit",
+    "MolScrub": "molscrub",
+    "Meeko": "meeko",
+    "PDBFixer": "pdbfixer",
+    "fpocket": "fpocket",
+    "Open Babel": "openbabel",
+    "PLIP": "plip",
+    "AutoDock Vina": "engine_version",
+}
+
+
+def retained_artifact_versions(study):
+    """Recover historical tool versions embedded in retained result files.
+
+    Older study manifests did not record Open Babel or PLIP explicitly, but
+    their generated artifacts do: Open Babel writes its version into the PDB
+    AUTHOR record and PLIP writes ``plipversion`` into report.xml.  Use these
+    immutable run products instead of the environment regenerating the PDF.
+    """
+    found = {"openbabel": set(), "plip": set()}
+    for path in sorted(study.glob("**/interactions/*.pdb")):
+        try:
+            header = "\n".join(path.read_text(errors="replace").splitlines()[:20])
+        except OSError:
+            continue
+        match = re.search(r"GENERATED BY OPEN BABEL\s+([0-9][^\s]*)", header, re.IGNORECASE)
+        if match:
+            found["openbabel"].add(match.group(1))
+    for path in sorted(study.glob("**/interactions/report.xml")):
+        try:
+            xml = path.read_text(errors="replace")
+        except OSError:
+            continue
+        match = re.search(r"<plipversion>\s*([^<]+?)\s*</plipversion>", xml, re.IGNORECASE)
+        if match:
+            found["plip"].add(match.group(1).strip())
+    recovered = {}
+    for key, versions in found.items():
+        if len(versions) == 1:
+            recovered[key] = next(iter(versions))
+        elif len(versions) > 1:
+            recovered[key] = "multiple retained versions: " + ", ".join(sorted(versions))
+    return recovered
+
+
+def retained_scientific_versions(study, summary=None, docking_manifest=None):
+    """Read software versions that belong to the scientific run.
+
+    New studies store these values directly.  Legacy studies retain at least
+    the Docking Universal and Vina versions.  A prior report comparison is a
+    compatible migration source only when its new-run Docking Universal value
+    agrees with the immutable study summary; this rejects stale reports made
+    later in a different environment.
+    """
+    summary = summary or read_json(study / "report" / "study_summary.json")
+    docking_manifest = docking_manifest or read_key_value_tsv(first(study, [
+        "compounds/*/seed_*/docking/run_manifest.tsv", "**/docking/run_manifest.tsv",
+    ]))
+    retained = dict(summary.get("scientific_software", {}) or {})
+    if not retained:
+        previous = read_json(study / "report" / "software_versions_and_references.json")
+        previous_software = {
+            item.get("software"): item.get("version")
+            for item in previous.get("software", [])
+        }
+        entries = (previous.get("control_to_new_run_version_check") or {}).get("entries", [])
+        by_label = {entry.get("software"): entry.get("new_run_version") for entry in entries}
+        expected_workflow = str(summary.get("docking_universal_version", "") or "")
+        if expected_workflow and str(by_label.get("Docking Universal", "")) == expected_workflow:
+            retained.update({
+                key: by_label[label]
+                for label, key in SCIENTIFIC_VERSION_LABELS.items()
+                if by_label.get(label)
+            })
+        elif expected_workflow and str(previous_software.get("Docking Universal", "")) == expected_workflow:
+            retained.update({
+                key: previous_software[label]
+                for label, key in SCIENTIFIC_SOFTWARE_KEYS.items()
+                if previous_software.get(label)
+            })
+    for key, version in retained_artifact_versions(study).items():
+        if str(retained.get(key, "") or "").lower() in {
+            "", "unknown", "not recorded", "not detected",
+        }:
+            retained[key] = version
+    retained["docking_universal"] = str(
+        summary.get("docking_universal_version")
+        or retained.get("docking_universal")
+        or "not recorded"
+    )
+    retained["engine_version"] = str(
+        docking_manifest.get("engine_version")
+        or retained.get("engine_version")
+        or summary.get("configured_engine_version")
+        or "not recorded"
+    )
+    for key in (
+        "python", "rdkit", "molscrub", "meeko", "pdbfixer",
+        "fpocket", "openbabel", "plip",
+    ):
+        retained[key] = str(retained.get(key) or "not recorded")
+    return retained
 
 def receptor_preparation_record(study, control=None):
     """Describe the receptor-conversion path from retained preparation artifacts."""
@@ -402,39 +572,39 @@ def compare_scientific_versions(recorded, current):
     return {"overall": overall, "entries": entries}
 
 def reproducibility_record(protocol, study, control):
-    """Collect versions and methods from the actual report runtime and protocol."""
+    """Separate retained scientific-run versions from report-runtime versions."""
     recorded = protocol.get("software", {}) if protocol else {}
+    summary = read_json(study / "report" / "study_summary.json")
     figure_manifest = read_json(study / "report" / "report_figure_manifest.json")
     clustering = read_json(first(study, ["compounds/*/pose_analysis/clustering_manifest.json", "**/clustering_manifest.json"]))
     docking_manifest = read_key_value_tsv(first(study, ["compounds/*/seed_*/docking/run_manifest.tsv", "**/docking/run_manifest.tsv"]))
     receptor_preparation = receptor_preparation_record(study, control)
-    current = {
+    run_versions = retained_scientific_versions(study, summary, docking_manifest)
+    report_runtime = {
         "docking_universal": package_version(),
         "python": sys.version.split()[0],
-        "rdkit": installed_version("rdkit", "rdkit-pypi"),
-        "molscrub": installed_version("molscrub"),
-        "meeko": installed_version("meeko"),
-        "pdbfixer": installed_version("pdbfixer"),
-        "engine_version": docking_manifest.get("engine_version", "not recorded"),
+        "pymol": pymol_version(),
+        "matplotlib": installed_version("matplotlib"),
+        "reportlab": installed_version("reportlab"),
     }
-    engine_version = current["engine_version"]
+    engine_version = run_versions["engine_version"]
     engine_source = docking_manifest.get("engine_source")
     if engine_source:
         engine_version += f" ({engine_source})"
     software = [
-        {"role": "Workflow", "software": "Docking Universal", "version": current["docking_universal"]},
-        {"role": "Ligand-free cavity detection", "software": "fpocket", "version": fpocket_version()},
+        {"role": "Scientific workflow", "software": "Docking Universal", "version": run_versions["docking_universal"]},
+        {"role": "Ligand-free cavity detection", "software": "fpocket", "version": run_versions["fpocket"]},
         {"role": "Docking scores and poses", "software": "AutoDock Vina", "version": engine_version},
-        {"role": "Docking parameterization", "software": "Meeko", "version": current["meeko"]},
-        {"role": "Conditional conservative receptor repair", "software": "PDBFixer", "version": current["pdbfixer"]},
-        {"role": "Protonation/conformer preparation", "software": "MolScrub", "version": current["molscrub"]},
-        {"role": "Molecular graph, RMSD, clustering", "software": "RDKit", "version": current["rdkit"]},
-        {"role": "Molecular conversion/PLIP backend", "software": "Open Babel", "version": openbabel_version()},
-        {"role": "Interaction calls", "software": "PLIP", "version": installed_version("plip")},
-        {"role": "3D rendering", "software": "PyMOL", "version": pymol_version()},
-        {"role": "Plots", "software": "Matplotlib", "version": installed_version("matplotlib")},
-        {"role": "PDF generation", "software": "ReportLab", "version": installed_version("reportlab")},
-        {"role": "Runtime", "software": "Python", "version": current["python"]},
+        {"role": "Receptor and ligand parameterization", "software": "Meeko", "version": run_versions["meeko"]},
+        {"role": "Conditional conservative receptor repair", "software": "PDBFixer", "version": run_versions["pdbfixer"]},
+        {"role": "Protonation/conformer preparation", "software": "MolScrub", "version": run_versions["molscrub"]},
+        {"role": "Molecular graph, RMSD, clustering", "software": "RDKit", "version": run_versions["rdkit"]},
+        {"role": "Molecular conversion/PLIP backend", "software": "Open Babel", "version": run_versions["openbabel"]},
+        {"role": "Interaction calls", "software": "PLIP", "version": run_versions["plip"]},
+        {"role": "3D rendering", "software": "PyMOL", "version": report_runtime["pymol"]},
+        {"role": "Plots", "software": "Matplotlib", "version": report_runtime["matplotlib"]},
+        {"role": "PDF generation", "software": "ReportLab", "version": report_runtime["reportlab"]},
+        {"role": "Scientific workflow runtime", "software": "Python", "version": run_versions["python"]},
     ]
     references = [
         {"citation": "Eberhardt J, Santos-Martins D, Tillack AF, Forli S. AutoDock Vina 1.2.0: New Docking Methods, Expanded Force Field, and Python Bindings. J Chem Inf Model. 2021;61:3891-3898.", "url": "https://doi.org/10.1021/acs.jcim.1c00203"},
@@ -453,7 +623,8 @@ def reproducibility_record(protocol, study, control):
         "study": str(study), "control": str(control) if control else None,
         "software": software,
         "receptor_preparation": receptor_preparation,
-        "control_to_new_run_version_check": compare_scientific_versions(recorded, current) if protocol else None,
+        "control_to_new_run_version_check": compare_scientific_versions(recorded, run_versions) if protocol else None,
+        "report_generation": report_runtime,
         "methods": {
             "cavity_detection": "fpocket geometric cavity detection, descriptor calculation, and recorded geometry/overlap filtering" if discover_cavity_record(study) else "not used in the retained report study",
             "docking_scores_and_poses": "AutoDock Vina",
@@ -468,27 +639,164 @@ def reproducibility_record(protocol, study, control):
     }
 
 
+def retain_used_report_methods(provenance, cavity, has_docking):
+    """Keep only software and references supported by retained run evidence."""
+    preparation = provenance.get("receptor_preparation", {})
+    used_software = {
+        "Docking Universal", "Meeko", "PyMOL", "Matplotlib", "ReportLab", "Python",
+    }
+    if cavity:
+        used_software.add("fpocket")
+    if has_docking:
+        used_software.update({"AutoDock Vina", "MolScrub", "RDKit", "Open Babel", "PLIP"})
+    if preparation.get("pdbfixer_used"):
+        used_software.add("PDBFixer")
+
+    version_check = provenance.get("control_to_new_run_version_check")
+    if version_check and not preparation.get("pdbfixer_used"):
+        version_check["entries"] = [
+            entry for entry in version_check.get("entries", [])
+            if entry.get("software") != "PDBFixer"
+        ]
+        statuses = {entry["status"] for entry in version_check["entries"]}
+        version_check["overall"] = (
+            "SAME" if statuses == {"SAME"}
+            else "NOT THE SAME" if "DIFFERENT" in statuses
+            else "NOT VERIFIED"
+        )
+
+    provenance["software"] = [
+        item for item in provenance.get("software", [])
+        if item.get("software") in used_software
+    ]
+    for item in provenance["software"]:
+        if item.get("software") == "Meeko":
+            item["role"] = (
+                "Receptor and ligand parameterization"
+                if has_docking else "Receptor preparation"
+            )
+
+    def reference_was_used(reference):
+        citation = reference.get("citation", "")
+        if "AutoDock Vina" in citation:
+            return has_docking
+        if "Fpocket" in citation:
+            return bool(cavity)
+        if "Meeko:" in citation:
+            return True
+        if "PDBFixer:" in citation or "OpenMM 7:" in citation:
+            return bool(preparation.get("pdbfixer_used"))
+        if any(name in citation for name in ("PLIP:", "Butina D.", "Open Babel", "RDKit:")):
+            return has_docking
+        if "PyMOL Molecular Graphics System" in citation:
+            return True
+        return False
+
+    provenance["references"] = [
+        reference for reference in provenance.get("references", [])
+        if reference_was_used(reference)
+    ]
+    return provenance
+
+
+def require_complete_used_versions(provenance):
+    """Refuse to publish a report with incomplete used-software provenance."""
+    missing_values = {
+        "", "unknown", "not recorded", "not detected",
+        "detected; version not recorded",
+    }
+    problems = []
+    for item in provenance.get("software", []):
+        version = str(item.get("version", "") or "").strip()
+        normalized = version.lower()
+        if normalized in missing_values or normalized.startswith("multiple retained versions:"):
+            problems.append(f"{item.get('software', 'unknown software')}: {version or 'missing'}")
+    comparison = provenance.get("control_to_new_run_version_check") or {}
+    for entry in comparison.get("entries", []):
+        for side, key in (("control", "control_version"), ("new run", "new_run_version")):
+            version = str(entry.get(key, "") or "").strip()
+            normalized = version.lower()
+            if normalized in missing_values or normalized.startswith("multiple retained versions:"):
+                problems.append(
+                    f"{entry.get('software', 'unknown software')} ({side}): "
+                    f"{version or 'missing'}"
+                )
+    if problems:
+        raise SystemExit(
+            "PDF report error: complete version provenance is required for every "
+            "software component used. Recover or record versions for: " + "; ".join(problems)
+        )
+
+
+def reproducibility_summary(provenance, cavity, has_docking):
+    preparation = provenance["receptor_preparation"]
+    sentences = []
+    if cavity:
+        sentences.append(
+            "fpocket supplied ligand-free geometric cavity candidates and descriptors; "
+            "the report records the selected docking box separately."
+        )
+    sentences.append(f"Receptor preparation path: {preparation['path']}.")
+    if has_docking:
+        cutoff = provenance["methods"]["cluster_cutoff_angstrom"]
+        sentences.append(
+            "AutoDock Vina produced docking scores and poses. PLIP supplied rule-based "
+            "protein-ligand interaction calls, with retained PLIP XML as the authoritative "
+            "interaction record. RDKit supplied symmetry-aware heavy-atom RMSD calculations "
+            f"and Butina clustering at a {cutoff} A cutoff. PyMOL produced the molecular "
+            "panels, and ReportLab assembled this PDF."
+        )
+    else:
+        sentences.append(
+            "No ligand docking, scoring, pose clustering, or interaction analysis was performed. "
+            "PyMOL produced the structural panels, and ReportLab assembled this PDF."
+        )
+    return " ".join(sentences)
+
+
 def combine_horizontal_diagrams(diagrams, output):
     """Make the compact horizontal A/B/C interaction panel used in reports."""
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageChops, ImageDraw, ImageFont
 
-    images = [Image.open(path).convert("RGB") for _, path in diagrams[:3]]
+    images = []
+    trim_padding = 24
+    for _, path in diagrams[:3]:
+        source = Image.open(path).convert("RGB")
+        difference = ImageChops.difference(source, Image.new("RGB", source.size, "white"))
+        content_bbox = difference.getbbox()
+        if content_bbox:
+            left, top, right, bottom = content_bbox
+            source = source.crop((
+                max(0, left - trim_padding),
+                max(0, top - trim_padding),
+                min(source.width, right + trim_padding),
+                min(source.height, bottom + trim_padding),
+            ))
+        images.append(source)
     if not images:
         return False
-    width, height = 2400, 860
-    margin, gap, label_height = 35, 22, 64
-    slot_width = (width - 2 * margin - gap * (len(images) - 1)) // len(images)
-    canvas = Image.new("RGB", (width, height), "white")
+    width = 2400
+    side_margin, gap = 35, 22
+    top_margin, bottom_margin, label_height = 10, 18, 46
+    slot_width = (width - 2 * side_margin - gap * (len(images) - 1)) // len(images)
     font_path = Path("/System/Library/Fonts/Helvetica.ttc")
     font = ImageFont.truetype(str(font_path), 42) if font_path.is_file() else ImageFont.load_default()
+    resized = []
+    for source in images:
+        ratio = min(1.0, slot_width / source.width)
+        resized.append(source.resize(
+            (max(1, int(source.width * ratio)), max(1, int(source.height * ratio))),
+            Image.Resampling.LANCZOS,
+        ))
+    panel_height = max(source.height for source in resized)
+    height = top_margin + label_height + panel_height + bottom_margin
+    canvas = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(canvas)
-    for index, source in enumerate(images):
-        ratio = min(slot_width / source.width, (height - 2 * margin - label_height) / source.height)
-        source = source.resize((int(source.width * ratio), int(source.height * ratio)), Image.Resampling.LANCZOS)
-        x = margin + index * (slot_width + gap) + (slot_width - source.width) // 2
-        y = margin + label_height + (height - 2 * margin - label_height - source.height) // 2
+    for index, source in enumerate(resized):
+        x = side_margin + index * (slot_width + gap) + (slot_width - source.width) // 2
+        y = top_margin + label_height + (panel_height - source.height) // 2
         canvas.paste(source, (x, y))
-        draw.text((margin + index * (slot_width + gap), 12), "ABC"[index], fill="black", font=font)
+        draw.text((x + 4, top_margin), "ABC"[index], fill="black", font=font)
     output.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(output, dpi=(220, 220))
     return True
@@ -528,12 +836,34 @@ def main():
     summary = read_json(args.study / "report" / "study_summary.json")
     compounds = summary.get("compounds", [])
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="SmallDU", parent=styles["BodyText"], fontSize=8, leading=10))
-    styles.add(ParagraphStyle(name="ReferenceDU", parent=styles["BodyText"], fontSize=7, leading=7))
-    styles.add(ParagraphStyle(name="CaptionDU", parent=styles["Heading2"], alignment=TA_CENTER, fontSize=11, leading=14))
+    # One spacing system is shared by every report scenario.  Scenario logic
+    # changes content, never typography, heading gaps, or block rhythm.
+    styles["Title"].fontSize = 20
+    styles["Title"].leading = 24
+    styles["Title"].spaceAfter = 18
+    styles["Heading1"].fontSize = 18
+    styles["Heading1"].leading = 22
+    styles["Heading1"].spaceBefore = 10
+    styles["Heading1"].spaceAfter = 6
+    styles["Heading1"].keepWithNext = True
+    styles["Heading2"].fontSize = 14
+    styles["Heading2"].leading = 17
+    styles["Heading2"].spaceBefore = 8
+    styles["Heading2"].spaceAfter = 5
+    styles["Heading2"].keepWithNext = True
+    styles["BodyText"].fontSize = 10
+    styles["BodyText"].leading = 13
+    styles["BodyText"].spaceBefore = 0
+    styles["BodyText"].spaceAfter = 0
+    styles.add(ParagraphStyle(name="SmallDU", parent=styles["BodyText"], fontSize=8, leading=10, spaceBefore=0, spaceAfter=0))
+    styles.add(ParagraphStyle(name="ReferenceDU", parent=styles["BodyText"], fontSize=7, leading=8, spaceBefore=0, spaceAfter=2))
+    styles.add(ParagraphStyle(name="CaptionDU", parent=styles["Heading2"], alignment=TA_CENTER, fontSize=11, leading=14, spaceBefore=8, spaceAfter=5))
 
     def image(path, width=7.0, height=4.5):
-        item = Image(str(path)); item._restrictSize(width*inch, height*inch); return item
+        item = Image(str(path))
+        item._restrictSize(width*inch, height*inch)
+        item.hAlign = "CENTER"
+        return item
     def table(rows, widths, compact=False):
         item = Table(rows, colWidths=widths, repeatRows=1, hAlign="CENTER")
         item.setStyle(TableStyle([
@@ -613,7 +943,7 @@ def main():
         else "Docking Universal - Ligand-Free Cavity Report" if cavity
         else "Docking Universal - Docking Study Report"
     )
-    story = [Paragraph(f"{report_title}<br/><font size=\"12\">Version {package_version()}</font>", styles["Title"])]
+    story = [Paragraph(f"{report_title}<br/><font size=\"12\">Report generator version {package_version()}</font>", styles["Title"])]
     if study_descriptor:
         story += [Paragraph(study_descriptor, styles["Heading2"]), Spacer(1,8)]
     if cavity:
@@ -622,25 +952,29 @@ def main():
     # cavity figure.  A docking-at-a-glance table before that figure implies
     # an approved protocol and reverses the actual workflow order.
     at_a_glance = None
+    at_a_glance_widths = [2.55*inch, 4.15*inch]
+    at_a_glance_note = None
+    compound_results = []
     if has_docking and compounds:
-        first_compound = compounds[0]
-        first_cid = str(first_compound.get("compound_id", ""))
-        first_name = ligand_names[0] if ligand_names else display_compound_name(first_compound.get("compound_name"), first_cid)
-        try:
-            with (args.study / "compounds" / first_cid / "pose_analysis" / "cluster_summary.csv").open(newline="") as handle:
-                first_clusters = list(csv.DictReader(handle))
-        except OSError:
-            first_clusters = []
-        first_clusters.sort(key=lambda row: int(row.get("energy_rank", 999999)))
-        leading = first_clusters[0] if first_clusters else {}
-        at_a_glance = [
-            ["Summary of docking results", "Recorded result"],
-            ["Ligand(s) docked", first_name if len(compounds) == 1 else f"{len(compounds)} compounds (top result: {first_name})"],
-            ["Best retained Vina score", f"{leading.get('best_energy_kcal_per_mol', 'not recorded')} kcal/mol"],
-            ["Top-ranked cluster", leading.get("cluster_id", "not recorded")],
-            ["Distinct retained clusters", len(first_clusters) or "not recorded"],
-            ["Scientific status", "Approved protocol reused" if protocol else "Exploratory; not validated by a bound-ligand control"],
-        ]
+        compound_results = compound_result_records(args.study, compounds, ligand_names)
+        if len(compound_results) == 1:
+            at_a_glance = single_compound_summary_rows(compound_results[0], protocol)
+        else:
+            at_a_glance = [["Ligand", "Best Vina score", "Top cluster", "Clusters", "Status"]]
+            for result in compound_results:
+                score = result["best_energy_kcal_per_mol"]
+                at_a_glance.append([
+                    result["name"],
+                    f"{score} kcal/mol" if score != "Unavailable" else score,
+                    result["top_cluster"],
+                    result["cluster_count"] or "Unavailable",
+                    result["status"],
+                ])
+            at_a_glance_widths = [2.2*inch, 1.4*inch, 1.05*inch, .85*inch, 1.2*inch]
+            at_a_glance_note = (
+                "Each row is the best retained result for that ligand. Docking scores are "
+                "ranking estimates and are not cross-ligand binding-affinity measurements."
+            )
     figure_number = 1
     section_number = 1
 
@@ -659,7 +993,7 @@ def main():
         docking_box = manifest.get("config") or locked.get("box", "NA")
         story += [Paragraph(f"{section_number}. Configured docking protocol",styles["Heading1"]),
           Paragraph("This section records the settings used for this exploratory study. No target-specific bound-ligand pose-recovery control was available.",styles["BodyText"]),Spacer(1,6),
-          table([["Parameter","Configured value"],["Validation status",summary.get("protocol_validation_status", "Not evaluated by bound-ligand control")],["Engine",engine],["Engine version",engine_version],["Exhaustiveness",manifest.get("exhaustiveness") or configured.get("exhaustiveness","NA")],["Modes per job",manifest.get("num_modes") or configured.get("num_modes","NA")],["Energy range",f"{manifest.get('energy_range_kcal_per_mol') or configured.get('energy_range_kcal_per_mol','NA')} kcal/mol"],["Independent seeds",seed_count or "NA"],["Receptor",Path(receptor).name],["Docking box",Path(docking_box).name]], [2.55*inch,4.15*inch]),PageBreak()]
+          table([["Parameter","Configured value"],["Validation status",summary.get("protocol_validation_status", "Not evaluated by bound-ligand control")],["Engine",engine],["Engine version",engine_version],["Exhaustiveness",manifest.get("exhaustiveness") or configured.get("exhaustiveness","NA")],["Modes per job",manifest.get("num_modes") or configured.get("num_modes","NA")],["Energy range",f"{manifest.get('energy_range_kcal_per_mol') or configured.get('energy_range_kcal_per_mol','NA')} kcal/mol"],["Independent seeds",seed_count or "NA"],["Receptor",Path(receptor).name],["Docking box",Path(docking_box).name]], [2.55*inch,4.15*inch], compact=True),Spacer(1,10)]
         section_number += 1
 
     if cavity:
@@ -685,20 +1019,20 @@ def main():
                 ["fpocket druggability descriptor", descriptor.get("druggability_score", "NA")],
                 ["Docking-box center (A)", ", ".join(selected.get(key, "NA") for key in ("center_x", "center_y", "center_z"))],
                 ["Docking-box dimensions (A)", " x ".join(f"{value:g}" for value in box_dimensions) if box_dimensions else "NA"],
-            ], [2.55*inch, 4.15*inch]), Spacer(1,8),
+            ], [2.55*inch, 4.15*inch], compact=True), Spacer(1,8),
         ]
         cavity_ab = args.study / "report" / "cavity_panels_AB.png"
         cavity_a = args.study / "report" / "cavity_panel_A_selection.png"
         cavity_b = args.study / "report" / "cavity_panel_B_structure.png"
         cavity_overview = args.study / "report" / "cavity_selected_box.png"
         if cavity_ab.is_file():
-            story += [
+            story += [KeepTogether([
                 image(cavity_ab, 7.0, 4.1),
                 Paragraph(
                     f"<b>Figure {figure_number}. Exploratory pocket analysis.</b> (A) Weighted fpocket composite priority for all candidates that passed the score and geometry eligibility filters, ordered by that priority. The weighting is <i>fpocket pocket score × exp(−distance from the protein centroid / 10 A)</i>; it favors interior pockets. The colored candidates are the three retained for review and color-match Panel B; gray candidates were not retained for review. The unweighted fpocket pocket score is recorded in the configuration table. (B) The retained pocket hypotheses are shown as color-matched surfaces on the receptor. These geometric pocket surfaces are not experimentally observed molecular surfaces, and fpocket scores are not binding-affinity estimates.",
                     styles["SmallDU"],
-                ), Spacer(1,8),
-            ]
+                ),
+            ]), Spacer(1,8)]
             figure_number += 1
         elif cavity_a.is_file():
             story += [
@@ -712,35 +1046,36 @@ def main():
         if cavity_b.is_file() and not cavity_ab.is_file():
             story += [image(cavity_b, 6.5, 3.8), Paragraph(f"<b>Figure {figure_number}. Selected cavity and docking box structural review.</b>", styles["SmallDU"]), Spacer(1,8)]
             figure_number += 1
-        if cavity_overview.is_file() and not has_docking:
-            story += [
-                image(cavity_overview, 6.5, 4.15),
+        if cavity_overview.is_file():
+            story += [KeepTogether([
+                # This is a verification view subordinate to the primary A/B
+                # pocket-analysis panel, so keep it visibly smaller.
+                image(cavity_overview, 5.25, 3.35),
                 Paragraph(
                     f"<b>Figure {figure_number}. Chosen pocket and docking box.</b> The receptor is shown as a gray cartoon, the selected alpha-sphere-derived pocket surface in translucent red, the selected center in yellow, and the docking box as an orange wireframe. Red matches the selected candidate in Figure {figure_number - 1}. This records the region chosen to proceed; it does not establish that the pocket is biologically correct.",
                     styles["SmallDU"],
-                ), Spacer(1,8),
-            ]
+                ),
+            ]), Spacer(1,8)]
             figure_number += 1
-        story.append(PageBreak())
+        story.append(PageBreak() if not has_docking else Spacer(1,10))
         section_number += 1
 
     if cavity and not has_docking:
-        provenance = reproducibility_record(protocol, args.study, args.control)
-        allowed_roles = {"Workflow", "Conditional conservative receptor repair", "Ligand-free cavity detection", "3D rendering", "Plots", "PDF generation", "Runtime"}
-        software = [item for item in provenance["software"] if item["role"] in allowed_roles]
-        references = [item for item in provenance["references"] if any(name in item["citation"] for name in ("Fpocket", "PyMOL", "PDBFixer", "OpenMM"))]
-        provenance["software"] = software
-        provenance["references"] = references
+        provenance = retain_used_report_methods(
+            reproducibility_record(protocol, args.study, args.control), cavity, has_docking
+        )
+        require_complete_used_versions(provenance)
+        software = provenance["software"]
+        references = provenance["references"]
         (args.study / "report" / "software_versions_and_references.json").write_text(json.dumps(provenance, indent=2) + "\n")
         provenance_rows = [["Result element", "Software", "Version used"]]
         for item in software:
             provenance_rows.append([Paragraph(item["role"], styles["SmallDU"]), Paragraph(item["software"], styles["SmallDU"]), Paragraph(str(item["version"]), styles["SmallDU"])])
         story += [
-            # Receptor-only preparation reports retain the established four-part
-            # scientific-report numbering even when the compact rendering folds
-            # the intermediate preparation records into the preceding pages.
-            Paragraph("4. Reproducibility, software, and references", styles["Heading1"]),
-            Paragraph(f"This preparation-only report records fpocket cavity detection, candidate filtering, the selected review box, and PyMOL structural rendering. Receptor preparation path: {provenance['receptor_preparation']['path']}. No ligand docking, scoring, pose clustering, or interaction analysis was performed.", styles["BodyText"]),
+            # A receptor-only report has no docking-results section, so the
+            # reproducibility record follows the two preparation sections.
+            Paragraph(f"{section_number}. Reproducibility, software, and references", styles["Heading1"]),
+            Paragraph(reproducibility_summary(provenance, cavity, has_docking), styles["BodyText"]),
             Spacer(1,8),
         ]
         story += pdbfixer_report_note(provenance["receptor_preparation"], out, styles)
@@ -748,7 +1083,7 @@ def main():
         story += user_approved_removal_report_note(provenance["receptor_preparation"], out, styles)
         story += ccd_modification_report_note(provenance["receptor_preparation"], out, styles)
         story += [Paragraph("Software versions used for this report", styles["Heading2"]),
-            table(provenance_rows, [2.35*inch, 1.55*inch, 2.8*inch], compact=True),
+            table(provenance_rows, [2.5*inch, 1.65*inch, 3.05*inch], compact=True),
             Spacer(1,10), Paragraph("Scientific and software references", styles["Heading2"]),
         ]
         for index, reference in enumerate(references, start=1):
@@ -800,7 +1135,7 @@ def main():
         # A continued screen carries the control result as compact provenance.
         # Repeating its figures is reserved for an explicitly requested appendix.
         if args.include_control_appendix and control_ab:
-            story += [image(control_ab,7.0,4.1),Paragraph(f"<b>Figure {figure_number}. Retrospective control performance and pose recovery.</b> (A) Control-cluster Vina score versus symmetry-aware, no-fit heavy-atom RMSD to experimental {experimental_label} in the receptor coordinate frame. (B) Experimental ligand (magenta), lowest-energy pose (red), and lowest-RMSD pose (blue) superimposed in that frame; receptor residues within 5 A of the displayed ligands are gray.",styles["SmallDU"]),Spacer(1,8)]
+            story += [KeepTogether([image(control_ab,7.0,4.1),Paragraph(f"<b>Figure {figure_number}. Retrospective control performance and pose recovery.</b> (A) Control-cluster Vina score versus symmetry-aware, no-fit heavy-atom RMSD to experimental {experimental_label} in the receptor coordinate frame. (B) Experimental ligand (magenta), lowest-energy pose (red), and lowest-RMSD pose (blue) superimposed in that frame; receptor residues within 5 A of the displayed ligands are gray.",styles["SmallDU"])]),Spacer(1,8)]
             figure_number += 1
         elif control_ab:
             # Reused protocols retain the single approved A/B control figure
@@ -880,12 +1215,19 @@ def main():
     result_heading = "New-ligand docking results" if protocol else "Docking results"
     story += [Paragraph(f"{result_number}. {result_heading}",styles["Heading1"])]
     if at_a_glance:
-        story += [Paragraph("Summary of docking results", styles["Heading2"]), table(at_a_glance, [2.55*inch, 4.15*inch]), Spacer(1,10)]
+        story += [
+            Paragraph("Summary of docking results", styles["Heading2"]),
+            table(at_a_glance, at_a_glance_widths, compact=len(compounds) > 1),
+        ]
+        if at_a_glance_note:
+            story += [Spacer(1,4), Paragraph(at_a_glance_note, styles["SmallDU"])]
+        story += [Spacer(1,10)]
     shared_panel = first(args.study,["report/study_panels_AB.png"]) if len(compounds) == 1 else None
     inventory = read_json(args.study / "inputs" / "compound_library_inventory.json")
     inventory_rows = inventory.get("compounds", inventory.get("entries", []))
     inventory_by_id = {str(x.get("compound_id")): x for x in inventory_rows}
     display_names = {}
+    compound_results_by_id = {record["compound_id"]: record for record in compound_results}
     report_compounds = compounds or [{"compound_name":args.study.name,"compound_id":""}]
     for compound_index, compound in enumerate(report_compounds):
         cid=str(compound.get("compound_id", "")); inventory_row=inventory_by_id.get(cid, {}); name=display_compound_name(compound.get("compound_name") or inventory_row.get("compound_name") or cid, inventory_row.get("source"))
@@ -896,6 +1238,13 @@ def main():
             scope_text = "Docking used the configured protocol shown above. No target-specific bound-ligand control was supplied, so pose-recovery performance for this target was not evaluated."
         result_subject = f"Target: {target_name} | Ligand: {name}" if protocol else f"Ligand: {name}"
         story += [Paragraph(result_subject,styles["Heading2"]),Paragraph(scope_text + " More favorable Vina scores are more negative; RMSD and cluster population are separate measures.",styles["BodyText"]),Spacer(1,6)]
+        if len(report_compounds) > 1 and cid in compound_results_by_id:
+            ligand_result = compound_results_by_id[cid]
+            story += [
+                Paragraph("Summary of docking results", styles["Heading2"]),
+                table(single_compound_summary_rows(ligand_result, protocol), [2.55*inch, 4.15*inch], compact=True),
+                Spacer(1,8),
+            ]
         compound_root = args.study / "compounds" / cid
         panel = first(args.study,[f"report/{cid}_panels_AB.png",f"report/{cid}_panel_AB.png",f"report/compound_{cid}_panels_AB.png",f"report/{cid}_panel_A_clusters.png"])
         if not panel:
@@ -912,7 +1261,7 @@ def main():
                 if is_cluster_plot else
                 f"<b>Figure {figure_number}. Docking pose-cluster analysis for {name}.</b> (A) Docking score versus symmetry-aware, no-fit heavy-atom RMSD from the lowest-energy cluster representative in the receptor coordinate frame; point size denotes cluster population. (B) Representative structures from the highlighted clusters, using matching cluster colors."
             )
-            story += [image(panel,6.0,3.75),Paragraph(caption,styles["SmallDU"]),Spacer(1,4)]
+            story += [KeepTogether([image(panel,6.0,3.75),Paragraph(caption,styles["SmallDU"])]),Spacer(1,4)]
             figure_number += 1
         # This table is deliberately read from Panel A's exported data, not
         # re-derived from a different summary.  It therefore lists the same
@@ -1002,7 +1351,10 @@ def main():
         if compound_index < len(report_compounds)-1:
             story.append(PageBreak())
 
-    provenance = reproducibility_record(protocol, args.study, args.control)
+    provenance = retain_used_report_methods(
+        reproducibility_record(protocol, args.study, args.control), cavity, has_docking
+    )
+    require_complete_used_versions(provenance)
     (args.study / "report" / "software_versions_and_references.json").write_text(
         json.dumps(provenance, indent=2) + "\n"
     )
@@ -1020,16 +1372,10 @@ def main():
             Paragraph(item["software"], styles["SmallDU"]),
             Paragraph(str(item["version"]), styles["SmallDU"]),
         ])
-    method = provenance["methods"]
     story += [
         PageBreak(), Paragraph(f"{result_number + 1}. Reproducibility, software, and references", styles["Heading1"]),
-        Paragraph(
-            ("fpocket supplied ligand-free geometric cavity candidates, volumes, and druggability descriptors; the report separately records the selected docking box. " if cavity else "") +
-            f"Receptor preparation path: {provenance['receptor_preparation']['path']}. PDBFixer is a conservative fallback after strict Meeko rejection; it is not applied routinely. ADFRsuite, when explicitly recorded, is a narrow compatibility fallback after Meeko rejects a linked deposited component. Unmatched receptor components are removed only when the user explicitly approves the final model-changing attempt. "
-            "Docking scores and poses were produced by AutoDock Vina. PLIP supplied rule-based protein-ligand interaction calls; the retained PLIP XML is the authoritative interaction record. RDKit supplied the retained molecular graph handling and symmetry-aware, no-fit heavy-atom RMSD matrix used by Butina clustering. The clustering cutoff was "
-            f"{method['cluster_cutoff_angstrom']} A. If only one cluster is present, its lowest-energy member is reported as the sole representative. PyMOL produced the 3D molecular panels; ReportLab assembled this PDF.",
-            styles["BodyText"],
-        ), Spacer(1,8),
+        Paragraph(reproducibility_summary(provenance, cavity, has_docking), styles["BodyText"]),
+        Spacer(1,8),
     ]
     story += pdbfixer_report_note(provenance["receptor_preparation"], out, styles)
     story += adfr_fallback_report_note(provenance["receptor_preparation"], out, styles)
@@ -1050,10 +1396,10 @@ def main():
         ]
         comparison_rows = [["Software", "Control", "New run", "Result"]]
         comparison_rows += [[entry["software"], entry["control_version"], entry["new_run_version"], entry["status"]] for entry in version_check["entries"]]
-        story += [Spacer(1,6), table(comparison_rows, [1.45*inch, 1.9*inch, 1.9*inch, 1.05*inch], compact=True), Spacer(1,10)]
+        story += [Spacer(1,6), table(comparison_rows, [1.65*inch, 2.15*inch, 2.15*inch, 1.25*inch], compact=True), Spacer(1,10)]
     story += [
         Paragraph("Additional software used for analysis and reporting", styles["Heading2"]),
-        table(provenance_rows, [2.35*inch, 1.55*inch, 2.8*inch], compact=True),
+        table(provenance_rows, [2.5*inch, 1.65*inch, 3.05*inch], compact=True),
         Spacer(1,6), Paragraph("Scientific and software references", styles["Heading2"]),
     ]
     for index, reference in enumerate(provenance["references"], start=1):

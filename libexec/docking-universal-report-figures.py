@@ -866,6 +866,9 @@ def combine_panels(panel_a, panel_b, output, control=False):
     b = fit(b, right_w - 70, 700)
     canvas = Image.new("RGB", (canvas_w, canvas_h), "white")
     a_x, a_y = margin + (left_w - a.width) // 2, margin + label_h
+    # Preserve the approved compact control-panel spacing.  The final
+    # equal-padding crop below centers the complete A/B group on the page;
+    # centering must not be achieved by spreading the panels apart.
     b_x = margin + left_w + gap + (right_w - b.width) // 2 - (45 if control else 0)
     b_y = a_y + (a.height - b.height) // 2
     canvas.paste(a, (a_x, a_y))
@@ -877,7 +880,17 @@ def combine_panels(panel_a, panel_b, output, control=False):
     draw.text((b_x, 18), "B", fill="black", font=font)
     content = ImageChops.difference(canvas, Image.new("RGB", canvas.size, "white")).getbbox()
     if content:
-        canvas = canvas.crop((0, 0, canvas.width, min(canvas.height, content[3] + 35)))
+        # Trim the composite to equal visible padding on every horizontal side.
+        # ReportLab centers the resulting image frame; retaining the original
+        # 2400 px canvas here made unequal internal whitespace look like a page-
+        # placement error even when the frame itself was mathematically centered.
+        side_pad = 35
+        canvas = canvas.crop((
+            max(0, content[0] - side_pad),
+            0,
+            min(canvas.width, content[2] + side_pad),
+            min(canvas.height, content[3] + 35),
+        ))
     canvas.save(output, quality=95, dpi=(220, 220))
     return True
 
