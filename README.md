@@ -42,11 +42,19 @@ The comparison is deliberately described as target-specific retrospective eviden
 
 ![Two end-to-end Docking Universal pathways: control-guided screening and ligand-free exploratory screening](docs/assets/end-to-end-workflows-and-outputs-mockup.png)
 
-## Example scientific report
+## Example scientific reports
 
-[View the complete automatically generated PDF report](docs/assets/docking-universal-example-report.pdf).
+[View a complete current-style PDF report](docs/assets/docking-universal-example-report.pdf).
 
-This representative 1HVR/XK2 study shows the standard report produced by the pipeline: retrospective bound-ligand control and PASS criteria, the selected target-matched protocol, two-compound docking results, score-versus-RMSD cluster panels, color-matched 3D cluster representatives, SDF-aware 2D interaction diagrams, ranked docking tables, limitations, software versions, and references. It is included as a format and workflow example; its target-specific retrospective result is not general validation of docking accuracy.
+Docking Universal produces scenario-specific reports for:
+
+- fresh bound-ligand control studies, with or without subsequent new-ligand docking;
+- new compounds docked with an existing approved protocol;
+- exploratory ligand-free cavity selection, with or without subsequent docking;
+- receptor preparation and cavity analysis without ligand docking; and
+- single- or multi-ligand docking studies.
+
+The linked example shows the current report organization, figures, tables, provenance, software-version recording, and scientific limitations. It demonstrates report format and workflow outputs; its individual docking results are not general validation of docking accuracy.
 
 ## Package map
 
