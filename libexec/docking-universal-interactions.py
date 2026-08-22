@@ -244,6 +244,7 @@ def generate_all_in_one_pml(
         "",
         "# Base molecular display",
         "hide everything",
+        "remove (complex and polymer.protein and hydro and neighbor elem C)",
         "show cartoon, complex and polymer.protein",
         "color slate, complex and polymer.protein",
         "set cartoon_transparency, 0.35",

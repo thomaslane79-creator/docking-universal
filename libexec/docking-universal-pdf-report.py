@@ -529,7 +529,7 @@ def main():
     compounds = summary.get("compounds", [])
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name="SmallDU", parent=styles["BodyText"], fontSize=8, leading=10))
-    styles.add(ParagraphStyle(name="ReferenceDU", parent=styles["BodyText"], fontSize=7.5, leading=9))
+    styles.add(ParagraphStyle(name="ReferenceDU", parent=styles["BodyText"], fontSize=7.5, leading=7.5))
     styles.add(ParagraphStyle(name="CaptionDU", parent=styles["Heading2"], alignment=TA_CENTER, fontSize=11, leading=14))
 
     def image(path, width=7.0, height=4.5):
@@ -582,9 +582,13 @@ def main():
     if not ligand_names and summary.get("workflow") == "control" and args.control:
         control_values = read_key_value_tsv(args.control / "run_manifest.tsv")
         ligand_names = [control_values.get("ligand_id", "ligand").split(":", 1)[0]]
+    control_title_sdf = first(args.control, ["00_inputs/*_experimental.sdf", "**/crystal_ligand.sdf"]) if args.control else None
+    control_title_name = control_title_sdf.stem.removesuffix("_experimental") if control_title_sdf else None
     out = args.out or args.study / "report" / descriptive_report_name(target_name, ligand_names, summary)
     out.parent.mkdir(parents=True, exist_ok=True)
-    if protocol or workflow_is_exploratory:
+    if protocol and control_title_name:
+        study_descriptor = f"Target: {target_name} | Ligand: {control_title_name}"
+    elif protocol or workflow_is_exploratory:
         # Protocol, control, and exploratory pocket-selection sections are
         # target-level records.  A subsequently docked ligand is named only
         # within its own docking-results section.
@@ -611,7 +615,8 @@ def main():
     # An exploratory report begins with the pocket configuration and its A/B
     # cavity figure.  A docking-at-a-glance table before that figure implies
     # an approved protocol and reverses the actual workflow order.
-    if has_docking and compounds and not cavity:
+    at_a_glance = None
+    if has_docking and compounds:
         first_compound = compounds[0]
         first_cid = str(first_compound.get("compound_id", ""))
         first_name = ligand_names[0] if ligand_names else display_compound_name(first_compound.get("compound_name"), first_cid)
@@ -623,14 +628,13 @@ def main():
         first_clusters.sort(key=lambda row: int(row.get("energy_rank", 999999)))
         leading = first_clusters[0] if first_clusters else {}
         at_a_glance = [
-            ["Docking result at a glance", "Recorded result"],
+            ["Summary of docking results", "Recorded result"],
             ["Ligand(s) docked", first_name if len(compounds) == 1 else f"{len(compounds)} compounds (top result: {first_name})"],
             ["Best retained Vina score", f"{leading.get('best_energy_kcal_per_mol', 'not recorded')} kcal/mol"],
             ["Top-ranked cluster", leading.get("cluster_id", "not recorded")],
             ["Distinct retained clusters", len(first_clusters) or "not recorded"],
             ["Scientific status", "Approved protocol reused" if protocol else "Exploratory; not validated by a bound-ligand control"],
         ]
-        story += [Paragraph("Docking result at a glance", styles["Heading1"]), table(at_a_glance, [2.55*inch, 4.15*inch]), Spacer(1,10)]
     figure_number = 1
     section_number = 1
 
@@ -726,7 +730,10 @@ def main():
         for item in software:
             provenance_rows.append([Paragraph(item["role"], styles["SmallDU"]), Paragraph(item["software"], styles["SmallDU"]), Paragraph(str(item["version"]), styles["SmallDU"])])
         story += [
-            Paragraph(f"{section_number}. Reproducibility, software, and references", styles["Heading1"]),
+            # Receptor-only preparation reports retain the established four-part
+            # scientific-report numbering even when the compact rendering folds
+            # the intermediate preparation records into the preceding pages.
+            Paragraph("4. Reproducibility, software, and references", styles["Heading1"]),
             Paragraph(f"This preparation-only report records fpocket cavity detection, candidate filtering, the selected review box, and PyMOL structural rendering. Receptor preparation path: {provenance['receptor_preparation']['path']}. No ligand docking, scoring, pose clustering, or interaction analysis was performed.", styles["BodyText"]),
             Spacer(1,8),
         ]
@@ -739,7 +746,7 @@ def main():
             Spacer(1,10), Paragraph("Scientific and software references", styles["Heading2"]),
         ]
         for index, reference in enumerate(references, start=1):
-            story += [Paragraph(f"{index}. {reference['citation']} <link href=\"{reference['url']}\"><font color=\"#1f4e79\">{reference['url']}</font></link>", styles["SmallDU"]), Spacer(1,4)]
+            story += [Paragraph(f"{index}. {reference['citation']} <link href=\"{reference['url']}\"><font color=\"#1f4e79\">{reference['url']}</font></link>", styles["ReferenceDU"]), Spacer(1,1)]
         SimpleDocTemplate(str(out),pagesize=letter,leftMargin=.65*inch,rightMargin=.65*inch,topMargin=.6*inch,bottomMargin=.6*inch,title="Docking Universal ligand-free cavity report").build(story)
         print(f"PDF report: {out}")
         return
@@ -756,21 +763,48 @@ def main():
             if control_ligand_sdf
             else protocol.get("control_evidence", {}).get("compound", "unspecified ligand")
         )
-        rows=[["Control-validation summary","Result"],
+        calibration_jobs = last.get("job_count", "NA")
+        total_jobs = int(calibration_jobs) + 1 if str(calibration_jobs).isdigit() else "NA"
+        rows=[["Configured and approved protocol","Selected value"],
           ["Protocol status","PASS" if passed else "REVIEW"],
           ["Control completed",protocol.get("created_utc", "Not recorded")],
           ["Control ligand",control_ligand_name],
           ["Control ligand RMSD (best sampled)",f"{b.get('best_rmsd_angstrom','NA')} A"],
           ["Acceptance threshold",f"{a.get('threshold_angstrom','NA')} A"],
           ["Control receptor preparation",protocol.get("receptor_preparation", {}).get("path", "not recorded by this older protocol")],
-          ["Locked docking box / pocket",Path(locked_inputs.get("box", "NA")).name]]
+          ["Locked docking box / pocket",Path(locked_inputs.get("box", "NA")).name],
+          ["Engine",protocol.get("engine","NA")],
+          ["Tier",protocol.get("calibration_tier","NA")],
+          ["Exhaustiveness",p.get("exhaustiveness","NA")],
+          ["Modes per job",p.get("num_modes","NA")],
+          ["Conformers per state",p.get("conformers_per_state","NA")],
+          ["Independent seeds",len(p.get("seeds",[]))],
+          ["Charge model",p.get("charge_model","NA")],
+          ["pH",p.get("ph","NA")],
+          ["Conformer force field",p.get("forcefield","mmff94")],
+          ["Tautomers enumerated",p.get("tautomers_enumerated",True)],
+          ["Conformer RMSD pruning",f"{p.get('rmsd_prune_angstrom',0.75)} A"],
+          ["Runtime",f"{protocol.get('wall_time_seconds',0)/60:.1f} min"],
+          ["Calibration and control jobs",f"{calibration_jobs} calibration + 1 control = {total_jobs} total"]]
+        if not args.include_control_appendix:
+            inherited_fields = {
+                "Protocol status", "Control completed", "Control ligand",
+                "Control ligand RMSD (best sampled)", "Acceptance threshold",
+                "Control receptor preparation", "Locked docking box / pocket",
+                "Engine", "Tier", "Exhaustiveness", "Modes per job",
+                "Independent seeds",
+            }
+            rows = [rows[0]] + [row for row in rows[1:] if row[0] in inherited_fields]
         story += [
           Paragraph(f"{section_number}. Configured docking protocol", styles["Heading1"]),
           Paragraph("This summary identifies the approved target-matched protocol and the control result that authorized its reuse.", styles["BodyText"]), Spacer(1,6),
-          table(rows,[2.55*inch,4.15*inch]),Spacer(1,10),
-          Paragraph(f"{section_number + 1}. Experimental control redocking results: {control_ligand_name}", styles["Heading1"]),
-          Paragraph(f"This retrospective control tests whether the protocol reproducibly recovers the experimental pose of {control_ligand_name}. PASS requires sampling, ranking, and independent-seed criteria to pass. It supports use of the selected protocol for this target, but does not establish affinity or prospective pose accuracy.", styles["BodyText"]), Spacer(1,6),
+          table(rows,[2.55*inch,4.15*inch], compact=True),
         ]
+        if args.include_control_appendix:
+            story += [PageBreak(),
+              Paragraph(f"{section_number + 1}. Experimental control redocking results: {control_ligand_name}", styles["Heading1"]),
+              Paragraph(f"This retrospective control tests whether the protocol reproducibly recovers the experimental pose of {control_ligand_name}. PASS requires sampling, ranking, and independent-seed criteria to pass. It supports use of the selected protocol for this target, but does not establish affinity or prospective pose accuracy.", styles["BodyText"]), Spacer(1,6),
+            ]
         control_ab=first(args.control,["report/control_panels_AB.png","**/control_panels_AB.png"]) if args.control else None
         control_a=first(args.control,["report/control_panel_A*.png","**/control_panel_A*.png"]) if args.control else None
         control_b=first(args.control,["report/control_panel_B_overlay.png","report/control_panel_B*.png","**/control_panel_B*.png"]) if args.control else None
@@ -780,6 +814,16 @@ def main():
         # Repeating its figures is reserved for an explicitly requested appendix.
         if args.include_control_appendix and control_ab:
             story += [image(control_ab,7.0,4.1),Paragraph(f"<b>Figure {figure_number}. Retrospective control performance and pose recovery.</b> (A) Control-cluster Vina score versus symmetry-aware, no-fit heavy-atom RMSD to experimental {experimental_label} in the receptor coordinate frame. (B) Experimental ligand (magenta), lowest-energy pose (red), and lowest-RMSD pose (blue) superimposed in that frame; receptor residues within 5 A of the displayed ligands are gray.",styles["SmallDU"]),Spacer(1,8)]
+            figure_number += 1
+        elif control_ab:
+            # Reused protocols retain the single approved A/B control figure
+            # as validation evidence, without repeating the detailed control
+            # PLIP interaction diagrams.
+            story += [KeepTogether([
+                Paragraph("Inherited control-validation evidence", styles["Heading2"]),
+                image(control_ab,7.0,3.6),
+                Paragraph(f"<b>Figure {figure_number}. Retrospective control performance and pose recovery.</b> (A) Control-cluster Vina score versus symmetry-aware, no-fit heavy-atom RMSD to experimental {experimental_label} in the receptor coordinate frame. (B) Experimental ligand (magenta), lowest-energy pose (red), and lowest-RMSD pose (blue) superimposed in that frame; receptor residues within 5 A of the displayed ligands are gray.",styles["SmallDU"]),
+            ]), PageBreak()]
             figure_number += 1
         elif args.include_control_appendix:
             if control_a: story += [Paragraph("Control Panel A - score and RMSD landscape",styles["CaptionDU"]),image(control_a),Spacer(1,5)]
@@ -800,16 +844,18 @@ def main():
         ] if args.control and args.include_control_appendix else []
         control_diagrams = [(path, description) for path, description in control_diagrams if path]
         if control_diagrams:
-            story += [PageBreak(), Paragraph("Control interaction diagrams",styles["Heading2"])]
-            for diagram, description in control_diagrams:
-                story += [KeepTogether([
-                    image(diagram,5.2,1.8),
-                    Paragraph(f"<b>Figure {figure_number}. SDF-aware PLIP interaction diagram.</b> {description} Ligand chemistry comes from the retained SDF and interaction calls come from the retained PLIP XML.",styles["SmallDU"]),
-                    Spacer(1,5),
-                ])]
+            # The approved control presentation is one compact A/B/C panel,
+            # matching the new-docking interaction panel.  Individual PLIP
+            # images remain available as retained artifacts, but are not
+            # expanded into three inconsistent report figures.
+            composite = args.control / "report" / "control_interactions_ABC.png"
+            if combine_horizontal_diagrams([(None, path) for path, _ in control_diagrams], composite):
+                story += [Paragraph("Control interaction diagrams",styles["Heading2"]),
+                    image(composite,6.8,2.45),
+                    Paragraph(f"<b>Figure {figure_number}. SDF-aware PLIP interaction diagrams for control ligand {experimental_label}.</b> A is the experimental reference pose, B is the globally lowest-energy redocked pose, and C is the lowest-RMSD redocked pose. Ligand chemistry comes from the retained SDF files; interaction calls come from the retained PLIP XML.",styles["SmallDU"]), Spacer(1,6)]
                 figure_number += 1
             story.append(PageBreak())
-        else:
+        elif args.include_control_appendix:
             story.append(PageBreak())
         protocol_provenance = [
             ["Protocol provenance", "Recorded value"],
@@ -830,9 +876,7 @@ def main():
         ]
         if args.include_control_appendix:
             story += [
-                Paragraph("Approved protocol",styles["Heading2"]),
-                table([["Parameter","Selected value"],["Engine",protocol.get("engine","NA")],["Tier",protocol.get("calibration_tier","NA")],["Exhaustiveness",p.get("exhaustiveness","NA")],["Modes per job",p.get("num_modes","NA")],["Conformers per state",p.get("conformers_per_state","NA")],["Independent seeds",len(p.get("seeds",[]))],["Charge model",p.get("charge_model","NA")],["pH",p.get("ph","NA")],["Conformer force field",p.get("forcefield","mmff94")],["Tautomers enumerated",p.get("tautomers_enumerated",True)],["Conformer RMSD pruning",f"{p.get('rmsd_prune_angstrom',0.75)} A"],["Runtime",f"{protocol.get('wall_time_seconds',0)/60:.1f} min"],["Calibration jobs",last.get("job_count","NA")]], [2.55*inch,4.15*inch]),
-                Spacer(1,10), Paragraph("Protocol provenance", styles["Heading2"]),
+                Paragraph("Protocol provenance", styles["Heading2"]),
                 Paragraph("This identifies the earlier control that authorized this screen. The hashes bind the report to the exact approved protocol, receptor, and docking box.", styles["BodyText"]),
                 Spacer(1,6), table(protocol_provenance, [2.55*inch,4.15*inch], compact=True), PageBreak(),
             ]
@@ -852,9 +896,11 @@ def main():
           Paragraph("This section records the settings selected for this study. Control approval applies only when an approved target-matched protocol is identified below.",styles["BodyText"]),Spacer(1,6),
           table([["Parameter","Configured value"],["Validation status",validation_status],["Engine",engine],["Engine version",engine_version],["Exhaustiveness",manifest.get("exhaustiveness") or configured.get("exhaustiveness","NA")],["Modes per job",manifest.get("num_modes") or configured.get("num_modes","NA")],["Energy range",f"{manifest.get('energy_range_kcal_per_mol') or configured.get('energy_range_kcal_per_mol','NA')} kcal/mol"],["Independent seeds",seed_count or "NA"],["Receptor",Path(receptor).name],["Docking box",Path(docking_box).name]], [2.55*inch,4.15*inch]),PageBreak()]
 
-    result_number = section_number if workflow_is_exploratory else section_number + (2 if protocol else 1)
+    result_number = section_number if workflow_is_exploratory else section_number + (2 if protocol and args.include_control_appendix else 1)
     result_heading = "New-ligand docking results" if protocol else "Docking results"
     story += [Paragraph(f"{result_number}. {result_heading}",styles["Heading1"])]
+    if at_a_glance:
+        story += [Paragraph("Summary of docking results", styles["Heading2"]), table(at_a_glance, [2.55*inch, 4.15*inch]), Spacer(1,10)]
     shared_panel = first(args.study,["report/study_panels_AB.png"]) if len(compounds) == 1 else None
     inventory = read_json(args.study / "inputs" / "compound_library_inventory.json")
     inventory_rows = inventory.get("compounds", inventory.get("entries", []))
@@ -913,6 +959,13 @@ def main():
             snapshot_count = snapshot_manifest.get("snapshot_count", 3)
             selected_representative_count = max(1, int(snapshot_count or 1))
             representative_label = "representative" if snapshot_count == 1 else "representatives"
+            panel_labels = ["A", "B", "C"][:selected_representative_count]
+            if len(panel_labels) == 1:
+                panel_description = "Panel A shows energy rank 1."
+            elif len(panel_labels) == 2:
+                panel_description = "Panels A and B show energy ranks 1 and 2, respectively."
+            else:
+                panel_description = "Panels A, B, and C show energy ranks 1, 2, and 3, respectively."
             cluster_reference = (
                 f"Figure {cluster_figure_number}"
                 if cluster_figure_number is not None
@@ -924,7 +977,7 @@ def main():
                 Paragraph(
                     f"<b>Figure {figure_number}. Three-dimensional interaction snapshots for {name}.</b> "
                     f"Shown are {snapshot_count} energy-ranked distinct cluster {representative_label}, ordered by Vina score. "
-                    f"Red, blue, and gold match the highlighted clusters in {cluster_reference}. These views support structural inspection; docking score rank does not establish pose correctness.",
+                    f"{panel_description} Red, blue, and gold match the highlighted clusters in {cluster_reference}. These views support structural inspection; docking score rank does not establish pose correctness.",
                     styles["SmallDU"],
                 ), Spacer(1,6),
             ])]
@@ -941,9 +994,11 @@ def main():
         if interaction_diagrams:
             composite = args.study / "report" / f"{cid}_selected_interactions_ABC.png"
             if combine_horizontal_diagrams(interaction_diagrams, composite):
-                story += [Paragraph("Selected pose interaction diagrams",styles["Heading2"]),
+                story += [KeepTogether([
+                    Paragraph("Selected 2D pose interaction diagrams",styles["Heading2"]),
                     image(composite,6.8,2.45),
-                    Paragraph(f"<b>Figure {figure_number}. SDF-aware PLIP interaction diagrams for {name}.</b> A, B, and C are the red, blue, and gold energy-ranked cluster representatives shown above. Ligand chemistry comes from each retained SDF; interaction calls come from the retained PLIP report.xml.",styles["SmallDU"]),Spacer(1,6)]
+                    Paragraph(f"<b>Figure {figure_number}. SDF-aware PLIP interaction diagrams for {name}.</b> A, B, and C are the red, blue, and gold energy-ranked cluster representatives shown above. Ligand chemistry comes from each retained SDF; interaction calls come from the retained PLIP report.xml.",styles["SmallDU"]),Spacer(1,6),
+                ])]
                 figure_number += 1
         elif panel:
             story.append(PageBreak())

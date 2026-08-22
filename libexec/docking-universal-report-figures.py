@@ -517,7 +517,10 @@ def render_overlay(receptor, ligands, colors, output, session, pymol, ligand_sur
         return False
     pml = output.with_suffix(".pml")
     objects = []
-    lines = ["reinitialize", f'load "{Path(receptor).resolve()}", receptor', "hide everything, all"]
+    lines = [
+        "reinitialize", f'load "{Path(receptor).resolve()}", receptor', "hide everything, all",
+        "remove (receptor and polymer.protein and hydro and neighbor elem C)",
+    ]
     for index, (ligand, color) in enumerate(zip(ligands, colors), start=1):
         obj = f"report_ligand_{index}"
         objects.append(obj)
@@ -897,23 +900,25 @@ def combine_cluster_snapshots(analysis, rows, output):
         return False
 
     font_path = Path("/System/Library/Fonts/Helvetica.ttc")
-    label_font = ImageFont.truetype(str(font_path), 42) if font_path.is_file() else ImageFont.load_default()
-    caption_font = ImageFont.truetype(str(font_path), 30) if font_path.is_file() else ImageFont.load_default()
-    cell_w, cell_h, image_h = 760, 610, 500
+    label_font = ImageFont.truetype(str(font_path), 84) if font_path.is_file() else ImageFont.load_default()
+    caption_font = ImageFont.truetype(str(font_path), 60) if font_path.is_file() else ImageFont.load_default()
+    cell_w, cell_h, image_h = 1800, 1260, 1200
     if len(entries) == 1:
-        canvas_w, canvas_h = 1400, 920
+        canvas_w, canvas_h = 1400, 970
         positions = [(175, 70)]
         cell_w, cell_h, image_h = 1050, 780, 660
     elif len(entries) == 2:
-        canvas_w, canvas_h = 1600, 660
-        positions = [(30, 30), (810, 30)]
+        canvas_w, canvas_h = 3772, 1390
+        positions = [(10, 30), (1930, 30)]
     else:
         # Three selected clusters need enough area for inspection.  Put two
         # panels across the top and the third beneath them rather than making
         # three unreadably narrow horizontal thumbnails.
-        canvas_w, canvas_h = 1600, 1080
-        image_h = 420
-        positions = [(30, 30), (810, 30), (420, 555)]
+        # The 16 px border expands each 1800 px panel to 1832 px.  Use the
+        # same 88 px frame-to-frame spacing horizontally and vertically.
+        canvas_w, canvas_h = 3772, 2720
+        image_h = 1200
+        positions = [(10, 30), (1930, 30), (970, 1350)]
     canvas = Image.new("RGB", (canvas_w, canvas_h), "white")
     draw = ImageDraw.Draw(canvas)
     panel_letters = "ABC"
@@ -922,21 +927,29 @@ def combine_cluster_snapshots(analysis, rows, output):
         snapshot = Image.open(source).convert("RGB")
         content = ImageChops.difference(snapshot, Image.new("RGB", snapshot.size, "white")).getbbox()
         if content:
-            pad = 28
+            pad = 32
             snapshot = snapshot.crop((
                 max(0, content[0] - pad), max(0, content[1] - pad),
                 min(snapshot.width, content[2] + pad), min(snapshot.height, content[3] + pad),
             ))
-        snapshot.thumbnail((cell_w - 36, image_h - 24), Image.Resampling.LANCZOS)
+        # Fill the wide report panel instead of preserving the source aspect
+        # ratio and leaving large horizontal white bands.
+        inner_w = int((cell_w - 36) * 0.92)
+        inner_h = int((image_h - 24) * 0.92)
+        crop_center = (0.65, 0.5) if index == 1 else (0.5, 0.5)
+        snapshot = ImageOps.fit(
+            snapshot, (inner_w, inner_h),
+            method=Image.Resampling.LANCZOS, centering=crop_center,
+        )
         frame = Image.new("RGB", (cell_w, image_h), "white")
         frame.paste(snapshot, ((cell_w - snapshot.width) // 2, (image_h - snapshot.height) // 2))
-        frame = ImageOps.expand(frame, border=7, fill=color)
+        frame = ImageOps.expand(frame, border=16, fill=color)
         canvas.paste(frame, (x, y))
-        draw.text((x + 16, y + 12), panel_letters[index], fill=color, font=label_font)
+        draw.text((x + 32, y + 28), panel_letters[index], fill=color, font=label_font)
         score = row.get("best_energy_kcal_per_mol", "NA")
         caption = f"Energy rank {row.get('energy_rank', index + 1)} | Cluster {row.get('cluster_id', 'NA')} | Vina {score} kcal/mol"
         bounds = draw.textbbox((0, 0), caption, font=caption_font)
-        draw.text((x + (cell_w - (bounds[2] - bounds[0])) / 2, y + image_h + 28), caption, fill=color, font=caption_font)
+        draw.text((x + (cell_w - (bounds[2] - bounds[0])) / 2, y + image_h + 48), caption, fill=color, font=caption_font)
         sources.append(str(source.resolve()))
     output.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(output, dpi=(220, 220))

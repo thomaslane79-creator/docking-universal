@@ -97,6 +97,7 @@ def write_overlay_pml(output_dir, rmsd):
         "load crystal_ligand.sdf, crystal_ligand",
         "load top_score_pose.sdf, docked_ligand",
         "hide everything, all",
+        "remove (receptor and polymer.protein and hydro and neighbor elem C)",
         "select nearby_residues, byres (receptor within 5 of (crystal_ligand or docked_ligand))",
         "show sticks, nearby_residues",
         "color gray60, nearby_residues",
