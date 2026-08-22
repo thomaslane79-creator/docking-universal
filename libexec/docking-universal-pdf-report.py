@@ -769,15 +769,7 @@ def main():
             if control_ligand_sdf
             else protocol.get("control_evidence", {}).get("compound", "unspecified ligand")
         )
-        calibration_jobs = last.get("job_count", "NA")
-        total_jobs = int(calibration_jobs) + 1 if str(calibration_jobs).isdigit() else "NA"
-        rows=[["Configured and approved protocol","Selected value"],
-          ["Protocol status","PASS" if passed else "REVIEW"],
-          ["Control completed",protocol.get("created_utc", "Not recorded")],
-          ["Control ligand",control_ligand_name],
-          ["Control ligand RMSD (best sampled)",f"{b.get('best_rmsd_angstrom','NA')} A"],
-          ["Acceptance threshold",f"{a.get('threshold_angstrom','NA')} A"],
-          ["Control receptor preparation",protocol.get("receptor_preparation", {}).get("path", "not recorded by this older protocol")],
+        rows=[["Approved docking protocol","Selected value"],
           ["Locked docking box / pocket",Path(locked_inputs.get("box", "NA")).name],
           ["Engine",protocol.get("engine","NA")],
           ["Tier",protocol.get("calibration_tier","NA")],
@@ -789,21 +781,10 @@ def main():
           ["pH",p.get("ph","NA")],
           ["Conformer force field",p.get("forcefield","mmff94")],
           ["Tautomers enumerated",p.get("tautomers_enumerated",True)],
-          ["Conformer RMSD pruning",f"{p.get('rmsd_prune_angstrom',0.75)} A"],
-          ["Runtime",f"{protocol.get('wall_time_seconds',0)/60:.1f} min"],
-          ["Calibration and control jobs",f"{calibration_jobs} calibration + 1 control = {total_jobs} total"]]
-        if not args.include_control_appendix:
-            inherited_fields = {
-                "Protocol status", "Control completed", "Control ligand",
-                "Control ligand RMSD (best sampled)", "Acceptance threshold",
-                "Control receptor preparation", "Locked docking box / pocket",
-                "Engine", "Tier", "Exhaustiveness", "Modes per job",
-                "Independent seeds",
-            }
-            rows = [rows[0]] + [row for row in rows[1:] if row[0] in inherited_fields]
+          ["Conformer RMSD pruning",f"{p.get('rmsd_prune_angstrom',0.75)} A"]]
         story += [
           Paragraph(f"{section_number}. Configured docking protocol", styles["Heading1"]),
-          Paragraph("This summary identifies the approved target-matched protocol and the control result that authorized its reuse.", styles["BodyText"]), Spacer(1,6),
+          Paragraph("This table records the reusable target-matched docking settings. Control performance is reported with the control figure; preparation, software, and provenance are reported in the final section.", styles["BodyText"]), Spacer(1,6),
           table(rows,[2.55*inch,4.15*inch], compact=True),
         ]
         if args.include_control_appendix:
@@ -826,7 +807,7 @@ def main():
             # as validation evidence, without repeating the detailed control
             # PLIP interaction diagrams.
             story += [KeepTogether([
-                Paragraph("Inherited control-validation evidence", styles["Heading2"]),
+                Paragraph("Control pose-recovery results", styles["Heading2"]),
                 image(control_ab,7.0,3.6),
                 Paragraph(f"<b>Figure {figure_number}. Retrospective control performance and pose recovery.</b> (A) Control-cluster Vina score versus symmetry-aware, no-fit heavy-atom RMSD to experimental {experimental_label} in the receptor coordinate frame. (B) Experimental ligand (magenta), lowest-energy pose (red), and lowest-RMSD pose (blue) superimposed in that frame; receptor residues within 5 A of the displayed ligands are gray.",styles["SmallDU"]),
             ]), PageBreak()]
