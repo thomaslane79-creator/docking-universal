@@ -31,16 +31,16 @@ Usage:
 
 Preparation:
   run           Guided end-to-end control, approved-screen, or exploratory study
-  control       Analyze a bound ligand and redock it as a pose-recovery control
+  control       Run a guided bound-ligand control and write its reports
+  screen        Screen compounds with an approved control and write reports
   calibrate     Run tiered ensemble redocking and write a protocol record
   ensemble      Generate independent pH-aware protomer/tautomer conformers
   prepare-receptor Prepare a receptor and generate pocket/box coordinates
   prepare-ligand Convert an SDF ligand library to prepared PDBQT files
-  pockets       Generate fpocket-ranked pocket coordinates from a protein PDB
+  pockets       Find and review ligand-free pockets and write a cavity report
 
 Analysis:
   evaluate-control Evaluate ensemble sampling/ranking and gate unknown docking
-  screen        Dock one unknown ligand with an approved target-locked protocol
   cluster-poses Cluster cross-seed/conformer poses and select representatives
   dock          Batch an existing receptor, ligand set, and Vina config
   collect       Convert PDBQT docking outputs into a tidy CSV table
@@ -109,10 +109,10 @@ doctor() {
       printf '  absent     %s\n' "$tool"
     fi
   done
-  if "$PYTHON_COMMAND" -c 'import pdbfixer, openmm' >/dev/null 2>&1; then
-    printf '  available  PDBFixer (receptor pre-cleaning)\n'
+  if "$PYTHON_COMMAND" -c 'import pdbfixer, openmm, gemmi, meeko' >/dev/null 2>&1; then
+    printf '  available  receptor Python stack (PDBFixer, OpenMM, Gemmi, Meeko)\n'
   else
-    printf '  absent     PDBFixer (receptor pre-cleaning)\n'
+    printf '  absent     receptor Python stack (requires PDBFixer, OpenMM, Gemmi, and Meeko)\n'
     missing_full=1
   fi
 
@@ -159,7 +159,7 @@ case "$command_name" in
     ;;
   control)
     shift
-    exec "$LIBEXEC_DIR/docking-universal-control" "$@"
+    exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-run.py" --mode control "$@"
     ;;
   run)
     shift
@@ -183,6 +183,16 @@ case "$command_name" in
     ;;
   pockets)
     shift
+    exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-run.py" --mode exploratory --pockets-only "$@"
+    ;;
+  # Internal stage aliases retained for pipeline orchestration and advanced
+  # compatibility. Public users should normally use `control` or `pockets`.
+  control-stage)
+    shift
+    exec "$LIBEXEC_DIR/docking-universal-control" "$@"
+    ;;
+  pockets-stage)
+    shift
     exec "$LIBEXEC_DIR/docking-universal-pockets" "$@"
     ;;
   dock)
@@ -202,6 +212,10 @@ case "$command_name" in
     exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-calibration-evaluate.py" "$@"
     ;;
   screen)
+    shift
+    exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-run.py" --mode screen "$@"
+    ;;
+  screen-stage)
     shift
     exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-screen.py" "$@"
     ;;

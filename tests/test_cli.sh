@@ -173,7 +173,7 @@ esac
 PYTHONPYCACHEPREFIX="$mock_dir/pycache" "${DOCKING_UNIVERSAL_PYTHON:-python}" -m py_compile "$project_dir"/libexec/*.py || fail "Python syntax"
 
 "$cli" evaluate-control --help | grep -q -- '--no-prompt' || fail "evaluate-control no-prompt help"
-"$cli" control --help | grep -q -- '--infer-ligand-chemistry' || fail "provisional PDB chemistry help"
+"$cli" control-stage --help | grep -q -- '--infer-ligand-chemistry' || fail "provisional PDB chemistry stage help"
 
 # A synthetic five-seed control verifies the v1 approval record without running
 # an external docking engine. Each seed contains one conformer comparison.
@@ -198,12 +198,12 @@ grep -q '"unknown_docking_allowed": true' "$mock_dir/protocol.json" || fail "pro
 # A complete approved protocol must validate its locked inputs and drive the
 # high-level screen planner, not merely contain an approval boolean.
 approved_ligand="$project_dir/examples/tutorials/01_bound_ligand/inputs/rilpivirine_pubchem.sdf"
-"$cli" screen --protocol "$mock_dir/protocol.json" --ligand "$approved_ligand" \
+"$cli" screen-stage --protocol "$mock_dir/protocol.json" --ligand "$approved_ligand" \
   --out "$mock_dir/approved_check" --check-only --non-interactive >/dev/null \
   || fail "approved protocol check"
-"$cli" run --mode screen --protocol "$mock_dir/protocol.json" --ligands "$approved_ligand" \
+"$cli" screen --protocol "$mock_dir/protocol.json" --ligands "$approved_ligand" \
   --out "$mock_dir/approved_plan" --name approved_protocol_test --plan-only --non-interactive >/dev/null \
-  || fail "approved protocol screen planning"
+  || fail "public approved protocol screen planning"
 [ -s "$mock_dir/approved_plan/study_manifest.json" ] || fail "approved protocol study manifest"
 
 missing_protocol_output=""
@@ -220,7 +220,7 @@ esac
 # unapproved. This protects automation from accidentally bypassing calibration.
 printf 'test\n$$$$\n' > "$mock_dir/unknown.sdf"
 sed 's/"unknown_docking_allowed": true/"unknown_docking_allowed": false/' "$mock_dir/protocol.json" > "$mock_dir/unapproved.json"
-if "$cli" screen --protocol "$mock_dir/unapproved.json" --ligand "$mock_dir/unknown.sdf" --out "$mock_dir/blocked" --non-interactive >/dev/null 2>&1; then
+if "$cli" screen-stage --protocol "$mock_dir/unapproved.json" --ligand "$mock_dir/unknown.sdf" --out "$mock_dir/blocked" --non-interactive >/dev/null 2>&1; then
   fail "unapproved protocol was accepted"
 fi
 

@@ -153,10 +153,10 @@ After a five-seed control passes, use its target-locked record for an unknown co
 
 ```bash
 docking-universal screen --protocol CONTROL/04_redocking/vina/broader/protocol.json \
-  --ligand compound.sdf --out compound_run
+  --ligands compound.sdf --out compound_run
 ```
 
-Screening verifies the recorded receptor and box hashes before starting. A control record cannot be reused after either input changes.
+Screening verifies the recorded receptor and box hashes before starting. A control record cannot be reused after either input changes. The public `screen` command runs the complete guided screen and writes PDF, HTML, Markdown, and JSON reports.
 
 ## PLIP visualization design
 

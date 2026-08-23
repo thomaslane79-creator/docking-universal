@@ -76,14 +76,40 @@ folders and CSV, JSON, Markdown, HTML, and PDF reports.
    and machine-readable reports. This supports review rather than treating one
    docking score as a conclusion.
 
-### Useful direct workflows
+### Complete and direct workflows
 
-Three major parts of the guided study are also useful on their own:
+Use the guided command when you want a complete study record, including the
+final human-readable report:
 
-- **Bound-ligand control — `docking-universal control`:** test whether a
-  preparation and search protocol can recover a known experimental pose. This
-  is useful for calibration, protocol review, or generating an approved protocol
-  before screening additional compounds.
+- **Bound-ligand control study — `docking-universal run --mode control`:** guide
+  receptor/site preparation, independent redocking, pose-recovery assessment,
+  and reporting. A completed control writes PDF, HTML, Markdown, and JSON
+  reports. If the control passes, it also writes a portable approved
+  `.duprotocol` bundle for later screening with the same locked settings.
+- **Screen with an existing passing control — `docking-universal screen`:**
+  select an approved `.duprotocol` and a new ligand or compound
+  library and reuse the control-approved receptor, pocket, box, preparation
+  policy, and search settings unchanged. The new screen receives its own
+  PDF, HTML, Markdown, and JSON reports while retaining a concise record of the
+  control evidence. For scripted use, the equivalent explicit form is
+  `docking-universal screen --protocol approved.duprotocol --ligands compounds.sdf --out study`.
+- **Ligand-free cavity and docking study — `docking-universal run --mode
+  exploratory`:** guide fpocket cavity review and exploratory docking when no
+  suitable experimental control ligand is available. Its report clearly
+  separates geometric pocket hypotheses from biological validation.
+
+Four major parts of the guided study are also useful on their own:
+
+- **Bound-ligand control — `docking-universal control`:** the short public form
+  of the complete guided control study. It tests whether the protocol can
+  recover a known experimental pose and automatically writes PDF, HTML,
+  Markdown, and JSON reports. A passing control also writes the reusable
+  `.duprotocol` bundle.
+- **Pocket discovery — `docking-universal pockets`:** select a protein, run
+  fpocket independently, review ranked candidate cavities, and write pocket
+  coordinates, docking-box configurations, and a cavity-only PDF/HTML/Markdown/
+  JSON report without docking a ligand. These are geometric hypotheses for
+  structural review, not proof of a biologically relevant binding site.
 - **Receptor and site preparation — `docking-universal prepare-receptor`:** prepare the
   receptor and inspect ligand-centered or predicted cavities without starting a
   docking campaign. This is useful for checking structural inputs and selecting
