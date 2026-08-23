@@ -34,8 +34,8 @@ Preparation:
   control       Analyze a bound ligand and redock it as a pose-recovery control
   calibrate     Run tiered ensemble redocking and write a protocol record
   ensemble      Generate independent pH-aware protomer/tautomer conformers
-  prepare       Prepare a receptor and generate pocket/box coordinates
-  ligands       Convert an SDF ligand library to prepared PDBQT files
+  prepare-receptor Prepare a receptor and generate pocket/box coordinates
+  prepare-ligand Convert an SDF ligand library to prepared PDBQT files
   pockets       Generate fpocket-ranked pocket coordinates from a protein PDB
 
 Analysis:
@@ -173,11 +173,11 @@ case "$command_name" in
     shift
     exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-ensemble.py" "$@"
     ;;
-  prepare)
+  prepare|prepare-receptor)
     shift
     exec "$LIBEXEC_DIR/docking-universal-prepare" "$@"
     ;;
-  ligands)
+  ligands|prepare-ligand)
     shift
     exec "$LIBEXEC_DIR/docking-universal-ligands" "$@"
     ;;

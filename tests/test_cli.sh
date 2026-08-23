@@ -13,9 +13,12 @@ bash -n "$cli" || fail "shell syntax"
 
 help_output=$("$cli" --help)
 case "$help_output" in
-  *"Docking Universal - structural docking"*"docking-universal <command>"*) ;;
+  *"Docking Universal - structural docking"*"docking-universal <command>"*"prepare-receptor"*"prepare-ligand"*) ;;
   *) fail "help output" ;;
 esac
+
+"$cli" prepare-receptor --help >/dev/null || fail "prepare-receptor alias"
+"$cli" prepare-ligand --help >/dev/null || fail "prepare-ligand alias"
 
 version_output=$("$cli" --version)
 case "$version_output" in

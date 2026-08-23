@@ -44,25 +44,56 @@ Docking Universal produces scenario-specific reports for:
 
 The linked example shows the current report organization, figures, tables, provenance, software-version recording, and scientific limitations. It demonstrates report format and workflow outputs; its individual docking results are not general validation of docking accuracy.
 
-## Package map
+## Guided study — recommended
 
-| Stage | Command | Main outputs |
-| --- | --- | --- |
-| Guided study | `docking-universal run` | control, approved-screen, or exploratory workflow; per-compound folders; CSV/JSON/Markdown/HTML reports |
-| Independent ensemble | `docking-universal ensemble` | pH-aware protomer/tautomer states and reproducible ETKDG/MMFF conformers |
-| Bound-ligand control | `docking-universal control` | verified experimental-coordinate SDF, redocked poses, scores, pose RMSDs, PLIP/PyMOL visuals |
-| Receptor + sites | `docking-universal prepare` | receptor PDB/PDBQT, ligand manifest, pocket diagnostics, Vina boxes, PyMOL scenes |
-| Compound library | `docking-universal ligands` | optimized per-compound PDBQT files with name and SMILES metadata |
-| Pocket coordinates | `docking-universal pockets` | ranked pocket coordinates, box PDBs, and configuration files |
-| Batch execution | `docking-universal dock` | per-compound PDBQT models, logs, and run manifest |
-| Result collation | `docking-universal collect` | tidy CSV preserving Vina score and RMSD-bound fields |
-| Pose comparison | `docking-universal compare-redock` | symmetry-aware pose RMSDs, summary, complexes, and overlay scene |
-| Control evaluation | `docking-universal evaluate-control` | sampling/ranking/seed acceptance and versioned protocol gate |
-| Protocol-locked unknown | `docking-universal screen` | independent unknown-ligand ensemble, replicated poses, combined scores, audit manifest |
-| Cross-run pose clustering | `docking-universal cluster-poses` | all-pose inventory, energy-ranked clusters, three representative scenes, seed/conformer support |
-| Interactions | `docking-universal interactions` | PLIP XML/text, fixed coordinates, all-in-one PyMOL PML, manifest |
-| 3D output | `docking-universal render3d` | headless PyMOL PNG from an existing PML or coordinate file |
-| 2D output | `docking-universal depict2d` | generic PNG/SVG molecular depictions from existing coordinate files |
+`docking-universal run` guides the user through the complete study: receptor
+and ligand preparation, a bound-ligand control or explicitly exploratory path,
+docking, analysis, and reporting. Most users do not need to run the underlying
+stage commands separately.
+
+It produces a control, approved-screen, or exploratory study with per-compound
+folders and CSV, JSON, Markdown, HTML, and PDF reports.
+
+### What the guided study does
+
+1. **Choose the scientific pathway.** Use a bound-ligand control, reuse an
+   approved protocol for new compounds, or clearly label a ligand-free study as
+   exploratory. This keeps the strength of the resulting evidence explicit.
+2. **Prepare the receptor and binding site.** Check and prepare the structure,
+   then define a ligand-centered site or review predicted cavities. This records
+   what was actually docked and avoids silently accepting an arbitrary site.
+3. **Prepare plausible ligand states and shapes.** Generate pH-aware chemical
+   states and reproducible 3D conformers. This reduces dependence on a single
+   guessed protonation state or starting geometry.
+4. **Test or apply the docking protocol.** A control tests pose recovery before
+   approving screening settings; an approved screen reuses those locked settings.
+   Exploratory studies remain explicitly uncalibrated.
+5. **Dock with recorded sampling settings.** Run the selected conformers and
+   independent seeds with AutoDock Vina so the search can be reproduced and its
+   consistency assessed.
+6. **Analyze and report the results.** Collate scores, compare or cluster poses,
+   generate interaction and structure visuals, and retain provenance in human-
+   and machine-readable reports. This supports review rather than treating one
+   docking score as a conclusion.
+
+### Useful direct workflows
+
+Three major parts of the guided study are also useful on their own:
+
+- **Bound-ligand control — `docking-universal control`:** test whether a
+  preparation and search protocol can recover a known experimental pose. This
+  is useful for calibration, protocol review, or generating an approved protocol
+  before screening additional compounds.
+- **Receptor and site preparation — `docking-universal prepare-receptor`:** prepare the
+  receptor and inspect ligand-centered or predicted cavities without starting a
+  docking campaign. This is useful for checking structural inputs and selecting
+  an appropriate docking box first.
+- **Ligand preparation — `docking-universal prepare-ligand`:** prepare an SDF
+  ligand or compound library independently. This is useful for checking ligand
+  identities and prepared structures before docking.
+
+The guided `docking-universal run` workflow invokes these capabilities when
+needed, so most users do not need to run them separately.
 
 ## Requirements
 
@@ -105,8 +136,7 @@ docking-universal run
 The installer explains each stage, creates both scientific environments, checks
 the complete installation, and prints the command to begin. It does not require
 you to activate or manage either Conda environment. The installed launcher runs
-every subcommand in the correct environment automatically, including
-`docking-universal prepare-ligand` and `docking-universal check-install`.
+Docking Universal in the correct environment automatically.
 The guided `run` command asks where to save the study. Graphical Ubuntu sessions
 prefer Ubuntu's Zenity/GTK chooser, which follows desktop theme, font, and display
 scaling; Tk remains a fallback. macOS opens Finder initially at the front Finder
@@ -170,7 +200,7 @@ make install PREFIX="$HOME/.local"
 
 On Apple silicon, install the conda-forge package named `pymol-open-source`, not the official native bundle. The pinned PyMOL 3.0.0, PyCairo 1.27.0, RDKit 2023.09.6, and Python 3.9 matrix was freshly solved and its headless rendering path verified on macOS arm64 on 2026-08-08. See [Installation](docs/installation.md) for the M2 note, stage-by-stage dependencies, and troubleshooting.
 
-## Command overview
+## Guided study examples
 
 ```text
 docking-universal run
@@ -178,22 +208,7 @@ docking-universal run --mode control --complex 1HVR --download-pdb --out control
 docking-universal run --mode screen --protocol approved.duprotocol --ligands library.sdf --out study
 docking-universal run --mode exploratory --receptor-pdb receptor.pdb --receptor-pdbqt receptor.pdbqt --box pocket.conf --ligands library.sdf --out study
 docking-universal run --mode exploratory --complex protein_only.pdb --ligands library.sdf --review-pockets --out study
-docking-universal control --complex bound_complex.pdb
-docking-universal control --complex bound_complex.pdb --control-tier broader --non-interactive
-docking-universal ensemble ligand_template.sdf --out ensemble.sdf --ph 7.4 --conformers 10
-docking-universal prepare <complex.pdb>
-docking-universal ligands <library.sdf> [-n SDF_NAME_FIELD]
-docking-universal pockets <protein_only.pdb> <name> [quick|robust]
-docking-universal dock --engine vina --receptor receptor.pdbqt --ligands DIR --config box.conf --out results_vina
-docking-universal dock --engine vina --receptor receptor.pdbqt --ligands DIR --config box.conf --out results_vina
-docking-universal collect RESULTS_DIR --out scores.csv
-docking-universal screen --protocol protocol.json --ligand unknown.sdf --out unknown_run
-docking-universal interactions complex.pdb --plip-command plip
-docking-universal render3d scene.pml --out scene.png
-docking-universal depict2d ligand.pdb ligand.sdf --out-dir 2d_depictions
 ```
-
-Every subcommand provides `--help`.
 
 `docking-universal run` is the recommended entry point. In interactive use it explains and offers three scientifically distinct paths: a retrospective bound-ligand control, screening with a target-locked approved protocol, or explicitly uncalibrated exploratory docking when no suitable bound ligand exists. It accepts one SDF, a multi-record SDF, or a directory of SDF files. Each compound is isolated in its own folder so a failure does not erase completed work, and the final `report/` contains CSV, JSON, Markdown, HTML, and PDF summaries. The PDF stage automatically rebuilds the control and per-compound cluster figures from retained artifacts. A control report includes SDF-aware PLIP interaction diagrams for the experimental, globally lowest-energy, and globally lowest-RMSD poses. Each compound includes the approved A/B cluster figure, a compact color-matched 3D snapshot figure for up to three low-energy distinct clusters, and chemically typed 2D interaction diagrams for those representatives. The ligand drawing uses the retained pose SDF rather than inferring bond order from a PDB; PLIP XML supplies the interaction calls and ligand contact coordinates. It does not depend on manually prepared images. Use `--plan-only` to validate and split inputs without docking. See the [guided workflow](docs/guided-workflow.md) for the choices, outputs, and interpretation limits.
 
@@ -205,9 +220,9 @@ The standard combined PDF keeps reused control evidence concise: control date, l
 
 Default completed control folders use the readable form `control_<PDB>_<ligand>_<YYYYMMDD_HHMMSS>`, such as `control_1HVR_XK2_20260811_143025`. Explicit `--out` folder names remain unchanged.
 
-### Run end-to-end or in separate stages
+### Continue from a completed control
 
-You can run the entire guided workflow with `docking-universal run`, or pause between stages. In a split workflow, first run the bound-ligand control, then pass its resulting `protocol.json` to the approved screen:
+After completing a bound-ligand control, its resulting `protocol.json` can be passed to an approved screen:
 
 ```bash
 # Stage 1: control and protocol calibration
@@ -227,7 +242,7 @@ Two [complete workflow tutorials](examples/tutorials/README.md) show the major s
 
 Completed PDFs receive descriptive archival names derived from the target, ligand scope, run date, and report type—for example, `2R8N_Indinavir_2026-08-11_docking_report.pdf`, `1HVR_XK2_2026-08-11_control_report.pdf`, or `4AKE_cavity_2026-08-11_cavity_report.pdf`. Libraries of more than three compounds use a bounded label such as `2R8N_15-ligands_2026-08-11_docking_report.pdf`; the individual ligand names remain in the report and machine-readable summary.
 
-`docking-universal control` is the guided retrospective-control workflow. It lists exact bound-ligand instances as `RESNAME:CHAIN:RESNUM` with atom counts and requires confirmation. The Bash prompt then offers strict chemistry verification (recommended) or a manual override whose reason is recorded in `run_manifest.tsv`.
+The guided bound-ligand-control path lists exact bound-ligand instances as `RESNAME:CHAIN:RESNUM` with atom counts and requires confirmation. It then offers strict chemistry verification (recommended) or a manual override whose reason is recorded in `run_manifest.tsv`.
 
 The default path now performs independent-ensemble calibration and writes a versioned, target-locked `protocol.json`. The superseded single-conformer implementation is available only through `--legacy-single-conformer` to reproduce historical output and cannot authorize unknown docking.
 
@@ -241,28 +256,11 @@ In the default path, “CCD chemistry” means only the coordinate-free molecula
 
 The default `quick` tier runs 3 conformers × 2 seeds at exhaustiveness 16 as a diagnostic and cannot satisfy the default five-seed approval rule. If it fails or is incomplete, interactive use offers targeted repeatability, broader-search, conformer-expansion, robust, or input-inspection choices and shows the planned docking-job count. No slow retry begins without confirmation. For unattended work, choose a tier explicitly with `--control-tier` and add `--non-interactive`.
 
-```bash
-docking-universal control --complex 1HVR.pdb
-```
-
-For a recorded noninteractive run, use the exact candidate identifier:
-
-```bash
-docking-universal control --complex 1HVR.pdb --ligand-id XK2:A:263
-```
-
-The explicit override is also available from Bash for exceptional chemistry, but it requires an audit note:
-
-```bash
-docking-universal control --complex unusual_complex.pdb --ligand-id LIG:A:401 \
-  --force-ligand --override-reason "Curated local ligand identity and bond orders"
-```
-
 This control is separate from prospective docking and ligand-free pocket evaluation. Its interaction visuals describe the experimental ligand and redocked control poses; they are not reused as evidence for unrelated screened compounds.
 
 The calibration path deliberately strips all template coordinates before ensemble generation. MolScrub enumerates pH-dependent chemical states; Docking Universal then generates seeded ETKDG conformers and force-field minimizes them. The crystallographic pose is withheld until RMSD evaluation. A v1 protocol is eligible for unknown docking only when both the best sampled pose and globally top-ranked pose meet the configured RMSD threshold for every required independent seed. It records the engine, macrocycle treatment, search settings, seeds, receptor and box paths, and SHA-256 hashes.
 
-`docking-universal screen` consumes an approved protocol and one unknown-compound SDF. It verifies that the receptor and box are unchanged, independently generates the recorded number of pH-aware conformers, repeats docking with the recorded seeds, and combines scores. Failed, incomplete, altered, or engine-incompatible protocols are rejected. Protocol transfer preserves a tested search configuration; it does not prove that an unknown pose or score is correct.
+The guided approved-screen path consumes an approved protocol and one unknown-compound SDF. It verifies that the receptor and box are unchanged, independently generates the recorded number of pH-aware conformers, repeats docking with the recorded seeds, and combines scores. Failed, incomplete, altered, or engine-incompatible protocols are rejected. Protocol transfer preserves a tested search configuration; it does not prove that an unknown pose or score is correct.
 
 By default, screening then clusters all poses across seeds and conformers at a 2.0 Å symmetry-aware no-fit heavy-atom RMSD cutoff. It selects the lowest-energy members of the three lowest-energy distinct clusters for PLIP and PyMOL output while retaining every raw pose. See [Pose clustering and representative analysis](docs/pose-clustering.md) for option meanings and scientific interpretation.
 
@@ -270,7 +268,7 @@ PyMOL scenes load chemically typed ligand SDFs so bond display does not depend o
 
 ## Receptor cavities and docking-box selection
 
-`docking-universal prepare` is the guided, high-audit workflow. It prepares the receptor, detects bound ligand candidates, supports ligand-centered and ligand-free cavity modes, produces coordinates and equal-size Vina boxes, and writes PyMOL review scenes.
+The guided study prepares the receptor, detects bound ligand candidates, supports ligand-centered and ligand-free cavity modes, produces coordinates and equal-size Vina boxes, and writes PyMOL review scenes.
 
 In ligand-centered mode, the selected ligand centroid anchors the docking box. A local protein region is passed to `fpocket`; alpha spheres are retained when they overlap ligand van der Waals volume and remain within the configured centroid cutoff. The ligand identifies the reference site; it is not itself a biological proof of pocket identity.
 
@@ -286,23 +284,11 @@ The reference is the whole protein or largest chain. Boxes that exceed the confi
 
 Ligand-free guided runs start with conservative fpocket settings and a score threshold of 0.10. If no candidate survives, the interface offers a documented retry at 0.0 while retaining the geometry, broad-pocket, and overlap filters. Lowering the threshold admits additional geometric hypotheses; it does not validate them as binding sites. When multiple retained pockets have competitive scores (within 0.05 score units or 20% of the best score, whichever is larger), the interface marks the near-tie, can open all competitive PyMOL scenes, and waits for the user to choose the numbered pocket/box. fpocket rank is therefore a review aid rather than an automatic biological-site assignment.
 
-## Visual output from existing files
+## Visual output
 
-The visualization commands do not run docking or modify the input structures.
-
-`render3d` accepts an existing `.pml`, `.pse`, `.pdb`, `.pdbqt`, `.mol2`, or `.sdf`. It starts PyMOL in quiet headless mode, applies a neutral default style for raw coordinates, ray-traces the view, and writes a PNG.
-
-```bash
-docking-universal render3d output_scene.pml --out figures/output_scene.png
-```
-
-`depict2d` accepts one or more existing coordinate files and creates generic molecular depictions. PNG and SVG are supported.
-
-```bash
-docking-universal depict2d ligand.pdb ligand_02.sdf --format svg --out-dir figures/2d
-```
-
-These are generic structure depictions. Protein–ligand interaction visuals use a separate path: PLIP computes and writes interaction reports and fixed coordinates, then Docking Universal reads those outputs and writes a consolidated PyMOL PML scene. This custom scene step avoids depending on PLIP's native visualization path, which was unreliable in the original environment.
+The guided study generates 2D molecular depictions, 3D PyMOL scenes, and
+protein–ligand interaction figures automatically for its reports. These visuals
+do not replace inspection of the retained structures and provenance records.
 
 The repository includes small, provenance-recorded inputs for the 1HVR/XK2 bound-ligand tutorial and the 2R8N ligand-free cavity tutorial. The [example PDF report](docs/assets/docking-universal-example-report.pdf) demonstrates the automatic consolidated-report path without adding bulky intermediate docking runs to the repository. A ligand-free exploratory run automatically receives a distinct cavity-and-docking report: fpocket candidate ranks, cavity volume and druggability descriptors, the selected pocket and docking-box geometry, an A/B cavity-review figure, the configured protocol, and subsequent compound results replace the bound-ligand control section. A separate generic XK2 depiction demonstrates the SDF-to-2D path without implying docking or receptor interactions.
 
