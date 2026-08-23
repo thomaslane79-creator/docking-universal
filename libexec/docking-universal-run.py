@@ -1351,6 +1351,7 @@ def parse_args():
     parser.add_argument("--non-interactive", action="store_true")
     parser.add_argument("--no-visuals", action="store_true")
     parser.add_argument("--review-pockets", action="store_true", help="open the prepared exploratory cavity scene in PyMOL before docking")
+    parser.add_argument("--pockets-only", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--pymol", default="pymol", help="PyMOL executable for --review-pockets")
     parser.add_argument("--cavity-mode", choices=("1", "2", "3"), default="1", help="ligand-free fpocket mode: conservative (default), expanded, or permissive")
     parser.add_argument("--max-pockets", type=int, default=3, help="maximum ligand-free pockets to retain")
@@ -1371,6 +1372,8 @@ def main():
         mode = choose_mode()
         if not mode:
             raise SystemExit("Invalid workflow selection")
+    if args.pockets_only and mode != "exploratory":
+        raise SystemExit("--pockets-only is only valid for the ligand-free exploratory workflow")
     use_finder_working_directory(args)
     if mode == "exploratory" and args.max_pockets < 3:
         raise SystemExit("--max-pockets must be at least 3 for exploratory pocket review.")
@@ -1497,7 +1500,7 @@ def main():
             box_size = input("Docking-box edge length in Angstroms [26.0]: ").strip() or "26.0"
             box_size = validated_box_size(box_size)
         command = [
-            "env", f"BOX_SIZE={box_size}", cli, "control", "--complex", complex_path,
+            "env", f"BOX_SIZE={box_size}", cli, "control-stage", "--complex", complex_path,
             "--engine", args.engine, "--control-tier", control_tier, "--out", study / "control",
             "--ph", args.ph, "--base-seed", args.base_seed, "--forcefield", args.forcefield,
             "--rmsd-prune", args.rmsd_prune, "--charge-model", args.charge_model,
@@ -1607,17 +1610,22 @@ def main():
         return
 
     ligands = args.ligands
-    if not ligands and not args.non_interactive:
-        ligands = choose_ligand_source()
-    if not ligands:
-        raise SystemExit("--ligands is required")
-    compounds = split_compounds(ligands, study / "inputs" / "compounds")
-    report_compound_library(compounds, study / "inputs" / "compound_library_inventory.json")
+    if args.pockets_only:
+        if ligands:
+            raise SystemExit("docking-universal pockets does not accept --ligands; use an exploratory run to dock compounds")
+        compounds = []
+    else:
+        if not ligands and not args.non_interactive:
+            ligands = choose_ligand_source()
+        if not ligands:
+            raise SystemExit("--ligands is required")
+        compounds = split_compounds(ligands, study / "inputs" / "compounds")
+        report_compound_library(compounds, study / "inputs" / "compound_library_inventory.json")
 
     if mode == "screen":
         print("STAGE: validating the approved protocol and locked receptor/box before any compound is docked")
         run([
-            cli, "screen", "--protocol", args.protocol, "--ligand", compounds[0]["input"],
+            cli, "screen-stage", "--protocol", args.protocol, "--ligand", compounds[0]["input"],
             "--out", study / "protocol_check", "--check-only", "--non-interactive",
         ])
 
@@ -1629,7 +1637,7 @@ def main():
     if mode == "exploratory" and not (receptor_pdb and receptor_pdbqt and box):
         if not args.complex:
             raise SystemExit("exploratory mode requires prepared receptor/box inputs or --complex for guided preparation")
-        if args.non_interactive and not args.plan_only:
+        if args.non_interactive and not (args.plan_only or args.pockets_only):
             raise SystemExit("raw exploratory preparation requires interaction; provide --receptor-pdb, --receptor-pdbqt, and --box")
         raw_complex = validate_complex_pdb(args.complex.expanduser().resolve())
         try:
@@ -1724,6 +1732,17 @@ def main():
     )
     (study / "study_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
+    if args.pockets_only:
+        manifest["completion_status"] = "COMPLETED"
+        manifest["study_status"] = "EXPLORATORY_NO_CONTROL"
+        manifest["analysis"] = "ligand-free cavity discovery only"
+        (study / "study_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+        report_dir = write_reports(study, manifest, [])
+        print(f"\nPocket study complete: {study}")
+        print(f"PDF and readable reports: {report_dir}")
+        print(f"Machine summary: {report_dir / 'study_summary.json'}")
+        return
+
     failures = 0
     if args.plan_only:
         for compound in compounds:
@@ -1735,7 +1754,7 @@ def main():
         print("  Next: independent conformers → ligand PDBQT → replicated rigid-receptor docking → clustering → reports")
         compound_dir = study / "compounds" / compound["compound_id"]
         command = [
-            cli, "screen", "--ligand", compound["input"], "--out", compound_dir,
+            cli, "screen-stage", "--ligand", compound["input"], "--out", compound_dir,
             "--analysis", args.analysis, "--representatives", args.representatives,
             "--cluster-rmsd", args.cluster_rmsd, "--non-interactive",
         ]

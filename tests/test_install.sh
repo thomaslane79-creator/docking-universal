@@ -2,6 +2,11 @@
 set -eu
 
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+grep -q '^[[:space:]]*- gemmi' "$project_dir/environment.yml" || {
+  printf 'FAIL: environment.yml must declare Meeko receptor dependency gemmi\n' >&2
+  exit 1
+}
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/docking-universal-install.XXXXXX")
 trap 'rm -rf "$work_dir"' EXIT HUP INT TERM
 prefix="$work_dir/prefix"
