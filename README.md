@@ -109,7 +109,7 @@ every subcommand in the correct environment automatically, including
 `docking-universal prepare-ligand` and `docking-universal check-install`.
 The guided `run` command asks where to save the study. Graphical Ubuntu sessions
 prefer Ubuntu's Zenity/GTK chooser, which follows desktop theme, font, and display
-scaling; Tk remains a fallback. macOS opens Finder initially at the front Finder
+scaling and opens at a readable 1100×750 initial size; Tk remains a fallback. macOS opens Finder initially at the front Finder
 folder. Headless Linux sessions use a path prompt whose default is the terminal's
 current folder. An explicit `--out` always takes precedence.
 

@@ -52,7 +52,8 @@ manual activation, including `run`, `prepare-ligand`, `prepare-receptor`,
 `check-install`, and `validate`. It routes the command through the main
 environment and the software invokes the separate Vina environment when needed.
 The interactive runner asks for a parent folder before creating its named study
-folder. Graphical Ubuntu sessions prefer the desktop-native Zenity/GTK chooser,
+folder. Graphical Ubuntu sessions prefer the desktop-native Zenity/GTK chooser
+at a readable 1100×750 initial size,
 with Tk as a fallback; macOS opens Finder initially at the front Finder folder.
 Headless Linux falls back to a path prompt. Supplying `--out` bypasses all
 automatic folder selection.

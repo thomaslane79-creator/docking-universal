@@ -429,7 +429,10 @@ def choose_path_graphically(prompt, folder=False, sdf=False):
             raise SystemExit(f"Finder could not select the requested input: {result.stderr.strip()}")
         selected_text = result.stdout.strip()
     elif platform.system() == "Linux" and shutil.which("zenity"):
-        command = ["zenity", "--file-selection", f"--title={prompt}"]
+        command = [
+            "zenity", "--file-selection", f"--title={prompt}",
+            "--width=1100", "--height=750",
+        ]
         if folder:
             command.append("--directory")
         if sdf:
