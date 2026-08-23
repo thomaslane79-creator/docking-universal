@@ -52,9 +52,10 @@ manual activation, including `run`, `prepare-ligand`, `prepare-receptor`,
 `check-install`, and `validate`. It routes the command through the main
 environment and the software invokes the separate Vina environment when needed.
 The interactive runner asks for a parent folder before creating its named study
-folder. Graphical Ubuntu sessions open a desktop folder chooser; macOS opens a
-Finder chooser initially at the front Finder folder. Headless Linux falls back
-to a path prompt. Supplying `--out` bypasses all automatic folder selection.
+folder. Graphical Ubuntu sessions prefer the desktop-native Zenity/GTK chooser,
+with Tk as a fallback; macOS opens Finder initially at the front Finder folder.
+Headless Linux falls back to a path prompt. Supplying `--out` bypasses all
+automatic folder selection.
 
 For manual installation, create both environments and install the public
 command into the active main environment:

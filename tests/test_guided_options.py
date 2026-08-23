@@ -83,6 +83,18 @@ class StudyPathwayTests(unittest.TestCase):
                 "Choose where Docking Universal should save this study", folder=True
             )
 
+    def test_ubuntu_graphical_selection_prefers_zenity(self):
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(RUNNER.platform, "system", return_value="Linux"), \
+             patch.object(RUNNER.shutil, "which", side_effect=lambda name: "/usr/bin/zenity" if name == "zenity" else None), \
+             patch.object(RUNNER.subprocess, "run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = temporary + "\n"
+            selected = RUNNER.choose_path_graphically("Choose output", folder=True)
+            self.assertEqual(selected, Path(temporary).resolve())
+            self.assertEqual(run.call_args.args[0][:3], ["zenity", "--file-selection", "--title=Choose output"])
+            self.assertIn("--directory", run.call_args.args[0])
+
     def test_front_finder_directory_is_detected_on_macos(self):
         with tempfile.TemporaryDirectory() as temporary, \
              patch.object(RUNNER.platform, "system", return_value="Darwin"), \
