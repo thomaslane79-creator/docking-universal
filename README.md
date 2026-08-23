@@ -107,6 +107,10 @@ the complete installation, and prints the command to begin. It does not require
 you to activate or manage either Conda environment. The installed launcher runs
 every subcommand in the correct environment automatically, including
 `docking-universal prepare-ligand` and `docking-universal check-install`.
+The guided `run` command asks where to save the study. Graphical Ubuntu sessions
+open a desktop folder chooser, while macOS opens Finder initially at the front
+Finder folder. Headless Linux sessions fall back to a path prompt whose default
+is the terminal's current folder. An explicit `--out` always takes precedence.
 
 For cloning, version tracking, controlled updates, issue reporting, and keeping
 software separate from study records, see the
