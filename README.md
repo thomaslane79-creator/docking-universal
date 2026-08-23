@@ -76,35 +76,32 @@ folders and CSV, JSON, Markdown, HTML, and PDF reports.
    and machine-readable reports. This supports review rather than treating one
    docking score as a conclusion.
 
-### Complete and direct workflows
+### Complete study workflows
 
-Use the guided command when you want a complete study record, including the
-final human-readable report:
+Run `docking-universal run` if you want the program to ask which complete study
+you are performing. The shorter commands below launch the **same workflows**;
+they simply skip that first selection question:
 
-- **Bound-ligand control study — `docking-universal run --mode control`:** guide
-  receptor/site preparation, independent redocking, pose-recovery assessment,
-  and reporting. A completed control writes PDF, HTML, Markdown, and JSON
-  reports. If the control passes, it also writes a portable approved
-  `.duprotocol` bundle for later screening with the same locked settings.
-- **Screen with an existing passing control — `docking-universal screen`:**
-  select an approved `.duprotocol` and a new ligand or compound
-  library and reuse the control-approved receptor, pocket, box, preparation
-  policy, and search settings unchanged. The new screen receives its own
-  PDF, HTML, Markdown, and JSON reports while retaining a concise record of the
-  control evidence. For scripted use, the equivalent explicit form is
+- **Bound-ligand control — `docking-universal control`:** exactly the same as
+  `docking-universal run --mode control`. It guides receptor/site preparation,
+  independent redocking, pose-recovery assessment, and reporting. A completed
+  control writes PDF, HTML, Markdown, and JSON reports. If it passes, it also
+  writes a portable approved `.duprotocol` bundle.
+- **Screen using an existing passing control — `docking-universal screen`:**
+  exactly the same as `docking-universal run --mode screen`. It selects an
+  approved `.duprotocol` and a new ligand or compound library, reuses the locked
+  receptor, pocket, box, preparation policy, and search settings, and writes
+  PDF, HTML, Markdown, and JSON reports. Scripted example:
   `docking-universal screen --protocol approved.duprotocol --ligands compounds.sdf --out study`.
 - **Ligand-free cavity and docking study — `docking-universal run --mode
-  exploratory`:** guide fpocket cavity review and exploratory docking when no
-  suitable experimental control ligand is available. Its report clearly
-  separates geometric pocket hypotheses from biological validation.
+  exploratory`:** guides fpocket cavity review and exploratory docking when no
+  suitable experimental control ligand is available. Its report distinguishes
+  geometric pocket hypotheses from biological validation.
 
-Four major parts of the guided study are also useful on their own:
+### Individual stages
 
-- **Bound-ligand control — `docking-universal control`:** the short public form
-  of the complete guided control study. It tests whether the protocol can
-  recover a known experimental pose and automatically writes PDF, HTML,
-  Markdown, and JSON reports. A passing control also writes the reusable
-  `.duprotocol` bundle.
+The following parts of a complete study can also be run independently:
+
 - **Pocket discovery — `docking-universal pockets`:** select a protein, run
   fpocket independently, review ranked candidate cavities, and write pocket
   coordinates, docking-box configurations, and a cavity-only PDF/HTML/Markdown/
@@ -118,8 +115,8 @@ Four major parts of the guided study are also useful on their own:
   ligand or compound library independently. This is useful for checking ligand
   identities and prepared structures before docking.
 
-The guided `docking-universal run` workflow invokes these capabilities when
-needed, so most users do not need to run them separately.
+The complete workflows invoke these stages when needed, so most users do not
+need to run them separately.
 
 ## Requirements
 
