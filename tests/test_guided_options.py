@@ -50,12 +50,16 @@ class StudyPathwayTests(unittest.TestCase):
 
     def test_output_parent_defaults_to_current_directory(self):
         with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(RUNNER.platform, "system", return_value="Linux"), \
+             patch.object(RUNNER, "graphical_chooser_available", return_value=False), \
              patch.object(RUNNER.Path, "cwd", return_value=Path(temporary)), \
              patch("builtins.input", return_value=""):
             self.assertEqual(RUNNER.choose_output_parent(), Path(temporary).resolve())
 
     def test_output_parent_accepts_an_explicit_path(self):
         with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(RUNNER.platform, "system", return_value="Linux"), \
+             patch.object(RUNNER, "graphical_chooser_available", return_value=False), \
              patch("builtins.input", return_value=temporary):
             self.assertEqual(RUNNER.choose_output_parent(), Path(temporary).resolve())
 
