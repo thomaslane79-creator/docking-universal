@@ -220,6 +220,75 @@ def choose_mode():
     return {"1": "control", "2": "screen", "3": "exploratory"}.get(choice)
 
 
+def finder_front_directory():
+    """Return the front Finder window's folder, or None when unavailable."""
+    if platform.system() != "Darwin" or not shutil.which("osascript"):
+        return None
+    script = '''
+tell application "Finder"
+    if (count of Finder windows) is 0 then return ""
+    return POSIX path of (target of front Finder window as alias)
+end tell
+'''
+    result = subprocess.run(
+        ["osascript", "-e", script], text=True, capture_output=True, check=False
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    directory = Path(result.stdout.strip()).expanduser()
+    return directory.resolve() if directory.is_dir() else None
+
+
+def use_finder_working_directory(args):
+    """Adopt Finder's front folder only for a fully guided interactive run."""
+    supplied_paths = (
+        args.out, args.complex, args.protocol, args.ligands,
+        args.receptor_pdb, args.receptor_pdbqt, args.box,
+    )
+    if args.non_interactive or any(path is not None for path in supplied_paths):
+        return
+    directory = finder_front_directory()
+    if directory is not None and directory != Path.cwd().resolve():
+        os.chdir(directory)
+        print(f"Using the open Finder folder: {directory}")
+
+
+def choose_output_parent():
+    """Ask where an automatically named interactive study folder should live."""
+    current = Path.cwd().resolve()
+    if platform.system() == "Darwin" and shutil.which("osascript"):
+        script = '''
+on run argv
+    set defaultFolder to POSIX file (item 1 of argv) as alias
+    set selectedFolder to choose folder with prompt "Choose where Docking Universal should save this study" default location defaultFolder
+    return POSIX path of selectedFolder
+end run
+'''
+        result = subprocess.run(
+            ["osascript", "-e", script, str(current)],
+            text=True, capture_output=True, check=False,
+        )
+        if result.returncode != 0:
+            if "cancel" in result.stderr.lower():
+                raise SystemExit("Finder folder selection cancelled")
+            raise SystemExit(f"Finder could not select an output folder: {result.stderr.strip()}")
+        selected = Path(result.stdout.strip()).expanduser()
+        if not selected.is_dir():
+            raise SystemExit(f"Finder selection is not a readable folder: {selected}")
+        return selected.resolve()
+    if graphical_chooser_available():
+        return choose_path_graphically(
+            "Choose where Docking Universal should save this study", folder=True
+        )
+    print("\nWhere should the study results be saved?")
+    print("Docking Universal will create a new, clearly named study folder there.")
+    entered = input(f"Parent folder [{current}]: ").strip()
+    parent = Path(entered).expanduser() if entered else current
+    if not parent.is_absolute():
+        parent = current / parent
+    return parent.resolve()
+
+
 def calibration_strategy(choice):
     """Translate every guided calibration choice into recorded execution settings."""
     choices = {
@@ -328,55 +397,69 @@ def choose_ensemble_settings(args, mode):
     )
 
 
+def graphical_chooser_available():
+    if platform.system() == "Darwin":
+        return bool(shutil.which("osascript"))
+    if platform.system() == "Linux" and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        try:
+            import tkinter as tk
+        except ImportError:
+            return False
+        try:
+            probe = tk.Tk()
+            probe.withdraw()
+            probe.destroy()
+            return True
+        except tk.TclError:
+            return False
+    return False
+
+
+def choose_path_graphically(prompt, folder=False, sdf=False):
+    """Use Finder on macOS or Tk's desktop chooser on graphical Linux."""
+    if platform.system() == "Darwin" and shutil.which("osascript"):
+        chooser = "choose folder" if folder else "choose file"
+        script = f'POSIX path of ({chooser} with prompt "{prompt}")'
+        result = subprocess.run(["osascript", "-e", script], text=True, capture_output=True, check=False)
+        if result.returncode != 0:
+            if "User canceled" in result.stderr or "-128" in result.stderr:
+                raise SystemExit("Finder selection cancelled")
+            raise SystemExit(f"Finder could not select the requested input: {result.stderr.strip()}")
+        selected_text = result.stdout.strip()
+    elif graphical_chooser_available():
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            root.attributes("-topmost", True)
+            if folder:
+                selected_text = filedialog.askdirectory(title=prompt, mustexist=True)
+            else:
+                filetypes = [("SDF files", "*.sdf"), ("All files", "*")] if sdf else [("All files", "*")]
+                selected_text = filedialog.askopenfilename(title=prompt, filetypes=filetypes)
+        finally:
+            root.destroy()
+        if not selected_text:
+            raise SystemExit("Graphical file selection cancelled")
+    else:
+        raise SystemExit("A graphical file chooser is unavailable; use the manual-path option instead")
+    selected = Path(selected_text).expanduser().resolve()
+    if folder and not selected.is_dir():
+        raise SystemExit(f"Selection is not a readable folder: {selected}")
+    if not folder and not selected.is_file():
+        raise SystemExit(f"Selection is not a readable file: {selected}")
+    return selected
+
+
 def choose_file_with_finder():
     """Open the native macOS file chooser and return its POSIX path."""
-    if platform.system() != "Darwin" or not shutil.which("osascript"):
-        raise SystemExit("Finder selection is available only in a local macOS session; use the manual-path option instead")
-    script = (
-        'POSIX path of (choose file with prompt "Choose the experimental-complex PDB file" '
-        'of type {"org.wwpdb.pdb", "public.data"})'
-    )
-    result = subprocess.run(
-        ["osascript", "-e", script], text=True, capture_output=True, check=False
-    )
-    if result.returncode != 0:
-        if "User canceled" in result.stderr or "-128" in result.stderr:
-            raise SystemExit("Finder selection cancelled")
-        raise SystemExit(f"Finder could not select a file: {result.stderr.strip()}")
-    selected = Path(result.stdout.strip()).expanduser().resolve()
-    if not selected.is_file():
-        raise SystemExit(f"Finder selection is not a readable file: {selected}")
-    return selected
+    return choose_path_graphically("Choose the experimental-complex PDB file")
 
 
 def choose_sdf_with_finder():
     """Open the native macOS file chooser for one SDF ligand file."""
-    if platform.system() != "Darwin" or not shutil.which("osascript"):
-        raise SystemExit(
-            "Finder selection is available only in a local macOS session."
-        )
-
-    script = (
-        'POSIX path of (choose file '
-        'with prompt "Choose the compound SDF file")'
-    )
-    result = subprocess.run(
-        ["osascript", "-e", script],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-
-    if result.returncode != 0:
-        if "User canceled" in result.stderr or "-128" in result.stderr:
-            raise SystemExit("Finder selection cancelled")
-        raise SystemExit(
-            f"Finder could not select an SDF file: {result.stderr.strip()}"
-        )
-
-    selected = Path(result.stdout.strip()).expanduser().resolve()
-    if not selected.is_file():
-        raise SystemExit(f"Finder selection is not a readable file: {selected}")
+    selected = choose_path_graphically("Choose the compound SDF file", sdf=True)
     if selected.suffix.lower() != ".sdf":
         raise SystemExit(f"Selected ligand file must end in .sdf: {selected}")
 
@@ -386,10 +469,10 @@ def choose_sdf_with_finder():
 
 def choose_ligand_source():
     """Choose one SDF in Finder or enter a portable file/directory path."""
-    finder_available = platform.system() == "Darwin" and bool(shutil.which("osascript"))
+    finder_available = graphical_chooser_available()
     print("Choose the compound input:")
     if finder_available:
-        print("  1) Choose an SDF file with Finder")
+        print("  1) Choose an SDF file graphically")
         print("  2) Enter an exact SDF file path")
         print("  3) Enter an SDF directory path for batch docking")
     else:
@@ -422,18 +505,7 @@ def choose_ligand_source():
 
 def choose_path_with_finder(prompt, folder=False):
     """Open a macOS file or folder chooser and return the selected POSIX path."""
-    if platform.system() != "Darwin" or not shutil.which("osascript"):
-        raise SystemExit("Finder selection is available only in a local macOS session")
-    chooser = "choose folder" if folder else "choose file"
-    script = f'POSIX path of ({chooser} with prompt "{prompt}")'
-    result = subprocess.run(
-        ["osascript", "-e", script], text=True, capture_output=True, check=False
-    )
-    if result.returncode != 0:
-        if "User canceled" in result.stderr or "-128" in result.stderr:
-            raise SystemExit("Finder selection cancelled")
-        raise SystemExit(f"Finder could not select the requested input: {result.stderr.strip()}")
-    return Path(result.stdout.strip()).expanduser().resolve()
+    return choose_path_graphically(prompt, folder=folder)
 
 
 def approved_protocols_under(path):
@@ -523,11 +595,11 @@ def choose_approved_protocol_from(path):
 
 def choose_approved_protocol():
     """Resume screening from a previously approved target-specific protocol."""
-    finder_available = platform.system() == "Darwin" and bool(shutil.which("osascript"))
+    finder_available = graphical_chooser_available()
     print("Choose the validated portable protocol to reuse:")
     if finder_available:
-        print("  1) Choose a .duprotocol bundle or protocol.json with Finder")
-        print("  2) Choose its completed control/study folder with Finder")
+        print("  1) Choose a .duprotocol bundle or protocol.json graphically")
+        print("  2) Choose its completed control/study folder graphically")
         print("  3) Enter an exact protocol.json path")
         print("  4) Enter a control/study folder path")
     else:
@@ -562,10 +634,10 @@ def choose_complex_source():
     """Ask explicitly whether the experimental complex is remote or local."""
     print("Choose the experimental-complex source:")
     print("  1) Download a canonical structure from RCSB using its PDB ID")
-    if platform.system() == "Darwin":
-        print("  2) Choose a local PDB file with Finder")
+    if graphical_chooser_available():
+        print("  2) Choose a local PDB file graphically")
     else:
-        print("  2) Choose a local PDB file (macOS Finder unavailable)")
+        print("  2) Choose a local PDB file (graphical chooser unavailable)")
     print("  3) Enter an exact local PDB path")
     choice = input("Select [1]: ").strip() or "1"
     if choice == "1":
@@ -1285,6 +1357,7 @@ def main():
         mode = choose_mode()
         if not mode:
             raise SystemExit("Invalid workflow selection")
+    use_finder_working_directory(args)
     if mode == "exploratory" and args.max_pockets < 3:
         raise SystemExit("--max-pockets must be at least 3 for exploratory pocket review.")
     if mode == "screen":
@@ -1342,11 +1415,12 @@ def main():
         print(f"  Charge model: {locked_parameters.get('charge_model', 'NA')}")
     study_name = args.name or f"docking_universal_{mode}"
     default_control_output = mode == "control" and args.out is None
+    output_parent = choose_output_parent() if args.out is None and not args.non_interactive else Path.cwd()
     if default_control_output:
         protein_hint = safe_id(Path(args.complex).stem if args.complex else "protein", "protein")
-        requested_study = Path(f"control_pending_{protein_hint}_{run_timestamp}").resolve()
+        requested_study = (output_parent / f"control_pending_{protein_hint}_{run_timestamp}").resolve()
     else:
-        requested_study = (args.out or Path(safe_id(study_name))).expanduser().resolve()
+        requested_study = (args.out or output_parent / safe_id(study_name)).expanduser().resolve()
     resume_planned = False
     if mode == "control" and requested_study.exists():
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

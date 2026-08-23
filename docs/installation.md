@@ -9,22 +9,62 @@ state for reproducibility, and report problems without exposing research data.
 
 Docking Universal uses external scientific programs as composable stages. The repository's `environment.yml` contains the smallest direct dependency set verified together on macOS arm64. The automated 0.5 test suite is also exercised on current Ubuntu and macOS GitHub runners using this declared environment. macOS arm64 remains the reference platform for retained scientific validation; run the full integration or release validation on the intended workstation before production use.
 
+### Beginner route: no Git required
+
+To try the software without learning Git first:
+
+1. Open <https://github.com/thomaslane79-creator/docking-universal>.
+2. Select **Code**, then **Download ZIP**.
+3. Extract the ZIP.
+4. Install [Miniforge](https://github.com/conda-forge/miniforge) if Conda is not already installed.
+5. Open a terminal in the extracted folder and run:
+
 ```bash
-git clone YOUR_REPOSITORY_URL
-cd Docking_Universal
-conda env create -f environment.yml
-conda activate docking-universal
-./bin/docking-universal check-install
-make test
+bash install.sh
+docking-universal run
 ```
 
-Install the public command into the active environment:
+On macOS, Finder can open a terminal at a folder through **Services → New
+Terminal at Folder** when that service is enabled. On common Linux desktops,
+right-click the extracted folder and choose **Open in Terminal**.
+
+### Git route
+
+The recommended setup creates both required environments, installs the public
+command, and verifies the complete pipeline:
 
 ```bash
+git clone https://github.com/thomaslane79-creator/docking-universal.git
+cd docking-universal
+bash install.sh
+docking-universal run
+```
+
+If Conda is unavailable, `install.sh` stops before changing anything and links
+to the recommended Miniforge installer. Running `make setup` is equivalent to
+running `./install.sh`. The installer is idempotent: missing environments are
+created and existing environments receive required updates without removing
+user-added packages. Experts who want strict declared-only environments can use
+`conda env update -f FILE --prune` manually.
+
+The installed `docking-universal` launcher works for every subcommand without
+manual activation, including `run`, `prepare-ligand`, `prepare-receptor`,
+`check-install`, and `validate`. It routes the command through the main
+environment and the software invokes the separate Vina environment when needed.
+The interactive runner asks for a parent folder before creating its named study
+folder. Graphical Ubuntu sessions open a desktop folder chooser; macOS opens a
+Finder chooser initially at the front Finder folder. Headless Linux falls back
+to a path prompt. Supplying `--out` bypasses all automatic folder selection.
+
+For manual installation, create both environments and install the public
+command into the active main environment:
+
+```bash
+conda env create -f environment.yml
+conda env create -f environments/vina.yml
 conda activate docking-universal
 make install-conda
-which docking-universal
-docking-universal --help
+docking-universal check-install --full
 ```
 
 `make install-conda` uses the active `CONDA_PREFIX`; it fails rather than guessing when no Conda environment is active. The installed command and its private helpers remain relocatable within that environment.
@@ -40,12 +80,6 @@ docking-universal check-install
 
 The final check reports whether PDBFixer is available. The strict Meeko path remains first, but PDBFixer must be installed so the documented automatic repair path is available when a receptor needs it.
 
-AutoDock Vina is kept in a small engine environment so its compiled dependencies do not destabilize the preparation, analysis, and PyMOL stack:
-
-```bash
-conda env create -f environments/vina.yml
-```
-
 No manual activation is required for normal package use. If `vina` is not already on `PATH`, Docking Universal automatically looks for it in `docking-universal-vina`.
 
 An installed copy can run validation from any writable directory:
@@ -60,10 +94,12 @@ docking-universal validate integration
 
 Installed validation uses packaged scientific fixtures and writes a new `validation_runs/` directory below the invocation directory. It does not write inside the Conda installation. Source checkouts additionally run the repository's developer unit tests.
 
-The environment does not modify or replace an existing environment. To remove it later:
+The installer updates declared packages but does not replace either environment.
+To remove the complete installation later:
 
 ```bash
 conda env remove -n docking-universal
+conda env remove -n docking-universal-vina
 ```
 
 ## Apple silicon and PyMOL

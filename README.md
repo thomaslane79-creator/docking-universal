@@ -87,38 +87,70 @@ The direct versions verified in a fresh macOS arm64 environment are pinned in [e
 
 ## Install
 
-New to GitHub or to obtaining research software from a repository? See the
-[GitHub essentials guide for scientific users](docs/assets/github-essentials-for-docking-universal.pdf)
-for cloning, version tracking, controlled updates, issue reporting, and the
-separation of software files from study records.
+### New to command-line scientific software
 
-Create the two Conda environments. The main `docking-universal` environment
-contains preparation, analysis, and reporting tools; the isolated
-`docking-universal-vina` environment supplies the compiled Vina engine.
+Git is not required just to try Docking Universal:
+
+1. On the [Docking Universal GitHub page](https://github.com/thomaslane79-creator/docking-universal), select **Code**, then **Download ZIP**.
+2. Extract the downloaded ZIP.
+3. Install [Miniforge](https://github.com/conda-forge/miniforge) for your operating system if Conda is not already installed.
+4. Open a terminal in the extracted `docking-universal` folder.
+5. Run:
+
+```bash
+bash install.sh
+docking-universal run
+```
+
+The installer explains each stage, creates both scientific environments, checks
+the complete installation, and prints the command to begin. It does not require
+you to activate or manage either Conda environment. The installed launcher runs
+every subcommand in the correct environment automatically, including
+`docking-universal prepare-ligand` and `docking-universal check-install`.
+The guided `run` command asks where to save the study. Graphical Ubuntu sessions
+open a desktop folder chooser, while macOS opens Finder initially at the front
+Finder folder. Headless Linux sessions fall back to a path prompt whose default
+is the terminal's current folder. An explicit `--out` always takes precedence.
+
+For cloning, version tracking, controlled updates, issue reporting, and keeping
+software separate from study records, see the
+[GitHub essentials guide for scientific users](docs/assets/github-essentials-for-docking-universal.pdf).
+
+### Git clone route
+
+Run the bootstrap installer. It creates or updates both required Conda
+environments, installs the public command, and verifies the complete pipeline:
+
+```bash
+git clone https://github.com/thomaslane79-creator/docking-universal.git
+cd docking-universal
+bash install.sh
+docking-universal run
+```
+
+If Conda is not installed, the script stops without changing the system and
+links to the recommended Miniforge installer. `make setup` is an equivalent
+entry point. The main `docking-universal` environment contains preparation,
+analysis, and reporting tools; `docking-universal-vina` supplies the isolated
+compiled Vina engine. After installation, `docking-universal` commands work
+without activating either environment.
+
+For manual installation or environment maintenance, run:
 
 ```bash
 conda env create -f environment.yml
 conda env create -f environments/vina.yml
 conda activate docking-universal
-./bin/docking-universal check-install
-make test
-```
-
-Install the command into the active Conda environment so it is available from any directory:
-
-```bash
-conda activate docking-universal
 make install-conda
 which docking-universal
-docking-universal --help
+docking-universal check-install --full
 ```
 
 `environment.yml` installs PDBFixer 1.11 and its OpenMM dependency. `make install-conda` then installs the Docking Universal command into that active environment; it does not solve dependencies itself. Existing environments should be refreshed with `conda env update -f environment.yml --prune` before reinstalling the command.
 
 The `dock` command discovers Vina there automatically; the Vina section of
 `check-install` should report it as available from the
-`docking-universal-vina` Conda environment. Normal use requires activation of
-only the main environment. The run record retains the executable source,
+`docking-universal-vina` Conda environment. The run record retains the executable source,
 version, receptor, ligand directory, box, and search settings.
 
 For exact reproduction of the M2 Vina test environment, use `environments/vina-lock-osx-arm64.txt`; use the readable YAML for normal installation.

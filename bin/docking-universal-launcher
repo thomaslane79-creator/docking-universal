@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -eu
+
+# Installed beside the user's Conda executable by install.sh. This keeps every
+# public subcommand available without requiring an activated environment.
+launcher_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+conda_command=${DOCKING_UNIVERSAL_CONDA:-"$launcher_dir/conda"}
+
+if [ ! -x "$conda_command" ]; then
+  conda_command=conda
+fi
+
+if ! command -v "$conda_command" >/dev/null 2>&1; then
+  printf 'Error: Conda was not found. Reinstall Docking Universal with bash install.sh.\n' >&2
+  exit 1
+fi
+
+exec "$conda_command" run --no-capture-output -n docking-universal \
+  docking-universal "$@"

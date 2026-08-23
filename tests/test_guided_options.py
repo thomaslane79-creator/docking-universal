@@ -48,6 +48,62 @@ class StudyPathwayTests(unittest.TestCase):
         with patch("builtins.input", return_value="9"):
             self.assertIsNone(RUNNER.choose_mode())
 
+    def test_output_parent_defaults_to_current_directory(self):
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(RUNNER.platform, "system", return_value="Linux"), \
+             patch.object(RUNNER, "graphical_chooser_available", return_value=False), \
+             patch.object(RUNNER.Path, "cwd", return_value=Path(temporary)), \
+             patch("builtins.input", return_value=""):
+            self.assertEqual(RUNNER.choose_output_parent(), Path(temporary).resolve())
+
+    def test_output_parent_accepts_an_explicit_path(self):
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(RUNNER.platform, "system", return_value="Linux"), \
+             patch.object(RUNNER, "graphical_chooser_available", return_value=False), \
+             patch("builtins.input", return_value=temporary):
+            self.assertEqual(RUNNER.choose_output_parent(), Path(temporary).resolve())
+
+    def test_output_parent_uses_finder_folder_chooser_on_macos(self):
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(RUNNER.platform, "system", return_value="Darwin"), \
+             patch.object(RUNNER.shutil, "which", return_value="/usr/bin/osascript"), \
+             patch.object(RUNNER.subprocess, "run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = temporary + "\n"
+            self.assertEqual(RUNNER.choose_output_parent(), Path(temporary).resolve())
+            self.assertIn("choose folder", run.call_args.args[0][2])
+
+    def test_output_parent_uses_graphical_chooser_on_ubuntu(self):
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(RUNNER.platform, "system", return_value="Linux"), \
+             patch.object(RUNNER, "graphical_chooser_available", return_value=True), \
+             patch.object(RUNNER, "choose_path_graphically", return_value=Path(temporary)) as chooser:
+            self.assertEqual(RUNNER.choose_output_parent(), Path(temporary))
+            chooser.assert_called_once_with(
+                "Choose where Docking Universal should save this study", folder=True
+            )
+
+    def test_front_finder_directory_is_detected_on_macos(self):
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(RUNNER.platform, "system", return_value="Darwin"), \
+             patch.object(RUNNER.shutil, "which", return_value="/usr/bin/osascript"), \
+             patch.object(RUNNER.subprocess, "run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = temporary + "\n"
+            self.assertEqual(RUNNER.finder_front_directory(), Path(temporary).resolve())
+
+    def test_explicit_output_bypasses_finder_directory(self):
+        args = argparse.Namespace(
+            non_interactive=False, out=Path("chosen"), complex=None,
+            protocol=None, ligands=None, receptor_pdb=None,
+            receptor_pdbqt=None, box=None,
+        )
+        with patch.object(RUNNER, "finder_front_directory") as finder, \
+             patch.object(RUNNER.os, "chdir") as chdir:
+            RUNNER.use_finder_working_directory(args)
+            finder.assert_not_called()
+            chdir.assert_not_called()
+
 
 class CalibrationChoiceTests(unittest.TestCase):
     def test_all_six_calibration_choices(self):
