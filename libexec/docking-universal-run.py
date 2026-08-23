@@ -401,6 +401,8 @@ def graphical_chooser_available():
     if platform.system() == "Darwin":
         return bool(shutil.which("osascript"))
     if platform.system() == "Linux" and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        if shutil.which("zenity"):
+            return True
         try:
             import tkinter as tk
         except ImportError:
@@ -425,6 +427,18 @@ def choose_path_graphically(prompt, folder=False, sdf=False):
             if "User canceled" in result.stderr or "-128" in result.stderr:
                 raise SystemExit("Finder selection cancelled")
             raise SystemExit(f"Finder could not select the requested input: {result.stderr.strip()}")
+        selected_text = result.stdout.strip()
+    elif platform.system() == "Linux" and shutil.which("zenity"):
+        command = ["zenity", "--file-selection", f"--title={prompt}"]
+        if folder:
+            command.append("--directory")
+        if sdf:
+            command.extend(["--file-filter=SDF files | *.sdf", "--file-filter=All files | *"])
+        result = subprocess.run(command, text=True, capture_output=True, check=False)
+        if result.returncode != 0:
+            if result.returncode == 1:
+                raise SystemExit("Graphical file selection cancelled")
+            raise SystemExit(f"Zenity could not select the requested input: {result.stderr.strip()}")
         selected_text = result.stdout.strip()
     elif graphical_chooser_available():
         import tkinter as tk
