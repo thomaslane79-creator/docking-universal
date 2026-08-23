@@ -4,6 +4,9 @@ channels:
 dependencies:
   # Direct, stage-level dependencies verified in a fresh macOS arm64 environment.
   - python=3.9.23
+  # Used by install.sh to install and validate the public command. Declaring it
+  # here avoids requiring developer command-line tools on a new workstation.
+  - make
   - fpocket=4.2.2
   - openbabel=3.1.1
   - plip=2.3.1

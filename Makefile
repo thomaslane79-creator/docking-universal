@@ -2,10 +2,11 @@ PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 LIBEXECDIR ?= $(PREFIX)/libexec/docking-universal
 
-.PHONY: test test-integration test-release install install-conda uninstall
+.PHONY: test test-integration test-release setup install install-conda uninstall
 
 test:
 	./tests/test_install.sh
+	./tests/test_bootstrap_install.sh
 	./tests/test_cli.sh
 	$${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_run_selection.py tests/test_guided_options.py tests/test_report_cavity.py tests/test_pdbfixer_preclean.py tests/test_ccd_audit.py
 
@@ -14,6 +15,9 @@ test-integration:
 
 test-release:
 	./bin/docking-universal validate release
+
+setup:
+	./install.sh
 
 install:
 	install -d "$(DESTDIR)$(BINDIR)"

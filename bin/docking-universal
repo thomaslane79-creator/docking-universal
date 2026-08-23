@@ -52,7 +52,7 @@ Visualization:
   depict2d      Create generic 2D PNG/SVG depictions from coordinate files
 
 Utilities:
-  check-install Report available required and optional tools (`doctor` alias)
+  check-install Report available tools; use --full to require the full pipeline
   validate      Run quick, integration, or long release validation suites
   version       Print the package version
   help          Show this message
@@ -62,9 +62,24 @@ EOF
 }
 
 doctor() {
+  full_install=0
+  case "${1:-}" in
+    "") ;;
+    --full) full_install=1 ;;
+    -h|--help)
+      printf 'Usage: docking-universal check-install [--full]\n'
+      printf '  --full  fail unless all complete-pipeline tools and environments are available\n'
+      return 0
+      ;;
+    *)
+      printf 'Unknown check-install option: %s\n' "$1" >&2
+      return 2
+      ;;
+  esac
   required="awk grep sort tee"
   optional="fpocket prepare_receptor prepare_ligand mk_prepare_receptor.py mk_prepare_ligand.py obabel plip pymol $PYTHON_COMMAND"
   missing=0
+  missing_full=0
 
   printf 'Core tools\n'
   for tool in $required; do
@@ -82,7 +97,8 @@ doctor() {
   elif command -v conda >/dev/null 2>&1 && conda run -n "${DOCKING_UNIVERSAL_VINA_ENV:-docking-universal-vina}" vina --version >/dev/null 2>&1; then
     printf '  available  vina (Conda environment: %s)\n' "${DOCKING_UNIVERSAL_VINA_ENV:-docking-universal-vina}"
   else
-    printf '  absent     vina (optional environment not found)\n'
+    printf '  absent     vina (create it with: conda env create -f environments/vina.yml)\n'
+    missing_full=1
   fi
 
   printf '\nStage-specific tools\n'
@@ -97,9 +113,31 @@ doctor() {
     printf '  available  PDBFixer (receptor pre-cleaning)\n'
   else
     printf '  absent     PDBFixer (receptor pre-cleaning)\n'
+    missing_full=1
+  fi
+
+  if ! command -v fpocket >/dev/null 2>&1 || \
+     ! command -v obabel >/dev/null 2>&1 || \
+     ! command -v plip >/dev/null 2>&1 || \
+     ! command -v pymol >/dev/null 2>&1 || \
+     ! command -v "$PYTHON_COMMAND" >/dev/null 2>&1; then
+    missing_full=1
+  fi
+  if ! command -v prepare_receptor >/dev/null 2>&1 && ! command -v mk_prepare_receptor.py >/dev/null 2>&1; then
+    missing_full=1
+  fi
+  if ! command -v prepare_ligand >/dev/null 2>&1 && ! command -v mk_prepare_ligand.py >/dev/null 2>&1; then
+    missing_full=1
   fi
 
   printf '\nOnly tools used by the selected command are required.\n'
+  if [ "$full_install" -eq 1 ] && [ "$missing_full" -ne 0 ]; then
+    printf 'Full pipeline check: FAILED\n' >&2
+    return 1
+  fi
+  if [ "$full_install" -eq 1 ]; then
+    printf 'Full pipeline check: PASS\n'
+  fi
   return "$missing"
 }
 
@@ -112,7 +150,8 @@ case "$command_name" in
     printf 'Docking Universal %s\n' "$VERSION"
     ;;
   doctor|check-install)
-    doctor
+    shift
+    doctor "$@"
     ;;
   validate)
     shift

@@ -82,6 +82,22 @@ done
 
 "$cli" check-install >/dev/null || fail "check-install alias"
 
+# A strict full-install check must accept either supported preparation backend,
+# require Vina and the complete analysis stack, and use the selected Python for
+# the PDBFixer/OpenMM import probe.
+for tool in mk_prepare_receptor.py mk_prepare_ligand.py obabel plip pymol; do
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$mock_dir/$tool"
+  chmod +x "$mock_dir/$tool"
+done
+cat > "$mock_dir/full-python" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$mock_dir/full-python"
+PATH="$mock_dir:$PATH" DOCKING_UNIVERSAL_PYTHON="$mock_dir/full-python" \
+  "$cli" check-install --full | grep -q 'Full pipeline check: PASS' \
+  || fail "full installation check"
+
 mock_osascript="$mock_dir/osascript"
 cat > "$mock_osascript" <<'EOF'
 #!/usr/bin/env bash
