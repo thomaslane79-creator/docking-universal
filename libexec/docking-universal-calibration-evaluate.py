@@ -8,8 +8,14 @@ locks receptor/box hashes. It does not establish prospective accuracy.
 
 import argparse
 import hashlib
+from importlib import metadata
 import json
+import os
+import platform
+import shutil
+import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -19,6 +25,46 @@ def sha256(path):
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def package_version():
+    root = Path(__file__).resolve().parent
+    for path in (root / "VERSION", root.parent / "VERSION"):
+        if path.is_file():
+            return path.read_text().strip()
+    return "not detected"
+
+
+def distribution_version(*names):
+    for name in names:
+        try:
+            return metadata.version(name)
+        except metadata.PackageNotFoundError:
+            continue
+    return "not detected"
+
+
+def engine_version(engine):
+    executable = shutil.which(engine)
+    command = [executable, "--version"] if executable else []
+    source = executable or "not detected"
+    if not command:
+        conda = shutil.which("conda")
+        engine_env = os.environ.get("DOCKING_UNIVERSAL_VINA_ENV", "docking-universal-vina")
+        if conda and engine == "vina":
+            command = [conda, "run", "-n", engine_env, engine, "--version"]
+            source = f"conda environment {engine_env}"
+    if not command:
+        return "not detected", source
+    try:
+        result = subprocess.run(
+            command, capture_output=True, text=True,
+            check=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "not detected", source
+    lines = (result.stdout or result.stderr).strip().splitlines()
+    return (lines[-1].strip() if lines else "not detected"), source
 
 
 def main():
@@ -86,6 +132,7 @@ def main():
 
     receptor = args.receptor.expanduser().resolve()
     box = args.box.expanduser().resolve()
+    detected_engine_version, detected_engine_source = engine_version(args.engine)
     result = {
         "schema_name": "docking-universal-protocol",
         "schema_version": 1,
@@ -123,7 +170,25 @@ def main():
         "seed_results": seed_results,
         "variants": variants,
         "unknown_docking_allowed": approved,
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "software": {
+            "docking_universal": package_version(),
+            "python": platform.python_version(),
+            "rdkit": distribution_version("rdkit", "rdkit-pypi"),
+            "molscrub": distribution_version("molscrub"),
+            "meeko": distribution_version("meeko"),
+            "pdbfixer": distribution_version("pdbfixer"),
+            "engine": args.engine,
+            "engine_version": detected_engine_version,
+            "engine_source": detected_engine_source,
+        },
     }
+    if approved:
+        result.update({
+            "protocol_type": "control-validated",
+            "evidence_basis": "Passing bound-ligand pose-recovery control",
+            "screening_authority": "control-approved",
+        })
     output = args.out.expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2) + "\n")

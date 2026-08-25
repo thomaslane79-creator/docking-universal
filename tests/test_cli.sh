@@ -198,7 +198,7 @@ grep -q '"unknown_docking_allowed": true' "$mock_dir/protocol.json" || fail "pro
 # A complete approved protocol must validate its locked inputs and drive the
 # high-level screen planner, not merely contain an approval boolean.
 approved_ligand="$project_dir/examples/tutorials/01_bound_ligand/inputs/rilpivirine_pubchem.sdf"
-"$cli" screen-stage --protocol "$mock_dir/protocol.json" --ligand "$approved_ligand" \
+"$cli" _screen-stage --protocol "$mock_dir/protocol.json" --ligand "$approved_ligand" \
   --out "$mock_dir/approved_check" --check-only --non-interactive >/dev/null \
   || fail "approved protocol check"
 "$cli" screen --protocol "$mock_dir/protocol.json" --ligands "$approved_ligand" \
@@ -207,7 +207,7 @@ approved_ligand="$project_dir/examples/tutorials/01_bound_ligand/inputs/rilpivir
 [ -s "$mock_dir/approved_plan/study_manifest.json" ] || fail "approved protocol study manifest"
 
 missing_protocol_output=""
-if missing_protocol_output=$("$cli" run --mode screen --protocol "$mock_dir/missing_protocol.json" \
+if missing_protocol_output=$("$cli" screen --protocol "$mock_dir/missing_protocol.json" \
   --ligands "$approved_ligand" --out "$mock_dir/missing_plan" --plan-only --non-interactive 2>&1); then
   fail "missing protocol was accepted"
 fi
@@ -220,7 +220,7 @@ esac
 # unapproved. This protects automation from accidentally bypassing calibration.
 printf 'test\n$$$$\n' > "$mock_dir/unknown.sdf"
 sed 's/"unknown_docking_allowed": true/"unknown_docking_allowed": false/' "$mock_dir/protocol.json" > "$mock_dir/unapproved.json"
-if "$cli" screen-stage --protocol "$mock_dir/unapproved.json" --ligand "$mock_dir/unknown.sdf" --out "$mock_dir/blocked" --non-interactive >/dev/null 2>&1; then
+if "$cli" screen --protocol "$mock_dir/unapproved.json" --ligands "$mock_dir/unknown.sdf" --out "$mock_dir/blocked" --non-interactive >/dev/null 2>&1; then
   fail "unapproved protocol was accepted"
 fi
 

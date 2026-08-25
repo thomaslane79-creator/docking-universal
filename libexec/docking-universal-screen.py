@@ -1,9 +1,11 @@
 #!/usr/bin/env python
-"""Dock one unknown compound with an approved protocol or explicit exploration.
+"""Dock one unknown compound with a reusable protocol or explicit exploration.
 
-The protocol is accepted only if its schema, approval flag, receptor hash, box
-hash, and engine-specific macrocycle treatment match. This prevents a control
-performed on one target or input revision from silently authorizing another.
+The protocol is accepted only if its schema, screening authority, receptor hash,
+box hash, and engine-specific macrocycle treatment match. This prevents a
+recorded configuration from silently authorizing a different target or input
+revision. Control-validated and explicitly authorized exploratory protocols are
+distinguished throughout selection and reporting.
 
 Exploratory mode is deliberately marked uncalibrated and never creates an
 approval. A successful retrospective control also does not prove that an
@@ -20,7 +22,14 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from docking_universal_bundle import extract_bundle, resolve_locked_path
+from docking_universal_bundle import (
+    CONTROL_VALIDATED,
+    extract_bundle,
+    protocol_can_screen,
+    protocol_type,
+    protocol_type_label,
+    resolve_locked_path,
+)
 
 
 def sha256(path):
@@ -39,7 +48,7 @@ def run(command):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     authority = parser.add_mutually_exclusive_group(required=True)
-    authority.add_argument("--protocol", type=Path, help="approved .duprotocol bundle or legacy protocol.json")
+    authority.add_argument("--protocol", type=Path, help="reusable .duprotocol bundle or legacy protocol.json")
     authority.add_argument("--exploratory", action="store_true", help="explicitly run without an approved pose-recovery control")
     parser.add_argument("--ligand", required=True, type=Path, help="one compound SDF with authoritative chemistry")
     parser.add_argument("--out", required=True, type=Path)
@@ -49,6 +58,7 @@ def main():
     parser.add_argument("--engine-command")
     parser.add_argument("--engine-env")
     parser.add_argument("--protocol-source-name", help=argparse.SUPPRESS)
+    parser.add_argument("--accept-exploratory-protocol", action="store_true", help="explicitly authorize unattended use of an exploratory protocol")
     parser.add_argument("--non-interactive", action="store_true")
     parser.add_argument("--check-only", action="store_true", help="validate protocol, ligand, receptor, and box without docking")
     parser.add_argument("--analysis", choices=("none", "summary", "representatives"), default="representatives", help="none: docking only; summary: cluster tables; representatives: tables plus selected PLIP/PyMOL output (default)")
@@ -97,19 +107,28 @@ def main():
         protocol = json.loads(protocol_path.read_text())
         if protocol.get("schema_name") != "docking-universal-protocol" or protocol.get("schema_version") != 1:
             raise SystemExit("Protocol is missing the supported docking-universal-protocol v1 schema")
-        if not protocol.get("unknown_docking_allowed") or protocol.get("control_status") != "approved":
-            raise SystemExit("Protocol is not approved; unknown docking is blocked")
-        acceptance = protocol.get("acceptance", {})
-        stored_seeds = protocol.get("parameters", {}).get("seeds", [])
-        minimum_seeds = int(acceptance.get("minimum_independent_seeds", 0))
-        internally_consistent = (
-            acceptance.get("sampling_pass") is True and acceptance.get("ranking_pass") is True
-            and acceptance.get("seed_requirement_pass") is True
-            and len(set(stored_seeds)) >= minimum_seeds >= 1
-            and int(acceptance.get("independent_seed_count", 0)) == len(set(stored_seeds))
-        )
-        if not internally_consistent:
-            raise SystemExit("Protocol approval fields are incomplete or internally inconsistent")
+        kind = protocol_type(protocol)
+        if not kind or not protocol_can_screen(protocol):
+            raise SystemExit("Protocol is neither control-approved nor explicitly authorized for exploratory screening")
+        if kind == CONTROL_VALIDATED:
+            acceptance = protocol.get("acceptance", {})
+            stored_seeds = protocol.get("parameters", {}).get("seeds", [])
+            minimum_seeds = int(acceptance.get("minimum_independent_seeds", 0))
+            internally_consistent = (
+                acceptance.get("sampling_pass") is True and acceptance.get("ranking_pass") is True
+                and acceptance.get("seed_requirement_pass") is True
+                and len(set(stored_seeds)) >= minimum_seeds >= 1
+                and int(acceptance.get("independent_seed_count", 0)) == len(set(stored_seeds))
+            )
+            if not internally_consistent:
+                raise SystemExit("Protocol approval fields are incomplete or internally inconsistent")
+        elif args.non_interactive and not args.accept_exploratory_protocol:
+            raise SystemExit("Exploratory protocol use requires --accept-exploratory-protocol in non-interactive mode")
+        elif not args.non_interactive and not args.accept_exploratory_protocol:
+            print("This protocol records exploratory site selection without pose-recovery validation.")
+            answer = input("Use it to screen new ligands as an exploratory study? [y/N]: ").strip().lower()
+            if answer not in {"y", "yes"}:
+                raise SystemExit("Exploratory screening cancelled")
         engine = protocol["engine"]
         expected_macrocycle = "flexible_meeko" if engine == "vina" else "rigid_conformer_ensemble"
         if protocol["parameters"].get("macrocycle_treatment") != expected_macrocycle:
@@ -120,13 +139,24 @@ def main():
         box = args.box.expanduser().resolve() if args.box else resolve_locked_path(
             protocol_path, protocol["locked_inputs"]["box"]
         )
+        if not args.receptor_pdb and protocol.get("locked_inputs", {}).get("receptor_pdb"):
+            args.receptor_pdb = resolve_locked_path(
+                protocol_path, protocol["locked_inputs"]["receptor_pdb"]
+            )
         for path, key, label in ((receptor, "receptor_sha256", "receptor"), (box, "box_sha256", "box")):
             if not path.is_file():
                 raise SystemExit(f"Locked {label} not found: {path}")
             if sha256(path) != protocol["locked_inputs"][key]:
                 raise SystemExit(f"Locked {label} hash mismatch; rerun the control for the changed input")
         parameters = protocol["parameters"]
-        workflow_status = "CONTROL_APPROVED"
+        workflow_status = "CONTROL_APPROVED" if kind == CONTROL_VALIDATED else kind.upper().replace("-", "_")
+        print("Selected protocol:")
+        print(f"  Target: {protocol.get('target', Path(receptor).stem)}")
+        print(f"  Protocol type: {protocol_type_label(kind)}")
+        print(f"  Evidence basis: {protocol.get('evidence_basis', 'not recorded by this older protocol')}")
+        print(f"  Screening authority: {protocol.get('screening_authority', 'control approval')}")
+        print(f"  Created: {str(protocol.get('created_utc', 'not recorded'))[:10]}")
+        print(f"  Docking box: {Path(protocol['locked_inputs']['box']).name}")
     else:
         if not args.receptor or not args.box:
             parser.error("--exploratory requires --receptor and --box")
@@ -157,7 +187,10 @@ def main():
         print("Input check: PASS")
         print(f"Engine: {engine}")
         print(f"Independent seeds: {len(parameters['seeds'])}")
-        print("Protocol status: approved and hashes unchanged" if protocol_path else "Protocol status: exploratory, no control approval")
+        if protocol_path:
+            print(f"Protocol status: {protocol_type_label(kind)}; locked inputs verified")
+        else:
+            print("Protocol status: exploratory, no reusable protocol")
         return
 
     out = args.out.expanduser().resolve()
@@ -174,7 +207,7 @@ def main():
     conformers = int(parameters["conformers_per_state"])
     seeds = [int(seed) for seed in parameters["seeds"]]
     job_count = conformers * len(seeds)
-    print(f"Approved protocol: {protocol_path}" if protocol_path else "Exploratory workflow: no approved target-specific control")
+    print(f"Reusable protocol: {protocol_path}" if protocol_path else "Exploratory workflow: no reusable protocol")
     print(f"Planned docking jobs: {conformers} conformers × {len(seeds)} seeds = {job_count} jobs")
     if not args.non_interactive and sys.stdin.isatty():
         answer = input("Run docking with these recorded settings? [y/N]: ").strip().lower()
@@ -232,10 +265,11 @@ def main():
         writer.writeheader()
         writer.writerows(rows)
     manifest = {
-        "workflow": "target_locked_unknown_docking" if protocol_path else "exploratory_unknown_docking",
+        "workflow": "target_locked_unknown_docking" if protocol_path and kind == CONTROL_VALIDATED else "exploratory_unknown_docking",
         "completion_status": workflow_status,
         "protocol": str(protocol_path) if protocol_path else None,
         "protocol_source_file_name": protocol_source_file_name if protocol_path else None,
+        "protocol_type": kind if protocol_path else None,
         "protocol_sha256": sha256(protocol_path) if protocol_path else None,
         "ligand": str(ligand),
         "ligand_sha256": sha256(ligand),
@@ -253,7 +287,11 @@ def main():
             "charge_model": parameters["charge_model"],
         },
         "docking_job_count": job_count,
-        "scientific_warning": "Scores and poses require independent scientific interpretation." if protocol_path else "EXPLORATORY: no approved target-specific pose-recovery control was available.",
+        "scientific_warning": (
+            "Scores and poses require independent scientific interpretation."
+            if protocol_path and kind == CONTROL_VALIDATED
+            else "EXPLORATORY: no approved target-specific pose-recovery control was available."
+        ),
     }
     (out / "screen_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     if args.analysis != "none":

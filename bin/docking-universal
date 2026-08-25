@@ -29,10 +29,13 @@ Docking Universal - structural docking preparation and visualization toolkit
 Usage:
   docking-universal <command> [options]
 
-Preparation:
-  run           Guided end-to-end control, approved-screen, or exploratory study
+Report-producing workflows:
+  run           Guided end-to-end control, reusable-protocol screen, or exploratory study
   control       Run a guided bound-ligand control and write its reports
-  screen        Screen compounds with an approved control and write reports
+  create-protocol Prepare a target and generate a reusable protocol plus PDF report
+  screen        Screen new ligands with a required protocol and generate the complete PDF report
+
+Preparation and component tools:
   calibrate     Run tiered ensemble redocking and write a protocol record
   ensemble      Generate independent pH-aware protomer/tautomer conformers
   prepare-receptor Prepare a receptor and generate pocket/box coordinates
@@ -165,6 +168,10 @@ case "$command_name" in
     shift
     exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-run.py" "$@"
     ;;
+  create-protocol)
+    shift
+    exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-create-protocol.py" "$@"
+    ;;
   calibrate)
     shift
     exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-calibrate.py" "$@"
@@ -213,9 +220,9 @@ case "$command_name" in
     ;;
   screen)
     shift
-    exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-run.py" --mode screen "$@"
+    exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-run.py" screen "$@"
     ;;
-  screen-stage)
+  screen-stage|_screen-stage)
     shift
     exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-screen.py" "$@"
     ;;

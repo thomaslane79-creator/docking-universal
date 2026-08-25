@@ -209,7 +209,7 @@ class InputSourceTests(unittest.TestCase):
              patch("builtins.input", return_value="2"):
             self.assertEqual(RUNNER.choose_complex_source(), chosen)
         with patch("builtins.input", side_effect=["3", str(chosen)]):
-            self.assertEqual(RUNNER.choose_complex_source(), chosen)
+            self.assertEqual(RUNNER.choose_complex_source(), chosen.resolve())
 
     def test_ligand_finder_file_and_directory_choices(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -28,6 +28,8 @@ libexec="$prefix/libexec/docking-universal"
 [ -f "$libexec/validation-assets/test_inputs/two_compounds.sdf" ] || fail "installed test input"
 [ -f "$libexec/validation-assets/tutorials/01_bound_ligand/inputs/1HVR.pdb" ] || fail "installed bound-ligand fixture"
 [ -f "$libexec/validation-assets/tutorials/02_ligand_free_cavity/inputs/2R8N.pdb" ] || fail "installed cavity fixture"
+[ -x "$project_dir/install.sh" ] || fail "user-facing installer"
+[ -x "$project_dir/bin/docking-universal-launcher" ] || fail "host-side Conda launcher"
 
 installed_dir="$work_dir/outside-source"
 mkdir -p "$installed_dir"
@@ -38,9 +40,12 @@ mkdir -p "$installed_dir"
   [ "$(docking-universal --version)" = "Docking Universal 0.6.0" ] || fail "installed version"
   docking-universal --help >/dev/null || fail "installed general help"
   docking-universal run --help >/dev/null || fail "installed run help"
+  docking-universal create-protocol --help >/dev/null || fail "installed create-protocol help"
   docking-universal prepare --help >/dev/null || fail "installed prepare help"
   docking-universal validate --help >/dev/null || fail "installed validate help"
   docking-universal validate quick --out "$installed_dir/quick" >/dev/null || fail "installed quick validation"
 )
+
+bash -n "$project_dir/install.sh" || fail "installer syntax"
 
 printf 'PASS: installed-copy checks\n'

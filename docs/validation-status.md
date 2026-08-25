@@ -9,7 +9,7 @@ The test suite exercises:
 - all three guided study pathways: bound-ligand control, approved-protocol screening, and ligand-free exploration;
 - all six initial control strategies and every guided/manual calibration-escalation route;
 - default and custom ligand ensembles, including MMFF94, MMFF94s, UFF, pH, conformer count, random seed, RMSD pruning, and tautomer selection;
-- macOS Finder, exact-file, directory/batch, and portable non-macOS input routing;
+- macOS Finder, Ubuntu Zenity/Tk, exact-file, directory/batch, and headless input routing;
 - all approved-protocol resume routes and multiple-protocol disambiguation;
 - each prepared pocket selection plus single-pocket, competitive-pocket, and no-PyMOL review choices;
 - docking-box validation, rejected choices, unapproved-protocol blocking, result parsing, and all command help entry points;

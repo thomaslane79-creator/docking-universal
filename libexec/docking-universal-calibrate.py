@@ -289,6 +289,12 @@ def run_tier(args, tier_name, cli, libexec, tier_root):
         result["provisional_chemistry_limit"] = (
             "PDB-inferred ligand chemistry was used; this control cannot authorize unknown-compound screening."
         )
+    if result.get("unknown_docking_allowed"):
+        result.update({
+            "protocol_type": "control-validated",
+            "evidence_basis": "Passing bound-ligand pose-recovery control",
+            "screening_authority": "control-approved",
+        })
     engine_manifest = read_tsv_manifest(tier_root / f"seed_{seeds[0]}" / "docking" / "run_manifest.tsv")
     result["software"] = {
         "docking_universal": package_version(),
