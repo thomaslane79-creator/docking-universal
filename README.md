@@ -43,7 +43,7 @@ Choose the task that matches what you want to do:
 | --- | --- | --- |
 | Start a complete new study | `docking-universal run` | Guides you through a bound-ligand control or an exploratory site-selection study, optionally docks one or multiple new compounds, and generates the complete report. |
 | Create a reusable protocol and its report | `docking-universal create-protocol` | Prepares the receptor and docking region, records the scientific basis and settings, and generates a scientific PDF protocol report plus a portable `.duprotocol` bundle. |
-| Screen with an existing protocol | `docking-universal screen` | Requires a previously created `.duprotocol`, lets you select a new SDF file or SDF directory, applies the recorded receptor, box, and search settings, and generates the complete screening report. |
+| Dock new compounds using a Docking Universal protocol | `docking-universal screen` | Requires a previously created Docking Universal `.duprotocol`, lets you select a new SDF file or SDF directory, reuses the recorded receptor, docking box, and search settings, and generates the complete screening report. |
 
 ### Start a complete study
 
@@ -69,13 +69,13 @@ The interface offers three protocol types:
 
 The protocol type is recorded in the report, protocol metadata, and `.duprotocol` filename. The bundle contains the prepared receptor, docking box, settings, provenance, and available supporting evidence needed for later reuse.
 
-### Screen new compounds with a protocol
+### Dock new compounds using a Docking Universal protocol
 
 ```bash
 docking-universal screen
 ```
 
-This command requires a reusable `.duprotocol` created by `docking-universal create-protocol` or a compatible earlier Docking Universal control. The interface asks you to select the protocol first and displays its target, protocol type, evidence basis, screening authority, creation date, and docking box. It then asks for one SDF, a multi-record SDF, or a directory of SDF files. Each compound receives an isolated result folder, and the final report contains the protocol provenance plus individual docking, clustering, 3D, and 2D interaction results. A batch report also begins with a summary of all compounds.
+This command docks new compounds without recreating the receptor preparation, docking box, or search settings. It requires a reusable `.duprotocol` created by `docking-universal create-protocol` or a compatible earlier Docking Universal control. A `.duprotocol` is specific to Docking Universal and is not a general protocol format for use by other docking software. The interface asks you to select the protocol first and displays its target, protocol type, evidence basis, screening authority, creation date, and docking box. It then asks for one SDF, a multi-record SDF, or a directory of SDF files. Each compound receives an isolated result folder, and the final report contains the protocol provenance plus individual docking, clustering, 3D, and 2D interaction results. A batch report also begins with a summary of all compounds.
 
 Every guided workflow retains its PDF report, machine-readable summaries, parameters, intermediate artifacts, and raw tool logs. Exploratory protocols and results remain explicitly identified as exploratory; running them does not convert them into control-validated evidence.
 
