@@ -65,6 +65,24 @@ class RunCommandSyntaxTests(unittest.TestCase):
         ):
             self.assertIn(expected, text)
 
+    def test_selected_protocol_displays_persistent_receptor_warning(self):
+        record = {
+            "target": "5KRH",
+            "protocol_type": "site-guided-exploratory",
+            "locked_inputs": {"box": "5KRH_pocket1.conf"},
+            "receptor_preparation": {
+                "user_approved_component_removal": True,
+                "user_approved_removed_components": [
+                    {"chain": "A", "residue_number": "305", "residue_name": "SER", "atom_count": "5"},
+                ],
+            },
+        }
+        output = io.StringIO()
+        with patch("sys.stdout", output):
+            RUNNER.print_selected_protocol(record)
+        self.assertIn("WARNING: The receptor model was changed", output.getvalue())
+        self.assertIn("HIGH-SEVERITY STRUCTURAL MODIFICATION", output.getvalue())
+
 
 class LigandSourceSelectionTests(unittest.TestCase):
     def test_macos_default_routes_to_finder(self):

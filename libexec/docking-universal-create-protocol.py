@@ -29,6 +29,11 @@ from docking_universal_bundle import (  # noqa: E402
     protocol_type_label,
 )
 
+STANDARD_AMINO_ACIDS = {
+    "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE",
+    "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
+}
+
 
 def safe_id(value, fallback="protein"):
     value = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value).strip()).strip("._-")
@@ -115,13 +120,23 @@ def approved_removal_summary(protocol):
         preparation.get("user_approved_component_removal_manifest")
     )
     if rows:
-        noun = "residue/component was" if len(rows) == 1 else "residues/components were"
-        inventory = f" {len(rows)} {noun} removed."
+        standard = sum(str(row.get("residue_name", "")).upper() in STANDARD_AMINO_ACIDS for row in rows)
+        other = len(rows) - standard
+        parts = []
+        if standard:
+            parts.append(f"{standard} standard amino-acid residue{' was' if standard == 1 else 's were'} removed")
+        if other:
+            parts.append(f"{other} other residue/component{' was' if other == 1 else 's were'} removed")
+        inventory = " " + "; ".join(parts) + "."
+        severity = (" <b>High-severity structural warning:</b> standard protein/peptide residues, not merely solvent or "
+                    "optional hetero components, were omitted from the final receptor.") if standard else ""
     else:
         inventory = " The retained removal record identifies the omitted material."
+        severity = ""
     return ("<b>User-approved receptor component removal:</b> all safe preparation fallbacks failed, and the user explicitly "
             "approved omission of unmatched components. This changed the receptor model." + inventory +
-            " The complete removal manifest and raw preparation log are retained in the protocol bundle.")
+            severity + " The complete removal manifest and raw preparation log are retained in the protocol bundle and this warning "
+            "must be carried into every subsequent screening report.")
 
 
 def choose_type():

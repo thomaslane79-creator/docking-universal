@@ -4,6 +4,11 @@ import argparse, csv, hashlib, json, re, subprocess, sys
 from importlib import metadata
 from pathlib import Path
 
+STANDARD_AMINO_ACIDS = {
+    "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE",
+    "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
+}
+
 def first(root, patterns):
     for pattern in patterns:
         hits = sorted(root.glob(pattern))
@@ -420,7 +425,7 @@ def retained_scientific_versions(study, summary=None, docking_manifest=None):
         retained[key] = str(retained.get(key) or "not recorded")
     return retained
 
-def receptor_preparation_record(study, control=None):
+def receptor_preparation_record(study, control=None, protocol=None):
     """Describe the receptor-conversion path from retained preparation artifacts."""
     roots = [root for root in (study, control) if root]
     # A `run` study may deliberately reuse a receptor prepared elsewhere.  Its
@@ -446,7 +451,10 @@ def receptor_preparation_record(study, control=None):
     receptor_dir = retained(["preparation/**/receptor", "**/receptor"])
     audit = read_json(audit_path)
     ccd_audit = read_json(ccd_audit_path)
-    if removal_log and removal_log.stat().st_size:
+    recorded_preparation = (protocol or {}).get("receptor_preparation", {})
+    recorded_removal = bool(recorded_preparation.get("user_approved_component_removal"))
+    recorded_rows = recorded_preparation.get("user_approved_removed_components") or []
+    if (removal_log and removal_log.stat().st_size) or recorded_removal:
         path = "user-approved removal of unmatched receptor components after safe preparation fallbacks failed"
         used = bool(audit_path)
     elif adfr_log and adfr_log.stat().st_size:
@@ -474,6 +482,8 @@ def receptor_preparation_record(study, control=None):
         "user_approved_component_removal_log": str(removal_log) if removal_log else None,
         "user_approved_component_removal_record": str(removal_record) if removal_record else None,
         "user_approved_component_removal_manifest": str(removal_manifest) if removal_manifest else None,
+        "user_approved_component_removal": bool(removal_log or recorded_removal),
+        "user_approved_removed_components": read_tsv_rows(removal_manifest) if removal_manifest else recorded_rows,
         "adfr_fallback_log": str(adfr_log) if adfr_log else None,
         "disulfide_retry_log": str(disulfide_log) if disulfide_log else None,
         "changes": audit,
@@ -491,7 +501,7 @@ def pdbfixer_report_note(record, out, styles):
     terminal = audit.get("missing_terminal_atoms_detected_not_added", "not recorded")
     replacements = len(audit.get("nonstandard_residue_replacements", []))
     gaps = len(audit.get("missing_residue_segments_detected_not_built", []))
-    if record.get("user_approved_component_removal_log"):
+    if record.get("user_approved_component_removal") or record.get("user_approved_component_removal_log"):
         disposition = "The repaired intermediate was rejected by strict Meeko, so these changes were not used in the final receptor; the user explicitly approved removal of unmatched components from the filtered original."
     else:
         disposition = "The repaired structure was accepted by strict Meeko and used to create the final receptor."
@@ -522,17 +532,31 @@ def adfr_fallback_report_note(record, out, styles):
 def user_approved_removal_report_note(record, out, styles):
     """Make model-changing component removal unambiguous in every report."""
     from reportlab.platypus import Paragraph, Spacer
-    if not record.get("user_approved_component_removal_log"):
+    if not record.get("user_approved_component_removal") and not record.get("user_approved_component_removal_log"):
         return []
-    rows = read_tsv_rows(Path(record["user_approved_component_removal_manifest"])) if record.get("user_approved_component_removal_manifest") else []
+    rows = record.get("user_approved_removed_components") or (
+        read_tsv_rows(Path(record["user_approved_component_removal_manifest"]))
+        if record.get("user_approved_component_removal_manifest") else []
+    )
     if rows:
-        noun = "residue/component was" if len(rows) == 1 else "residues/components were"
-        inventory = f" {len(rows)} {noun} removed."
+        standard = sum(str(row.get("residue_name", "")).upper() in STANDARD_AMINO_ACIDS for row in rows)
+        other = len(rows) - standard
+        parts = []
+        if standard:
+            parts.append(f"{standard} standard amino-acid residue{' was' if standard == 1 else 's were'} removed")
+        if other:
+            parts.append(f"{other} other residue/component{' was' if other == 1 else 's were'} removed")
+        inventory = " " + "; ".join(parts) + "."
+        severity = (
+            " <b>High-severity structural warning:</b> standard protein/peptide residues, not merely solvent or optional hetero components, were omitted from the final receptor."
+            if standard else ""
+        )
     else:
         inventory = " The retained removal record identifies the omitted material."
+        severity = ""
     text = ("<b>User-approved receptor component removal:</b> safe preparation fallbacks failed, "
             "and the user explicitly approved Meeko's removal of unmatched components. This changed "
-            "the receptor model." + inventory + " Inspect the complete retained removal manifest and log; a "
+            "the receptor model." + inventory + severity + " Inspect the complete retained removal manifest and log; a "
             "target-matched bound-ligand control is required before prospective screening.")
     return [Paragraph(text, styles["BodyText"]), Spacer(1, 8)]
 
@@ -618,7 +642,7 @@ def reproducibility_record(protocol, study, control):
     figure_manifest = read_json(study / "report" / "report_figure_manifest.json")
     clustering = read_json(first(study, ["compounds/*/pose_analysis/clustering_manifest.json", "**/clustering_manifest.json"]))
     docking_manifest = read_key_value_tsv(first(study, ["compounds/*/seed_*/docking/run_manifest.tsv", "**/docking/run_manifest.tsv"]))
-    receptor_preparation = receptor_preparation_record(study, control)
+    receptor_preparation = receptor_preparation_record(study, control, protocol)
     retained_preparation_summary = summary.get("protocol_receptor_preparation_summary")
     if retained_preparation_summary and receptor_preparation.get("pdbfixer_used") is None:
         receptor_preparation["path"] = retained_preparation_summary
@@ -956,6 +980,9 @@ def main():
     # provenance, not a newly performed cavity-search section. Only a direct
     # raw exploratory workflow owns the cavity results in this study folder.
     protocol_path = choose_protocol(args.control) if args.control and not workflow_is_exploratory else None
+    if not protocol_path and not workflow_is_exploratory:
+        recorded_protocol = Path(str(summary.get("approved_protocol", ""))).expanduser()
+        protocol_path = recorded_protocol.resolve() if recorded_protocol.is_file() else None
     protocol = read_json(protocol_path)
 
     # Build a human-readable report heading from run metadata. Directory-style

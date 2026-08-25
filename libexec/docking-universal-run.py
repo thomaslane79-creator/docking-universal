@@ -52,6 +52,10 @@ STATUSES = {
 
 COMMON_ADDITIVES = {"HOH", "WAT", "EDO", "GOL", "PEG", "MPD", "DMS", "IPA", "EOH", "ACT", "ACE", "SO4", "PO4"}
 COMMON_IONS = {"ZN", "MG", "MN", "CA", "FE", "CU", "NA", "K", "CL"}
+STANDARD_AMINO_ACIDS = {
+    "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE",
+    "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
+}
 
 
 class StartControlRequested(Exception):
@@ -665,6 +669,44 @@ def print_selected_protocol(record):
     print(f"  Screening authority: {record.get('screening_authority', 'control approval')}")
     print(f"  Created: {str(record.get('created_utc', 'not recorded by this older protocol'))[:10]}")
     print(f"  Docking box: {Path(record.get('locked_inputs', {}).get('box', 'not recorded')).name}")
+    warning = protocol_removal_warning(record)
+    if warning:
+        print(f"  WARNING: {warning}")
+
+
+def removal_warning_from_preparation(preparation):
+    """Return a persistent warning for an explicitly altered receptor model."""
+    if not preparation.get("user_approved_component_removal"):
+        return None
+    rows = preparation.get("user_approved_removed_components") or []
+    if not rows:
+        return ("The receptor was changed by explicit user-approved removal of unmatched components; "
+                "inspect the retained removal manifest and preparation log.")
+    standard = sum(str(row.get("residue_name", "")).upper() in STANDARD_AMINO_ACIDS for row in rows)
+    other = len(rows) - standard
+    counts = []
+    if standard:
+        counts.append(f"{standard} standard amino-acid residue{' was' if standard == 1 else 's were'} removed")
+    if other:
+        counts.append(f"{other} other residue/component{' was' if other == 1 else 's were'} removed")
+    severity = " HIGH-SEVERITY STRUCTURAL MODIFICATION." if standard else ""
+    return "The receptor model was changed: " + "; ".join(counts) + "." + severity
+
+
+def protocol_removal_warning(record):
+    return removal_warning_from_preparation((record or {}).get("receptor_preparation", {}))
+
+
+def study_removal_warning(study):
+    manifests = sorted(study.glob("preparation/**/receptor/user_approved_component_removal.tsv"))
+    if not manifests:
+        return None
+    with manifests[0].open(newline="") as handle:
+        rows = list(csv.DictReader(handle, delimiter="\t"))
+    return removal_warning_from_preparation({
+        "user_approved_component_removal": True,
+        "user_approved_removed_components": rows,
+    })
 
 
 def choose_complex_source():
@@ -1284,7 +1326,9 @@ def write_reports(study, manifest, compounds):
         manifest.get("protocol_receptor_preparation_summary")
         or receptor_preparation_summary(study)
     )
-    report = {**manifest, "receptor_preparation": preparation_summary, "compounds": rows}
+    removal_warning = manifest.get("protocol_receptor_modification_warning") or study_removal_warning(study)
+    report = {**manifest, "receptor_preparation": preparation_summary,
+              "receptor_modification_warning": removal_warning, "compounds": rows}
     (report_dir / "study_summary.json").write_text(json.dumps(report, indent=2) + "\n")
 
     lines = [
@@ -1296,6 +1340,8 @@ def write_reports(study, manifest, compounds):
         "## Receptor preparation", "",
         f"{preparation_summary}. PDBFixer is used only after strict Meeko rejects the filtered receptor.", "",
     ]
+    if removal_warning:
+        lines += [f"> **Receptor-model warning:** {removal_warning}", ""]
     if manifest["study_status"] == "EXPLORATORY_NO_CONTROL":
         lines += ["> **Exploratory result:** no approved bound-ligand pose-recovery control was available. Generated poses and scores are hypotheses for structural review.", ""]
     lines += ["## Compound results", "", "| Compound | Status | Clusters | Representatives | Best energy | Seed support |", "| --- | --- | ---: | ---: | ---: | ---: |"]
@@ -1318,6 +1364,8 @@ def write_reports(study, manifest, compounds):
         "the recorded site and docking results remain exploratory because target-specific pose-recovery performance was not evaluated.</p>"
         if manifest["study_status"] == "EXPLORATORY_NO_CONTROL" else ""
     )
+    if removal_warning:
+        warning_html = f"<strong>Receptor-model warning:</strong> {html.escape(removal_warning)}"
     document = f"""<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>{html.escape(manifest['study_name'])}</title><style>body{{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#18202a}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #ccd3da;padding:.55rem;text-align:left}}th{{background:#eef3f6}}code{{background:#eef3f6;padding:.15rem .3rem}}.note{{border-left:4px solid #b87900;padding:.8rem;background:#fff6df}}</style></head><body><h1>{html.escape(manifest['study_name'])}</h1><p>Scientific status: <code>{manifest['study_status']}</code><br>Completion status: <code>{manifest.get('completion_status', 'UNKNOWN')}</code></p><div class=\"note\">{warning_html or 'Target-specific protocol gate passed. This remains computational evidence, not experimental validation.'}</div><h2>Receptor preparation</h2><p>{html.escape(preparation_summary)}. PDBFixer is used only after strict Meeko rejects the filtered receptor.</p><h2>Compound summary</h2><table><thead><tr>{''.join(f'<th>{html.escape(field)}</th>' for field in fields)}</tr></thead><tbody>{html_rows}</tbody></table><h2>Scientific limits</h2><p>Scores are ranking outputs. Pose clustering and seed support describe search convergence and require structural and experimental interpretation.</p></body></html>"""
     (report_dir / "index.html").write_text(document)
     write_run_details(study, manifest, compounds, report_dir)
@@ -1776,6 +1824,8 @@ def main():
                 approved_record.get("receptor_preparation_summary")
                 or approved_record.get("receptor_preparation", {}).get("path")
             ),
+            "protocol_receptor_preparation": approved_record.get("receptor_preparation", {}),
+            "protocol_receptor_modification_warning": protocol_removal_warning(approved_record),
             "configured_engine": approved_record.get("engine", "vina"),
             "configured_engine_version": approved_record.get("software", {}).get("engine_version", "not recorded"),
             "configured_docking_parameters": approved_record.get("parameters", {}),

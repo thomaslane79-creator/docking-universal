@@ -820,9 +820,11 @@ if [ "$PREP_SUCCESS" = "0" ]; then
 No further safe automatic receptor-preparation fallback succeeded.
 Docking Universal can make one final, model-changing attempt by omitting
 unmatched residues/components and selecting alternate location A. This can
-remove biologically relevant material; inspect the saved diagnosis and run a
-bound-ligand control before screening.
+remove complete standard protein/peptide residues, not only missing atoms or
+optional hetero components. The current diagnosis is shown below. A successful
+attempt still requires structural review and a bound-ligand control before screening.
 EOF
+    cat "$FAILURE_DIAGNOSIS" >&2
     printf 'Proceed with user-approved component removal? [y/N] ' >&2
     read -r USER_APPROVES_REMOVAL || USER_APPROVES_REMOVAL=""
     case "$USER_APPROVES_REMOVAL" in
@@ -855,17 +857,23 @@ EOF
             }
           ' "$RECEPTOR_PDBQT" "$RECEPTOR_FILTERED_PDB" | { IFS= read -r header; printf '%s\n' "$header"; sort -t $'\t' -k1,1 -k2,2n -k3,3 -k4,4; } > "$USER_REMOVAL_MANIFEST"
           REMOVED_COMPONENT_COUNT=$(awk 'NR > 1 { n++ } END { print n+0 }' "$USER_REMOVAL_MANIFEST")
+          REMOVED_STANDARD_AMINO_COUNT=$(awk -F '\t' 'NR > 1 && $4 ~ /^(ALA|ARG|ASN|ASP|CYS|GLN|GLU|GLY|HIS|ILE|LEU|LYS|MET|PHE|PRO|SER|THR|TRP|TYR|VAL)$/ { n++ } END { print n+0 }' "$USER_REMOVAL_MANIFEST")
           REMOVED_COMPONENT_SUMMARY=$(awk -F '\t' 'NR > 1 { printf "%s%s:%s%s (%s)", (n++ ? ", " : ""), ($1 == "" ? "[blank]" : $1), $2, $3, $4 }' "$USER_REMOVAL_MANIFEST")
           {
             printf 'User approved component removal after safe preparation fallbacks failed.\n'
             printf 'Removed residue/component count: %s\n' "$REMOVED_COMPONENT_COUNT"
+            printf 'Removed standard amino-acid residue count: %s\n' "$REMOVED_STANDARD_AMINO_COUNT"
             printf 'Removed residues/components: %s\n' "${REMOVED_COMPONENT_SUMMARY:-none detected by residue comparison}"
+            if [ "$REMOVED_STANDARD_AMINO_COUNT" -gt 0 ]; then
+              printf 'HIGH-SEVERITY STRUCTURAL WARNING: standard protein/peptide residues were omitted from the final receptor.\n'
+            fi
             printf 'Removal manifest: %s\n' "$USER_REMOVAL_MANIFEST"
             printf 'Command: '
             printf '%q ' "${USER_REMOVAL_COMMAND[@]}"
             printf '\nLog: %s\n' "$USER_REMOVAL_LOG"
             printf 'Control redocking is required before prospective screening.\n'
           } > "$USER_REMOVAL_RECORD"
+          cat "$USER_REMOVAL_RECORD" >&2
           log "User-approved component-removal attempt succeeded; control redocking is required before screening."
         else
           log "User-approved component-removal attempt did not succeed; retaining the original failure."

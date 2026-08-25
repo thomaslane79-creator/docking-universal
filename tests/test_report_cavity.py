@@ -21,7 +21,30 @@ class CavityReportTests(unittest.TestCase):
                 "user_approved_component_removal_log": "retained.log",
                 "user_approved_component_removal_manifest": str(manifest),
             }, Path(temporary), styles)
-            self.assertIn("1 residue/component was removed", note[0].text)
+            self.assertIn("1 other residue/component was removed", note[0].text)
+
+    def test_removal_note_flags_standard_amino_acids_as_high_severity(self):
+        styles = __import__("reportlab.lib.styles", fromlist=["getSampleStyleSheet"]).getSampleStyleSheet()
+        note = REPORT.user_approved_removal_report_note({
+            "user_approved_component_removal": True,
+            "user_approved_removed_components": [
+                {"chain": "A", "residue_number": "305", "residue_name": "SER", "atom_count": "5"},
+            ],
+        }, Path("."), styles)
+        self.assertIn("1 standard amino-acid residue was removed", note[0].text)
+        self.assertIn("High-severity structural warning", note[0].text)
+
+    def test_protocol_record_propagates_removal_without_original_files(self):
+        protocol = {"receptor_preparation": {
+            "user_approved_component_removal": True,
+            "user_approved_removed_components": [
+                {"chain": "A", "residue_number": "305", "residue_name": "SER", "atom_count": "5"},
+            ],
+        }}
+        with tempfile.TemporaryDirectory() as temporary:
+            record = REPORT.receptor_preparation_record(Path(temporary), protocol=protocol)
+        self.assertTrue(record["user_approved_component_removal"])
+        self.assertEqual(record["user_approved_removed_components"][0]["residue_name"], "SER")
 
     def test_removal_route_takes_precedence_over_failed_adfr_log(self):
         with tempfile.TemporaryDirectory() as temporary:

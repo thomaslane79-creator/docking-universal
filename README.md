@@ -88,7 +88,7 @@ Known preparation limitations include some covalent adducts, linked glycans, met
 - [Complete current-style docking report](docs/assets/docking-universal-example-report.pdf)
 - [Site-guided protocol report after explicit user-approved receptor-component removal](docs/assets/5KRH-user-approved-removal-cavity-report.pdf)
 
-Reports adapt to control-validated, exploratory, protocol-reuse, and single- or multi-compound studies while retaining individual compound results. The 5KRH example shows how a model-changing removal is disclosed in the report; its exact component inventory and raw preparation log remain in the retained study artifacts and `.duprotocol` bundle.
+Reports adapt to control-validated, exploratory, protocol-reuse, and single- or multi-compound studies while retaining individual compound results. The 5KRH example shows how removal of 31 standard amino-acid residues is identified as a high-severity receptor-model change; its exact inventory and raw preparation log remain in the retained study artifacts and `.duprotocol` bundle, and the warning is carried into every later screening report that reuses that protocol.
 
 ## Documentation
 
