@@ -38,7 +38,7 @@ mkdir -p "$installed_dir"
   cd "$installed_dir"
   unset DOCKING_UNIVERSAL_CLI DOCKING_UNIVERSAL_LIBEXEC
   PATH="$prefix/bin:$PATH"
-  [ "$(docking-universal --version)" = "Docking Universal 0.6.3" ] || fail "installed version"
+  [ "$(docking-universal --version)" = "Docking Universal 0.6.4" ] || fail "installed version"
   docking-universal --help >/dev/null || fail "installed general help"
   docking-universal run --help >/dev/null || fail "installed run help"
   docking-universal create-protocol --help >/dev/null || fail "installed create-protocol help"
