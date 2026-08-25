@@ -1368,7 +1368,10 @@ def parse_args():
     parser.add_argument("--out", type=Path)
     parser.add_argument("--name", help="study name")
     parser.add_argument("--complex", type=Path, help="raw bound complex or protein PDB")
-    parser.add_argument("--control-ligand-id", help="exact RESNAME:CHAIN:RESNUM for a non-interactive bound-ligand control")
+    parser.add_argument(
+        "--control-ligand-id", "--ligand-id", dest="control_ligand_id",
+        help="exact RESNAME:CHAIN:RESNUM for a non-interactive bound-ligand control",
+    )
     parser.add_argument("--download-pdb", action="store_true", help="allow non-interactive RCSB download when --complex is a four-character PDB ID")
     parser.add_argument("--protocol", type=Path)
     parser.add_argument("--accept-exploratory-protocol", action="store_true", help="explicitly authorize unattended reuse of an exploratory protocol")

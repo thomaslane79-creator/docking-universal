@@ -57,6 +57,10 @@ case "$out" in /*) ;; *) out="$PWD/$out" ;; esac
 if [ "$background" -eq 1 ]; then
   [ ! -e "$out" ] || { echo "ERROR: validation output already exists: $out" >&2; exit 2; }
   mkdir -p "$out"
+  # The foreground child accepts a directory prepared by the background
+  # launcher only when this guard exists.  Create it before spawning to avoid
+  # a race in which the child observes the directory before the PID file.
+  : > "$out/pid"
   nohup "$0" "$level" --out "$out" > "$out/run.log" 2>&1 < /dev/null &
   pid=$!
   printf '%s\n' "$pid" > "$out/pid"
@@ -206,7 +210,7 @@ run_release() {
   "$CLI" control --complex "$ASSETS/tutorials/01_bound_ligand/inputs/1HVR.pdb" \
     --ligand-id XK2:A:263 --engine vina --control-tier repeatability \
     --out "$out/control_1HVR_XK2" --non-interactive
-  protocol=$(find "$out/control_1HVR_XK2/04_redocking/vina" -name protocol.json -type f | sort | tail -1)
+  protocol=$(find "$out/control_1HVR_XK2/control/04_redocking/vina" -name protocol.json -type f | sort | tail -1)
   [ -s "$protocol" ]
   "$PYTHON_COMMAND" - "$protocol" <<'PY'
 import json, sys

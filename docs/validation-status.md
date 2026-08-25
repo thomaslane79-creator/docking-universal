@@ -21,7 +21,7 @@ Run the automated suite with:
 make test
 ```
 
-The current automated suite is exercised in GitHub Actions on both current Ubuntu and macOS runners after creating the declared Conda environment. That supports platform portability at the software-test level. The retained full scientific validation remains referenced to macOS arm64, because compiled scientific tools can differ across platforms; run integration or release validation on the target workstation before production use.
+The current automated suite is exercised in GitHub Actions on current Ubuntu and macOS runners after creating the declared Conda environment. That supports portability at the software-test level. Because compiled scientific tools can differ across platforms, run integration or release validation on the target workstation before production use.
 
 The [complete two-cohort, 100-public-PDB receptor-preparation record](receptor-preparation-validation-2026-08-21.md) documents tested preparation paths, known limitations, public entry IDs, and retained evidence for the general and covalent-linkage stress-test cohorts.
 
@@ -37,7 +37,7 @@ The release suite is intentionally slow. It first repeats the integration probes
 
 ## Real-tool smoke checks
 
-The maintained macOS Apple Silicon environment has been checked with fpocket, Meeko, PDBFixer 1.11, MolScrub, RDKit, Open Babel, PLIP, PyMOL Open-Source, and AutoDock Vina 1.2.7. Real fixture-based checks cover:
+The maintained scientific environment has been checked with fpocket, Meeko, PDBFixer 1.11, MolScrub, RDKit, Open Babel, PLIP, PyMOL Open-Source, and AutoDock Vina 1.2.7. Real fixture-based checks cover:
 
 - ligand-centered 1HVR/XK2 receptor preparation and box generation;
 - strict-Meeko-first receptor conversion, conservative PDBFixer fallback auditing, and explicit user-approved component-removal behavior after safe attempts fail;

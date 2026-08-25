@@ -2,7 +2,7 @@ name: docking-universal
 channels:
   - conda-forge
 dependencies:
-  # Direct, stage-level dependencies verified in a fresh macOS arm64 environment.
+  # Direct, stage-level dependencies exercised on Ubuntu and macOS.
   - python=3.9.23
   # Used by install.sh to install and validate the public command. Declaring it
   # here avoids requiring developer command-line tools on a new workstation.

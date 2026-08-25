@@ -24,7 +24,7 @@ The installed Conda command was validated outside the source repository. `dockin
 
 The longer release suite also passed the repeatable 1HVR/XK2 control, a held-out approved-protocol screen, a ligand-free 2R8N/Indinavir exploratory screen, clustering, PLIP, PyMOL rendering, and reports. These are software/workflow checks on representative cases, not general biological validation.
 
-The packaged ligand-free tutorial input, unbound RCSB 2R8N, was also passed through the quick fpocket route on the macOS arm64 reference environment. The run completed and wrote five ranked candidate cavities with positive dimensions and Vina configuration files. This verifies tutorial execution through cavity generation; it does not validate any cavity as a biological binding site.
+The packaged ligand-free tutorial input, unbound RCSB 2R8N, was also passed through the quick fpocket route in the declared scientific environment. The run completed and wrote five ranked candidate cavities with positive dimensions and Vina configuration files. This verifies tutorial execution through cavity generation; it does not validate any cavity as a biological binding site.
 
 ## Reference case
 
@@ -42,7 +42,7 @@ The downloaded raw inputs are not redistributed in this repository. The checksum
 
 ## What was tested
 
-The raw PDB and SDF were processed on an M2 Mac using the clean main environment and the isolated Vina environment:
+The raw PDB and SDF were processed using the declared main environment and isolated Vina environment:
 
 1. Receptor atoms and `MODRES`-declared polymer residues were selected from the raw PDB and converted strictly with Meeko; no permissive bad-residue deletion was used. Meeko fetched the official CSO chemical-component definition from RCSB to type the two modified cysteines. Under the new strict-first pipeline, this case and the existing 2R8N example produced byte-identical receptor PDBQT files without invoking PDBFixer. Their selected boxes and paired downstream docking scores also matched the earlier direct-Meeko path.
 2. XK2 was prepared from the raw SDF with Open Babel and Meeko.

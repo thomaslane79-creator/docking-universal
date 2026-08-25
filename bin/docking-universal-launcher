@@ -15,5 +15,50 @@ if ! command -v "$conda_command" >/dev/null 2>&1; then
   exit 1
 fi
 
+# `conda run` manages its descendant process group.  If the in-environment
+# validator starts its own background child and immediately returns, Conda can
+# terminate that child while cleaning up the completed run.  For the public
+# no-activation launcher, keep `conda run` itself alive as the detached process
+# and run validation in the foreground inside it.
+if [ "${1:-}" = "validate" ]; then
+  background=0
+  for argument in "$@"; do
+    [ "$argument" != "--background" ] || background=1
+  done
+  if [ "$background" -eq 1 ]; then
+    shift
+    level="${1:-}"
+    case "$level" in
+      quick|integration|release) shift ;;
+      *) printf 'Error: validation level must be quick, integration, or release.\n' >&2; exit 2 ;;
+    esac
+    output=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --out) output="${2:-}"; [ -n "$output" ] || { printf 'Error: --out requires a directory.\n' >&2; exit 2; }; shift 2 ;;
+        --background) shift ;;
+        *) printf 'Error: unknown background-validation option: %s\n' "$1" >&2; exit 2 ;;
+      esac
+    done
+    timestamp=$(date '+%Y%m%d_%H%M%S')
+    [ -n "$output" ] || output="$PWD/validation_runs/${level}_${timestamp}"
+    case "$output" in /*) ;; *) output="$PWD/$output" ;; esac
+    [ ! -e "$output" ] || { printf 'Error: validation output already exists: %s\n' "$output" >&2; exit 2; }
+    mkdir -p "$output"
+    : > "$output/pid"
+    nohup "$conda_command" run --no-capture-output -n docking-universal \
+      docking-universal validate "$level" --out "$output" \
+      > "$output/run.log" 2>&1 < /dev/null &
+    pid=$!
+    printf '%s\n' "$pid" > "$output/pid"
+    printf '{"status":"RUNNING","level":"%s","pid":%s,"output":"%s"}\n' \
+      "$level" "$pid" "$output" > "$output/status.json"
+    printf 'Validation started in the background.\nLevel: %s\nPID: %s\nOutput: %s\n' \
+      "$level" "$pid" "$output"
+    printf 'Progress: tail -f "%s/run.log"\nStatus: cat "%s/status.json"\n' "$output" "$output"
+    exit 0
+  fi
+fi
+
 exec "$conda_command" run --no-capture-output -n docking-universal \
   docking-universal "$@"

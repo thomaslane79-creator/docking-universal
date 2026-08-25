@@ -37,6 +37,14 @@ class RunCommandSyntaxTests(unittest.TestCase):
         ), self.assertRaises(SystemExit):
             RUNNER.parse_args()
 
+    def test_control_ligand_id_public_alias_remains_compatible(self):
+        with patch.object(
+            sys, "argv",
+            ["docking-universal-run.py", "--mode", "control", "--ligand-id", "XK2:A:263"],
+        ):
+            args = RUNNER.parse_args()
+        self.assertEqual(args.control_ligand_id, "XK2:A:263")
+
     def test_selected_protocol_summary_displays_scientific_identity(self):
         record = {
             "target": "2R8N",
