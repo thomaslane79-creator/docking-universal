@@ -108,6 +108,18 @@ class ProtocolTypeTests(unittest.TestCase):
             retained = extracted.parent / record["receptor_preparation"]["user_approved_component_removal_manifest"]
             self.assertTrue(retained.is_file())
             self.assertIn("CSO", retained.read_text())
+            warning = record["receptor_preparation"]["receptor_modification_warning"]
+            self.assertEqual(warning["code"], "user-approved-receptor-component-removal")
+            self.assertTrue(warning["structural_review_required"])
+
+    def test_protocol_warning_records_standard_amino_acid_count(self):
+        warning = BUNDLE.build_receptor_modification_warning([
+            {"residue_name": "SER"}, {"residue_name": "CSO"},
+        ])
+        self.assertEqual(warning["severity"], "high")
+        self.assertEqual(warning["removed_residue_component_count"], 2)
+        self.assertEqual(warning["removed_standard_amino_acid_count"], 1)
+        self.assertEqual(warning["removed_other_component_count"], 1)
 
     def test_interactive_type_selection_covers_all_three_protocols(self):
         expected = [

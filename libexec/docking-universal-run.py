@@ -36,6 +36,7 @@ from docking_universal_bundle import (
     CONTROL_VALIDATED,
     LIGAND_GUIDED_EXPLORATORY,
     SITE_GUIDED_EXPLORATORY,
+    build_receptor_modification_warning,
     create_bundle,
     extract_bundle,
     protocol_can_screen,
@@ -52,10 +53,6 @@ STATUSES = {
 
 COMMON_ADDITIVES = {"HOH", "WAT", "EDO", "GOL", "PEG", "MPD", "DMS", "IPA", "EOH", "ACT", "ACE", "SO4", "PO4"}
 COMMON_IONS = {"ZN", "MG", "MN", "CA", "FE", "CU", "NA", "K", "CL"}
-STANDARD_AMINO_ACIDS = {
-    "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE",
-    "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
-}
 
 
 class StartControlRequested(Exception):
@@ -678,19 +675,10 @@ def removal_warning_from_preparation(preparation):
     """Return a persistent warning for an explicitly altered receptor model."""
     if not preparation.get("user_approved_component_removal"):
         return None
-    rows = preparation.get("user_approved_removed_components") or []
-    if not rows:
-        return ("The receptor was changed by explicit user-approved removal of unmatched components; "
-                "inspect the retained removal manifest and preparation log.")
-    standard = sum(str(row.get("residue_name", "")).upper() in STANDARD_AMINO_ACIDS for row in rows)
-    other = len(rows) - standard
-    counts = []
-    if standard:
-        counts.append(f"{standard} standard amino-acid residue{' was' if standard == 1 else 's were'} removed")
-    if other:
-        counts.append(f"{other} other residue/component{' was' if other == 1 else 's were'} removed")
-    severity = " HIGH-SEVERITY STRUCTURAL MODIFICATION." if standard else ""
-    return "The receptor model was changed: " + "; ".join(counts) + "." + severity
+    warning = preparation.get("receptor_modification_warning") or build_receptor_modification_warning(
+        preparation.get("user_approved_removed_components") or []
+    )
+    return warning["summary"]
 
 
 def protocol_removal_warning(record):

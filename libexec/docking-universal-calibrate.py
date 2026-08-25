@@ -26,6 +26,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from docking_universal_bundle import build_receptor_modification_warning
+
 
 TIERS = {
     "quick": dict(conformers=3, seeds=2, exhaustiveness=16, modes=15, energy_range=8.0),
@@ -329,6 +331,7 @@ def run_tier(args, tier_name, cli, libexec, tier_root):
         preparation_path = "conservative PDBFixer repair followed by strict Meeko"
     else:
         preparation_path = "strict Meeko; PDBFixer was not needed"
+    removed_components = read_tsv_rows(user_removal_manifest) if user_removal_manifest.is_file() else []
     result["receptor_preparation"] = {
         "path": preparation_path,
         "pdbfixer_used": pdbfixer_audit.is_file(),
@@ -345,7 +348,10 @@ def run_tier(args, tier_name, cli, libexec, tier_root):
         "user_approved_component_removal_record_sha256": sha256(user_removal_record) if user_removal_record.is_file() else None,
         "user_approved_component_removal_manifest": str(user_removal_manifest) if user_removal_manifest.is_file() else None,
         "user_approved_component_removal_manifest_sha256": sha256(user_removal_manifest) if user_removal_manifest.is_file() else None,
-        "user_approved_removed_components": read_tsv_rows(user_removal_manifest) if user_removal_manifest.is_file() else [],
+        "user_approved_removed_components": removed_components,
+        "receptor_modification_warning": build_receptor_modification_warning(
+            removed_components, user_removal_record.is_file()
+        ),
         "policy": "strict Meeko, then conservative PDBFixer plus strict Meeko, documented Meeko retries, and a narrow ADFRsuite fallback only for Meeko-diagnosed linked deposited components; unmatched components are removed only after an explicit final user approval",
     }
     result["created_utc"] = datetime.now(timezone.utc).isoformat()
