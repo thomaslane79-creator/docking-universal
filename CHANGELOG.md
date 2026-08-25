@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.3 — 2026-08-24
+
+**Defining release change:** Docking Universal now organizes its report-producing workflows around creating, reviewing, reusing, and screening with explicit Docking Universal protocols, with confirmed graphical operation on both Ubuntu and macOS.
+
+- Added `docking-universal create-protocol`, a guided workflow that prepares the receptor and docking region and produces both a scientific PDF protocol report and a reusable Docking Universal `.duprotocol` bundle.
+- Added three explicit protocol types: control-validated, ligand-guided exploratory, and site-guided exploratory. Their evidence basis, screening authority, creation time, receptor preparation, docking box, and software provenance are retained in the protocol record and presented during later selection.
+- Allowed exploratory protocols to be deliberately reused for exploratory screening without implying pose-recovery validation. Interactive use requires an explicit user decision; unattended use requires an explicit command-line authorization.
+- Made `docking-universal screen` the direct guided command for docking one or multiple new compounds with a required Docking Universal protocol. It displays the selected protocol before requesting ligands and reuses its locked receptor, docking box, and search settings.
+- Extended `.duprotocol` bundles to retain protocol-type-specific evidence, the source receptor when available, protocol/cavity/box report assets, cryptographic file verification, and compatibility with earlier approved Docking Universal controls. `.duprotocol` remains a Docking Universal-specific workflow format rather than a general input format for other docking software.
+- Updated scientific reports to distinguish protocols created in the current study from previously created protocols, distinguish control-validated from exploratory evidence, carry forward retained receptor-preparation and control evidence when applicable, and avoid describing a supplied prepared receptor as merely “not recorded.”
+- Added one graphical file-and-folder selection layer across the guided workflows and low-level `dock` command: Zenity/GTK on Ubuntu, Tk as an Ubuntu fallback, Finder on macOS, and exact-path prompts for headless or scripted use.
+- Reorganized command help and the README around the three report-producing workflows, the simple repository installer, and standalone receptor/ligand PDBQT preparation for other compatible software. The documentation now clearly distinguishes generally usable prepared files from Docking Universal-only `.duprotocol` bundles.
+- Expanded protocol records with creation timestamps and detected Docking Universal, Python, RDKit, MolScrub, Meeko, PDBFixer, and docking-engine provenance where available.
+- Added protocol-type, graphical-chooser, installed-command, and cross-platform routing tests. The complete local suite contains 81 tests, and the branch checks pass on current Ubuntu and macOS GitHub runners.
+- Added installed-copy checks for the user-facing installer, host-side Conda launcher, `create-protocol` command, and installer shell syntax. Normal use continues to require no manual Conda activation.
+
 ## 0.6.0 — 2026-08-21
 
 **Defining release change:** A material receptor-preparation compatibility expansion enables many more real deposited PDB structures to proceed to Vina-style PDBQT workflows, backed by a public 100-PDB validation record.
@@ -34,7 +50,7 @@ See [Changes completed on 2026-08-18](docs/changes-2026-08-18.md) for the comple
 - Added plan-only validation plus consolidated CSV, JSON, Markdown, and HTML study reports with separate scientific and completion statuses.
 - Integrated five-seed/conformer docking, cross-run clustering, three representative poses, PyMOL PNG/PSE output, and PLIP interaction analysis into the default completed-compound path.
 - Added headless PNG/PSE rendering of each selected PLIP interaction scene.
-- Verified a ligand-free exploratory smoke workflow and a distinct-compound approved-protocol workflow on the macOS arm64 reference system.
+- Verified a ligand-free exploratory smoke workflow and a distinct-compound approved-protocol workflow through retained integration runs.
 - Added explicit guided incremental versus manual calibration strategies. Guided mode records escalation history and stops at the first reproducible passing tier; manual mode makes no claim about cheaper settings.
 - Calibration now records tier elapsed time and estimates later-tier time from completed jobs before confirmation.
 
@@ -63,7 +79,7 @@ See [Changes completed on 2026-08-18](docs/changes-2026-08-18.md) for the comple
 - Corrected receptor metal filtering to use the fixed-width PDB element column instead of matching metal symbols anywhere in a `HETATM` record.
 - Excluded `MODRES`-declared polymer modifications from bound-ligand candidates.
 - Added fpocket 4.2 report/coordinate compatibility and strict positive box-dimension checks.
-- Added Meeko/Vina macrocycle preparation and fixed portable PyMOL PML loading on Apple silicon.
+- Added Meeko/Vina macrocycle preparation and fixed portable PyMOL PML loading across supported platforms.
 
 ## 0.2.0 — 2026-08-08
 

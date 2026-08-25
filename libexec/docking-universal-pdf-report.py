@@ -464,7 +464,7 @@ def receptor_preparation_record(study, control=None):
         path = "strict Meeko succeeded; PDBFixer was not needed"
         used = False
     else:
-        path = "not recorded in this run (a prepared receptor may have been supplied or reused)"
+        path = "prepared receptor supplied; receptor preparation occurred outside this recorded run"
         used = None
     return {
         "path": path,
@@ -611,6 +611,13 @@ def reproducibility_record(protocol, study, control):
     clustering = read_json(first(study, ["compounds/*/pose_analysis/clustering_manifest.json", "**/clustering_manifest.json"]))
     docking_manifest = read_key_value_tsv(first(study, ["compounds/*/seed_*/docking/run_manifest.tsv", "**/docking/run_manifest.tsv"]))
     receptor_preparation = receptor_preparation_record(study, control)
+    retained_preparation_summary = summary.get("protocol_receptor_preparation_summary")
+    if retained_preparation_summary and receptor_preparation.get("pdbfixer_used") is None:
+        receptor_preparation["path"] = retained_preparation_summary
+        if "PDBFixer was not needed" in retained_preparation_summary:
+            receptor_preparation["pdbfixer_used"] = False
+        elif "PDBFixer" in retained_preparation_summary:
+            receptor_preparation["pdbfixer_used"] = True
     run_versions = retained_scientific_versions(study, summary, docking_manifest)
     report_runtime = {
         "docking_universal": package_version(),
@@ -847,6 +854,22 @@ def main():
     else:
         args.control = discover_control(args.study)
 
+    summary = read_json(args.study / "report" / "study_summary.json")
+    workflow_is_exploratory = summary.get("workflow") == "exploratory"
+    summary_protocol_type = str(summary.get("protocol_type", "")).strip().lower()
+    reuses_control_protocol = (
+        summary_protocol_type == "control-validated"
+        or (not summary_protocol_type and summary.get("study_status") == "CONTROL_APPROVED")
+    )
+    # High-level screening materializes a selected .duprotocol bundle and
+    # records the resulting protocol.json in the summary.  Infer that control
+    # root while it is still available so inherited pose-recovery evidence is
+    # included without requiring a second, manual --control argument.
+    if not args.control and not workflow_is_exploratory and reuses_control_protocol:
+        recorded_protocol = Path(str(summary.get("approved_protocol", ""))).expanduser()
+        if recorded_protocol.is_file():
+            args.control = recorded_protocol.resolve().parent
+
     # Figures are first-class report outputs. Rebuild them from retained run
     # artifacts so the final PDF never depends on manually prepared images.
     figure_script = Path(__file__).with_name("docking-universal-report-figures.py")
@@ -865,7 +888,6 @@ def main():
     from reportlab.lib.units import inch
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle, PageBreak, KeepTogether
 
-    summary = read_json(args.study / "report" / "study_summary.json")
     # A standalone control report is the run that established the protocol and
     # therefore carries the full control evidence automatically.  The same
     # conditional detail break used by combined reports prevents blank pages.
@@ -914,10 +936,9 @@ def main():
             ("TOPPADDING",(0,0),(-1,-1),2.5 if compact else 4), ("BOTTOMPADDING",(0,0),(-1,-1),2.5 if compact else 4)]))
         return item
 
-    workflow_is_exploratory = (
-        summary.get("workflow") == "exploratory"
-        or summary.get("study_status") == "EXPLORATORY_NO_CONTROL"
-    )
+    # A screen that reuses an exploratory protocol still begins with protocol
+    # provenance, not a newly performed cavity-search section. Only a direct
+    # raw exploratory workflow owns the cavity results in this study folder.
     protocol_path = choose_protocol(args.control) if args.control and not workflow_is_exploratory else None
     protocol = read_json(protocol_path)
 
@@ -1051,6 +1072,7 @@ def main():
                 ["Pocket configuration", "Recorded value"],
                 ["Interpretive status", "Exploratory; not evaluated by a bound-ligand pose-recovery control"],
                 ["Selected docking pocket", cavity["selected_file"] or "Not resolved"],
+                ["fpocket eligibility threshold used", summary.get("cavity_score_threshold_used", "not recorded")],
                 ["fpocket pocket score (Figure 1A)", selected.get("score", "NA")],
                 ["Composite selection priority", selected.get("rank_score", "NA")],
                 ["fpocket druggability descriptor", descriptor.get("druggability_score", "NA")],
@@ -1233,9 +1255,29 @@ def main():
         validation_status = summary.get("protocol_validation_status", "Not evaluated by bound-ligand control")
         receptor = manifest.get("receptor") or locked.get("receptor", "NA")
         docking_box = manifest.get("config") or locked.get("box", "NA")
+        configured_rows = [["Parameter", "Configured value"]]
+        if summary.get("protocol_type"):
+            configured_rows += [
+                ["Protocol file name", summary.get("approved_protocol_file_name", "not recorded")],
+                ["Protocol type", {
+                    "control-validated": "Control-validated",
+                    "ligand-guided-exploratory": "Ligand-guided exploratory",
+                    "site-guided-exploratory": "Site-guided exploratory",
+                }.get(summary["protocol_type"], str(summary["protocol_type"]))],
+                ["Evidence basis", summary.get("protocol_evidence_basis", "not recorded")],
+                ["Screening authority", summary.get("protocol_screening_authority", "not recorded")],
+            ]
+        configured_rows += [
+            ["Validation status", validation_status], ["Engine", engine], ["Engine version", engine_version],
+            ["Exhaustiveness", manifest.get("exhaustiveness") or configured.get("exhaustiveness", "NA")],
+            ["Modes per job", manifest.get("num_modes") or configured.get("num_modes", "NA")],
+            ["Energy range", f"{manifest.get('energy_range_kcal_per_mol') or configured.get('energy_range_kcal_per_mol', 'NA')} kcal/mol"],
+            ["Independent seeds", seed_count or "NA"], ["Receptor", Path(receptor).name],
+            ["Docking box", Path(docking_box).name],
+        ]
         story += [Paragraph(f"{section_number}. Configured docking protocol",styles["Heading1"]),
-          Paragraph("This section records the settings selected for this study. Control approval applies only when an approved target-matched protocol is identified below.",styles["BodyText"]),Spacer(1,6),
-          table([["Parameter","Configured value"],["Validation status",validation_status],["Engine",engine],["Engine version",engine_version],["Exhaustiveness",manifest.get("exhaustiveness") or configured.get("exhaustiveness","NA")],["Modes per job",manifest.get("num_modes") or configured.get("num_modes","NA")],["Energy range",f"{manifest.get('energy_range_kcal_per_mol') or configured.get('energy_range_kcal_per_mol','NA')} kcal/mol"],["Independent seeds",seed_count or "NA"],["Receptor",Path(receptor).name],["Docking box",Path(docking_box).name]], [2.55*inch,4.15*inch]),PageBreak()]
+          Paragraph("This section records the reusable protocol, its scientific evidence basis, and the locked settings selected for this study.",styles["BodyText"]),Spacer(1,6),
+          table(configured_rows, [2.55*inch,4.15*inch], compact=True),PageBreak()]
 
     result_number = section_number if workflow_is_exploratory else section_number + (2 if protocol and args.include_control_appendix else 1)
     result_heading = "Ligand docking results"
@@ -1258,11 +1300,19 @@ def main():
     for compound_index, compound in enumerate(report_compounds):
         cid=str(compound.get("compound_id", "")); inventory_row=inventory_by_id.get(cid, {}); name=display_compound_name(compound.get("compound_name") or inventory_row.get("compound_name") or cid, inventory_row.get("source"))
         display_names[cid] = name
+        summary_protocol_type = summary.get("protocol_type")
         if protocol:
             scope_text = (
                 "Docking used the target-matched protocol established and approved by the control reported above."
                 if args.include_control_appendix
                 else "Docking used the existing approved target-matched protocol shown above."
+            )
+        elif summary_protocol_type == "control-validated":
+            scope_text = "Docking used the control-validated target-matched protocol identified above."
+        elif summary_protocol_type in {"ligand-guided-exploratory", "site-guided-exploratory"}:
+            scope_text = (
+                "Docking used the explicitly selected exploratory protocol identified above. "
+                "No target-specific bound-ligand pose-recovery control was supplied, so pose-recovery performance for this target was not evaluated."
             )
         else:
             scope_text = "Docking used the configured protocol shown above. No target-specific bound-ligand control was supplied, so pose-recovery performance for this target was not evaluated."
@@ -1336,6 +1386,12 @@ def main():
                 panel_description = "Panels A and B show energy ranks 1 and 2, respectively."
             else:
                 panel_description = "Panels A, B, and C show energy ranks 1, 2, and 3, respectively."
+            if selected_representative_count == 1:
+                color_description = "Red matches the highlighted cluster"
+            elif selected_representative_count == 2:
+                color_description = "Red and blue match the highlighted clusters"
+            else:
+                color_description = "Red, blue, and gold match the highlighted clusters"
             cluster_reference = (
                 f"Figure {cluster_figure_number}"
                 if cluster_figure_number is not None
@@ -1347,7 +1403,7 @@ def main():
                 Paragraph(
                     f"<b>Figure {figure_number}. Three-dimensional interaction snapshots for {name}.</b> "
                     f"Shown are {snapshot_count} energy-ranked distinct cluster {representative_label}, ordered by Vina score. "
-                    f"{panel_description} Red, blue, and gold match the highlighted clusters in {cluster_reference}. These views support structural inspection; docking score rank does not establish pose correctness.",
+                    f"{panel_description} {color_description} in {cluster_reference}. These views support structural inspection; docking score rank does not establish pose correctness.",
                     styles["SmallDU"],
                 ), Spacer(1,6),
             ])]
@@ -1364,10 +1420,17 @@ def main():
         if interaction_diagrams:
             composite = args.study / "report" / f"{cid}_selected_interactions_ABC.png"
             if combine_horizontal_diagrams(interaction_diagrams, composite):
+                interaction_count = len(interaction_diagrams)
+                if interaction_count == 1:
+                    interaction_panel_description = "A is the red energy-ranked cluster representative shown above."
+                elif interaction_count == 2:
+                    interaction_panel_description = "A and B are the red and blue energy-ranked cluster representatives shown above."
+                else:
+                    interaction_panel_description = "A, B, and C are the red, blue, and gold energy-ranked cluster representatives shown above."
                 story += [KeepTogether([
                     Paragraph("Selected 2D pose interaction diagrams",styles["Heading2"]),
                     image(composite,6.8,2.45),
-                    Paragraph(f"<b>Figure {figure_number}. SDF-aware PLIP interaction diagrams for {name}.</b> A, B, and C are the red, blue, and gold energy-ranked cluster representatives shown above. Ligand chemistry comes from each retained SDF; interaction calls come from the retained PLIP report.xml.",styles["SmallDU"]),Spacer(1,6),
+                    Paragraph(f"<b>Figure {figure_number}. SDF-aware PLIP interaction diagrams for {name}.</b> {interaction_panel_description} Ligand chemistry comes from each retained SDF; interaction calls come from the retained PLIP report.xml.",styles["SmallDU"]),Spacer(1,6),
                 ])]
                 figure_number += 1
         elif panel:

@@ -22,7 +22,7 @@ esac
 
 version_output=$("$cli" --version)
 case "$version_output" in
-  "Docking Universal 0.6.0"*) ;;
+  "Docking Universal 0.6.3"*) ;;
   *) fail "version output" ;;
 esac
 
@@ -101,8 +101,8 @@ PATH="$mock_dir:$PATH" DOCKING_UNIVERSAL_PYTHON="$mock_dir/full-python" \
   "$cli" check-install --full | grep -q 'Full pipeline check: PASS' \
   || fail "full installation check"
 
-mock_osascript="$mock_dir/osascript"
-cat > "$mock_osascript" <<'EOF'
+mock_graphical_chooser="$mock_dir/graphical-chooser"
+cat > "$mock_graphical_chooser" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
   *"prepared receptor PDBQT"*) printf '%s\n' "$DOCK_TEST_RECEPTOR" ;;
@@ -113,22 +113,26 @@ case "$*" in
   *) exit 2 ;;
 esac
 EOF
-chmod +x "$mock_osascript"
+chmod +x "$mock_graphical_chooser"
 
-mkdir -p "$mock_dir/finder_prepared_results"
-finder_prepared_output=$(printf '3\n' | env DOCKING_UNIVERSAL_OSASCRIPT="$mock_osascript" \
+mkdir -p "$mock_dir/graphical_prepared_results"
+graphical_prepared_output=$(printf '3\n' | env DISPLAY=:99 \
+  DOCKING_UNIVERSAL_OSASCRIPT="$mock_graphical_chooser" \
+  DOCKING_UNIVERSAL_ZENITY="$mock_graphical_chooser" \
   DOCKING_UNIVERSAL_VINA="$mock_vina" DOCK_TEST_RECEPTOR="$mock_dir/receptor.pdbqt" \
   DOCK_TEST_CONFIG="$mock_dir/box.conf" DOCK_TEST_LIGAND_DIR="$mock_dir/ligands" \
-  DOCK_TEST_OUTPUT="$mock_dir/finder_prepared_results" "$cli" dock 2>&1) \
-  || fail "Finder prepared-ligand dock"
-[ -s "$mock_dir/finder_prepared_results/example_vina.pdbqt" ] || fail "Finder prepared-ligand output"
-case "$finder_prepared_output" in
-  "Choose the prepared receptor PDBQT in Finder now."*) ;;
-  *) fail "Finder receptor pre-launch feedback" ;;
+  DOCK_TEST_OUTPUT="$mock_dir/graphical_prepared_results" "$cli" dock 2>&1) \
+  || fail "graphical prepared-ligand dock"
+[ -s "$mock_dir/graphical_prepared_results/example_vina.pdbqt" ] || fail "graphical prepared-ligand output"
+case "$graphical_prepared_output" in
+  "Choose the prepared receptor PDBQT in Finder now."*|\
+  "Choose the prepared receptor PDBQT with Zenity now."*) ;;
+  *) fail "graphical receptor pre-launch feedback" ;;
 esac
-case "$finder_prepared_output" in
-  *"Choose the prepared docking-box configuration (.conf file) in Finder now."*) ;;
-  *) fail "Finder docking-box file-type feedback" ;;
+case "$graphical_prepared_output" in
+  *"Choose the prepared docking-box configuration (.conf file) in Finder now."*|\
+  *"Choose the prepared docking-box configuration (.conf file) with Zenity now."*) ;;
+  *) fail "graphical docking-box file-type feedback" ;;
 esac
 
 mock_ligand_cli="$mock_dir/mock-ligand-cli"
@@ -151,15 +155,17 @@ printf 'MODEL\n' > "$out/pdbqt_ligands/from_sdf.pdbqt"
 EOF
 chmod +x "$mock_ligand_cli"
 printf 'ligand\n$$$$\n' > "$mock_dir/ligand.sdf"
-mkdir -p "$mock_dir/finder_sdf_results"
-printf '1\n' | env DOCKING_UNIVERSAL_OSASCRIPT="$mock_osascript" \
+mkdir -p "$mock_dir/graphical_sdf_results"
+printf '1\n' | env DISPLAY=:99 \
+  DOCKING_UNIVERSAL_OSASCRIPT="$mock_graphical_chooser" \
+  DOCKING_UNIVERSAL_ZENITY="$mock_graphical_chooser" \
   DOCKING_UNIVERSAL_CLI="$mock_ligand_cli" DOCKING_UNIVERSAL_VINA="$mock_vina" \
   DOCK_TEST_RECEPTOR="$mock_dir/receptor.pdbqt" DOCK_TEST_CONFIG="$mock_dir/box.conf" \
-  DOCK_TEST_SDF="$mock_dir/ligand.sdf" DOCK_TEST_OUTPUT="$mock_dir/finder_sdf_results" \
-  DOCK_TEST_LIGAND_LOG="$mock_dir/finder_sdf_ligand_args.txt" \
-  "$cli" dock >/dev/null || fail "Finder SDF dock"
-[ -s "$mock_dir/finder_sdf_results/from_sdf_vina.pdbqt" ] || fail "Finder SDF output"
-grep -q -- '--geometry-mode optimize' "$mock_dir/finder_sdf_ligand_args.txt" || fail "Finder SDF optimization mode"
+  DOCK_TEST_SDF="$mock_dir/ligand.sdf" DOCK_TEST_OUTPUT="$mock_dir/graphical_sdf_results" \
+  DOCK_TEST_LIGAND_LOG="$mock_dir/graphical_sdf_ligand_args.txt" \
+  "$cli" dock >/dev/null || fail "graphical SDF dock"
+[ -s "$mock_dir/graphical_sdf_results/from_sdf_vina.pdbqt" ] || fail "graphical SDF output"
+grep -q -- '--geometry-mode optimize' "$mock_dir/graphical_sdf_ligand_args.txt" || fail "graphical SDF optimization mode"
 
 dock_prerequisite_output=""
 if dock_prerequisite_output=$("$cli" dock --engine vina 2>&1); then
@@ -198,7 +204,7 @@ grep -q '"unknown_docking_allowed": true' "$mock_dir/protocol.json" || fail "pro
 # A complete approved protocol must validate its locked inputs and drive the
 # high-level screen planner, not merely contain an approval boolean.
 approved_ligand="$project_dir/examples/tutorials/01_bound_ligand/inputs/rilpivirine_pubchem.sdf"
-"$cli" screen-stage --protocol "$mock_dir/protocol.json" --ligand "$approved_ligand" \
+"$cli" _screen-stage --protocol "$mock_dir/protocol.json" --ligand "$approved_ligand" \
   --out "$mock_dir/approved_check" --check-only --non-interactive >/dev/null \
   || fail "approved protocol check"
 "$cli" screen --protocol "$mock_dir/protocol.json" --ligands "$approved_ligand" \
@@ -207,7 +213,7 @@ approved_ligand="$project_dir/examples/tutorials/01_bound_ligand/inputs/rilpivir
 [ -s "$mock_dir/approved_plan/study_manifest.json" ] || fail "approved protocol study manifest"
 
 missing_protocol_output=""
-if missing_protocol_output=$("$cli" run --mode screen --protocol "$mock_dir/missing_protocol.json" \
+if missing_protocol_output=$("$cli" screen --protocol "$mock_dir/missing_protocol.json" \
   --ligands "$approved_ligand" --out "$mock_dir/missing_plan" --plan-only --non-interactive 2>&1); then
   fail "missing protocol was accepted"
 fi
@@ -220,7 +226,7 @@ esac
 # unapproved. This protects automation from accidentally bypassing calibration.
 printf 'test\n$$$$\n' > "$mock_dir/unknown.sdf"
 sed 's/"unknown_docking_allowed": true/"unknown_docking_allowed": false/' "$mock_dir/protocol.json" > "$mock_dir/unapproved.json"
-if "$cli" screen-stage --protocol "$mock_dir/unapproved.json" --ligand "$mock_dir/unknown.sdf" --out "$mock_dir/blocked" --non-interactive >/dev/null 2>&1; then
+if "$cli" screen --protocol "$mock_dir/unapproved.json" --ligands "$mock_dir/unknown.sdf" --out "$mock_dir/blocked" --non-interactive >/dev/null 2>&1; then
   fail "unapproved protocol was accepted"
 fi
 

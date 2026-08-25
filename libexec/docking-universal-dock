@@ -11,8 +11,9 @@ Usage:
   docking-universal dock
   docking-universal dock --receptor receptor.pdbqt --ligands DIR --config box.conf --out DIR [options]
 
-With no options on macOS, Finder selects the prepared receptor, docking box,
-ligand input, and output directory. An SDF ligand input is prepared automatically.
+With no options, macOS Finder or an Ubuntu graphical chooser selects the prepared
+receptor, docking box, ligand input, and output directory. Headless sessions ask
+for exact paths. An SDF ligand input is prepared automatically.
 
 Options:
   --engine vina            Docking engine (only Vina is supported in 0.5.x)
@@ -27,17 +28,28 @@ Options:
 EOF
 }
 
-choose_with_finder() {
+choose_interactively() {
   prompt="$1"
   kind="$2"
-  chooser="choose file"
-  [ "$kind" = "folder" ] && chooser="choose folder"
-  printf '%s in Finder now.\n' "$prompt" >&2
-  result=$("$OSASCRIPT_COMMAND" -e "POSIX path of ($chooser with prompt \"$prompt\")" 2>/dev/null) || {
-    echo "ERROR: Finder selection cancelled: $prompt" >&2
-    exit 2
-  }
-  [ -n "$result" ] || { echo "ERROR: Finder returned no selection: $prompt" >&2; exit 2; }
+  if "$PYTHON_COMMAND" "$CHOOSER_HELPER" --available >/dev/null 2>&1; then
+    backend=$("$PYTHON_COMMAND" "$CHOOSER_HELPER" --label)
+    if [ "$backend" = "Finder" ]; then
+      printf '%s in Finder now.\n' "$prompt" >&2
+    else
+      printf '%s with %s now.\n' "$prompt" "$backend" >&2
+    fi
+    folder_option=""
+    [ "$kind" = "folder" ] && folder_option="--folder"
+    result=$("$PYTHON_COMMAND" "$CHOOSER_HELPER" --prompt "$prompt" $folder_option) || {
+      echo "ERROR: graphical selection cancelled: $prompt" >&2
+      exit 2
+    }
+  else
+    printf '%s\n' "$prompt" >&2
+    printf 'Exact path: ' >&2
+    IFS= read -r result
+  fi
+  [ -n "$result" ] || { echo "ERROR: no selection was provided: $prompt" >&2; exit 2; }
   printf '%s\n' "$result"
 }
 
@@ -55,18 +67,12 @@ engine_command=""
 engine_env=""
 
 if [ "$#" -eq 0 ]; then
-  OSASCRIPT_COMMAND="${DOCKING_UNIVERSAL_OSASCRIPT:-osascript}"
-  [ "$(uname -s)" = "Darwin" ] || [ -n "${DOCKING_UNIVERSAL_OSASCRIPT:-}" ] || {
-    echo "ERROR: interactive Finder selection is available on macOS only; provide --receptor, --ligands, --config, and --out." >&2
-    exit 2
-  }
-  command -v "$OSASCRIPT_COMMAND" >/dev/null 2>&1 || [ -x "$OSASCRIPT_COMMAND" ] || {
-    echo "ERROR: Finder selection requires osascript; provide explicit dock options instead." >&2
-    exit 2
-  }
+  PYTHON_COMMAND="${DOCKING_UNIVERSAL_PYTHON:-python}"
+  CHOOSER_HELPER="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/docking-universal-choose-path.py"
+  [ -f "$CHOOSER_HELPER" ] || { echo "ERROR: graphical-selection helper is missing: $CHOOSER_HELPER" >&2; exit 2; }
 
-  receptor=$(choose_with_finder "Choose the prepared receptor PDBQT" file)
-  config=$(choose_with_finder "Choose the prepared docking-box configuration (.conf file)" file)
+  receptor=$(choose_interactively "Choose the prepared receptor PDBQT" file)
+  config=$(choose_interactively "Choose the prepared docking-box configuration (.conf file)" file)
   case "$receptor" in *.pdbqt) ;; *) echo "ERROR: prepared receptor must be a .pdbqt file: $receptor" >&2; exit 2 ;; esac
   case "$config" in *.conf) ;; *) echo "ERROR: docking-box configuration must be a .conf file: $config" >&2; exit 2 ;; esac
 
@@ -77,19 +83,19 @@ if [ "$#" -eq 0 ]; then
   read -r ligand_choice
   case "$ligand_choice" in
     1)
-      ligand_sdf=$(choose_with_finder "Choose the ligand SDF" file)
+      ligand_sdf=$(choose_interactively "Choose the ligand SDF" file)
       case "$ligand_sdf" in *.sdf) ;; *) echo "ERROR: raw ligand input must be a .sdf file: $ligand_sdf" >&2; exit 2 ;; esac
       ;;
     2)
-      ligand_file=$(choose_with_finder "Choose the prepared ligand PDBQT" file)
+      ligand_file=$(choose_interactively "Choose the prepared ligand PDBQT" file)
       case "$ligand_file" in *.pdbqt) ;; *) echo "ERROR: prepared ligand must be a .pdbqt file: $ligand_file" >&2; exit 2 ;; esac
       ;;
     3)
-      ligand_dir=$(choose_with_finder "Choose the prepared ligand PDBQT directory" folder)
+      ligand_dir=$(choose_interactively "Choose the prepared ligand PDBQT directory" folder)
       ;;
     *) echo "ERROR: choose ligand input 1, 2, or 3" >&2; exit 2 ;;
   esac
-  out_dir=$(choose_with_finder "Choose the docking output directory" folder)
+  out_dir=$(choose_interactively "Choose the docking output directory" folder)
 
   if [ "$ligand_choice" = "1" ]; then
     cli_command="${DOCKING_UNIVERSAL_CLI:-}"

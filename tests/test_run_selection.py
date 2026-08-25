@@ -5,6 +5,8 @@ import importlib.util
 import argparse
 import tempfile
 import unittest
+import sys
+import io
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,6 +15,47 @@ MODULE_PATH = Path(__file__).resolve().parents[1] / "libexec" / "docking-univers
 SPEC = importlib.util.spec_from_file_location("docking_universal_run", MODULE_PATH)
 RUNNER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RUNNER)
+
+
+class RunCommandSyntaxTests(unittest.TestCase):
+    def test_run_screen_positional_workflow(self):
+        with patch.object(sys, "argv", ["docking-universal-run.py", "screen"]):
+            args = RUNNER.parse_args()
+        self.assertEqual(args.workflow, "screen")
+        self.assertIsNone(args.mode)
+
+    def test_legacy_mode_spelling_remains_compatible(self):
+        with patch.object(sys, "argv", ["docking-universal-run.py", "--mode", "screen"]):
+            args = RUNNER.parse_args()
+        self.assertEqual(args.mode, "screen")
+        self.assertIsNone(args.workflow)
+
+    def test_conflicting_workflow_spellings_are_rejected(self):
+        with patch.object(
+            sys, "argv",
+            ["docking-universal-run.py", "screen", "--mode", "control"],
+        ), self.assertRaises(SystemExit):
+            RUNNER.parse_args()
+
+    def test_selected_protocol_summary_displays_scientific_identity(self):
+        record = {
+            "target": "2R8N",
+            "protocol_type": "site-guided-exploratory",
+            "evidence_basis": "fpocket cavity analysis and user-reviewed docking box",
+            "screening_authority": "user-confirmed-exploratory-use",
+            "created_utc": "2026-08-24T12:00:00+00:00",
+            "locked_inputs": {"box": "2R8N_pocket1.conf"},
+        }
+        output = io.StringIO()
+        with patch("sys.stdout", output):
+            RUNNER.print_selected_protocol(record)
+        text = output.getvalue()
+        for expected in (
+            "Target: 2R8N", "Protocol type: Site-guided exploratory",
+            "Evidence basis: fpocket cavity analysis", "Screening authority:",
+            "Created: 2026-08-24", "Docking box: 2R8N_pocket1.conf",
+        ):
+            self.assertIn(expected, text)
 
 
 class LigandSourceSelectionTests(unittest.TestCase):
@@ -57,8 +100,20 @@ class ApprovedProtocolSelectionTests(unittest.TestCase):
                  patch("builtins.input", return_value=""):
                 self.assertEqual(RUNNER.choose_approved_protocol(), protocol.resolve())
                 finder.assert_called_once_with(
-                    "Choose the approved .duprotocol bundle or protocol.json"
+                    "Choose the reusable .duprotocol bundle or protocol.json"
                 )
+
+    def test_report_filename_uses_reused_protocol_receptor(self):
+        with tempfile.TemporaryDirectory() as directory:
+            name = RUNNER.report_pdf_name(
+                Path(directory),
+                {
+                    "workflow": "screen", "created_utc": "2026-08-24T00:00:00Z",
+                    "configured_locked_inputs": {"receptor": "assets/1HVR.pdbqt"},
+                },
+                [{"compound_name": "Rilpivirine"}],
+            )
+        self.assertEqual(name, "1HVR_Rilpivirine_2026-08-24_docking_report.pdf")
 
     def test_portable_bundle_round_trip(self):
         with tempfile.TemporaryDirectory() as directory:
