@@ -2,7 +2,7 @@
 
 **v0.6.3 · Research preview**
 
-Docking Universal guides receptor preparation, protocol creation, compound docking, analysis, visualization, and scientific PDF reporting using AutoDock Vina and established open-source tools. It records consequential workflow decisions and stops for user review when structural or chemical ambiguity cannot be handled safely.
+Docking Universal provides fully guided, interactive docking workflows on Ubuntu and macOS, from selecting inputs through generating scientific PDF reports. It uses AutoDock Vina and established open-source tools for receptor and ligand preparation, site selection, docking, analysis, and visualization.
 
 **Vina performs the docking; Docking Universal manages and documents the surrounding workflow.**
 
@@ -10,15 +10,34 @@ Docking Universal guides receptor preparation, protocol creation, compound docki
 
 Docking Universal began with a practical question: **how should I determine where to dock?** While building it, I learned how many consequential assumptions can sit behind an apparently straightforward result. I wanted a practical workflow that would make those choices reviewable rather than hide them. [Read more about the design philosophy](docs/design-philosophy.md).
 
+## Install
+
+Clone the repository, or download and extract it, then run:
+
+```bash
+git clone https://github.com/thomaslane79-creator/docking-universal.git
+cd docking-universal
+bash install.sh
+```
+
+The installer creates the required isolated Conda environments and makes `docking-universal` available from any directory. Normal use does not require manual Conda activation or environment management.
+
+```bash
+docking-universal check-install
+docking-universal --help
+```
+
+See the [installation guide](docs/installation.md) for updating, troubleshooting, and platform details.
+
 ## The three main workflows
 
 These are the three commands most users need. Each launches an interactive interface on Ubuntu and macOS (Zenity/GTK on Ubuntu, with Tk as a fallback; Finder on macOS), explains requested choices, asks where to save the study, and generates a scientific PDF report. Exact paths are also accepted for headless or scripted use.
 
-| What you want to do | Command | What it does |
+| What you want to do | Command | What you get |
 | --- | --- | --- |
-| Start a complete new study | `docking-universal run` | Guides a bound-ligand control or exploratory site-selection study and can dock one or multiple new compounds. |
-| Create a reusable Docking Universal protocol | `docking-universal create-protocol` | Prepares the receptor and docking region and generates a protocol report plus a reusable `.duprotocol` bundle. |
-| Dock new compounds with a saved protocol | `docking-universal screen` | Requires a Docking Universal `.duprotocol`, reuses its receptor, box, and search settings, and generates the complete screening report. |
+| Start a complete new study | `docking-universal run` | A complete control-validated or exploratory study, optionally including one or multiple new compounds, with a scientific PDF report and retained supporting files. |
+| Create a reusable Docking Universal protocol | `docking-universal create-protocol` | A prepared receptor and docking region, a scientific protocol report, and a reusable `.duprotocol` bundle. |
+| Dock new compounds with a saved protocol | `docking-universal screen` | A complete screening report plus individual docking, clustering, 3D, and 2D interaction results for every compound. |
 
 ### Docking Universal protocol types
 
@@ -53,25 +72,6 @@ Additional component commands can also be used independently in compatible workf
 | Compare a docked pose with a reference | `docking-universal compare-redock` | Symmetry-aware RMSD results, complexes, and an overlay scene. |
 | Analyze interactions | `docking-universal interactions` | PLIP interaction records and a PyMOL scene. |
 | Render existing molecular files | `docking-universal render3d` / `docking-universal depict2d` | 3D PNGs or generic 2D PNG/SVG depictions. |
-
-## Install
-
-Clone the repository, or download and extract it, then run:
-
-```bash
-git clone https://github.com/thomaslane79-creator/docking-universal.git
-cd docking-universal
-bash install.sh
-```
-
-The installer creates the required isolated Conda environments and makes `docking-universal` available from any directory. Normal use does not require manual Conda activation or environment management.
-
-```bash
-docking-universal check-install
-docking-universal --help
-```
-
-See the [installation guide](docs/installation.md) for updating, troubleshooting, and platform details.
 
 ## Current evidence and limitations
 
