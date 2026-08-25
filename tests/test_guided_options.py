@@ -205,6 +205,7 @@ class InputSourceTests(unittest.TestCase):
         with patch("builtins.input", side_effect=["1", "1hvr"]):
             self.assertEqual(RUNNER.choose_complex_source(), Path("1HVR"))
         with patch.object(RUNNER.platform, "system", return_value="Darwin"), \
+             patch.object(RUNNER, "graphical_chooser_available", return_value=True), \
              patch.object(RUNNER, "choose_file_with_finder", return_value=chosen), \
              patch("builtins.input", return_value="2"):
             self.assertEqual(RUNNER.choose_complex_source(), chosen)
