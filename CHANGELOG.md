@@ -4,6 +4,7 @@
 
 - Corrected receptor filtering so coordination waters and unsupported single-atom ions are not retained merely because they appear in a deposited `LINK` record; multi-atom linked components remain eligible for the narrow compatibility fallback.
 - Made final component removal an explicitly audited, user-approved route. Reports now state that the receptor model changed, give the number of removed residues/components, and retain the exact removal inventory and raw preparation log in the study artifacts and portable protocol bundle.
+- Classified removed standard amino-acid residues separately from other components and propagate a high-severity receptor-model warning through protocol selection and every subsequent JSON, Markdown, HTML, and PDF screening report. The approval prompt now displays the current failure diagnosis and warns that complete protein/peptide residues may be removed.
 - Rechecked six receptors affected by the filtering distinction (`1GYN`, `5K8R`, `3ET8`, `1P5S`, `4ER8`, and `2NSY`) and added a real 5KRH report demonstrating the approved-removal disclosure. These are focused regression checks, not a new biological-validation claim.
 
 ## 0.6.3 — 2026-08-24

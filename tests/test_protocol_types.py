@@ -196,7 +196,17 @@ class ProtocolTypeTests(unittest.TestCase):
                 "user_approved_component_removal_manifest": str(manifest),
             }})
             self.assertIn("explicitly approved", text)
-            self.assertIn("1 residue/component was removed", text)
+            self.assertIn("1 other residue/component was removed", text)
+
+    def test_approved_removal_summary_escalates_standard_residue_removal(self):
+        text = CREATE.approved_removal_summary({"receptor_preparation": {
+            "user_approved_component_removal": True,
+            "user_approved_removed_components": [
+                {"chain": "A", "residue_number": "305", "residue_name": "SER", "atom_count": "5"},
+            ],
+        }})
+        self.assertIn("1 standard amino-acid residue was removed", text)
+        self.assertIn("High-severity structural warning", text)
 
     def test_control_validated_wrapper_uses_repeatability_by_default(self):
         argv = [
