@@ -13,8 +13,12 @@
 - Added one graphical file-and-folder selection layer across the guided workflows and low-level `dock` command: Zenity/GTK on Ubuntu, Tk as an Ubuntu fallback, Finder on macOS, and exact-path prompts for headless or scripted use.
 - Reorganized command help and the README around the three report-producing workflows, the simple repository installer, and standalone receptor/ligand PDBQT preparation for other compatible software. The documentation now clearly distinguishes generally usable prepared files from Docking Universal-only `.duprotocol` bundles.
 - Expanded protocol records with creation timestamps and detected Docking Universal, Python, RDKit, MolScrub, Meeko, PDBFixer, and docking-engine provenance where available.
-- Added protocol-type, graphical-chooser, installed-command, and cross-platform routing tests. The complete local suite contains 81 tests, and the branch checks pass on current Ubuntu and macOS GitHub runners.
+- Added protocol-type, graphical-chooser, installed-command, and cross-platform routing tests. The complete local suite contains 83 tests, and the branch checks pass on current Ubuntu and macOS GitHub runners.
 - Added installed-copy checks for the user-facing installer, host-side Conda launcher, `create-protocol` command, and installer shell syntax. Normal use continues to require no manual Conda activation.
+- Hardened unattended validation: background runs now avoid the PID-file startup race, and the host launcher detaches the complete Conda invocation so validation can continue after the initiating shell returns.
+- Restored the documented `--ligand-id` control option as a compatible alias, updated release validation for the current orchestrated control directory, and added regression coverage for both paths.
+- Corrected control-only PDFs so they do not invent an empty ligand-docking section from the study-folder name; the report now proceeds directly from control evidence to reproducibility and references.
+- Made public environment documentation platform-neutral while retaining Ubuntu-first and macOS CI coverage plus explicit platform-specific lock snapshots.
 
 ## 0.6.0 — 2026-08-21
 

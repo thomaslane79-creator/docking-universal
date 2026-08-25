@@ -840,6 +840,14 @@ def combine_horizontal_diagrams(diagrams, output):
     canvas.save(output, dpi=(220, 220))
     return True
 
+
+def has_retained_docking_results(study):
+    """Return true only when a study retains a non-empty pose-cluster result."""
+    return any(
+        path.is_file() and path.stat().st_size > 0
+        for path in Path(study).glob("compounds/*/pose_analysis/cluster_summary.csv")
+    )
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("study", type=Path)
@@ -992,10 +1000,7 @@ def main():
     # Inventories and study manifests describe intended inputs, not completed
     # docking.  Require retained pose-cluster results before adding docking
     # sections to a preparation-only report.
-    has_docking = any(
-        path.is_file() and path.stat().st_size > 0
-        for path in args.study.glob("compounds/*/pose_analysis/cluster_summary.csv")
-    )
+    has_docking = has_retained_docking_results(args.study)
     report_title = (
         "Docking Universal - Ligand-Free Cavity and Docking Report" if cavity and has_docking
         else "Docking Universal - Ligand-Free Cavity Report" if cavity
@@ -1278,6 +1283,73 @@ def main():
         story += [Paragraph(f"{section_number}. Configured docking protocol",styles["Heading1"]),
           Paragraph("This section records the reusable protocol, its scientific evidence basis, and the locked settings selected for this study.",styles["BodyText"]),Spacer(1,6),
           table(configured_rows, [2.55*inch,4.15*inch], compact=True),PageBreak()]
+
+    # A control-only or protocol-only study has no prospective ligand result.
+    # Do not synthesize one from the study-directory name: that creates an
+    # empty, scientifically misleading "Ligand docking results" page.
+    if not has_docking:
+        provenance = retain_used_report_methods(
+            reproducibility_record(protocol, args.study, args.control), cavity, has_docking
+        )
+        require_complete_used_versions(provenance)
+        (args.study / "report" / "software_versions_and_references.json").write_text(
+            json.dumps(provenance, indent=2) + "\n"
+        )
+        version_check = provenance.get("control_to_new_run_version_check")
+        compared_software = {entry["software"] for entry in version_check["entries"]} if version_check else set()
+        displayed_software = [
+            item for item in provenance["software"]
+            if item["software"] not in compared_software
+            and not (version_check and item["software"] == "fpocket")
+        ]
+        provenance_rows = [["Result element", "Software", "Version used"]]
+        for item in displayed_software:
+            provenance_rows.append([
+                Paragraph(item["role"], styles["SmallDU"]),
+                Paragraph(item["software"], styles["SmallDU"]),
+                Paragraph(str(item["version"]), styles["SmallDU"]),
+            ])
+        next_section = section_number + (2 if protocol and args.include_control_appendix else 1)
+        story += [
+            Paragraph(f"{next_section}. Reproducibility, software, and references", styles["Heading1"]),
+            Paragraph(reproducibility_summary(provenance, cavity, has_docking), styles["BodyText"]),
+            Spacer(1, 8),
+        ]
+        story += pdbfixer_report_note(provenance["receptor_preparation"], out, styles)
+        story += adfr_fallback_report_note(provenance["receptor_preparation"], out, styles)
+        story += user_approved_removal_report_note(provenance["receptor_preparation"], out, styles)
+        story += ccd_modification_report_note(provenance["receptor_preparation"], out, styles)
+        if version_check:
+            verdict = version_check["overall"]
+            verdict_text = (
+                "Checked: no software version differences detected."
+                if verdict == "SAME" else
+                "Checked: software version differences detected."
+                if verdict == "NOT THE SAME" else
+                "Checked: software version comparison could not be fully verified."
+            )
+            story += [
+                Paragraph("Control-to-new-run software check", styles["Heading2"]),
+                Paragraph(f"<b>{verdict_text}</b>", styles["BodyText"]),
+            ]
+            comparison_rows = [["Software", "Control", "New run", "Result"]]
+            comparison_rows += [[entry["software"], entry["control_version"], entry["new_run_version"], entry["status"]] for entry in version_check["entries"]]
+            story += [Spacer(1, 6), table(comparison_rows, [1.65*inch, 2.15*inch, 2.15*inch, 1.25*inch], compact=True), Spacer(1, 10)]
+        story += [
+            Paragraph("Additional software used for analysis and reporting", styles["Heading2"]),
+            table(provenance_rows, [2.5*inch, 1.65*inch, 3.05*inch], compact=True),
+            Spacer(1, 6), Paragraph("Scientific and software references", styles["Heading2"]),
+        ]
+        for index, reference in enumerate(provenance["references"], start=1):
+            story += [Paragraph(
+                f"{index}. {reference['citation']} <link href=\"{reference['url']}\"><font color=\"#1f4e79\">{reference['url']}</font></link>",
+                styles["ReferenceDU"],
+            )]
+        SimpleDocTemplate(str(out), pagesize=letter, leftMargin=.65*inch, rightMargin=.65*inch,
+                          topMargin=.6*inch, bottomMargin=.6*inch,
+                          title="Docking Universal report").build(story)
+        print(f"PDF report: {out}")
+        return
 
     result_number = section_number if workflow_is_exploratory else section_number + (2 if protocol and args.include_control_appendix else 1)
     result_heading = "Ligand docking results"

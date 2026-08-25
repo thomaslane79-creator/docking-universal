@@ -70,6 +70,27 @@ env PATH="$mock_bin:$PATH" BOOTSTRAP_TEST_STATE="$state_file" \
 grep -q 'run --no-capture-output -n docking-universal docking-universal prepare-ligand --help' "$log_file" || fail "all-command environment routing"
 
 : > "$log_file"
+background_out="$work_dir/background-validation"
+background_output=$(env PATH="$mock_bin:$PATH" BOOTSTRAP_TEST_STATE="$state_file" \
+  BOOTSTRAP_TEST_LOG="$log_file" DOCKING_UNIVERSAL_CONDA=conda \
+  "$mock_bin/docking-universal" validate quick --out "$background_out" --background) \
+  || fail "background validation launcher"
+attempt=0
+while ! grep -q "docking-universal validate quick --out $background_out" "$log_file" && [ "$attempt" -lt 20 ]; do
+  sleep 0.05
+  attempt=$((attempt + 1))
+done
+grep -q "run --no-capture-output -n docking-universal docking-universal validate quick --out $background_out" "$log_file" \
+  || fail "background validation environment routing"
+case "$background_output" in
+  *"Validation started in the background."*"Level: quick"*"Output: $background_out"*) ;;
+  *) fail "background validation guidance" ;;
+esac
+[ -s "$background_out/pid" ] || fail "background validation PID"
+[ -f "$background_out/status.json" ] || fail "background validation status"
+[ -f "$background_out/run.log" ] || fail "background validation log"
+
+: > "$log_file"
 env PATH="$mock_bin:$PATH" BOOTSTRAP_TEST_STATE="$state_file" \
   BOOTSTRAP_TEST_LOG="$log_file" DOCKING_UNIVERSAL_CONDA=conda \
   "$project_dir/install.sh" >/dev/null || fail "repeat bootstrap installation"

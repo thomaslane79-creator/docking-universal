@@ -12,6 +12,17 @@ SPEC.loader.exec_module(REPORT)
 
 
 class CavityReportTests(unittest.TestCase):
+    def test_control_only_study_is_not_misclassified_as_ligand_docking(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            study = Path(temporary)
+            self.assertFalse(REPORT.has_retained_docking_results(study))
+            empty = study / "compounds" / "control_name" / "pose_analysis" / "cluster_summary.csv"
+            empty.parent.mkdir(parents=True)
+            empty.touch()
+            self.assertFalse(REPORT.has_retained_docking_results(study))
+            empty.write_text("energy_rank,cluster_id\n1,1\n")
+            self.assertTrue(REPORT.has_retained_docking_results(study))
+
     def test_control_appendix_detail_break_is_conditional(self):
         flowable = REPORT.docking_detail_section_break()
         self.assertEqual(flowable.__class__.__name__, "CondPageBreak")

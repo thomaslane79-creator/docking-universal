@@ -7,7 +7,7 @@ state for reproducibility, and report problems without exposing research data.
 
 ## Recommended Conda installation
 
-Docking Universal uses external scientific programs as composable stages. The repository's `environment.yml` contains the smallest direct dependency set verified together on macOS arm64. The automated 0.5 test suite is also exercised on current Ubuntu and macOS GitHub runners using this declared environment. macOS arm64 remains the reference platform for retained scientific validation; run the full integration or release validation on the intended workstation before production use.
+Docking Universal uses external scientific programs as composable stages. The repository's `environment.yml` contains the direct dependency set exercised on current Ubuntu and macOS GitHub runners. The 0.6.3 validation interface uses this declared environment; run integration or release validation on the intended workstation before production use because compiled scientific packages can differ across platforms.
 
 ### Beginner route: no Git required
 
@@ -103,11 +103,9 @@ conda env remove -n docking-universal
 conda env remove -n docking-universal-vina
 ```
 
-## Apple silicon and PyMOL
+## PyMOL and compiled dependencies
 
-Docking Universal was created partly to make this multi-program workflow reproducible on Apple-silicon M-series systems, where compiled chemistry, docking, and graphics packages do not always share compatible release schedules. The current reference machine is an M2 Mac using native `osx-arm64` Conda builds.
-
-The tested M1/M2/M3 route is the conda-forge package `pymol-open-source`, not the official proprietary PyMOL bundle. A newer 3.1.0 build was present during development, but the working scientific environment settled on this compatible matrix:
+The supported route is the conda-forge package `pymol-open-source`, not the official proprietary PyMOL bundle. The declared environment uses this compatible matrix:
 
 | Component | Version |
 | --- | ---: |
@@ -116,7 +114,7 @@ The tested M1/M2/M3 route is the conda-forge package `pymol-open-source`, not th
 | PyCairo | 1.27.0 |
 | RDKit | 2023.09.6 |
 
-Conda installs Qt, Cairo, OpenGL support libraries, and other low-level PyMOL dependencies automatically. They should not be installed one by one. This matrix was solved in a new native `osx-arm64` environment and produced a headless 640 × 480 PNG on 2026-08-08.
+Conda installs Qt, Cairo, OpenGL support libraries, and other low-level PyMOL dependencies automatically. They should not be installed one by one. Headless PyMOL rendering is included in the real-tool validation checks.
 
 ## What each package does
 
@@ -137,7 +135,7 @@ Only the packages needed by the selected stage must be available. `environment.y
 
 ## Why Vina has a small separate environment
 
-On current macOS arm64 conda-forge builds, Vina 1.2.7 may require a different Python/libboost generation than parts of the visualization and preparation stack. Keeping Vina isolated is a standard scientific-software solution to that compiled-library conflict. It is still accessed through the same Docking Universal command, and all outputs remain in the same study directory.
+On some conda-forge platforms, Vina 1.2.7 requires a different Python/libboost generation than parts of the visualization and preparation stack. Keeping Vina isolated avoids that compiled-library conflict. It is still accessed through the same Docking Universal command, and all outputs remain in the same study directory.
 
 Run Vina explicitly:
 
@@ -186,7 +184,7 @@ Meeko now passes an end-to-end raw 1HVR/XK2 test, including strict handling of R
 
 ## Verification performed
 
-The following checks passed from the new `docking-universal-test` environment on macOS arm64:
+The following checks passed in the declared scientific environment:
 
 - all required executables were installed and discoverable;
 - PyMOL imported and rendered an existing PDB to a valid PNG in headless mode;
