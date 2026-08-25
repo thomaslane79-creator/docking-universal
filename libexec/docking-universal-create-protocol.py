@@ -29,6 +29,7 @@ from docking_universal_bundle import (  # noqa: E402
     create_bundle,
     protocol_type_label,
 )
+from docking_universal_pocket_review import choose_prepared_box, review_pocket_scene  # noqa: E402
 
 
 def safe_id(value, fallback="protein"):
@@ -259,16 +260,7 @@ def detected_ligands(preparation):
 def choose_box(boxes, interactive):
     if not boxes:
         raise SystemExit("Preparation completed without a docking-box configuration")
-    if len(boxes) == 1 or not interactive:
-        return boxes[0]
-    print("Prepared docking boxes:")
-    for index, path in enumerate(boxes, 1):
-        print(f"  {index}) {path.name}")
-    raw = input("Select docking box [1]: ").strip() or "1"
-    try:
-        return boxes[int(raw) - 1]
-    except (ValueError, IndexError):
-        raise SystemExit(f"Choose a docking box from 1 to {len(boxes)}") from None
+    return choose_prepared_box(boxes, interactive)
 
 
 def choose_ligand(rows, requested, interactive):
@@ -490,6 +482,7 @@ def parse_args():
     parser.add_argument("--accept-exploratory", action="store_true", help="authorize creation of a reusable exploratory protocol")
     parser.add_argument("--non-interactive", action="store_true")
     parser.add_argument("--no-visuals", action="store_true")
+    parser.add_argument("--pymol", default="pymol", help="PyMOL executable used for interactive pocket review")
     parser.add_argument("--box-size", type=float, default=26.0)
     parser.add_argument("--exhaustiveness", type=int, default=16)
     parser.add_argument("--seeds", type=int, default=5)
@@ -582,6 +575,13 @@ def main():
         score_threshold_used = 0.0
     if not receptor_pdbqt or not receptor_pdb:
         raise SystemExit("Prepared receptor outputs are incomplete")
+    pocket_review_scene = None
+    if kind == SITE_GUIDED_EXPLORATORY:
+        pocket_review_scene = review_pocket_scene(
+            preparation,
+            args.pymol,
+            interactive=not args.non_interactive and not args.no_visuals,
+        )
     selected_box = choose_box(boxes, not args.non_interactive)
     ligand = choose_ligand(detected_ligands(preparation), args.ligand_resname, not args.non_interactive) if kind == LIGAND_GUIDED_EXPLORATORY else None
     values = box_values(selected_box)
@@ -632,6 +632,7 @@ def main():
         },
         "receptor_preparation_summary": preparation_summary(prep_root),
         "cavity_score_threshold_used": score_threshold_used,
+        "pocket_review_scene": pocket_review_scene,
         "bundle_file_name": bundle_name,
         "scientific_scope": {"purpose": "reusable exploratory site definition", "does_not_establish": ["pose-recovery validation", "binding affinity accuracy", "biological activity"]},
     }

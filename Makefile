@@ -28,6 +28,7 @@ install:
 	install -m 0755 bin/docking-universal "$(DESTDIR)$(BINDIR)/docking-universal"
 	install -m 0755 libexec/docking-universal-* "$(DESTDIR)$(LIBEXECDIR)/"
 	install -m 0644 libexec/docking_universal_bundle.py "$(DESTDIR)$(LIBEXECDIR)/"
+	install -m 0644 libexec/docking_universal_pocket_review.py "$(DESTDIR)$(LIBEXECDIR)/"
 	install -m 0644 VERSION "$(DESTDIR)$(LIBEXECDIR)/VERSION"
 	install -m 0644 examples/test_inputs/two_compounds.sdf "$(DESTDIR)$(LIBEXECDIR)/validation-assets/test_inputs/"
 	install -m 0644 examples/tutorials/01_bound_ligand/inputs/1HVR.pdb examples/tutorials/01_bound_ligand/inputs/rilpivirine_pubchem.sdf "$(DESTDIR)$(LIBEXECDIR)/validation-assets/tutorials/01_bound_ligand/inputs/"

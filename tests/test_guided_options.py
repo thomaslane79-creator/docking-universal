@@ -269,9 +269,15 @@ class ProtocolResumeChoiceTests(unittest.TestCase):
 class PocketChoiceTests(unittest.TestCase):
     def fixture(self, root):
         cavity = root / "target_receptor_prep" / "cavity"; cavity.mkdir(parents=True)
+        receptor = root / "target_receptor_prep" / "receptor"; receptor.mkdir()
+        (receptor / "target.pdb").write_text("ATOM      1  CA  GLY A   1       0.000   0.000   0.000\n")
+        frozen = cavity / "frozen"; frozen.mkdir()
         boxes = [cavity / f"target_pocket{i}.conf" for i in (1, 2, 3)]
-        for box in boxes:
-            box.write_text("size_x = 26\n"); box.with_suffix(".pml").write_text("# scene\n")
+        for index, box in enumerate(boxes, 1):
+            box.write_text("size_x = 26\n")
+            box.with_name(box.stem + "_center.pdb").write_text("HETATM    1 CTR  CTR A   1       0.000   0.000   0.000\n")
+            box.with_name(box.stem + "_box.pdb").write_text("ATOM      1  X   BOX A   1       1.000   1.000   1.000\n")
+            (frozen / f"pocket{index}_atm.pdb").write_text("ATOM      1  C   STP A   1       0.000   0.000   0.000\n")
         (cavity / "pocket_selection_diagnostics.tsv").write_text(
             "rank_order\tpocket_file\tscore\tdecision\n"
             "1\tpocket1_atm.pdb\t0.10\tselected\n"
@@ -287,18 +293,23 @@ class PocketChoiceTests(unittest.TestCase):
                 with self.subTest(index=index), patch("builtins.input", return_value=str(index)):
                     self.assertEqual(RUNNER.choose_prepared_box(boxes), expected)
 
-    def test_review_none_number_and_all_competitive(self):
+    def test_review_none_or_one_labeled_combined_scene(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); boxes = self.fixture(root)
             with patch("builtins.input", return_value="n"), patch.object(RUNNER.subprocess, "Popen") as popen:
                 self.assertIsNone(RUNNER.review_pocket_scene(root, "/usr/bin/true", interactive=True))
                 popen.assert_not_called()
-            with patch("builtins.input", return_value="2"), patch.object(RUNNER.subprocess, "Popen") as popen:
+            with patch("builtins.input", return_value=""), patch.object(RUNNER.subprocess, "Popen") as popen:
                 opened = RUNNER.review_pocket_scene(root, "/usr/bin/true", interactive=True)
-                self.assertEqual(opened, [str(boxes[1].with_suffix(".pml"))]); self.assertEqual(popen.call_count, 1)
-            with patch("builtins.input", return_value="a"), patch.object(RUNNER.subprocess, "Popen") as popen:
-                opened = RUNNER.review_pocket_scene(root, "/usr/bin/true", interactive=True)
-                self.assertEqual(len(opened), 2); self.assertEqual(popen.call_count, 2)
+                self.assertEqual(len(opened), 1); self.assertEqual(popen.call_count, 1)
+                scene = Path(opened[0]).read_text()
+                self.assertIn('"Pocket 1"', scene)
+                self.assertIn('"Pocket 2"', scene)
+                self.assertIn('"Pocket 3"', scene)
+                self.assertIn("group Pocket_1__fpocket_0_1000__priority_1, pocket_1_*", scene)
+                self.assertIn("color du_blue, pocket_1_cavity", scene)
+                self.assertIn("color du_gold, pocket_2_cavity", scene)
+                self.assertIn("disable pocket_1_box", scene)
 
 
 if __name__ == "__main__":
