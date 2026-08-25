@@ -1,6 +1,6 @@
 # Docking Universal
 
-**v0.6.3 · Research preview**
+**v0.6.4 · Research preview**
 
 Docking Universal provides fully guided, interactive docking workflows on Ubuntu and macOS, from selecting inputs through generating scientific PDF reports. It uses AutoDock Vina and established open-source tools for receptor and ligand preparation, site selection, docking, analysis, and visualization.
 

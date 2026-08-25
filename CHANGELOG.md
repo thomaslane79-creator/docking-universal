@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.6.4 — 2026-08-25
+
+**Patch release focus:** receptor-model changes are now explicit, durable, and propagated, and ligand-free pocket review is visually unambiguous before selection.
+
 - Corrected receptor filtering so coordination waters and unsupported single-atom ions are not retained merely because they appear in a deposited `LINK` record; multi-atom linked components remain eligible for the narrow compatibility fallback.
 - Made final component removal an explicitly audited, user-approved route. Reports now state that the receptor model changed, give the number of removed residues/components, and retain the exact removal inventory and raw preparation log in the study artifacts and portable protocol bundle.
 - Classified removed standard amino-acid residues separately from other components and propagate a high-severity receptor-model warning through protocol selection and every subsequent JSON, Markdown, HTML, and PDF screening report. The approval prompt now displays the current failure diagnosis and warns that complete protein/peptide residues may be removed.

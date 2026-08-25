@@ -7,7 +7,7 @@ state for reproducibility, and report problems without exposing research data.
 
 ## Recommended Conda installation
 
-Docking Universal uses external scientific programs as composable stages. The repository's `environment.yml` contains the direct dependency set exercised on current Ubuntu and macOS GitHub runners. The 0.6.3 validation interface uses this declared environment; run integration or release validation on the intended workstation before production use because compiled scientific packages can differ across platforms.
+Docking Universal uses external scientific programs as composable stages. The repository's `environment.yml` contains the direct dependency set exercised on current Ubuntu and macOS GitHub runners. The 0.6.4 validation interface uses this declared environment; run integration or release validation on the intended workstation before production use because compiled scientific packages can differ across platforms.
 
 ### Beginner route: no Git required
 
