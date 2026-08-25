@@ -1840,6 +1840,11 @@ fi
 echo "show spheres, ${CANONICAL}_center${IDX}"
 echo "color yellow, ${CANONICAL}_center${IDX}"
 echo "set sphere_scale, 0.7, ${CANONICAL}_center${IDX}"
+echo "label ${CANONICAL}_center${IDX}, \"Pocket ${IDX} | fpocket ${SCORE}\""
+echo "set label_size, 18, ${CANONICAL}_center${IDX}"
+echo "set label_color, white, ${CANONICAL}_center${IDX}"
+echo "set label_outline_color, black, ${CANONICAL}_center${IDX}"
+echo "set label_position, [0.0, 0.0, 2.5], ${CANONICAL}_center${IDX}"
 
 # --- box ---
 echo "load $ABS_BOX, ${CANONICAL}_box${IDX}"

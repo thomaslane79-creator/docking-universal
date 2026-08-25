@@ -43,6 +43,12 @@ from docking_universal_bundle import (
     protocol_type,
     protocol_type_label,
 )
+from docking_universal_pocket_review import (
+    choose_prepared_box,
+    describe_prepared_boxes,
+    prepared_box_records,
+    review_pocket_scene,
+)
 
 
 STATUSES = {
@@ -1009,106 +1015,6 @@ def discover_preparation(root, interactive=True, defer_box_selection=False):
     else:
         box = boxes[0]
     return receptor_pdb, receptor_pdbqt, box
-
-
-def prepared_box_records(boxes):
-    """Attach retained fpocket provenance and a transparent near-tie flag to boxes."""
-    if not boxes:
-        return []
-    cavity = boxes[0].parent
-    diagnostics = cavity / "pocket_selection_diagnostics.tsv"
-    rows = []
-    if diagnostics.is_file():
-        with diagnostics.open(newline="") as handle:
-            rows = [row for row in csv.DictReader(handle, delimiter="\t") if row.get("decision") == "selected"]
-    records = []
-    for index, box in enumerate(boxes):
-        row = rows[index] if index < len(rows) else {}
-        try:
-            score = float(row.get("score", "nan"))
-        except ValueError:
-            score = float("nan")
-        records.append({"box": box, "scene": box.with_suffix(".pml"), "row": row, "score": score})
-    finite = [record["score"] for record in records if record["score"] == record["score"]]
-    if finite:
-        best = max(finite)
-        tolerance = max(0.05, abs(best) * 0.20)
-        for record in records:
-            record["competitive"] = record["score"] == record["score"] and record["score"] >= best - tolerance
-            record["competitive_tolerance"] = tolerance
-    else:
-        for record in records:
-            record["competitive"] = False
-    return records
-
-
-def describe_prepared_boxes(boxes):
-    records = prepared_box_records(boxes)
-    for index, record in enumerate(records, start=1):
-        row = record["row"]
-        score = f"{record['score']:.4f}" if record["score"] == record["score"] else "not recorded"
-        marker = " - competitive score" if record.get("competitive") else ""
-        source = row.get("pocket_file", "fpocket source not recorded")
-        print(f"  {index}) {record['box'].name} | {source} | fpocket score {score}{marker}")
-    return records
-
-
-def choose_prepared_box(boxes, interactive=True):
-    if len(boxes) == 1:
-        return boxes[0]
-    print("Prepared docking boxes available after pocket review:")
-    describe_prepared_boxes(boxes)
-    print("Scores prioritize geometric pocket hypotheses; they do not establish the biological binding site.")
-    choice = input("Select reviewed pocket/box [1]: ").strip() or "1" if interactive else "1"
-    if not choice.isdigit() or not (1 <= int(choice) <= len(boxes)):
-        raise SystemExit("Invalid docking-box selection")
-    return boxes[int(choice) - 1]
-
-
-def review_pocket_scene(root, pymol_command, interactive=False, requested=False):
-    """Optionally open the prepared cavity scene before exploratory docking."""
-    prep_roots = sorted(root.glob("*_receptor_prep"))
-    boxes = sorted(prep_roots[0].glob("cavity/*.conf")) if len(prep_roots) == 1 else []
-    records = prepared_box_records(boxes)
-    if not records:
-        print("Pocket review: no generated PyMOL cavity scene was found.")
-        return None
-    print("Pocket review candidates:")
-    describe_prepared_boxes(boxes)
-    competitive = [record for record in records if record.get("competitive") and record["scene"].is_file()]
-    if interactive:
-        default = "a" if len(competitive) > 1 else "1"
-        print("Open in PyMOL before selecting the docking box:")
-        print("  Enter a pocket number, a = all competitive pockets, or n = do not open PyMOL")
-        answer = input(f"Select [{default}]: ").strip().lower() or default
-        if answer in {"n", "no"}:
-            return None
-        if answer == "a":
-            selected = competitive or [records[0]]
-        elif answer.isdigit() and 1 <= int(answer) <= len(records):
-            selected = [records[int(answer) - 1]]
-        else:
-            raise SystemExit("Invalid pocket-review selection")
-    elif requested:
-        selected = competitive or [records[0]]
-    else:
-        return None
-    executable = shutil.which(pymol_command) or (pymol_command if Path(pymol_command).is_file() else None)
-    if not executable:
-        message = f"PyMOL was requested for pocket review but was not found: {pymol_command}"
-        if requested:
-            raise SystemExit(message)
-        print(message)
-        return None
-    opened = []
-    for record in selected:
-        scene = record["scene"]
-        if not scene.is_file():
-            continue
-        subprocess.Popen([str(executable), str(scene)], cwd=str(scene.parent))
-        opened.append(str(scene))
-        print(f"Opened cavity review in PyMOL: {scene}")
-    return opened or None
 
 
 def read_cluster_rows(compound_dir):
