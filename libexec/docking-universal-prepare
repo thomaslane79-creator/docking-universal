@@ -511,6 +511,13 @@ awk '
       linked[name1 SUBSEP chain1 SUBSEP seq1 icode1]=1
       linked[name2 SUBSEP chain2 SUBSEP seq2 icode2]=1
     }
+    if (/^HETATM/) {
+      resname=substr($0,18,3); gsub(/ /,"",resname)
+      chain=substr($0,22,1); gsub(/ /,"",chain)
+      seq=substr($0,23,4); gsub(/ /,"",seq)
+      icode=substr($0,27,1); gsub(/ /,"",icode)
+      atom_count[resname SUBSEP chain SUBSEP seq icode]++
+    }
     next
   }
   /^ATOM  / { print; next }
@@ -528,10 +535,12 @@ awk '
       print normalized
       next
     }
-    if (resname SUBSEP chain SUBSEP seq icode in linked) {
+    key=resname SUBSEP chain SUBSEP seq icode
+    if ((key in linked) && atom_count[key] > 1 && resname !~ /^(HOH|WAT|DOD)$/) {
       # Retain directly protein-linked hetero components for the documented
-      # legacy ADFRsuite fallback. Meeko will still reject unsupported linked
-      # chemistry rather than silently guessing it.
+      # legacy ADFRsuite fallback. Single-atom coordination ions and linked
+      # waters are not covalent components; supported metals are handled by
+      # the element whitelist below.
       print
       next
     }
@@ -541,6 +550,25 @@ awk '
         element == "CA" || element == "FE" || element == "CU") print
   }
 ' "$INPUT_PDB" "$INPUT_PDB" > "$RECEPTOR_FILTERED_PDB"
+
+# Record whether a multi-atom deposited component was deliberately retained
+# because of LINK connectivity. This is broader and more reliable than tying
+# the ADFRsuite retry to one particular Meeko diagnostic sentence.
+RETAINED_LINKED_COMPONENTS=$(awk '
+  FNR == NR {
+    if (/^LINK  /) {
+      n1=substr($0,18,3); gsub(/ /,"",n1); c1=substr($0,22,1); gsub(/ /,"",c1); s1=substr($0,23,4); gsub(/ /,"",s1); i1=substr($0,27,1); gsub(/ /,"",i1)
+      n2=substr($0,48,3); gsub(/ /,"",n2); c2=substr($0,52,1); gsub(/ /,"",c2); s2=substr($0,53,4); gsub(/ /,"",s2); i2=substr($0,57,1); gsub(/ /,"",i2)
+      linked[n1 SUBSEP c1 SUBSEP s1 i1]=1; linked[n2 SUBSEP c2 SUBSEP s2 i2]=1
+    }
+    next
+  }
+  /^HETATM/ {
+    n=substr($0,18,3); gsub(/ /,"",n); c=substr($0,22,1); gsub(/ /,"",c); s=substr($0,23,4); gsub(/ /,"",s); i=substr($0,27,1); gsub(/ /,"",i)
+    key=n SUBSEP c SUBSEP s i
+    if ((key in linked) && n !~ /^(HOH|WAT|DOD)$/ && !seen[key]++) print n ":" c ":" s i
+  }
+' "$INPUT_PDB" "$RECEPTOR_FILTERED_PDB" | paste -sd, -)
 
 PDBFIXER_MODE="${DOCKING_UNIVERSAL_PDBFIXER:-auto}"
 case "$PDBFIXER_MODE" in
@@ -700,7 +728,7 @@ EOF
   # retain many such deposited adducts in a Vina-readable PDBQT. It is not a
   # generic rescue for glycans, nucleic acids, or metal/cofactor chemistry.
   if [ "$PREP_SUCCESS" = "0" ] && [ "$ADFR_FALLBACK" = "1" ] && [ -n "$ADFR_FALLBACK_BIN" ] && [ -x "$ADFR_FALLBACK_BIN" ] && \
-     grep -qs "linking fragments" "$RECEPTOR_BACKEND_LOG" "$PDBFIXER_MEEKO_LOG" "$RECEPTOR_RETRY_LOG" "$DISULFIDE_RETRY_LOG" 2>/dev/null; then
+     { [ -n "$RETAINED_LINKED_COMPONENTS" ] || grep -qs "linking fragments" "$RECEPTOR_BACKEND_LOG" "$PDBFIXER_MEEKO_LOG" "$RECEPTOR_RETRY_LOG" "$DISULFIDE_RETRY_LOG" 2>/dev/null; }; then
     log "Meeko rejected linked deposited chemistry; trying the legacy ADFRsuite receptor-preparation fallback; detailed output -> $ADFR_FALLBACK_LOG"
     ADFR_FALLBACK_COMMAND=("$ADFR_FALLBACK_BIN" -r "$RECEPTOR_FILTERED_PDB" -o "$RECEPTOR_PDBQT" -A checkhydrogens)
     if "${ADFR_FALLBACK_COMMAND[@]}" > "$ADFR_FALLBACK_LOG" 2>&1 && [ -s "$RECEPTOR_PDBQT" ]; then
@@ -801,14 +829,38 @@ EOF
       y|Y|yes|YES|Yes)
         USER_REMOVAL_LOG="$RECEPTOR_DIR/receptor_user_approved_removal.log"
         USER_REMOVAL_RECORD="$RECEPTOR_DIR/user_approved_component_removal.txt"
+        USER_REMOVAL_MANIFEST="$RECEPTOR_DIR/user_approved_component_removal.tsv"
         USER_REMOVAL_COMMAND=("$PREP_RECEPTOR_BIN" --read_pdb "$RECEPTOR_FILTERED_PDB" -o "$RECEPTOR_DIR/${CANONICAL}" -p "$RECEPTOR_PDBQT" --allow_bad_res --default_altloc A "${MEEKO_TEMPLATE_ARGS[@]}")
         log "Running user-approved component-removal attempt."
-        if "${USER_REMOVAL_COMMAND[@]}" > "$USER_REMOVAL_LOG" 2>&1; then
+        if "${USER_REMOVAL_COMMAND[@]}" > "$USER_REMOVAL_LOG" 2>&1 && [ -s "$RECEPTOR_PDBQT" ]; then
           PREP_SUCCESS=1
           PREP_ROUTE=meeko_user_approved_component_removal
           cp "$RECEPTOR_FILTERED_PDB" "$RECEPTOR_PDB"
+          awk '
+            FNR == NR {
+              if (/^(ATOM  |HETATM)/) {
+                n=substr($0,18,3); gsub(/ /,"",n); c=substr($0,22,1); gsub(/ /,"",c); s=substr($0,23,4); gsub(/ /,"",s); i=substr($0,27,1); gsub(/ /,"",i)
+                retained[n SUBSEP c SUBSEP s SUBSEP i]=1
+              }
+              next
+            }
+            /^(ATOM  |HETATM)/ {
+              n=substr($0,18,3); gsub(/ /,"",n); c=substr($0,22,1); gsub(/ /,"",c); s=substr($0,23,4); gsub(/ /,"",s); i=substr($0,27,1); gsub(/ /,"",i)
+              key=n SUBSEP c SUBSEP s SUBSEP i
+              if (!(key in retained)) { count[key]++; name[key]=n; chain[key]=c; seq[key]=s; ins[key]=i }
+            }
+            END {
+              print "chain\tresidue_number\tinsertion_code\tresidue_name\tatom_count"
+              for (key in count) print chain[key] "\t" seq[key] "\t" ins[key] "\t" name[key] "\t" count[key]
+            }
+          ' "$RECEPTOR_PDBQT" "$RECEPTOR_FILTERED_PDB" | { IFS= read -r header; printf '%s\n' "$header"; sort -t $'\t' -k1,1 -k2,2n -k3,3 -k4,4; } > "$USER_REMOVAL_MANIFEST"
+          REMOVED_COMPONENT_COUNT=$(awk 'NR > 1 { n++ } END { print n+0 }' "$USER_REMOVAL_MANIFEST")
+          REMOVED_COMPONENT_SUMMARY=$(awk -F '\t' 'NR > 1 { printf "%s%s:%s%s (%s)", (n++ ? ", " : ""), ($1 == "" ? "[blank]" : $1), $2, $3, $4 }' "$USER_REMOVAL_MANIFEST")
           {
             printf 'User approved component removal after safe preparation fallbacks failed.\n'
+            printf 'Removed residue/component count: %s\n' "$REMOVED_COMPONENT_COUNT"
+            printf 'Removed residues/components: %s\n' "${REMOVED_COMPONENT_SUMMARY:-none detected by residue comparison}"
+            printf 'Removal manifest: %s\n' "$USER_REMOVAL_MANIFEST"
             printf 'Command: '
             printf '%q ' "${USER_REMOVAL_COMMAND[@]}"
             printf '\nLog: %s\n' "$USER_REMOVAL_LOG"

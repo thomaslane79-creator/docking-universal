@@ -87,11 +87,41 @@ def command_version(command):
 
 def preparation_summary(prep_root):
     text = (prep_root / "run.log").read_text(errors="replace") if (prep_root / "run.log").is_file() else ""
+    removal_record = next(iter(sorted(prep_root.glob("receptor/user_approved_component_removal.txt"))), None)
+    if removal_record and removal_record.is_file():
+        return "User explicitly approved removal of unmatched receptor components after safe preparation fallbacks failed; the retained record identifies the altered model"
     if "Initial receptor preparation succeeded; PDBFixer was not needed" in text:
         return "Strict Meeko succeeded; PDBFixer was not needed"
     if "PDBFixer" in text and "succeeded" in text:
         return "Strict Meeko required conditional PDBFixer repair; the retained audit records the changes"
     return "Receptor preparation completed; the retained preparation log records the applied path"
+
+
+def read_removal_manifest(manifest):
+    rows = []
+    if manifest and Path(manifest).is_file():
+        lines = Path(manifest).read_text(errors="replace").splitlines()
+        if lines:
+            headings = lines[0].split("\t")
+            rows = [dict(zip(headings, line.split("\t"))) for line in lines[1:] if line.strip()]
+    return rows
+
+
+def approved_removal_summary(protocol):
+    preparation = protocol.get("receptor_preparation", {})
+    if not preparation.get("user_approved_component_removal"):
+        return None
+    rows = preparation.get("user_approved_removed_components") or read_removal_manifest(
+        preparation.get("user_approved_component_removal_manifest")
+    )
+    if rows:
+        noun = "residue/component was" if len(rows) == 1 else "residues/components were"
+        inventory = f" {len(rows)} {noun} removed."
+    else:
+        inventory = " The retained removal record identifies the omitted material."
+    return ("<b>User-approved receptor component removal:</b> all safe preparation fallbacks failed, and the user explicitly "
+            "approved omission of unmatched components. This changed the receptor model." + inventory +
+            " The complete removal manifest and raw preparation log are retained in the protocol bundle.")
 
 
 def choose_type():
@@ -393,7 +423,6 @@ def write_ligand_guided_pdf(out, protocol, figure):
         ["Use record", "Recorded meaning"],
         ["Intended use", "Screen one or multiple new ligands without redefining the prepared receptor or docking box"],
         ["Evidence boundary", "Exploratory site definition from a ligand in the selected structure; no pose-recovery control"],
-        ["Later screening report", "Carries this protocol provenance and adds ligand-specific docking, clustering, and interaction results"],
     ]
     pdbfixer_version = distribution_version("pdbfixer")
     if "PDBFixer was not needed" in protocol["receptor_preparation_summary"]:
@@ -415,10 +444,14 @@ def write_ligand_guided_pdf(out, protocol, figure):
         P("These parameters are recorded for later ligand screening; they were not executed while creating this protocol. No ligand docking, docking seeds, pose generation, clustering, or interaction analysis was performed."),
         report_table(Table, TableStyle, Paragraph, settings, [1.63*inch, 1.55*inch, 1.63*inch, 1.55*inch], styles, colors),
         Spacer(1, 6), P("<b>Protocol interpretation.</b> This configuration is technically complete and reproducible. Its selected site and future docking results remain structural hypotheses because bound-ligand pose recovery was not evaluated."),
-        Spacer(1, 5), P("<b>Protocol use summary</b>", "SmallDU"), report_table(Table, TableStyle, Paragraph, use, [2.15*inch, 4.2*inch], styles, colors),
+        Spacer(1, 9), P("<b>Protocol use summary</b>", "SmallDU"), Spacer(1, 4),
+        report_table(Table, TableStyle, Paragraph, use, [2.15*inch, 4.2*inch], styles, colors),
         PageBreak(), P("3. Ligand-defined docking region", "SectionDU"),
         P(f"{protocol['site_anchor']} was used only as a structural site anchor. The prepared receptor and exact ligand-centered box shown below are retained in the portable protocol. No ligand redocking, RMSD analysis, pose clustering, or interaction analysis was performed while creating this protocol."),
     ]
+    removal_note = approved_removal_summary(protocol)
+    if removal_note:
+        story.insert(5, P(removal_note, "SmallDU"))
     if figure and Path(figure).is_file():
         item = Image(str(figure)); item._restrictSize(3.6*inch, 2.72*inch); item.hAlign = "CENTER"; story.append(item)
         story.append(P(f"<b>Figure 1. Ligand-guided docking region for {protocol['target']}.</b> {protocol['site_anchor']} from the selected structure is shown within the prepared receptor. The wireframe records the {box['size_x']} × {box['size_y']} × {box['size_z']} Å AutoDock Vina search box. The ligand identifies the region of interest but does not constitute pose-recovery validation.", "CaptionDU"))
@@ -561,6 +594,9 @@ def main():
     bundle_name = f"{base}.duprotocol"
     audit = next(iter(sorted(prep_root.glob("receptor/pdbfixer_audit.json"))), None)
     ccd_audit = next(iter(sorted(prep_root.glob("receptor/ccd_modification_audit.json"))), None)
+    removal_log = next(iter(sorted(prep_root.glob("receptor/receptor_user_approved_removal.log"))), None)
+    removal_record = next(iter(sorted(prep_root.glob("receptor/user_approved_component_removal.txt"))), None)
+    removal_manifest = next(iter(sorted(prep_root.glob("receptor/user_approved_component_removal.tsv"))), None)
     ligand_pdb = ligand["path"] if ligand else None
     protocol = {
         "schema_name": "docking-universal-protocol", "schema_version": 1, "schema_status": "stable_v1",
@@ -584,6 +620,11 @@ def main():
         "receptor_preparation": {
             "pdbfixer_audit": str(audit) if audit else None,
             "ccd_modification_audit": str(ccd_audit) if ccd_audit else None,
+            "user_approved_component_removal": bool(removal_record),
+            "user_approved_component_removal_log": str(removal_log) if removal_log else None,
+            "user_approved_component_removal_record": str(removal_record) if removal_record else None,
+            "user_approved_component_removal_manifest": str(removal_manifest) if removal_manifest else None,
+            "user_approved_removed_components": read_removal_manifest(removal_manifest),
         },
         "receptor_preparation_summary": preparation_summary(prep_root),
         "cavity_score_threshold_used": score_threshold_used,

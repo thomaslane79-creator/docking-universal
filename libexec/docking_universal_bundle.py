@@ -121,6 +121,12 @@ def create_bundle(protocol_path, control_root, output, control_compound=None):
             if removal_record_source.is_file():
                 removal_record_copy = _copy(removal_record_source, assets / "user_approved_component_removal.txt")
                 protocol["receptor_preparation"]["user_approved_component_removal_record"] = f"assets/{removal_record_copy.name}"
+        removal_manifest_value = protocol.get("receptor_preparation", {}).get("user_approved_component_removal_manifest")
+        if removal_manifest_value:
+            removal_manifest_source = Path(removal_manifest_value).expanduser().resolve()
+            if removal_manifest_source.is_file():
+                removal_manifest_copy = _copy(removal_manifest_source, assets / "user_approved_component_removal.tsv")
+                protocol["receptor_preparation"]["user_approved_component_removal_manifest"] = f"assets/{removal_manifest_copy.name}"
 
         evidence = packaged_control / "evidence"
         evidence_files = []

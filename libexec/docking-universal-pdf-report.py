@@ -440,20 +440,21 @@ def receptor_preparation_record(study, control=None):
     post_fix_log = retained(["preparation/**/receptor/receptor_after_pdbfixer.log", "**/receptor/receptor_after_pdbfixer.log"])
     removal_log = retained(["preparation/**/receptor/receptor_user_approved_removal.log", "**/receptor/receptor_user_approved_removal.log", "**/assets/receptor_user_approved_removal.log"])
     removal_record = retained(["preparation/**/receptor/user_approved_component_removal.txt", "**/receptor/user_approved_component_removal.txt", "**/assets/user_approved_component_removal.txt"])
+    removal_manifest = retained(["preparation/**/receptor/user_approved_component_removal.tsv", "**/receptor/user_approved_component_removal.tsv", "**/assets/user_approved_component_removal.tsv"])
     adfr_log = retained(["preparation/**/receptor/receptor_adfr_fallback.log", "**/receptor/receptor_adfr_fallback.log", "**/assets/receptor_adfr_fallback.log"])
     disulfide_log = retained(["preparation/**/receptor/receptor_disulfide_retry.log", "**/receptor/receptor_disulfide_retry.log", "**/assets/receptor_disulfide_retry.log"])
     receptor_dir = retained(["preparation/**/receptor", "**/receptor"])
     audit = read_json(audit_path)
     ccd_audit = read_json(ccd_audit_path)
-    if adfr_log and adfr_log.stat().st_size:
+    if removal_log and removal_log.stat().st_size:
+        path = "user-approved removal of unmatched receptor components after safe preparation fallbacks failed"
+        used = bool(audit_path)
+    elif adfr_log and adfr_log.stat().st_size:
         path = "legacy ADFRsuite fallback after Meeko rejected a linked deposited component"
         used = bool(audit_path)
     elif disulfide_log and disulfide_log.stat().st_size:
         path = "strict Meeko succeeded after a CYX disulfide-template retry"
         used = False
-    elif removal_log and removal_log.stat().st_size:
-        path = "user-approved removal of unmatched receptor components after safe preparation fallbacks failed"
-        used = bool(audit_path)
     elif post_fix_log and post_fix_log.stat().st_size:
         path = "conservative PDBFixer repair followed by strict Meeko"
         used = True
@@ -472,6 +473,7 @@ def receptor_preparation_record(study, control=None):
         "pdbfixer_audit": str(audit_path) if audit_path else None,
         "user_approved_component_removal_log": str(removal_log) if removal_log else None,
         "user_approved_component_removal_record": str(removal_record) if removal_record else None,
+        "user_approved_component_removal_manifest": str(removal_manifest) if removal_manifest else None,
         "adfr_fallback_log": str(adfr_log) if adfr_log else None,
         "disulfide_retry_log": str(disulfide_log) if disulfide_log else None,
         "changes": audit,
@@ -522,10 +524,16 @@ def user_approved_removal_report_note(record, out, styles):
     from reportlab.platypus import Paragraph, Spacer
     if not record.get("user_approved_component_removal_log"):
         return []
+    rows = read_tsv_rows(Path(record["user_approved_component_removal_manifest"])) if record.get("user_approved_component_removal_manifest") else []
+    if rows:
+        noun = "residue/component was" if len(rows) == 1 else "residues/components were"
+        inventory = f" {len(rows)} {noun} removed."
+    else:
+        inventory = " The retained removal record identifies the omitted material."
     text = ("<b>User-approved receptor component removal:</b> safe preparation fallbacks failed, "
-            "and the user explicitly approved Meeko's removal of unmatched components. The final "
-            "receptor model may omit deposited material; inspect the retained removal log and run a "
-            "target-matched bound-ligand control before prospective screening.")
+            "and the user explicitly approved Meeko's removal of unmatched components. This changed "
+            "the receptor model." + inventory + " Inspect the complete retained removal manifest and log; a "
+            "target-matched bound-ligand control is required before prospective screening.")
     return [Paragraph(text, styles["BodyText"]), Spacer(1, 8)]
 
 def ccd_modification_report_note(record, out, styles):

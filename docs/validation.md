@@ -13,6 +13,7 @@ This page is the index for validation performed on Docking Universal. Each recor
 | Ligand-free reference workflow | Public unbound `2R8N` preparation and Indinavir exploratory workflow | Completed as exploratory; details below. |
 | General receptor-preparation robustness | Historical 50-entry public-PDB sample plus final-policy reruns of the five former cleanup cases | Reconciled result: 46/50 PDBQTs; complete cohort record: [100-PDB receptor-preparation validation record](receptor-preparation-validation-2026-08-21.md). |
 | Linked-chemistry/adduct robustness | 50 RCSB structures selected for covalent-linkage annotations, explicit-removal reruns, and two downstream workflow examples | 39/50 historical PDBQTs; full 100-receptor manifest, implemented safeguards, failures/limitations, and evidence links: [100-PDB receptor-preparation validation record](receptor-preparation-validation-2026-08-21.md). |
+| Fresh report-generation stress check | 100 public receptors were attempted through PDF/protocol/bundle generation; six preparation stops affected by a generic `LINK`-filtering distinction were rerun after correction | Initial run: 79/100 complete reports. All six focused regressions then passed; a full corrected 100-entry rerun remains pending. See the [reconciliation record](receptor-preparation-validation-2026-08-21.md#fresh-report-generation-stress-reconciliation-2026-08-25). |
 
 ## How to read these results
 
