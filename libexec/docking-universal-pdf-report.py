@@ -4,10 +4,7 @@ import argparse, csv, hashlib, json, re, subprocess, sys
 from importlib import metadata
 from pathlib import Path
 
-STANDARD_AMINO_ACIDS = {
-    "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE",
-    "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
-}
+from docking_universal_bundle import build_receptor_modification_warning
 
 def first(root, patterns):
     for pattern in patterns:
@@ -475,6 +472,10 @@ def receptor_preparation_record(study, control=None, protocol=None):
     else:
         path = "prepared receptor supplied; receptor preparation occurred outside this recorded run"
         used = None
+    removed_rows = read_tsv_rows(removal_manifest) if removal_manifest else recorded_rows
+    modification_warning = recorded_preparation.get("receptor_modification_warning") or build_receptor_modification_warning(
+        removed_rows, bool(removal_log or recorded_removal)
+    )
     return {
         "path": path,
         "pdbfixer_used": used,
@@ -483,7 +484,8 @@ def receptor_preparation_record(study, control=None, protocol=None):
         "user_approved_component_removal_record": str(removal_record) if removal_record else None,
         "user_approved_component_removal_manifest": str(removal_manifest) if removal_manifest else None,
         "user_approved_component_removal": bool(removal_log or recorded_removal),
-        "user_approved_removed_components": read_tsv_rows(removal_manifest) if removal_manifest else recorded_rows,
+        "user_approved_removed_components": removed_rows,
+        "receptor_modification_warning": modification_warning,
         "adfr_fallback_log": str(adfr_log) if adfr_log else None,
         "disulfide_retry_log": str(disulfide_log) if disulfide_log else None,
         "changes": audit,
@@ -538,25 +540,14 @@ def user_approved_removal_report_note(record, out, styles):
         read_tsv_rows(Path(record["user_approved_component_removal_manifest"]))
         if record.get("user_approved_component_removal_manifest") else []
     )
-    if rows:
-        standard = sum(str(row.get("residue_name", "")).upper() in STANDARD_AMINO_ACIDS for row in rows)
-        other = len(rows) - standard
-        parts = []
-        if standard:
-            parts.append(f"{standard} standard amino-acid residue{' was' if standard == 1 else 's were'} removed")
-        if other:
-            parts.append(f"{other} other residue/component{' was' if other == 1 else 's were'} removed")
-        inventory = " " + "; ".join(parts) + "."
-        severity = (
-            " <b>High-severity structural warning:</b> standard protein/peptide residues, not merely solvent or optional hetero components, were omitted from the final receptor."
-            if standard else ""
-        )
-    else:
-        inventory = " The retained removal record identifies the omitted material."
-        severity = ""
+    warning = record.get("receptor_modification_warning") or build_receptor_modification_warning(rows)
+    inventory = " " + warning["summary"]
+    severity = (
+        " <b>High-severity structural warning:</b> standard protein/peptide residues, not merely solvent or optional hetero components, were omitted from the final receptor."
+        if warning["severity"] == "high" else ""
+    )
     text = ("<b>User-approved receptor component removal:</b> safe preparation fallbacks failed, "
-            "and the user explicitly approved Meeko's removal of unmatched components. This changed "
-            "the receptor model." + inventory + severity + " Inspect the complete retained removal manifest and log; a "
+            "and the user explicitly approved Meeko's removal of unmatched components." + inventory + severity + " Inspect the complete retained removal manifest and log; a "
             "target-matched bound-ligand control is required before prospective screening.")
     return [Paragraph(text, styles["BodyText"]), Spacer(1, 8)]
 

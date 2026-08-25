@@ -16,6 +16,41 @@ PROTOCOL_TYPES = {
     LIGAND_GUIDED_EXPLORATORY,
     SITE_GUIDED_EXPLORATORY,
 }
+STANDARD_AMINO_ACIDS = {
+    "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE",
+    "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
+}
+
+
+def build_receptor_modification_warning(rows, removal_occurred=True):
+    """Create the durable, machine-readable warning stored in a protocol."""
+    if not removal_occurred:
+        return None
+    rows = rows or []
+    standard = sum(str(row.get("residue_name", "")).upper() in STANDARD_AMINO_ACIDS for row in rows)
+    other = len(rows) - standard
+    if rows:
+        counts = []
+        if standard:
+            counts.append(f"{standard} standard amino-acid residue{' was' if standard == 1 else 's were'} removed")
+        if other:
+            counts.append(f"{other} other residue/component{' was' if other == 1 else 's were'} removed")
+        summary = "The receptor model was changed: " + "; ".join(counts) + "."
+    else:
+        summary = ("The receptor was changed by explicit user-approved removal of unmatched components; "
+                   "inspect the retained removal manifest and preparation log.")
+    if standard:
+        summary += " HIGH-SEVERITY STRUCTURAL MODIFICATION."
+    return {
+        "code": "user-approved-receptor-component-removal",
+        "severity": "high" if standard else "warning",
+        "summary": summary,
+        "removed_residue_component_count": len(rows) if rows else None,
+        "removed_standard_amino_acid_count": standard if rows else None,
+        "removed_other_component_count": other if rows else None,
+        "structural_review_required": True,
+        "control_redocking_required": True,
+    }
 
 
 def protocol_type(record):
@@ -72,6 +107,11 @@ def create_bundle(protocol_path, control_root, output, control_compound=None):
     if not kind or not protocol_can_screen(protocol):
         raise ValueError("protocol is neither control-approved nor explicitly authorized for exploratory reuse")
     protocol["protocol_type"] = kind
+    preparation = protocol.setdefault("receptor_preparation", {})
+    if preparation.get("user_approved_component_removal") and not preparation.get("receptor_modification_warning"):
+        preparation["receptor_modification_warning"] = build_receptor_modification_warning(
+            preparation.get("user_approved_removed_components") or []
+        )
 
     with tempfile.TemporaryDirectory(prefix="docking-universal-bundle-") as temporary:
         root = Path(temporary)

@@ -25,14 +25,10 @@ from docking_universal_bundle import (  # noqa: E402
     CONTROL_VALIDATED,
     LIGAND_GUIDED_EXPLORATORY,
     SITE_GUIDED_EXPLORATORY,
+    build_receptor_modification_warning,
     create_bundle,
     protocol_type_label,
 )
-
-STANDARD_AMINO_ACIDS = {
-    "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE",
-    "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
-}
 
 
 def safe_id(value, fallback="protein"):
@@ -119,22 +115,12 @@ def approved_removal_summary(protocol):
     rows = preparation.get("user_approved_removed_components") or read_removal_manifest(
         preparation.get("user_approved_component_removal_manifest")
     )
-    if rows:
-        standard = sum(str(row.get("residue_name", "")).upper() in STANDARD_AMINO_ACIDS for row in rows)
-        other = len(rows) - standard
-        parts = []
-        if standard:
-            parts.append(f"{standard} standard amino-acid residue{' was' if standard == 1 else 's were'} removed")
-        if other:
-            parts.append(f"{other} other residue/component{' was' if other == 1 else 's were'} removed")
-        inventory = " " + "; ".join(parts) + "."
-        severity = (" <b>High-severity structural warning:</b> standard protein/peptide residues, not merely solvent or "
-                    "optional hetero components, were omitted from the final receptor.") if standard else ""
-    else:
-        inventory = " The retained removal record identifies the omitted material."
-        severity = ""
+    warning = preparation.get("receptor_modification_warning") or build_receptor_modification_warning(rows)
+    inventory = " " + warning["summary"]
+    severity = (" <b>High-severity structural warning:</b> standard protein/peptide residues, not merely solvent or "
+                "optional hetero components, were omitted from the final receptor.") if warning["severity"] == "high" else ""
     return ("<b>User-approved receptor component removal:</b> all safe preparation fallbacks failed, and the user explicitly "
-            "approved omission of unmatched components. This changed the receptor model." + inventory +
+            "approved omission of unmatched components." + inventory +
             severity + " The complete removal manifest and raw preparation log are retained in the protocol bundle and this warning "
             "must be carried into every subsequent screening report.")
 
@@ -612,6 +598,8 @@ def main():
     removal_log = next(iter(sorted(prep_root.glob("receptor/receptor_user_approved_removal.log"))), None)
     removal_record = next(iter(sorted(prep_root.glob("receptor/user_approved_component_removal.txt"))), None)
     removal_manifest = next(iter(sorted(prep_root.glob("receptor/user_approved_component_removal.tsv"))), None)
+    removed_components = read_removal_manifest(removal_manifest)
+    modification_warning = build_receptor_modification_warning(removed_components, bool(removal_record))
     ligand_pdb = ligand["path"] if ligand else None
     protocol = {
         "schema_name": "docking-universal-protocol", "schema_version": 1, "schema_status": "stable_v1",
@@ -639,7 +627,8 @@ def main():
             "user_approved_component_removal_log": str(removal_log) if removal_log else None,
             "user_approved_component_removal_record": str(removal_record) if removal_record else None,
             "user_approved_component_removal_manifest": str(removal_manifest) if removal_manifest else None,
-            "user_approved_removed_components": read_removal_manifest(removal_manifest),
+            "user_approved_removed_components": removed_components,
+            "receptor_modification_warning": modification_warning,
         },
         "receptor_preparation_summary": preparation_summary(prep_root),
         "cavity_score_threshold_used": score_threshold_used,
