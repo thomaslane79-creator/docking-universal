@@ -53,10 +53,11 @@ def describe_prepared_boxes(boxes):
     records = prepared_box_records(boxes)
     for index, record in enumerate(records, start=1):
         row = record["row"]
+        color = POCKET_COLORS[(index - 1) % len(POCKET_COLORS)][0].removeprefix("du_")
         score = f"{record['score']:.4f}" if record["score"] == record["score"] else "not recorded"
         marker = " - competitive score" if record.get("competitive") else ""
         source = row.get("pocket_file", "fpocket source not recorded")
-        print(f"  {index}) {record['box'].name} | {source} | fpocket score {score}{marker}")
+        print(f"  {index}) Pocket {index} ({color}) | {record['box'].name} | {source} | fpocket score {score}{marker}")
     return records
 
 
@@ -178,8 +179,9 @@ def choose_prepared_box(boxes, interactive=True):
         return boxes[0]
     print("Prepared docking boxes available after pocket review:")
     describe_prepared_boxes(boxes)
+    print("Pocket numbers and colors match the unified PyMOL review.")
     print("Scores prioritize geometric pocket hypotheses; they do not establish the biological binding site.")
-    choice = input("Select reviewed pocket/box [1]: ").strip() or "1" if interactive else "1"
+    choice = input("Select the reviewed pocket/box number [1]: ").strip() or "1" if interactive else "1"
     if not choice.isdigit() or not (1 <= int(choice) <= len(boxes)):
         raise SystemExit("Invalid docking-box selection")
     return boxes[int(choice) - 1]
