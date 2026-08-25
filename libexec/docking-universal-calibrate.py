@@ -14,6 +14,7 @@ flexible-macrocycle representation.
 """
 
 import argparse
+import csv
 import hashlib
 import importlib.metadata
 import json
@@ -41,6 +42,11 @@ def sha256(path):
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def read_tsv_rows(path):
+    with Path(path).open(newline="") as handle:
+        return list(csv.DictReader(handle, delimiter="\t"))
 
 
 def tier_settings(args, tier_name):
@@ -313,11 +319,12 @@ def run_tier(args, tier_name, cli, libexec, tier_root):
     post_pdbfixer_log = receptor_dir / "receptor_after_pdbfixer.log"
     user_removal_log = receptor_dir / "receptor_user_approved_removal.log"
     user_removal_record = receptor_dir / "user_approved_component_removal.txt"
+    user_removal_manifest = receptor_dir / "user_approved_component_removal.tsv"
     adfr_fallback_log = receptor_dir / "receptor_adfr_fallback.log"
-    if adfr_fallback_log.is_file() and adfr_fallback_log.stat().st_size:
-        preparation_path = "legacy ADFRsuite fallback after Meeko rejected a linked deposited component"
-    elif user_removal_log.is_file() and user_removal_log.stat().st_size:
+    if user_removal_log.is_file() and user_removal_log.stat().st_size:
         preparation_path = "user-approved removal of unmatched receptor components after safe preparation fallbacks failed"
+    elif adfr_fallback_log.is_file() and adfr_fallback_log.stat().st_size:
+        preparation_path = "legacy ADFRsuite fallback after Meeko rejected a linked deposited component"
     elif post_pdbfixer_log.is_file() and post_pdbfixer_log.stat().st_size:
         preparation_path = "conservative PDBFixer repair followed by strict Meeko"
     else:
@@ -331,10 +338,14 @@ def run_tier(args, tier_name, cli, libexec, tier_root):
         "ccd_modification_audit_sha256": sha256(ccd_audit) if ccd_audit.is_file() else None,
         "adfr_fallback_log": str(adfr_fallback_log) if adfr_fallback_log.is_file() else None,
         "adfr_fallback_log_sha256": sha256(adfr_fallback_log) if adfr_fallback_log.is_file() else None,
+        "user_approved_component_removal": user_removal_record.is_file(),
         "user_approved_component_removal_log": str(user_removal_log) if user_removal_log.is_file() else None,
         "user_approved_component_removal_log_sha256": sha256(user_removal_log) if user_removal_log.is_file() else None,
         "user_approved_component_removal_record": str(user_removal_record) if user_removal_record.is_file() else None,
         "user_approved_component_removal_record_sha256": sha256(user_removal_record) if user_removal_record.is_file() else None,
+        "user_approved_component_removal_manifest": str(user_removal_manifest) if user_removal_manifest.is_file() else None,
+        "user_approved_component_removal_manifest_sha256": sha256(user_removal_manifest) if user_removal_manifest.is_file() else None,
+        "user_approved_removed_components": read_tsv_rows(user_removal_manifest) if user_removal_manifest.is_file() else [],
         "policy": "strict Meeko, then conservative PDBFixer plus strict Meeko, documented Meeko retries, and a narrow ADFRsuite fallback only for Meeko-diagnosed linked deposited components; unmatched components are removed only after an explicit final user approval",
     }
     result["created_utc"] = datetime.now(timezone.utc).isoformat()

@@ -83,9 +83,12 @@ Additional component commands can also be used independently in compatible workf
 
 Known preparation limitations include some covalent adducts, linked glycans, metals/heme, modified backbones, and nucleic-acid complexes. These results test workflow behavior and safeguards; they do not establish broad prospective docking accuracy or biological validity. See the [validation index](docs/validation.md) and [100-PDB receptor-preparation record](docs/receptor-preparation-validation-2026-08-21.md).
 
-## Example scientific report
+## Example scientific reports
 
-[View a complete current-style PDF report](docs/assets/docking-universal-example-report.pdf). Reports adapt to control-validated, exploratory, protocol-reuse, and single- or multi-compound studies while retaining individual compound results.
+- [Complete current-style docking report](docs/assets/docking-universal-example-report.pdf)
+- [Site-guided protocol report after explicit user-approved receptor-component removal](docs/assets/5KRH-user-approved-removal-cavity-report.pdf)
+
+Reports adapt to control-validated, exploratory, protocol-reuse, and single- or multi-compound studies while retaining individual compound results. The 5KRH example shows how a model-changing removal is disclosed in the report; its exact component inventory and raw preparation log remain in the retained study artifacts and `.duprotocol` bundle.
 
 ## Documentation
 

@@ -12,6 +12,26 @@ SPEC.loader.exec_module(REPORT)
 
 
 class CavityReportTests(unittest.TestCase):
+    def test_removal_note_names_removed_components(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            manifest = Path(temporary) / "user_approved_component_removal.tsv"
+            manifest.write_text("chain\tresidue_number\tinsertion_code\tresidue_name\tatom_count\nA\t67\t\tCSO\t8\n")
+            styles = __import__("reportlab.lib.styles", fromlist=["getSampleStyleSheet"]).getSampleStyleSheet()
+            note = REPORT.user_approved_removal_report_note({
+                "user_approved_component_removal_log": "retained.log",
+                "user_approved_component_removal_manifest": str(manifest),
+            }, Path(temporary), styles)
+            self.assertIn("1 residue/component was removed", note[0].text)
+
+    def test_removal_route_takes_precedence_over_failed_adfr_log(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            receptor = Path(temporary) / "preparation" / "target" / "receptor"
+            receptor.mkdir(parents=True)
+            (receptor / "receptor_adfr_fallback.log").write_text("fallback failed\n")
+            (receptor / "receptor_user_approved_removal.log").write_text("Files written\n")
+            record = REPORT.receptor_preparation_record(Path(temporary))
+            self.assertTrue(record["path"].startswith("user-approved removal"))
+
     def test_control_only_study_is_not_misclassified_as_ligand_docking(self):
         with tempfile.TemporaryDirectory() as temporary:
             study = Path(temporary)

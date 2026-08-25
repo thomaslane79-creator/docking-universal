@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Corrected receptor filtering so coordination waters and unsupported single-atom ions are not retained merely because they appear in a deposited `LINK` record; multi-atom linked components remain eligible for the narrow compatibility fallback.
+- Made final component removal an explicitly audited, user-approved route. Reports now state that the receptor model changed, give the number of removed residues/components, and retain the exact removal inventory and raw preparation log in the study artifacts and portable protocol bundle.
+- Rechecked six receptors affected by the filtering distinction (`1GYN`, `5K8R`, `3ET8`, `1P5S`, `4ER8`, and `2NSY`) and added a real 5KRH report demonstrating the approved-removal disclosure. These are focused regression checks, not a new biological-validation claim.
+
 ## 0.6.3 — 2026-08-24
 
 **Defining release change:** Docking Universal now organizes its report-producing workflows around creating, reviewing, reusing, and screening with explicit Docking Universal protocols, with confirmed graphical operation on both Ubuntu and macOS.

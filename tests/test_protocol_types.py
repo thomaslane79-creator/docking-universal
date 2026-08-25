@@ -71,6 +71,44 @@ class ProtocolTypeTests(unittest.TestCase):
             self.assertEqual(extracted_record["protocol_type"], BUNDLE.LIGAND_GUIDED_EXPLORATORY)
             self.assertTrue((extracted.parent / extracted_record["locked_inputs"]["receptor_pdb"]).is_file())
 
+    def test_bundle_retains_user_approved_removal_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            receptor = root / "target.pdbqt"
+            receptor_pdb = root / "target.pdb"
+            box = root / "target.conf"
+            removal_log = root / "receptor_user_approved_removal.log"
+            removal_record = root / "user_approved_component_removal.txt"
+            removal_manifest = root / "user_approved_component_removal.tsv"
+            receptor.write_text("ATOM\n")
+            receptor_pdb.write_text("ATOM\n")
+            box.write_text("center_x = 1\n")
+            removal_log.write_text("Files written\n")
+            removal_record.write_text("User approved component removal.\n")
+            removal_manifest.write_text("chain\tresidue_number\tinsertion_code\tresidue_name\tatom_count\nA\t67\t\tCSO\t8\n")
+            protocol = root / "protocol.json"
+            protocol.write_text(json.dumps({
+                "schema_name": "docking-universal-protocol", "schema_version": 1,
+                "protocol_type": BUNDLE.SITE_GUIDED_EXPLORATORY,
+                "control_status": "not_performed", "unknown_docking_allowed": False,
+                "exploratory_screening_allowed": True,
+                "screening_authority": "user-confirmed-exploratory-use",
+                "locked_inputs": {"receptor": str(receptor), "receptor_pdb": str(receptor_pdb), "box": str(box)},
+                "receptor_preparation": {
+                    "user_approved_component_removal": True,
+                    "user_approved_component_removal_log": str(removal_log),
+                    "user_approved_component_removal_record": str(removal_record),
+                    "user_approved_component_removal_manifest": str(removal_manifest),
+                },
+            }))
+            output = root / "approved-removal.duprotocol"
+            BUNDLE.create_bundle(protocol, root, output)
+            extracted = BUNDLE.extract_bundle(output)
+            record = json.loads(extracted.read_text())
+            retained = extracted.parent / record["receptor_preparation"]["user_approved_component_removal_manifest"]
+            self.assertTrue(retained.is_file())
+            self.assertIn("CSO", retained.read_text())
+
     def test_interactive_type_selection_covers_all_three_protocols(self):
         expected = [
             BUNDLE.CONTROL_VALIDATED,
@@ -140,6 +178,25 @@ class ProtocolTypeTests(unittest.TestCase):
             self.assertTrue(CREATE.retry_fpocket_fallback(False))
         with patch("builtins.input", return_value="n"):
             self.assertFalse(CREATE.retry_fpocket_fallback(False))
+
+    def test_preparation_summary_discloses_user_approved_removal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            prep = Path(directory)
+            receptor = prep / "receptor"
+            receptor.mkdir()
+            (receptor / "user_approved_component_removal.txt").write_text("User approved component removal.\n")
+            self.assertIn("explicitly approved removal", CREATE.preparation_summary(prep))
+
+    def test_approved_removal_summary_names_removed_residues(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory) / "user_approved_component_removal.tsv"
+            manifest.write_text("chain\tresidue_number\tinsertion_code\tresidue_name\tatom_count\nT\t4\t\t8OG\t34\n")
+            text = CREATE.approved_removal_summary({"receptor_preparation": {
+                "user_approved_component_removal": True,
+                "user_approved_component_removal_manifest": str(manifest),
+            }})
+            self.assertIn("explicitly approved", text)
+            self.assertIn("1 residue/component was removed", text)
 
     def test_control_validated_wrapper_uses_repeatability_by_default(self):
         argv = [
