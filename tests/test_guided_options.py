@@ -2,6 +2,8 @@
 """Branch coverage for every choice exposed by the guided Python interface."""
 
 import argparse
+import contextlib
+import io
 import importlib.util
 import tempfile
 import unittest
@@ -292,6 +294,18 @@ class PocketChoiceTests(unittest.TestCase):
             for index, expected in enumerate(boxes, 1):
                 with self.subTest(index=index), patch("builtins.input", return_value=str(index)):
                     self.assertEqual(RUNNER.choose_prepared_box(boxes), expected)
+
+    def test_terminal_list_names_the_matching_pymol_colors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            boxes = self.fixture(Path(directory))
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output), patch("builtins.input", return_value="1"):
+                RUNNER.choose_prepared_box(boxes)
+            text = output.getvalue()
+            self.assertIn("Pocket 1 (blue)", text)
+            self.assertIn("Pocket 2 (gold)", text)
+            self.assertIn("Pocket 3 (magenta)", text)
+            self.assertIn("colors match the unified PyMOL review", text)
 
     def test_review_none_or_one_labeled_combined_scene(self):
         with tempfile.TemporaryDirectory() as directory:
