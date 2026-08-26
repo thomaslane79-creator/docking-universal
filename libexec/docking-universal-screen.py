@@ -67,7 +67,7 @@ def main():
     parser.add_argument("--mk-export", default="mk_export.py")
     parser.add_argument("--pymol", default="pymol")
     parser.add_argument("--plip-command", default="plip")
-    parser.add_argument("--engine", choices=("vina",), default="vina", help="docking engine (Vina only in this release)")
+    parser.add_argument("--engine", choices=("vina", "qvinaw"), default="vina", help="docking engine: Vina or QuickVina-W")
     parser.add_argument("--seeds", type=int, default=5, help="exploratory independent seeds")
     parser.add_argument("--conformers", type=int, default=3, help="exploratory conformers per chemical state")
     parser.add_argument("--exhaustiveness", type=int, default=16, help="exploratory search effort")
@@ -130,6 +130,8 @@ def main():
             if answer not in {"y", "yes"}:
                 raise SystemExit("Exploratory screening cancelled")
         engine = protocol["engine"]
+        if engine not in {"vina", "qvinaw"}:
+            raise SystemExit(f"Protocol records an unsupported docking engine: {engine}")
         expected_macrocycle = "flexible_meeko" if engine == "vina" else "rigid_conformer_ensemble"
         if protocol["parameters"].get("macrocycle_treatment") != expected_macrocycle:
             raise SystemExit("Protocol macrocycle treatment does not match the recorded engine")

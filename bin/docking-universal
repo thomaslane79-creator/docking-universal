@@ -103,6 +103,14 @@ doctor() {
     printf '  absent     vina (create it with: conda env create -f environments/vina.yml)\n'
     missing_full=1
   fi
+  if command -v qvinaw >/dev/null 2>&1; then
+    printf '  available  qvinaw / QuickVina-W (%s)\n' "$(command -v qvinaw)"
+  elif command -v conda >/dev/null 2>&1 && conda run -n "${DOCKING_UNIVERSAL_QVINAW_ENV:-docking-universal-qvinaw}" qvinaw --version >/dev/null 2>&1; then
+    printf '  available  qvinaw / QuickVina-W (Conda environment: %s)\n' "${DOCKING_UNIVERSAL_QVINAW_ENV:-docking-universal-qvinaw}"
+  else
+    printf '  absent     qvinaw / QuickVina-W (create it with: conda env create -f environments/qvinaw.yml)\n'
+    missing_full=1
+  fi
 
   printf '\nStage-specific tools\n'
   for tool in $optional; do

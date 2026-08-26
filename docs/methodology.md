@@ -4,9 +4,9 @@ This note records what the workflow does, why the major decisions exist, and whe
 
 ## Docking model and batch scope
 
-AutoDock Vina performs the actual docking search and produces the docking scores in the default workflow. Docking Universal is not a replacement docking engine and does not implement a new scoring function; it is the scientific orchestration and analysis layer around Vina. Its contribution is the end-to-end handling of chemistry and receptor preparation, docking-box definition, independent conformers and seeds, retrospective protocol calibration, batch execution, pose clustering, interaction analysis, provenance, and reporting.
+AutoDock Vina performs the actual docking search and produces the docking scores in the default workflow; QuickVina-W is available as a second Vina-family search engine. Docking Universal is not a replacement docking engine and does not implement a new scoring function. Its contribution is the end-to-end handling of chemistry and receptor preparation, docking-box definition, independent conformers and seeds, retrospective protocol calibration, batch execution, pose clustering, interaction analysis, provenance, and reporting.
 
-Docking Universal currently supports rigid-receptor AutoDock Vina workflows. Vina is the only docking engine supported in this release. Receptor coordinates do not move during a docking job. Ligand rotatable bonds may be sampled according to the PDBQT representation, and independent ligand conformers can be docked across multiple seeds. This is not flexible-receptor or induced-fit docking.
+Docking Universal currently supports rigid-receptor AutoDock Vina and QuickVina-W workflows. Receptor coordinates do not move during a docking job. Ligand rotatable bonds may be sampled according to the engine-compatible PDBQT representation, and independent ligand conformers can be docked across multiple seeds. This is not flexible-receptor or induced-fit docking.
 
 The same preparation and search protocol can be applied to one compound, a multi-record SDF, or a directory of SDF files. Batch execution isolates every compound and retains per-seed outputs before consolidated pose clustering and reporting.
 
@@ -53,7 +53,7 @@ The reference centroid is either the whole protein or the largest chain. Higher 
 
 ## 6. Bound-ligand redocking control
 
-The retrospective control removes the confirmed experimental ligand, prepares the ligand-free receptor, centers a box on the withheld ligand coordinates, and redocks independently generated ligand conformers with AutoDock Vina. Docked poses are mapped back to typed chemistry and compared with the experimental pose using symmetry-aware heavy-atom RMSD in the receptor coordinate frame, without fitting the docked ligand onto the reference. A 2.0 Å threshold is reported by default but remains configurable.
+The retrospective control removes the confirmed experimental ligand, prepares the ligand-free receptor, centers a box on the withheld ligand coordinates, and redocks independently generated ligand conformers with the selected engine. Docked poses are mapped back to typed chemistry and compared with the experimental pose using symmetry-aware heavy-atom RMSD in the receptor coordinate frame, without fitting the docked ligand onto the reference. A 2.0 Å threshold is reported by default but remains configurable.
 
 This tests pose recovery for a known ligand/site under the selected preparation and docking settings. It is separate from prospective compound docking and from ligand-free pocket ranking, and success on one complex does not validate a scoring function generally.
 
@@ -79,9 +79,11 @@ The workflow records:
 
 These artifacts are designed to make a result reproducible and reviewable.
 
-## 9. Ligand preparation and Vina compatibility
+## 9. Ligand preparation and engine compatibility
 
-Open Babel splits ordinary SDF input and can generate an optimized 3D representation. Calibration and protocol-locked screening instead preserve the independently generated ETKDG conformers. Meeko writes ligand PDBQT; the receptor pipeline may use its narrow ADFRsuite compatibility fallback only when the recorded diagnosis permits it. Vina preparation retains Meeko's supported flexible-macrocycle representation. The selected backend and Vina target are written to the preparation manifest.
+Open Babel splits ordinary SDF input and can generate an optimized 3D representation. Calibration and protocol-locked screening instead preserve the independently generated ETKDG conformers. Meeko writes ligand PDBQT; the receptor pipeline may use its narrow ADFRsuite compatibility fallback only when the recorded diagnosis permits it. AutoDock Vina preparation retains Meeko's supported flexible-macrocycle representation. QuickVina-W preparation rigidifies macrocycles and relies on the independently generated conformer ensemble because its older Vina-derived implementation does not support the newer flexible-macrocycle pseudo-atom representation. The selected backend and engine target are written to the preparation manifest.
+
+QuickVina-W uses Vina's scoring model but changes the search strategy, particularly for wide search spaces. Engine choice is therefore locked into every reusable protocol. Passing a control with one engine does not authorize silently switching the associated screening to the other, and scores or poses from separate engines are not treated as identical results.
 
 ## Limitations
 

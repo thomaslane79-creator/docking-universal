@@ -9,8 +9,9 @@ not evidence that affinities or prospective poses are biologically correct.
 
 The crystallographic coordinates are used only by the RMSD comparison. Starting
 conformers are generated independently from bond-order/stereochemical chemistry.
-Vina receives Meeko-prepared PDBQT files, including its supported
-flexible-macrocycle representation.
+The selected Vina-family engine receives Meeko-prepared PDBQT files. Current
+Vina supports Meeko's flexible-macrocycle representation; QuickVina-W uses a
+rigid independently generated conformer ensemble for macrocycles.
 """
 
 import argparse
@@ -173,7 +174,7 @@ def parse_args():
     parser.add_argument("--receptor-pdbqt", required=True, type=Path, help="prepared docking receptor")
     parser.add_argument("--box", required=True, type=Path, help="Vina-format box configuration")
     parser.add_argument("--out", required=True, type=Path)
-    parser.add_argument("--engine", choices=("vina",), default="vina")
+    parser.add_argument("--engine", choices=("vina", "qvinaw"), default="vina")
     parser.add_argument("--tier", choices=tuple(TIERS), default="quick")
     parser.add_argument(
         "--guided-from", type=Path,

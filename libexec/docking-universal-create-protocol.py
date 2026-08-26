@@ -424,7 +424,7 @@ def write_ligand_guided_pdf(out, protocol, figure):
         ["Result element", "Software", "Version used"],
         ["Workflow", "Docking Universal", package_version()], ["Docking parameterization", "Meeko", distribution_version("meeko")],
         ["Conditional receptor repair", "PDBFixer", pdbfixer_version],
-        ["Docking engine specified", "AutoDock Vina", protocol.get("engine_version", "recorded when screening runs")],
+        ["Docking engine specified", "AutoDock Vina" if protocol["engine"] == "vina" else "QuickVina-W", protocol.get("engine_version", "recorded when screening runs")],
         ["3D rendering", "PyMOL Open-Source", protocol.get("pymol_version", "not used")], ["PDF generation", "ReportLab", distribution_version("reportlab")],
     ]
     story = [
@@ -447,14 +447,19 @@ def write_ligand_guided_pdf(out, protocol, figure):
         story.insert(5, P(removal_note, "SmallDU"))
     if figure and Path(figure).is_file():
         item = Image(str(figure)); item._restrictSize(3.6*inch, 2.72*inch); item.hAlign = "CENTER"; story.append(item)
-        story.append(P(f"<b>Figure 1. Ligand-guided docking region for {protocol['target']}.</b> {protocol['site_anchor']} from the selected structure is shown within the prepared receptor. The wireframe records the {box['size_x']} × {box['size_y']} × {box['size_z']} Å AutoDock Vina search box. The ligand identifies the region of interest but does not constitute pose-recovery validation.", "CaptionDU"))
+        story.append(P(f"<b>Figure 1. Ligand-guided docking region for {protocol['target']}.</b> {protocol['site_anchor']} from the selected structure is shown within the prepared receptor. The wireframe records the {box['size_x']} × {box['size_y']} × {box['size_z']} Å Vina-format search box. The ligand identifies the region of interest but does not constitute pose-recovery validation.", "CaptionDU"))
+    references = [
+        P("1. Eberhardt J, Santos-Martins D, Tillack AF, Forli S. AutoDock Vina 1.2.0. J Chem Inf Model. 2021;61:3891-3898. doi:10.1021/acs.jcim.1c00203", "SmallDU"),
+    ]
+    if protocol["engine"] == "qvinaw":
+        references.append(P("2. Hassan NM, Alhossary AA, Mu Y, Kwoh CK. Protein-Ligand Blind Docking Using QuickVina-W With Inter-Process Spatio-Temporal Integration. Sci Rep. 2017;7:15451. doi:10.1038/s41598-017-15571-7", "SmallDU"))
+    references.append(P(f"{len(references) + 1}. Santos-Martins D, He Y, Eberhardt J, et al. Meeko: molecule parameterization and software interoperability for docking and beyond. J Chem Inf Model. 2025;65:13045-13050. doi:10.1021/acs.jcim.5c02271", "SmallDU"))
     story += [
         P("4. Reproducibility, software, and references", "SectionDU"),
         P("The protocol retains the prepared receptor, docking-box configuration, source ligand coordinates, preparation audits, selected settings, and recorded software versions needed to reproduce and review later use."),
         report_table(Table, TableStyle, Paragraph, software, [2.15*inch, 2.25*inch, 1.95*inch], styles, colors),
         Spacer(1, 7), P("<b>Selected references</b>", "SmallDU"),
-        P("1. Eberhardt J, Santos-Martins D, Tillack AF, Forli S. AutoDock Vina 1.2.0. J Chem Inf Model. 2021;61:3891-3898. doi:10.1021/acs.jcim.1c00203", "SmallDU"),
-        P("2. Santos-Martins D, He Y, Eberhardt J, et al. Meeko: molecule parameterization and software interoperability for docking and beyond. J Chem Inf Model. 2025;65:13045-13050. doi:10.1021/acs.jcim.5c02271", "SmallDU"),
+        *references,
     ]
     SimpleDocTemplate(str(out), pagesize=letter, leftMargin=.58*inch, rightMargin=.58*inch, topMargin=.38*inch, bottomMargin=.56*inch, title="Docking Universal protocol development report").build(story)
 
@@ -489,6 +494,7 @@ def parse_args():
     parser.add_argument("--num-modes", type=int, default=15)
     parser.add_argument("--energy-range", type=float, default=8.0)
     parser.add_argument("--conformers", type=int, default=3)
+    parser.add_argument("--engine", choices=("vina", "qvinaw"), default="vina", help="docking engine: Vina or QuickVina-W")
     parser.add_argument("--ph", type=float, default=7.4)
     parser.add_argument("--base-seed", type=int, default=20260808)
     parser.add_argument("--control-tier", choices=("quick", "repeatability", "broader", "conformers", "robust"), default="repeatability", help="control-validated sampling tier (default: repeatability)")
@@ -509,7 +515,7 @@ def main():
         command = [
             sys.executable, Path(__file__).with_name("docking-universal-run.py"),
             "--mode", "control", "--control-tier", args.control_tier,
-            "--ph", args.ph, "--base-seed", args.base_seed,
+            "--ph", args.ph, "--base-seed", args.base_seed, "--engine", args.engine,
         ]
         if args.complex: command += ["--complex", args.complex]
         if args.out: command += ["--out", args.out]
@@ -606,11 +612,11 @@ def main():
         "protocol_type": kind, "target": target, "site_anchor": ligand["resname"] if ligand else Path(selected_box).stem,
         "evidence_basis": evidence_basis, "screening_authority": "user-confirmed-exploratory-use",
         "created_utc": date, "control_status": "not_performed", "unknown_docking_allowed": False,
-        "exploratory_screening_allowed": True, "engine": "vina",
+        "exploratory_screening_allowed": True, "engine": args.engine,
         "parameters": {
             "ph": args.ph, "conformers_per_state": args.conformers, "ensemble_seed": args.base_seed,
             "forcefield": "mmff94", "rmsd_prune_angstrom": 0.75, "tautomers_enumerated": True,
-            "charge_model": "gasteiger", "macrocycle_treatment": "flexible_meeko",
+            "charge_model": "gasteiger", "macrocycle_treatment": "flexible_meeko" if args.engine == "vina" else "rigid_conformer_ensemble",
             "exhaustiveness": args.exhaustiveness, "num_modes": args.num_modes,
             "energy_range_kcal_per_mol": args.energy_range,
             "seeds": [args.base_seed + index for index in range(args.seeds)],
@@ -662,7 +668,7 @@ def main():
             "created_utc": date, "target": target, "target_source": str(local_structure), "compound_count": 0,
             "cavity_score_threshold_used": score_threshold_used,
             "protocol_type": kind, "protocol_validation_status": "Site-guided exploratory protocol; not evaluated by bound-ligand control",
-            "configured_engine": "vina", "configured_engine_version": "recorded when screening runs",
+            "configured_engine": args.engine, "configured_engine_version": "recorded when screening runs",
             "configured_docking_parameters": protocol["parameters"], "configured_locked_inputs": protocol["locked_inputs"],
             "docking_universal_version": package_version(),
             "scientific_software": {

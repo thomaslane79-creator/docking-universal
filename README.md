@@ -2,13 +2,13 @@
 
 **v0.6.4 · Research preview**
 
-Docking Universal provides fully guided, interactive docking workflows on Ubuntu and macOS, from selecting inputs through generating scientific PDF reports. It uses AutoDock Vina and established open-source tools for receptor and ligand preparation, site selection, docking, analysis, and visualization.
+Docking Universal provides fully guided, interactive docking workflows on Ubuntu and macOS, from selecting inputs through generating scientific PDF reports. It supports AutoDock Vina and QuickVina-W alongside established open-source tools for receptor and ligand preparation, site selection, docking, analysis, and visualization.
 
-**Vina performs the docking; Docking Universal manages and documents the surrounding workflow.**
+**A Vina-family engine performs the docking; Docking Universal manages and documents the surrounding workflow.**
 
 ## What Docking Universal adds beyond Vina
 
-AutoDock Vina is the docking engine: it searches an already defined box using already prepared receptor and ligand files, then returns scored poses. Docking Universal turns that calculation into a guided, reproducible scientific workflow. It prepares and checks the inputs, helps establish where docking should occur, tests whether a protocol can recover known evidence, analyzes the resulting poses and interactions, and retains an audit trail of how every result was produced.
+AutoDock Vina and QuickVina-W are the supported docking engines: each searches an already defined box using already prepared receptor and ligand files, then returns scored poses. Docking Universal turns that calculation into a guided, reproducible scientific workflow. It prepares and checks the inputs, helps establish where docking should occur, tests whether a protocol can recover known evidence, analyzes the resulting poses and interactions, and retains an audit trail of how every result was produced.
 
 | Scientific stage | What Docking Universal adds |
 | --- | --- |
@@ -18,14 +18,22 @@ AutoDock Vina is the docking engine: it searches an already defined box using al
 | **Site and docking-box selection** | fpocket cavity detection, descriptor collection, candidate filtering and ranking, numbered and color-matched PyMOL review, docking-box generation, and explicit user selection. |
 | **Experimental control** | Bound-ligand pose-recovery redocking, multi-conformer and independent-seed sampling, symmetry-aware RMSD evaluation, reproducibility criteria, and failure-closed screening authorization. |
 | **Reusable protocols** | Control-validated, ligand-guided exploratory, and site-guided exploratory protocols that lock the prepared receptor, selected box, search settings, evidence status, and supporting records in a portable Docking Universal `.duprotocol` bundle. |
-| **Screening execution** | Guided single- or multi-compound screening, reproducible Vina jobs, isolated per-compound outputs, partial-failure retention, and normalized score collection. |
+| **Screening execution** | Guided single- or multi-compound screening with AutoDock Vina or QuickVina-W, isolated per-compound outputs, partial-failure retention, and normalized score collection. |
 | **Pose analysis** | Cross-seed and cross-conformer symmetry-aware RMSD matrices, Butina pose clustering, cluster populations, energy-ranked representatives, and retained machine-readable tables. |
 | **Interaction analysis and visualization** | PLIP-authoritative interaction calls, customized 2D interaction diagrams, color-matched 3D PyMOL pose and interaction views, and retained PyMOL sessions. |
 | **Scientific reporting** | Scenario-specific PDF reports for controls, protocol creation, cavity selection, protocol reuse, and single- or multi-compound screening, with both study summaries and detailed individual-compound results. |
 | **Workflow-level auditing** | Original inputs, parameters, pocket decisions, box geometry, preparation routes, failed attempts, fallbacks, structural modifications, user approvals, protocol warnings, software versions, intermediate artifacts, raw logs, and authoritative tool outputs remain available for inspection. |
 | **Practical operation** | One-command environment installation, interactive Ubuntu and macOS file selection, exact-path and scripted operation, validation commands, tutorials, documented limitations, and standalone receptor or ligand preparation for other compatible software. |
 
-**Docking Universal is therefore not a graphical replacement for the Vina command line. It is the scientific preparation, validation, analysis, reporting, and audit system surrounding Vina as its current docking engine.**
+**Docking Universal is therefore not a graphical replacement for an engine command line. It is the scientific preparation, validation, analysis, reporting, and audit system surrounding its supported Vina-family engines.**
+
+### Docking engines
+
+AutoDock Vina remains the default. QuickVina-W can be selected with `--engine qvinaw` and is intended especially for broader search regions. The engine is part of every protocol's locked scientific method: a Vina control authorizes only Vina screening, while a QuickVina-W control authorizes only QuickVina-W screening. Scores and poses from the two searches are retained separately and are not treated as interchangeable results.
+
+```bash
+docking-universal dock --engine qvinaw --receptor receptor.pdbqt --ligands prepared_ligands --config box.conf --out results_qvinaw
+```
 
 ## Why I built it: a scientist's perspective
 
@@ -125,7 +133,7 @@ Every command also provides `--help`.
 
 ## Scope
 
-Docking Universal currently supports rigid-receptor structural docking with AutoDock Vina. It does not perform molecular dynamics, induced-fit refinement, or free-energy calculations, and its results require scientific interpretation.
+Docking Universal currently supports rigid-receptor structural docking with AutoDock Vina and QuickVina-W. It does not perform molecular dynamics, induced-fit refinement, or free-energy calculations, and its results require scientific interpretation.
 
 ## License and citation
 

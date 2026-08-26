@@ -6,7 +6,7 @@ conda_command=${DOCKING_UNIVERSAL_CONDA:-conda}
 
 usage() {
   cat <<'EOF'
-Install Docking Universal and its two Conda environments.
+Install Docking Universal and its three Conda environments.
 
 Usage:
   ./install.sh
@@ -37,7 +37,7 @@ EOF
   exit 1
 fi
 
-if [ ! -f "$project_dir/environment.yml" ] || [ ! -f "$project_dir/environments/vina.yml" ]; then
+if [ ! -f "$project_dir/environment.yml" ] || [ ! -f "$project_dir/environments/vina.yml" ] || [ ! -f "$project_dir/environments/qvinaw.yml" ]; then
   printf 'Error: installation environment files were not found beside install.sh.\n' >&2
   exit 1
 fi
@@ -81,6 +81,7 @@ printf 'Repository: %s\n' "$project_dir"
 
 install_environment docking-universal "$project_dir/environment.yml"
 install_environment docking-universal-vina "$project_dir/environments/vina.yml"
+install_environment docking-universal-qvinaw "$project_dir/environments/qvinaw.yml"
 
 printf '\nInstalling the Docking Universal command into the main environment\n'
 "$conda_command" run --no-capture-output -n docking-universal \
@@ -110,5 +111,6 @@ If you are comfortable activating Conda environments, that remains supported:
   docking-universal run
 
 The main environment remains active during normal use. Docking Universal runs
-Vina from docking-universal-vina automatically when a docking stage starts.
+Vina or QuickVina-W from its isolated engine environment automatically when a
+docking stage starts.
 EOF

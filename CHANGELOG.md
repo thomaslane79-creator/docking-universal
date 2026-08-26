@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added QuickVina-W as a second Vina-family docking engine across low-level docking, bound-ligand calibration, exploratory studies, reusable protocols, protocol-locked screening, pose clustering, manifests, and scientific reports. Engine choice is retained as part of the protocol and cannot be silently changed during reuse.
+- Added an isolated `docking-universal-qvinaw` Conda environment, installer routing, cross-platform environment checks, mocked command/provenance tests, and a real QuickVina-W integration smoke stage.
+- Made QuickVina-W ligand preparation explicitly rigidify macrocycles instead of emitting newer Meeko flexible-macrocycle pseudo-atoms that its older Vina-derived implementation may not support.
+
 ## 0.6.4 — 2026-08-25
 
 **Patch release focus:** receptor-model changes are now explicit, durable, and propagated, and ligand-free pocket review is visually unambiguous before selection.

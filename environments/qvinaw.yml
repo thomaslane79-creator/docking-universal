@@ -1,0 +1,7 @@
+name: docking-universal-qvinaw
+channels:
+  - conda-forge
+dependencies:
+  # qvina supplies the qvinaw executable. Keep it isolated from both the main
+  # chemistry/visualization stack and the separately versioned Vina engine.
+  - qvina=2.1.0
