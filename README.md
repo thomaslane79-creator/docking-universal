@@ -6,6 +6,27 @@ Docking Universal provides fully guided, interactive docking workflows on Ubuntu
 
 **Vina performs the docking; Docking Universal manages and documents the surrounding workflow.**
 
+## What Docking Universal adds beyond Vina
+
+AutoDock Vina is the docking engine: it searches an already defined box using already prepared receptor and ligand files, then returns scored poses. Docking Universal turns that calculation into a guided, reproducible scientific workflow. It prepares and checks the inputs, helps establish where docking should occur, tests whether a protocol can recover known evidence, analyzes the resulting poses and interactions, and retains an audit trail of how every result was produced.
+
+| Scientific stage | What Docking Universal adds |
+| --- | --- |
+| **Structure and component records** | RCSB PDB retrieval, deposited-component inventories, ligand identifiers, Chemical Component Dictionary checks, and retained source records. |
+| **Protein preparation** | Iterative Meeko preparation, conditional PDBFixer repair, diagnosed compatibility fallbacks, prepared receptor PDBQT output, and an explicit stop for review before any model-changing component removal. |
+| **Ligand preparation** | SDF validation and splitting, molecular-graph handling, protonation and tautomer enumeration, conformer generation and pruning, charge assignment, and one prepared ligand PDBQT per compound. |
+| **Site and docking-box selection** | fpocket cavity detection, descriptor collection, candidate filtering and ranking, numbered and color-matched PyMOL review, docking-box generation, and explicit user selection. |
+| **Experimental control** | Bound-ligand pose-recovery redocking, multi-conformer and independent-seed sampling, symmetry-aware RMSD evaluation, reproducibility criteria, and failure-closed screening authorization. |
+| **Reusable protocols** | Control-validated, ligand-guided exploratory, and site-guided exploratory protocols that lock the prepared receptor, selected box, search settings, evidence status, and supporting records in a portable Docking Universal `.duprotocol` bundle. |
+| **Screening execution** | Guided single- or multi-compound screening, reproducible Vina jobs, isolated per-compound outputs, partial-failure retention, and normalized score collection. |
+| **Pose analysis** | Cross-seed and cross-conformer symmetry-aware RMSD matrices, Butina pose clustering, cluster populations, energy-ranked representatives, and retained machine-readable tables. |
+| **Interaction analysis and visualization** | PLIP-authoritative interaction calls, customized 2D interaction diagrams, color-matched 3D PyMOL pose and interaction views, and retained PyMOL sessions. |
+| **Scientific reporting** | Scenario-specific PDF reports for controls, protocol creation, cavity selection, protocol reuse, and single- or multi-compound screening, with both study summaries and detailed individual-compound results. |
+| **Workflow-level auditing** | Original inputs, parameters, pocket decisions, box geometry, preparation routes, failed attempts, fallbacks, structural modifications, user approvals, protocol warnings, software versions, intermediate artifacts, raw logs, and authoritative tool outputs remain available for inspection. |
+| **Practical operation** | One-command environment installation, interactive Ubuntu and macOS file selection, exact-path and scripted operation, validation commands, tutorials, documented limitations, and standalone receptor or ligand preparation for other compatible software. |
+
+**Docking Universal is therefore not a graphical replacement for the Vina command line. It is the scientific preparation, validation, analysis, reporting, and audit system surrounding Vina as its current docking engine.**
+
 ## Why I built it: a scientist's perspective
 
 Docking Universal began with a practical question: **how should I determine where to dock?** While building it, I learned how many consequential assumptions can sit behind an apparently straightforward result. I wanted a practical workflow that would make those choices reviewable rather than hide them. [Read more about the design philosophy](docs/design-philosophy.md).
