@@ -9,7 +9,7 @@ Both tutorials use rigid-receptor docking and are compatible with the same batch
 The 1HVR/XK2 tutorial uses the experimental inhibitor to locate the pocket and test whether the chosen docking settings recover its pose.
 
 ```bash
-./bin/docking-universal run --mode control \
+docking-universal run control \
   --complex examples/tutorials/01_bound_ligand/inputs/1HVR.pdb \
   --out examples/tutorials/01_bound_ligand/study
 ```
@@ -21,7 +21,7 @@ The workflow verifies XK2 chemistry, removes it from receptor preparation, defin
 The 2R8N tutorial uses an unbound HIV-1 subtype C protease structure. Water and glycerol crystallization additives are present, but neither is treated as a relevant inhibitor or pose-recovery control. Protein cavities must therefore be detected and reviewed.
 
 ```bash
-./bin/docking-universal run --mode exploratory \
+docking-universal run exploratory \
   --complex examples/tutorials/02_ligand_free_cavity/inputs/2R8N.pdb \
   --ligands examples/tutorials/02_ligand_free_cavity/inputs/indinavir_pubchem_5362440.sdf \
   --out examples/tutorials/02_ligand_free_cavity/study

@@ -80,14 +80,14 @@ Prepared receptor and ligand PDBQT files are separate from Docking Universal `.d
 
 | What you want to prepare | Command | Output |
 | --- | --- | --- |
-| Protein receptor | `docking-universal prepare-receptor protein.pdb` | Prepared receptor PDBQT and diagnostic logs. Model-changing removal requires review. |
+| Protein receptor and docking-site files | `docking-universal prepare-receptor protein.pdb` | Prepared receptor PDBQT, pocket/box files, and diagnostic logs. Model-changing removal requires review. |
 | One or more compounds | `docking-universal prepare-ligand compounds.sdf` | One prepared ligand PDBQT per compound with preparation metadata. |
 
 Additional component commands can also be used independently in compatible workflows:
 
 | Task | Command | Output |
 | --- | --- | --- |
-| Find candidate pockets | `docking-universal pockets` | Ranked pocket coordinates, box structures, and Vina configuration files. |
+| Find and review candidate pockets | `docking-universal pockets` | Ranked pocket coordinates, box structures, Vina configuration files, and a cavity report. |
 | Dock prepared inputs | `docking-universal dock` | Per-compound Vina poses, logs, and a run manifest. |
 | Collect docking scores | `docking-universal collect` | Tidy CSV results. |
 | Compare a docked pose with a reference | `docking-universal compare-redock` | Symmetry-aware RMSD results, complexes, and an overlay scene. |

@@ -4,9 +4,10 @@ Docking Universal consolidates distinct structural-docking utilities found in th
 
 | Packaged component | Source lineage | Consolidation decision |
 | --- | --- | --- |
-| `docking-universal run` | New study-orchestration layer | Guides complete control, approved-screen, or exploratory studies; splits libraries, isolates failures, and writes consolidated reports |
-| `docking-universal prepare` | `prepare_receptor_and_conf_v1.35.13_surface_local_pockets.sh` | Latest receptor, ligand-detection, pocket-diagnostics, box, and PyMOL-scene workflow; exposed as the supported preparation command |
-| `docking-universal ligands` | `prepare_ligands_from_sdf_with_smiles.sh` | Preserves SDF splitting, 3D optimization, PDBQT conversion, and metadata insertion; removes the machine-specific executable path |
+| `docking-universal run` | Study-orchestration layer | Guides complete control-validated or exploratory studies; splits libraries, isolates failures, and writes consolidated reports |
+| `docking-universal create-protocol` | Protocol-creation orchestration | Creates control-validated, ligand-guided exploratory, or site-guided exploratory protocols, reports, and portable `.duprotocol` bundles |
+| `docking-universal prepare-receptor` | Consolidated receptor and site-preparation workflow | Prepares the receptor, records fallbacks and approvals, detects ligand/site context, and writes pocket, box, and PyMOL review outputs |
+| `docking-universal prepare-ligand` | Consolidated ligand-preparation workflow | Preserves SDF splitting, 3D optimization, PDBQT conversion, and metadata insertion without machine-specific executable paths |
 | `docking-universal pockets` | Receptor/pocket preparation plus consolidated reporting | Runs an independent ligand-free cavity study, retains ranked coordinates and boxes, and writes cavity-only PDF, HTML, Markdown, and JSON reports; the smaller historical generator remains an internal compatibility stage |
 | `docking-universal dock` | `dock_all.sh` | Replaces hard-coded structures and directories with one checked AutoDock Vina interface and a run manifest |
 | `docking-universal control` / `calibrate` | Bound-ligand scripts plus new calibration layer | Runs the complete guided control with consolidated reports; verifies a selected crystal ligand, creates unbiased ensembles, runs tiered seed/conformer controls, and writes a reusable target-locked protocol when approved |
@@ -17,7 +18,7 @@ Docking Universal consolidates distinct structural-docking utilities found in th
 | `docking-universal render3d` | New consolidation layer | Renders existing PML/session/coordinate outputs with headless PyMOL |
 | `docking-universal depict2d` | New consolidation layer | Creates generic 2D PNG/SVG depictions from existing coordinate files using RDKit or Open Babel |
 
-Older receptor-script revisions are treated as development history, not separate public commands. Their useful behavior is represented by the latest supported workflow; known older contradictions and hard-coded paths are not shipped as active interfaces.
+Earlier script revisions are development history, not separate public commands. Their useful behavior is represented by the current supported workflow; contradictory defaults and hard-coded paths are not active interfaces.
 
 The supported preparation commands were further reworked for packaging: scientific executables can be supplied through options or environment variables, ligand chemistry operations use a space-safe temporary workspace, metadata insertion is cross-platform, input/mode validation is explicit, and outputs can be directed independently of the source workspace.
 

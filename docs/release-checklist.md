@@ -8,10 +8,10 @@ publish when the following items are checked:
    `CITATION.cff`.
 2. Do not publish generated `study/` folders or local `runs/`; they are ignored
    so a fresh user starts from the documented inputs.
-3. Run `conda env create -f environment.yml`, activate the environment, and
-   run `make test` on the target platform.
-4. Run `./bin/docking-universal doctor` and record the platform and optional
-   Vina/PyMOL availability.
+3. Run `bash install.sh`, then run `make test` on the target platform.
+4. Run `docking-universal check-install --full`, `docking-universal validate
+   integration`, and the release suite when publishing a scientific-workflow
+   change. Record the platform and validation output.
 5. Use the two tutorials as demonstrations: the 1HVR/XK2 retrospective control
    followed by the rilpivirine held-out screen, and the 2R8N/indinavir
    ligand-free exploratory workflow.
@@ -19,6 +19,6 @@ publish when the following items are checked:
    replicated search, pose clustering, and visualization. Do not present
    scores as measured affinities or one control as broad validation.
 
-The curated reference layout under `tests/expected_runs/` is intentionally
-small and reviewable. Full local studies remain reproducible but are not
-required repository contents.
+The compact fixtures under `tests/inputs/` and parser expectations under
+`tests/expected_outputs/` are intentionally small and reviewable. Full local
+studies remain reproducible but are not required repository contents.

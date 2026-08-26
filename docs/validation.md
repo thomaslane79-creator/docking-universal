@@ -1,4 +1,4 @@
-# Raw-input validation
+# Validation evidence and limitations
 
 This page is the index for validation performed on Docking Universal. Each record distinguishes software execution from scientific validation: a command can complete while a target-specific control fails, and only a passing control supports an approved screening protocol.
 
@@ -7,7 +7,7 @@ This page is the index for validation performed on Docking Universal. Each recor
 | Validation area | What was exercised | Result and detailed record |
 | --- | --- | --- |
 | Installed Conda command | `make install-conda`, command discovery outside the repository, CLI help, and installed integration validation | Passed; installed validation writes to caller-owned output and does not require a writable source checkout. |
-| Automated regression suite | CLI checks plus Python unit/integration tests for workflow selection, guided options, reports, PDBFixer precleaning, and CCD audit handling | Passed: 45 tests in the final local regression run. |
+| Automated regression suite | CLI checks plus Python unit/integration tests for workflow selection, guided options, reports, PDBFixer precleaning, and CCD audit handling | Passed: 94 collected Python tests plus the maintained shell CLI and installation checks. |
 | Continuous integration | Shell/CLI checks on macOS and Ubuntu | Passed on both operating systems for the reconciled release branch. Windows is not a supported target in this release. |
 | Bound-ligand reference workflow | Public HIV-1 protease complex `1HVR` with inhibitor XK2, including preparation, control, docking, analysis, visualisation, and reports | Passed; details below. |
 | Ligand-free reference workflow | Public unbound `2R8N` preparation and Indinavir exploratory workflow | Completed as exploratory; details below. |
@@ -39,7 +39,7 @@ Downloaded inputs:
 
 The control retrieves coordinate-free XK2 chemical identity from the RCSB CCD metadata API. No CCD ideal-coordinate SDF is an input to the default control.
 
-The downloaded raw inputs are not redistributed in this repository. The checksums identify the files used for the test. A small set of derived, self-contained PyMOL validation artifacts is included under `tests/expected_runs/1hvr_xk2/pymol`.
+The downloaded raw inputs are not redistributed in this repository. The checksums identify the files used for the test. Compact synthetic inputs and parser expectations used by the maintained regression suite are retained under `tests/inputs/` and `tests/expected_outputs/`; complete public-structure studies are generated locally.
 
 ## What was tested
 
@@ -48,7 +48,7 @@ The raw PDB and SDF were processed using the declared main environment and isola
 1. Receptor atoms and `MODRES`-declared polymer residues were selected from the raw PDB and converted strictly with Meeko; no permissive bad-residue deletion was used. Meeko fetched the official CSO chemical-component definition from RCSB to type the two modified cysteines. Under the new strict-first pipeline, this case and the existing 2R8N example produced byte-identical receptor PDBQT files without invoking PDBFixer. Their selected boxes and paired downstream docking scores also matched the earlier direct-Meeko path.
 2. XK2 was prepared from the raw SDF with Open Babel and Meeko.
 3. Meeko prepared AutoDock Vina PDBQT input while retaining the recorded ligand chemistry and conformer provenance.
-4. For the ligand-free tests, XK2 was withheld from fpocket. Both the guided conservative workflow and the standalone robust command ranked and boxed sites from protein coordinates alone.
+4. For the ligand-free tests, XK2 was withheld from fpocket. Both the guided conservative workflow and the robust `pockets` pathway ranked and boxed sites from protein coordinates alone.
 5. A retrospectively selected recovered site was used for a low-exhaustiveness software smoke run with Vina 1.2.7.
 6. Vina output was collected to CSV with its score and RMSD-bound fields retained explicitly.
 7. The top Vina pose was combined with receptor coordinates for PLIP analysis, custom PML generation, headless PyMOL rendering, and generic RDKit depiction.
@@ -60,7 +60,7 @@ The three remaining second-cohort stops require specialized handling rather than
 
 ## Ligand-centered preparation result
 
-The guided `prepare` command was also run directly on the untouched complex PDB with strict Meeko preparation and ligand-centered mode selected. `MODRES`-declared CSO residues were retained as polymer context rather than misclassified as free ligands; XK2 was the only ligand candidate.
+The guided `prepare-receptor` command was also run directly on the untouched complex PDB with strict Meeko preparation and ligand-centered mode selected. `MODRES`-declared CSO residues were retained as polymer context rather than misclassified as free ligands; XK2 was the only ligand candidate.
 
 - prepared receptor: 99 residues and 922 atoms in chain A, and 99 residues and 922 atoms in chain B;
 - ligand atoms detected: 46;
@@ -70,7 +70,7 @@ The guided `prepare` command was also run directly on the untouched complex PDB 
 - independently calculated XK2 centroid: the same coordinates to displayed precision;
 - generated box size: 26 × 26 × 26 Å.
 
-The generated ligand-centered PML was rendered headlessly to 800 × 600 PNG and visually inspected on the M2 reference system.
+The generated ligand-centered PML was rendered headlessly to an 800 × 600 PNG and visually inspected in the reference validation environment.
 
 ## Ligand-free pocket result
 
@@ -78,7 +78,7 @@ The bound XK2 coordinates in the original complex were withheld from fpocket and
 
 ### Guided full-pipeline run
 
-The interactive `prepare` workflow was run on the prepared protein-only PDB, with conservative fpocket settings, a maximum of three cavities, centroid-based centers, and per-chain reference centroids. It detected no ligand and selected the two candidates that passed its score and geometry filters:
+The interactive `prepare-receptor` workflow was run on the prepared protein-only PDB, with conservative fpocket settings, a maximum of three cavities, centroid-based centers, and per-chain reference centroids. It detected no ligand and selected the two candidates that passed its score and geometry filters:
 
 | Selected cavity | Distance from predicted center to withheld XK2 centroid |
 | --- | ---: |
@@ -134,7 +134,7 @@ The test exposed and led to corrections for:
 - report parsing that confused `Score` with `Druggability Score` and `Volume` with `Volume score`;
 - nonnumeric pocket extents and invalid negative box sizes;
 - configuration files that incorrectly named a source PDB as a docking receptor;
-- quoted PyMOL PML paths that produced a valid but blank PNG on the M2 reference build;
+- quoted PyMOL PML paths that produced a valid but blank PNG in the reference validation environment;
 - `MODRES` polymer modifications that could otherwise be misclassified as ligands;
 - Bash `/dev/fd` restrictions in headless execution, handled by the recorded file-only logging mode.
 - active Conda environments that exposed `python` but allowed macOS `python3` to resolve outside the environment; Python-backed stages now consistently use the active environment interpreter;
