@@ -23,7 +23,7 @@ make test
 
 The current automated suite is exercised in GitHub Actions on current Ubuntu and macOS runners after creating the declared Conda environment. That supports portability at the software-test level. Because compiled scientific tools can differ across platforms, run integration or release validation on the target workstation before production use.
 
-The [complete two-cohort, 100-public-PDB receptor-preparation record](receptor-preparation-validation-2026-08-21.md) documents tested preparation paths, known limitations, public entry IDs, and retained evidence for the general and covalent-linkage stress-test cohorts.
+The [complete two-cohort, 100-public-PDB receptor-preparation record](receptor-preparation-validation-2026-08-21.md) documents tested preparation paths, known limitations, public entry IDs, and retained evidence for the general and covalent-linkage stress-test cohorts. The accompanying [86-report validation-evidence bundle](https://github.com/thomaslane79-creator/docking-universal/releases/download/v0.6.4/docking-universal-100-pdb-validation-evidence-86-reports.zip) contains the 79 original reports—including the guided 5NBX histidine-template case—six complete v0.6.4 reports after the `LINK`-filter correction, the audited 5KRH explicit-removal report, and machine-readable summaries. Fourteen attempted structures remain without complete reports; a single clean v0.6.4 rerun of all 100 remains pending.
 
 The same checks and the real-tool suites are available through the public interface:
 
