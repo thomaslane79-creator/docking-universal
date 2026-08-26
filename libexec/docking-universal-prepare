@@ -24,8 +24,8 @@ print_help() {
 Docking Universal - auditable receptor and docking-box preparation
 
 Usage:
-  docking-universal prepare <complex.pdb>
-  docking-universal prepare --help
+  docking-universal prepare-receptor <complex.pdb>
+  docking-universal prepare-receptor --help
 
 Docking Universal prepares a receptor, detects bound ligands, discovers pockets with
 fpocket, and writes AutoDock Vina configuration plus PyMOL review files.
@@ -62,7 +62,7 @@ Common environment settings:
   MEEKO_SET_TEMPLATE            Explicit residue template, e.g. A:36=HIE
 
 Example:
-  FEEDBACK_LEVEL=guided docking-universal prepare receptor_complex.pdb
+  FEEDBACK_LEVEL=guided docking-universal prepare-receptor receptor_complex.pdb
 
 See the project README for the complete settings reference and scientific
 method notes.

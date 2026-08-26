@@ -6,13 +6,13 @@ This note records what the workflow does, why the major decisions exist, and whe
 
 AutoDock Vina performs the actual docking search and produces the docking scores in the default workflow. Docking Universal is not a replacement docking engine and does not implement a new scoring function; it is the scientific orchestration and analysis layer around Vina. Its contribution is the end-to-end handling of chemistry and receptor preparation, docking-box definition, independent conformers and seeds, retrospective protocol calibration, batch execution, pose clustering, interaction analysis, provenance, and reporting.
 
-Docking Universal currently supports rigid-receptor AutoDock Vina workflows. Vina is the only docking engine included in this research preview; a smina comparison backend may be evaluated in a future version. Receptor coordinates do not move during a docking job. Ligand rotatable bonds may be sampled according to the PDBQT representation, and independent ligand conformers can be docked across multiple seeds. This is not flexible-receptor or induced-fit docking.
+Docking Universal currently supports rigid-receptor AutoDock Vina workflows. Vina is the only docking engine supported in this release. Receptor coordinates do not move during a docking job. Ligand rotatable bonds may be sampled according to the PDBQT representation, and independent ligand conformers can be docked across multiple seeds. This is not flexible-receptor or induced-fit docking.
 
 The same preparation and search protocol can be applied to one compound, a multi-record SDF, or a directory of SDF files. Batch execution isolates every compound and retains per-seed outputs before consolidated pose clustering and reporting.
 
 ## 1. Receptor preparation
 
-Docking Universal reads a PDB structure, retains protein atoms, `MODRES`-declared polymer modifications, and a small set of supported metal elements, and removes waters and unrelated heteroatoms from the receptor. It first attempts strict Meeko conversion of that filtered receptor. If strict conversion fails, conservative PDBFixer repair resolves alternate locations and missing side-chain atoms without building missing loops or terminal atoms, after which strict Meeko is retried. For a depositor-annotated disulfide that causes Meeko's padding error, paired cysteines are retried as `CYX` templates so the bridge is preserved and auditable rather than removed. If safe fallbacks fail, unmatched components are omitted only after an explicit interactive user approval, with the decision retained in the preparation record. ADFRsuite remains a selectable legacy PDBQT backend. Fixed-width PDB coordinate and element columns are used throughout.
+Docking Universal reads a PDB structure, retains protein atoms, `MODRES`-declared polymer modifications, and a small set of supported metal elements, and removes waters and unrelated heteroatoms from the receptor. It first attempts strict Meeko conversion of that filtered receptor. If strict conversion fails, conservative PDBFixer repair resolves alternate locations and missing side-chain atoms without building missing loops or terminal atoms, after which strict Meeko is retried. For a depositor-annotated disulfide that causes Meeko's padding error, paired cysteines are retried as `CYX` templates so the bridge is preserved and auditable rather than removed. A narrow ADFRsuite compatibility route may be attempted for diagnosed linked deposited chemistry. If safe fallbacks fail, unmatched components are omitted only after explicit interactive user approval, with the decision and exact inventory retained in the preparation record. Fixed-width PDB coordinate and element columns are used throughout.
 
 ## 2. Ligand detection
 
@@ -32,7 +32,7 @@ When a detected ligand is selected, its atom centroid becomes the Vina box cente
 
 Without a selected ligand, Docking Universal can run conservative, expanded, or permissive `fpocket` settings. In comparison mode, it evaluates candidate-cavity counts and uses the run with more cavities that remain within configured alpha-sphere-count and bounding-box limits. The resulting cavities are reviewed visually, and the user selects a docking box for the calculation; this is not a claim that the software has identified a biologically validated pocket.
 
-The current pre-release uses a configurable cubic box edge (26 Å by default). In a bound-ligand control, the center is fixed at the experimental ligand coordinates; in ligand-free docking, it is centered on the reviewed cavity. It does not yet derive the box dimensions directly from cavity bounds; cavity-derived dimensions with explicit padding are a planned future option.
+The current release uses a configurable cubic box edge (26 Å by default). In a bound-ligand control or ligand-guided exploratory protocol, the center is fixed at the selected ligand coordinates; in site-guided exploratory docking, it is centered on the reviewed cavity. The current workflow does not derive box dimensions directly from cavity bounds.
 
 Pockets must meet the fpocket score threshold. With strict local filtering enabled, unusually broad pockets are excluded rather than merely warned about.
 
@@ -61,7 +61,7 @@ The crystal ligand is withheld from docking input and used only as the RMSD refe
 
 Calibration escalates in explicit tiers. Quick diagnostics use three conformers and two seeds; repeatability increases to five seeds; broader search raises exhaustiveness and retained poses; conformer expansion increases independent starting geometries; robust mode combines those changes. The default approval rule requires sampling and ranking recovery for five independent seeds. Repeated failure should trigger input inspection rather than indefinite parameter escalation.
 
-An approved v1 protocol locks the receptor and docking-box SHA-256 hashes, engine, macrocycle treatment, pH, charge model, conformer count, seeds, exhaustiveness, retained modes, and energy range. Unknown docking refuses changed or unapproved records. Transferring these parameters tests unknown compounds consistently with the control but does not transfer proof of pose or affinity accuracy.
+A reusable `.duprotocol` bundle locks the receptor and docking-box hashes, engine, macrocycle treatment, pH, charge model, conformer count, seeds, exhaustiveness, retained modes, and energy range. Control-validated protocols also carry passing pose-recovery evidence. Ligand-guided and site-guided protocols remain explicitly exploratory. Screening refuses changed bundle contents; consistent reuse does not transfer proof of pose or affinity accuracy.
 
 ## 7. Redundant pocket suppression
 
@@ -81,11 +81,11 @@ These artifacts are designed to make a result reproducible and reviewable.
 
 ## 9. Ligand preparation and Vina compatibility
 
-Open Babel splits ordinary SDF input and can generate an optimized 3D representation. Calibration and protocol-locked screening instead preserve the independently generated ETKDG conformers. Meeko or the legacy ADFRsuite backend writes PDBQT. Vina preparation retains Meeko's supported flexible-macrocycle representation. The selected backend and Vina target are written to the preparation manifest.
+Open Babel splits ordinary SDF input and can generate an optimized 3D representation. Calibration and protocol-locked screening instead preserve the independently generated ETKDG conformers. Meeko writes ligand PDBQT; the receptor pipeline may use its narrow ADFRsuite compatibility fallback only when the recorded diagnosis permits it. Vina preparation retains Meeko's supported flexible-macrocycle representation. The selected backend and Vina target are written to the preparation manifest.
 
 ## Limitations
 
-- Alternate locations and insertion codes are not modeled explicitly.
+- Alternate locations are resolved to one recorded choice rather than modeled as an ensemble; insertion-code handling remains constrained by the selected external templates.
 - Ligand detection relies on residue-name exclusions and atom count.
 - Protein preparation behavior depends on the selected PDBFixer, Meeko, or ADFRsuite version and on available residue templates. Every repair or fallback path requires review near the selected docking site.
 - When Meeko finds a histidine tied between valid HID/HIE templates, guided preparation identifies the residue and asks for HIE (NE2 protonated), HID (ND1 protonated), HIP (doubly protonated, positive), or a review stop. The selected assignment is retained in `histidine_template_selection.tsv`; unattended use must provide an explicit `MEEKO_SET_TEMPLATE`, because the workflow does not guess a biologically correct histidine state.

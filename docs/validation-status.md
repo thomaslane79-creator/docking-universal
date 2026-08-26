@@ -28,9 +28,9 @@ The [complete two-cohort, 100-public-PDB receptor-preparation record](receptor-p
 The same checks and the real-tool suites are available through the public interface:
 
 ```bash
-./bin/docking-universal validate quick
-./bin/docking-universal validate integration
-./bin/docking-universal validate release --background
+docking-universal validate quick
+docking-universal validate integration
+docking-universal validate release --background
 ```
 
 The release suite is intentionally slow. It first repeats the integration probes, then runs the 1HVR/XK2 multi-seed pose-recovery control, a protocol-locked Rilpivirine screen, and a ligand-free 2R8N/Indinavir exploratory study. Every invocation creates a new timestamped directory in `validation_runs/` and writes `status.json`; `PASSED` means the expected software stages and artifacts completed, not that every predicted pose is biologically correct.
@@ -41,8 +41,8 @@ The maintained scientific environment has been checked with fpocket, Meeko, PDBF
 
 - ligand-centered 1HVR/XK2 receptor preparation and box generation;
 - strict-Meeko-first receptor conversion, conservative PDBFixer fallback auditing, and explicit user-approved component-removal behavior after safe attempts fail;
-- historical receptor-preparation robustness sampling across 50 public PDB structures: 47/50 produced a PDBQT under the then-current pipeline (10/10 in the original cohort and 37/40 in an additional reproducibly selected cohort). Of those, 41 completed without unmatched-component removal, one used the recorded guided histidine selection, and five used the former automatic Meeko cleanup that omitted unmatched components. The current workflow requires explicit approval for that model-changing step;
-- explicit review stops for the four additional-cohort structures involving a heme/cofactor template, protein-DNA template conflicts, linked glycans, or ambiguous histidine protonation rather than silent component deletion or state guessing;
+- reconciled receptor-preparation robustness across 50 public PDB structures: 46/50 produced a PDBQT under the current safety policy, including two that required explicit user-approved removal; four stopped rather than silently deleting or guessing unsupported chemistry;
+- a separate 50-structure linked-chemistry stress panel in which 39/50 produced PDBQTs and the remaining documented stops or timeouts were retained rather than converted into silent successes;
 - unchanged prepared PDBQT hashes for the existing 1HVR and 2R8N examples when strict Meeko succeeds, plus matching selected boxes and downstream docking results;
 - 2R8N ligand-free preparation in conservative, expanded, and permissive fpocket modes;
 - deepest-pocket and centroid box centers, including whole-protein and per-chain centroid scope;

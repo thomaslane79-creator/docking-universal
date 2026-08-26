@@ -83,10 +83,9 @@ The final check reports whether PDBFixer is available. The strict Meeko path rem
 
 No manual activation is required for normal package use. If `vina` is not already on `PATH`, Docking Universal automatically looks for it in `docking-universal-vina`.
 
-An installed copy can run validation from any writable directory:
+An installed copy can run validation from any writable directory without manual Conda activation:
 
 ```bash
-conda activate docking-universal
 mkdir -p validation-work
 cd validation-work
 docking-universal validate quick
@@ -121,8 +120,8 @@ Conda installs Qt, Cairo, OpenGL support libraries, and other low-level PyMOL de
 | Pipeline stage | Required package | Purpose |
 | --- | --- | --- |
 | Receptor pre-cleaning | PDBFixer | Resolve alternate locations, repair missing side-chain atoms, and standardize recognized modified residues before PDBQT conversion |
-| Receptor preparation | ADFRsuite `prepare_receptor` (legacy) or Meeko | Validate chemistry and create docking-ready receptor PDBQT |
-| Compound preparation | Open Babel plus ADFRsuite `prepare_ligand` (legacy) or Meeko | Split, convert, optimize, and create ligand PDBQT |
+| Receptor preparation | Meeko, with conditional PDBFixer repair and a narrow ADFRsuite compatibility fallback | Validate chemistry and create docking-ready receptor PDBQT |
+| Compound preparation | Open Babel plus Meeko | Split, validate, convert, optimize, and create ligand PDBQT |
 | Chemical states + conformers | MolScrub 0.2.2 plus RDKit | pH-aware protomer/tautomer enumeration and independent seeded ETKDG/MMFF ensembles |
 | Pocket discovery | fpocket | Detect and rank candidate cavities |
 | Docking | AutoDock Vina 1.2.7 (engine environment) | Perform docking search and scoring |
@@ -145,16 +144,16 @@ docking-universal dock --engine vina  --receptor receptor.pdbqt --ligands prepar
 
 Each output directory receives a manifest containing the selected engine, version, executable source, receptor, ligand directory, and configuration file.
 
-The `control` command uses this arrangement automatically. Users do not switch environments manually. Vina is the only docking engine supported in this research preview; a smina comparison backend may be evaluated in a future version.
+All report-producing workflows use this arrangement automatically. Users do not switch environments manually. Vina is the only docking engine supported in this release.
 
-After a five-seed control passes, use its target-locked record for an unknown compound:
+After creating a reusable protocol, use its portable Docking Universal bundle for new compounds:
 
 ```bash
-docking-universal screen --protocol CONTROL/04_redocking/vina/broader/protocol.json \
+docking-universal screen --protocol 1HVR_XK2_control-validated_20260825.duprotocol \
   --ligands compound.sdf --out compound_run
 ```
 
-Screening verifies the recorded receptor and box hashes before starting. A control record cannot be reused after either input changes. The public `screen` command runs the complete guided screen and writes PDF, HTML, Markdown, and JSON reports.
+Screening verifies the receptor and box recorded inside the bundle before starting. A protocol cannot be reused after either locked input changes. The public `screen` command runs the complete guided screen and writes PDF, HTML, Markdown, and JSON reports. Control-validated protocols carry passing pose-recovery evidence; exploratory protocols remain explicitly exploratory and require user authorization when reused.
 
 ## PLIP visualization design
 
@@ -170,7 +169,7 @@ Docking Universal tries the filtered original receptor with strict Meeko first. 
 
 When a depositor-annotated `SSBOND` pair triggers Meeko's disulfide-padding error, Docking Universal retries with both cysteines assigned the standard disulfide `CYX` template. The bridge is retained and listed in `receptor/disulfide_template_selection.tsv`; it is never silently removed. If all safe fallbacks then fail in an interactive terminal, Docking Universal displays the current diagnosis and offers one final, explicit option to omit unmatched components with Meeko. The prompt warns that complete protein/peptide residues may be removed, not merely missing atoms or optional hetero components. Declining leaves the receptor unchanged and stops. Accepting writes the exact TSV inventory, approval record, and raw log; removal of any standard amino-acid residue is labeled a high-severity structural modification in the original and all protocol-reuse reports. Target-matched control redocking remains required before screening.
 
-When a retained multi-atom `LINK`ed component is present and strict Meeko rejects it, or Meeko explicitly reports unsupported linked deposited chemistry, Docking Universal can make one final legacy ADFRsuite preparation attempt (`DOCKING_UNIVERSAL_ADFR_FALLBACK=1`, the default). Coordination waters and unsupported single-atom ions are not treated as covalent components solely because they appear in a `LINK` record. This narrow fallback is intended for linked small-molecule adducts, not glycans, DNA/RNA, heme, metals, or arbitrary cofactors. It retains `receptor/receptor_adfr_fallback.log`, records the backend switch, and requires a successful target-matched control redocking before approval. The preparer discovers `~/ADFRsuite-1.0/bin/prepare_receptor` when installed in that conventional location; otherwise set `DOCKING_UNIVERSAL_ADFR_FALLBACK_BIN` to its executable path. Set `DOCKING_UNIVERSAL_ADFR_FALLBACK=0` to disable it.
+When a retained multi-atom `LINK`ed component is present and strict Meeko rejects it, or Meeko explicitly reports unsupported linked deposited chemistry, Docking Universal can make one final ADFRsuite compatibility attempt (`DOCKING_UNIVERSAL_ADFR_FALLBACK=1`, the default). Coordination waters and unsupported single-atom ions are not treated as covalent components solely because they appear in a `LINK` record. This narrow fallback is intended for linked small-molecule adducts, not glycans, DNA/RNA, heme, metals, or arbitrary cofactors. It retains `receptor/receptor_adfr_fallback.log`, records the backend switch, and requires a successful target-matched control redocking before approval. The preparer discovers `~/ADFRsuite-1.0/bin/prepare_receptor` when installed in that conventional location; otherwise set `DOCKING_UNIVERSAL_ADFR_FALLBACK_BIN` to its executable path. Set `DOCKING_UNIVERSAL_ADFR_FALLBACK=0` to disable it.
 
 If the remaining error is specifically an ambiguous histidine tautomer, guided preparation explains HIE, HID, and HIP and asks which template to use before retrying. The choice is recorded. For unattended execution, set an exact Meeko assignment such as `MEEKO_SET_TEMPLATE=A:36=HIE`; no histidine state is chosen silently.
 
@@ -178,9 +177,7 @@ If preparation still stops, both the interactive terminal and `receptor_failure_
 
 An earlier installed-copy problem prevented the PDBFixer helper from being found at its packaged location; that path-resolution defect is fixed. A later Meeko rejection does not mean PDBFixer failed to run: PDBFixer may successfully repair ordinary missing atoms or alternate locations while leaving specialized cofactors, covalent linkages, or unsupported templates unresolved.
 
-The original validated receptor and ligand PDBQT outputs used ADFRsuite 1.0, installed separately. Meeko 0.7.1 is included in the clean Conda environment because it is the portable preparation tool maintained with AutoDock Vina. Preparation backend changes can affect atom typing, protonation, charge assignment, and therefore scientific results; the backend and version should always be recorded.
-
-Meeko now passes an end-to-end raw 1HVR/XK2 test, including strict handling of RCSB `MODRES` chemical-component metadata. That establishes a verified portable path for this case; it does not prove Meeko and ADFRsuite produce scientifically equivalent structures. Use ADFRsuite to reproduce original preparation behavior and record the selected backend for every study.
+Meeko 0.7.1 is the primary preparation backend in the declared environment. Backend changes can affect atom typing, protonation, charge assignment, and therefore scientific results; Docking Universal records the backend and version used. The ADFRsuite route is a narrow compatibility fallback and must not be assumed scientifically equivalent to Meeko without target-specific review and control evidence.
 
 ## Verification performed
 

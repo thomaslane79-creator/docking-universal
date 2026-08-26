@@ -25,9 +25,9 @@
   <main id="main">
     <section class="hero" id="top">
       <div class="hero-copy">
-        <p class="eyebrow">Structural bioinformatics · M-series verified research software</p>
+        <p class="eyebrow">Structural docking workflows · Ubuntu and macOS</p>
         <h1>Scientific docking workflow orchestration, validation, analysis, visualization, and reporting.</h1>
-        <p class="lede"><strong>Docking Universal is built around AutoDock Vina and established open-source structural-bioinformatics tools.</strong> It provides one guided, configurable Bash interface for control-guided or ligand-free docking studies while retaining independently composable commands, complete provenance, PyMOL Open-Source visualizations, and automatic scientific PDF reports.</p>
+        <p class="lede"><strong>Docking Universal is built around AutoDock Vina and established open-source structural-bioinformatics tools.</strong> It provides guided workflows for complete studies, reusable protocol creation, and protocol-based screening while retaining composable commands, complete provenance, PyMOL Open-Source visualizations, and automatic scientific PDF reports.</p>
         <p class="lede"><strong>AutoDock Vina performs the docking search and scoring.</strong> Docking Universal makes the surrounding established open-source toolchain reproducible, reviewable, batch-capable, and easier to run without launching each script manually.</p>
         <div class="actions">
           <a class="button primary" href="#install">Get started</a>
@@ -36,14 +36,14 @@
           <a class="button secondary" href="methodology.md">Read the method</a>
         </div>
         <dl class="hero-stats">
-          <div><dt>17</dt><dd>composable commands</dd></div>
+          <div><dt>3</dt><dd>main guided workflows</dd></div>
           <div><dt>2D + 3D</dt><dd>visual outputs</dd></div>
           <div><dt>1</dt><dd>auditable pipeline</dd></div>
         </dl>
       </div>
       <figure class="hero-visual">
-        <img src="assets/end-to-end-two-pathways-mockup.png" alt="Control-guided and ligand-free docking workflows using AutoDock Vina and fpocket">
-        <figcaption><span class="dot"></span> Control-guided screening or ligand-free exploratory screening</figcaption>
+        <img src="assets/end-to-end-workflows-current-capabilities.png" alt="Current control-guided and ligand-free exploratory Docking Universal workflows">
+        <figcaption><span class="dot"></span> Guided workflows with reusable reports and audit records</figcaption>
       </figure>
     </section>
 
@@ -63,12 +63,12 @@
 
     <section class="section workflow-overview" aria-labelledby="workflow-overview-title">
       <div class="section-heading">
-        <p class="eyebrow">One guided interface · two scientific pathways · auditable outputs</p>
+        <p class="eyebrow">One guided interface · report-producing workflows · auditable outputs</p>
         <h2 id="workflow-overview-title">From scientific decisions to reusable reports and sessions</h2>
         <p>The guided Bash workflow records inputs, choices, parameters, seeds, versions, scores, and limitations. Both pathways continue through Vina docking and produce structured results, versioned PDF reports, PyMOL Open-Source sessions, and 2D interaction diagrams.</p>
       </div>
       <figure class="overview-figure">
-        <img src="assets/end-to-end-workflows-and-outputs-mockup.png" alt="Complete Docking Universal workflows leading to PDF reports, PyMOL sessions, and 2D interaction diagrams">
+        <img src="assets/end-to-end-workflows-current-capabilities.png" alt="Complete Docking Universal workflows leading to PDF reports, PyMOL sessions, and 2D interaction diagrams">
       </figure>
     </section>
 
@@ -150,16 +150,16 @@
     <section class="section install" id="install">
       <div>
         <p class="eyebrow">Package interface</p>
-        <h2>One interface, seventeen commands</h2>
-        <p>The main Conda environment installs preparation, analysis, and visualization tools. A small isolated engine environment supplies AutoDock Vina without disturbing the PyMOL and chemistry stack. Vina is the only docking engine supported in this research preview; a smina comparison backend may be evaluated in a future version.</p>
-        <p><a href="installation.md">Complete installation guide, dependency roles, and M2 notes →</a></p>
+        <h2>One interface, specialized scientific commands</h2>
+        <p>The installer creates the preparation, analysis, and visualization environment plus a small isolated AutoDock Vina environment. The installed launcher uses both automatically, so normal operation does not require manual Conda activation.</p>
+        <p><a href="installation.md">Complete installation guide and dependency roles →</a></p>
       </div>
       <div class="terminal" role="region" aria-label="Docking Universal terminal example">
         <div class="terminal-bar"><i></i><i></i><i></i><span>terminal</span></div>
-        <pre><code><b>$</b> conda env create -f environment.yml
-<b>$</b> conda env create -f environments/vina.yml
-<b>$</b> conda activate docking-universal
-<b>$</b> ./bin/docking-universal check-install
+        <pre><code><b>$</b> git clone https://github.com/thomaslane79-creator/docking-universal.git
+<b>$</b> cd docking-universal
+<b>$</b> bash install.sh
+<b>$</b> docking-universal check-install
 
 available  fpocket
 available  obabel
@@ -167,9 +167,9 @@ available  plip
 available  pymol
 available  vina (isolated engine environment)
 
-<b>$</b> ./bin/docking-universal control --complex 1HVR.pdb
-<b>$</b> ./bin/docking-universal screen --protocol protocol.json \
-    --ligands unknown.sdf --out unknown_run
+<b>$</b> docking-universal run
+<b>$</b> docking-universal create-protocol
+<b>$</b> docking-universal screen
 <b>$</b> make test</code></pre>
       </div>
     </section>
@@ -178,7 +178,7 @@ available  vina (isolated engine environment)
       <p class="eyebrow">Research preview</p>
       <h2>Scientifically useful, with validation still in progress.</h2>
       <p>Docking Universal packages transparent structural-docking computations. It does not prove biological relevance. The documented 1HVR/XK2 work includes a failed low-effort baseline and a successful multi-seed Vina ensemble follow-up. This target-specific control is reported as retrospective evidence rather than general accuracy validation.</p>
-      <a href="validation.md">Review the raw-input validation →</a>
+      <a href="validation.md">Review validation evidence and limitations →</a>
     </section>
 
     <section class="section split" id="citation">

@@ -8,7 +8,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  docking-universal ligands <ligands.sdf> [options]
+  docking-universal prepare-ligand <ligands.sdf> [options]
 
 Options:
   -n, --name-field FIELD     SDF property used as the compound name

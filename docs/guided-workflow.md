@@ -18,14 +18,14 @@ Approved-protocol screening intentionally does not permit these values to be cha
 
 ### Bound-ligand control
 
-Use `--mode control` when a trustworthy experimental protein–ligand complex is available. The ligand identity and chemistry are verified, its experimental coordinates are withheld from conformer generation, and independent poses are redocked across recorded seeds. A protocol is approved only if the configured pose-recovery and repeatability rules pass.
+Use the control pathway when a trustworthy experimental protein–ligand complex is available. The ligand identity and chemistry are verified, its experimental coordinates are withheld from conformer generation, and independent poses are redocked across recorded seeds. A protocol is approved only if the configured pose-recovery and repeatability rules pass.
 
 After the quick diagnostic, interactive calibration offers **guided incremental calibration** or **manual tier selection**. Guided mode interprets the current sampling, ranking, and seed evidence, then proposes the next least-complex informative tier. It stops at the first reproducible pass and records the full escalation history. Manual mode tests only the selected settings and explicitly makes no claim that a cheaper protocol would work.
 
 Calibration time can vary substantially with ligand flexibility, box size, engine, and hardware. After the first completed tier, the guide reports an empirical estimate for each later tier based on the observed time per docking job on the current machine. This estimate is advisory; it does not include all rendering or system-load variation.
 
 ```bash
-./bin/docking-universal run --mode control --complex complex.pdb --out control_study
+docking-universal run control --complex complex.pdb --out control_study
 ```
 
 The interactive guide explicitly offers **Download from RCSB by PDB ID**, **Choose a local PDB graphically**, or **Enter an exact local path**. macOS uses Finder; graphical Ubuntu sessions prefer Zenity/GTK and use Tk as a fallback. These inputs deliberately mean different things. Both local options use exactly the selected file and never guess among prepared receptors and generated copies. The download option uses the canonical RCSB entry cached in this study or retrieves it. Downloads are stored under the study's `inputs/` folder with a source URL, retrieval time, and SHA-256 record. Manual paths remain available for headless Linux, Docker, remote shells, and automation. For unattended use, supply the ID with `--complex` and add `--download-pdb` explicitly.
@@ -34,17 +34,16 @@ This is a retrospective target-specific check. Passing it supports transfer of t
 
 Unless `--out` is supplied explicitly, a completed control study is named `control_<PDB>_<ligand>_<YYYYMMDD_HHMMSS>` (for example, `control_1HVR_XK2_20260811_143025`). A `control_pending_...` folder is used only while the interactive ligand decision and control are unfinished. After completion, the runner applies the final scientific name and updates retained absolute paths so its approved protocol can be resumed later. User-supplied output names are never rewritten.
 
-### Approved-protocol screen
+### Protocol-based screen
 
-Use `--mode screen` for unknown compounds only after a matching control has written an approved protocol. A passing high-level control also creates a portable `.duprotocol` ZIP containing `protocol.json`, the locked receptor PDBQT and docking-box configuration, the experimental control SDF, selected control figures/evidence, and a SHA-256 manifest. It preserves the previously determined target-specific choices - receptor preparation, selected pocket and docking box, ligand-ensemble policy, exhaustiveness, independent seeds, requested pose count, and energy range - so the same protocol can be used unchanged to dock new sets of compounds. Reports for those later sets carry forward a concise protocol and validation synopsis: control status and completion date, control ligand, recovered-pose RMSD and threshold, locked pocket/box, and the control-to-new-run software comparison. This is the preferred restart input when calibration and compound docking occur at different times or on another compatible installation. Legacy `protocol.json` remains supported. A selected pocket or an exhaustiveness value is not approval by itself; the bound-ligand control must have passed the recorded sampling, ranking, and independent-seed criteria.
+Use `docking-universal screen` to dock unknown compounds with a reusable `.duprotocol` bundle. The bundle contains the internal protocol record, locked receptor PDBQT and docking-box configuration, a manifest, and the supporting evidence available for its protocol type. It preserves the previously determined target-specific choices—receptor preparation, selected pocket and docking box, ligand-ensemble policy, exhaustiveness, independent seeds, requested pose count, and energy range—so new compounds use the same settings. Control-validated bundles carry the control status, completion date, control ligand, recovered-pose RMSD and threshold, and control-to-new-run software comparison. Ligand-guided and site-guided bundles remain explicitly exploratory and require user authorization when reused.
 
-In an interactive run, omitting `--protocol` opens a guided choice: select `.duprotocol` or `protocol.json` graphically, select a completed control/study folder and discover its reusable protocol, or enter a path manually. A bundle is extracted safely, every retained file hash is verified, and its recorded screening authority is checked before use. The receptor and box hashes must still match. Inputs can be one SDF, a multi-record SDF, or a directory of SDF files.
+In an interactive run, omitting `--protocol` opens a guided choice for a `.duprotocol` bundle or exact bundle path. The bundle is extracted safely, every retained file hash is verified, and its recorded scientific authority is checked before use. The receptor and box hashes must still match. Inputs can be one SDF, a multi-record SDF, or a directory of SDF files.
 
 When `--ligands` is omitted during an interactive desktop run, the guide offers Finder on macOS or Zenity/Tk on Ubuntu for a single SDF. It also retains exact-path and SDF-directory choices for portable or batch use. The same chooser is used when continuing directly from a completed control into unknown-compound screening.
 
 ```bash
-./bin/docking-universal run \
-  --mode screen \
+docking-universal screen \
   --protocol target_control_20260818_120000.duprotocol \
   --ligands compounds.sdf \
   --out approved_study
@@ -54,14 +53,11 @@ The default runs the protocol's independent conformers and seeds, retains every 
 
 ### Ligand-free exploratory docking
 
-Use `--mode exploratory` when no suitable experimental control ligand exists. Prepare and review a ligand-free pocket first, then supply the receptor and chosen box.
+Use the exploratory pathway when no suitable experimental control ligand exists. The guided workflow prepares the receptor, generates and reviews candidate pockets, and records the selected box before docking.
 
 ```bash
-./bin/docking-universal run \
-  --mode exploratory \
-  --receptor-pdb receptor.pdb \
-  --receptor-pdbqt receptor.pdbqt \
-  --box pocket.conf \
+docking-universal run exploratory \
+  --complex receptor.pdb \
   --ligands compounds.sdf \
   --out exploratory_study
 ```
@@ -104,7 +100,7 @@ study/
 
 `report/run_details.md` consolidates the readable run record: what was found in the input PDB, every accepted SDF compound, the scientific mode, coordinate policy, receptor/box/protocol information, the observed or protocol-carried receptor-preparation path, seeds, job counts, calibration history, failures, and the locations of raw outputs and logs. The Markdown, HTML, and JSON study summaries also identify that preparation path.
 
-The PDF report stage automatically generates numbered control and compound figures from retained pose, cluster, receptor, and protocol artifacts. A control-backed screen is divided explicitly into configured protocol, experimental control redocking, and new-ligand docking sections. The target/new-ligand label appears only in the new-ligand section. The concise default control material shows the control date, ligand, PASS/REVIEW status, best-sampled RMSD, acceptance threshold, locked pocket/box, and one combined experimental-versus-redocked overlay. Detailed control interaction figures and provenance remain in `.duprotocol`; pass `--include-control-appendix` to the report generator for a full audit appendix.
+The PDF report stage automatically generates numbered control and compound figures from retained pose, cluster, receptor, and protocol artifacts. A control-backed screen is divided explicitly into configured protocol, experimental control redocking, and ligand docking sections. The target and ligand labels appear only where they describe the corresponding evidence or docking result. The report shows the approved control figures and the recorded control date, ligand, PASS/REVIEW status, best-sampled RMSD, acceptance threshold, and locked pocket/box. Detailed artifacts and provenance remain in the `.duprotocol` bundle and retained study directory.
 
 New-ligand results include the three top energy-ranked cluster representatives. Ligand chemistry comes from retained SDF files and PLIP calls come from retained XML; the report-figure manifest and per-diagram manifests record these sources and coordinate mapping. Filename-only provenance suffixes such as `_pubchem` and `_pubchem_<CID>` are not presented as part of a ligand's chemical name.
 

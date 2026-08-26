@@ -16,7 +16,7 @@ receptor, docking box, ligand input, and output directory. Headless sessions ask
 for exact paths. An SDF ligand input is prepared automatically.
 
 Options:
-  --engine vina            Docking engine (only Vina is supported in 0.5.x)
+  --engine vina            Docking engine (only Vina is supported in this release)
   --engine-command PATH    Explicit engine executable
   --engine-env NAME        Conda environment containing the engine
   --exhaustiveness N       Forwarded to the selected engine when provided
