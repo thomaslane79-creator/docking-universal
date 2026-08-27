@@ -30,6 +30,19 @@ from docking_universal_bundle import (  # noqa: E402
     protocol_type_label,
 )
 from docking_universal_pocket_review import choose_prepared_box, review_pocket_scene  # noqa: E402
+from docking_universal_region import (  # noqa: E402
+    REGION_BOUND_LIGAND,
+    REGION_CHOICES,
+    REGION_FPOCKET,
+    REGION_RESIDUES,
+    REGION_WHOLE_PROTEIN,
+    choose_engine,
+    choose_fpocket_selection,
+    choose_region,
+    residue_box,
+    whole_protein_box,
+    write_box_files,
+)
 
 
 def safe_id(value, fallback="protein"):
@@ -78,6 +91,20 @@ def conda_package_version(name):
     return "not detected"
 
 
+def sibling_conda_package_version(environment, name):
+    """Read a package version from an isolated engine environment."""
+    env_prefix = Path(sys.prefix).parent / environment
+    records = sorted((env_prefix / "conda-meta").glob(f"{name}-*.json"))
+    for record in records:
+        try:
+            version = json.loads(record.read_text()).get("version")
+        except (OSError, json.JSONDecodeError):
+            continue
+        if version:
+            return str(version)
+    return "not detected"
+
+
 def command_version(command):
     try:
         result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=30)
@@ -85,6 +112,33 @@ def command_version(command):
         return "not detected"
     lines = (result.stdout or result.stderr).strip().splitlines()
     return lines[-1].strip() if lines else "not detected"
+
+
+def scientific_software_record(engine):
+    """Capture the versions that define later protocol-locked screening."""
+    openbabel = command_version(["obabel", "-V"])
+    if openbabel.startswith("Open Babel "):
+        openbabel = openbabel.removeprefix("Open Babel ").split()[0]
+    if engine == "qvinaw":
+        engine_version = sibling_conda_package_version("docking-universal-qvinaw", "qvina")
+        if engine_version != "not detected":
+            engine_version = f"QuickVina-W 1.1 (qvina package {engine_version})"
+    else:
+        engine_version = sibling_conda_package_version("docking-universal-vina", "vina")
+        if engine_version != "not detected":
+            engine_version = f"AutoDock Vina v{engine_version}"
+    return {
+        "docking_universal": package_version(),
+        "python": sys.version.split()[0],
+        "rdkit": distribution_version("rdkit"),
+        "molscrub": distribution_version("molscrub"),
+        "meeko": distribution_version("meeko"),
+        "pdbfixer": distribution_version("pdbfixer"),
+        "fpocket": conda_package_version("fpocket"),
+        "openbabel": openbabel,
+        "plip": distribution_version("plip"),
+        "engine_version": engine_version,
+    }
 
 
 def preparation_summary(prep_root):
@@ -481,6 +535,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--type", choices=(CONTROL_VALIDATED, LIGAND_GUIDED_EXPLORATORY, SITE_GUIDED_EXPLORATORY))
     parser.add_argument("--complex", type=Path, help="selected structure PDB")
+    parser.add_argument("--region-definition", choices=REGION_CHOICES)
+    parser.add_argument("--fpocket-selection", choices=("automatic", "reviewed"))
+    parser.add_argument("--residues", help="comma-separated residues such as A:HIS57,A:ASP102")
     parser.add_argument("--ligand-resname")
     parser.add_argument("--ligand-id", help="exact RESNAME:CHAIN:RESNUM for non-interactive control validation")
     parser.add_argument("--out", type=Path)
@@ -494,7 +551,7 @@ def parse_args():
     parser.add_argument("--num-modes", type=int, default=15)
     parser.add_argument("--energy-range", type=float, default=8.0)
     parser.add_argument("--conformers", type=int, default=3)
-    parser.add_argument("--engine", choices=("vina", "qvinaw"), default="vina", help="docking engine: Vina or QuickVina-W")
+    parser.add_argument("--engine", choices=("vina", "qvinaw"), help="override the engine recommended from the approved docking box")
     parser.add_argument("--ph", type=float, default=7.4)
     parser.add_argument("--base-seed", type=int, default=20260808)
     parser.add_argument("--control-tier", choices=("quick", "repeatability", "broader", "conformers", "robust"), default="repeatability", help="control-validated sampling tier (default: repeatability)")
@@ -506,16 +563,48 @@ def main():
     args = parse_args()
     project = Path(__file__).resolve().parent.parent
     cli = Path(os.environ.get("DOCKING_UNIVERSAL_CLI", project / "bin/docking-universal"))
-    kind = args.type
-    if not kind:
+    region_definition = args.region_definition
+    if not region_definition:
         if args.non_interactive:
-            raise SystemExit("--type is required with --non-interactive")
-        kind = choose_type()
+            region_definition = (
+                REGION_BOUND_LIGAND
+                if args.type in {CONTROL_VALIDATED, LIGAND_GUIDED_EXPLORATORY}
+                else REGION_FPOCKET
+            )
+        else:
+            region_definition = choose_region()
+    kind = args.type
+    if region_definition == REGION_BOUND_LIGAND:
+        if not kind:
+            if args.non_interactive:
+                raise SystemExit("A bound-ligand region requires --type control-validated or ligand-guided-exploratory")
+            print("\nHow should the selected bound ligand be used?")
+            print("  1) Pose-recovery control — remove and redock it to validate the protocol")
+            print("  2) Site reference only — define the box without redocking it")
+            answer = input("Select [1]: ").strip() or "1"
+            kind = {"1": CONTROL_VALIDATED, "2": LIGAND_GUIDED_EXPLORATORY}.get(answer)
+            if not kind:
+                raise SystemExit("Choose bound-ligand use 1 or 2")
+        if kind not in {CONTROL_VALIDATED, LIGAND_GUIDED_EXPLORATORY}:
+            raise SystemExit("A bound-ligand region must be control-validated or ligand-guided exploratory")
+    else:
+        if kind and kind != SITE_GUIDED_EXPLORATORY:
+            raise SystemExit("Predicted-pocket, selected-residue, and whole-protein regions are site-guided exploratory")
+        kind = SITE_GUIDED_EXPLORATORY
     if kind == CONTROL_VALIDATED:
+        provisional_box = {
+            "center_x": 0, "center_y": 0, "center_z": 0,
+            "size_x": args.box_size, "size_y": args.box_size, "size_z": args.box_size,
+        }
+        engine_selection = choose_engine(
+            provisional_box, region_definition, requested=args.engine,
+            interactive=not args.non_interactive,
+        )
         command = [
             sys.executable, Path(__file__).with_name("docking-universal-run.py"),
             "--mode", "control", "--control-tier", args.control_tier,
-            "--ph", args.ph, "--base-seed", args.base_seed, "--engine", args.engine,
+            "--ph", args.ph, "--base-seed", args.base_seed,
+            "--engine", engine_selection["selected_engine"],
         ]
         if args.complex: command += ["--complex", args.complex]
         if args.out: command += ["--out", args.out]
@@ -553,7 +642,8 @@ def main():
     target = safe_id(local_structure.stem)
     environment = os.environ.copy()
     environment.update({
-        "FEEDBACK_LEVEL": "concise", "DOCKING_UNIVERSAL_SITE_MODE": "ligand" if kind == LIGAND_GUIDED_EXPLORATORY else "pockets",
+        "FEEDBACK_LEVEL": "concise",
+        "DOCKING_UNIVERSAL_SITE_MODE": "ligand" if region_definition == REGION_BOUND_LIGAND else "pockets",
         "DOCKING_UNIVERSAL_CAVITY_MODE": "1", "DOCKING_UNIVERSAL_MAX_POCKETS": "3", "DOCKING_UNIVERSAL_CENTER_MODE": "centroid",
         "DOCKING_UNIVERSAL_CENTROID_MODE": "2", "DOCKING_UNIVERSAL_LOG_MODE": "file", "STRICT_LOCAL_POCKETS": "1",
         "BOX_SIZE": str(args.box_size),
@@ -567,8 +657,8 @@ def main():
     receptor_pdbqt = next(iter(sorted(prep_root.glob("receptor/*.pdbqt"))), None)
     receptor_pdb = next(iter(sorted(prep_root.glob("receptor/*.pdb"))), None)
     boxes = sorted(prep_root.glob("cavity/*.conf"))
-    score_threshold_used = 0.10 if kind == SITE_GUIDED_EXPLORATORY else None
-    if kind == SITE_GUIDED_EXPLORATORY and not boxes:
+    score_threshold_used = 0.10 if region_definition in {REGION_FPOCKET, REGION_WHOLE_PROTEIN} else None
+    if region_definition == REGION_FPOCKET and not boxes:
         if not retry_fpocket_fallback(args.non_interactive):
             raise SystemExit("No docking box was selected; cavity preparation was retained for review")
         fallback_environment = environment.copy()
@@ -582,22 +672,64 @@ def main():
     if not receptor_pdbqt or not receptor_pdb:
         raise SystemExit("Prepared receptor outputs are incomplete")
     pocket_review_scene = None
-    if kind == SITE_GUIDED_EXPLORATORY:
+    fpocket_selection = args.fpocket_selection
+    if region_definition == REGION_FPOCKET and not fpocket_selection:
+        fpocket_selection = "automatic" if args.non_interactive else choose_fpocket_selection()
+    if region_definition == REGION_FPOCKET and fpocket_selection == "reviewed":
         pocket_review_scene = review_pocket_scene(
             preparation,
             args.pymol,
             interactive=not args.non_interactive and not args.no_visuals,
         )
-    selected_box = choose_box(boxes, not args.non_interactive)
-    ligand = choose_ligand(detected_ligands(preparation), args.ligand_resname, not args.non_interactive) if kind == LIGAND_GUIDED_EXPLORATORY else None
+    elif region_definition == REGION_WHOLE_PROTEIN:
+        pocket_review_scene = review_pocket_scene(preparation, args.pymol, interactive=False, requested=False)
+    if region_definition == REGION_WHOLE_PROTEIN:
+        selected_box = write_box_files(
+            prep_root / "cavity" / f"{target}_whole-protein.conf",
+            whole_protein_box(receptor_pdbqt),
+        )
+    elif region_definition == REGION_RESIDUES:
+        residue_text = args.residues
+        if not residue_text:
+            if args.non_interactive:
+                raise SystemExit("--residues is required for a non-interactive selected-residue protocol")
+            residue_text = input("Residues (for example A:HIS57,A:ASP102): ").strip()
+        residue_values, selected_residues = residue_box(
+            local_structure, [item.strip() for item in residue_text.split(",") if item.strip()]
+        )
+        selected_box = write_box_files(
+            prep_root / "cavity" / f"{target}_selected-residues.conf", residue_values
+        )
+    elif region_definition == REGION_FPOCKET and fpocket_selection == "automatic":
+        selected_box = choose_box(boxes, False)
+    else:
+        selected_box = choose_box(boxes, not args.non_interactive)
+    ligand = choose_ligand(detected_ligands(preparation), args.ligand_resname, not args.non_interactive) if region_definition == REGION_BOUND_LIGAND else None
     values = box_values(selected_box)
-    evidence_basis = (
-        f"Coordinates of {ligand['resname']} in the selected structure used for site definition"
-        if ligand else "fpocket cavity analysis and user-reviewed docking box"
+    if not args.non_interactive:
+        print("\nProposed docking box:")
+        print(f"  Center: {values.get('center_x')}, {values.get('center_y')}, {values.get('center_z')} Å")
+        print(f"  Dimensions: {values.get('size_x')} × {values.get('size_y')} × {values.get('size_z')} Å")
+        if input("Approve this docking region? [Y/n]: ").strip().lower() in {"n", "no"}:
+            raise SystemExit("Docking-region approval declined; no protocol was created")
+    engine_selection = choose_engine(
+        values, region_definition, requested=args.engine, interactive=not args.non_interactive
     )
+    engine = engine_selection["selected_engine"]
+    if region_definition == REGION_BOUND_LIGAND:
+        evidence_basis = f"Coordinates of {ligand['resname']} in the selected structure used for site definition"
+    elif region_definition == REGION_FPOCKET:
+        evidence_basis = f"fpocket cavity analysis and {fpocket_selection} pocket selection"
+    elif region_definition == REGION_RESIDUES:
+        evidence_basis = "User-selected residues: " + ", ".join(selected_residues)
+    else:
+        evidence_basis = (
+            "Prepared receptor coordinate bounds with a 4 Angstrom margin; "
+            "fpocket characterized cavities but did not constrain the box"
+        )
     date = datetime.now(timezone.utc).isoformat()
     subject = f"{target}_{safe_id(ligand['resname'])}_" if ligand else f"{target}_"
-    base = f"{subject}{kind}_{date[:10]}"
+    base = f"{subject}{kind}_{engine}_{date[:10]}"
     bundle_name = f"{base}.duprotocol"
     audit = next(iter(sorted(prep_root.glob("receptor/pdbfixer_audit.json"))), None)
     ccd_audit = next(iter(sorted(prep_root.glob("receptor/ccd_modification_audit.json"))), None)
@@ -612,11 +744,16 @@ def main():
         "protocol_type": kind, "target": target, "site_anchor": ligand["resname"] if ligand else Path(selected_box).stem,
         "evidence_basis": evidence_basis, "screening_authority": "user-confirmed-exploratory-use",
         "created_utc": date, "control_status": "not_performed", "unknown_docking_allowed": False,
-        "exploratory_screening_allowed": True, "engine": args.engine,
+        "exploratory_screening_allowed": True, "engine": engine,
+        "software": scientific_software_record(engine),
+        "region_definition": region_definition,
+        "fpocket_selection": fpocket_selection,
+        "selected_residues": selected_residues if region_definition == REGION_RESIDUES else [],
+        "engine_selection": engine_selection,
         "parameters": {
             "ph": args.ph, "conformers_per_state": args.conformers, "ensemble_seed": args.base_seed,
             "forcefield": "mmff94", "rmsd_prune_angstrom": 0.75, "tautomers_enumerated": True,
-            "charge_model": "gasteiger", "macrocycle_treatment": "flexible_meeko" if args.engine == "vina" else "rigid_conformer_ensemble",
+            "charge_model": "gasteiger", "macrocycle_treatment": "flexible_meeko" if engine == "vina" else "rigid_conformer_ensemble",
             "exhaustiveness": args.exhaustiveness, "num_modes": args.num_modes,
             "energy_range_kcal_per_mol": args.energy_range,
             "seeds": [args.base_seed + index for index in range(args.seeds)],
@@ -668,7 +805,10 @@ def main():
             "created_utc": date, "target": target, "target_source": str(local_structure), "compound_count": 0,
             "cavity_score_threshold_used": score_threshold_used,
             "protocol_type": kind, "protocol_validation_status": "Site-guided exploratory protocol; not evaluated by bound-ligand control",
-            "configured_engine": args.engine, "configured_engine_version": "recorded when screening runs",
+            "region_definition": region_definition,
+            "fpocket_selection": fpocket_selection,
+            "engine_selection": engine_selection,
+            "configured_engine": engine, "configured_engine_version": "recorded when screening runs",
             "configured_docking_parameters": protocol["parameters"], "configured_locked_inputs": protocol["locked_inputs"],
             "docking_universal_version": package_version(),
             "scientific_software": {
@@ -687,6 +827,8 @@ def main():
     print(f"  Target: {target}")
     print(f"  Protocol type: {protocol_type_label(kind)}")
     print(f"  Evidence basis: {evidence_basis}")
+    print(f"  Region definition: {region_definition}")
+    print(f"  Docking engine: {'AutoDock Vina' if engine == 'vina' else 'QuickVina-W'}")
     print("  Screening authority: User-confirmed exploratory use")
     print(f"  Created: {date[:10]}")
     print(f"  Docking box: {selected_box.name}, {values.get('size_x', 'NA')} × {values.get('size_y', 'NA')} × {values.get('size_z', 'NA')} Å")

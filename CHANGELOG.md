@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.6.5 — 2026-08-27
+
+**Patch release focus:** QuickVina-W broad-search support and explicit docking-region selection.
+
+- Added bound-ligand, predicted-pocket, selected-residue, and whole-protein region definitions with recorded box geometry and automatic engine recommendations.
+- Added QuickVina-W selection for broad or whole-protein searches, including locked engine provenance in protocol bundles and complete screening reports.
+- Fixed installed-copy packaging for the new region-selection helper and complete software-version provenance for newly created protocols.
+- Added real whole-protein screening coverage: 225 poses across five seeds, clustering, PLIP, PyMOL rendering, and PDF generation.
+
 - Added QuickVina-W as a second Vina-family docking engine across low-level docking, bound-ligand calibration, exploratory studies, reusable protocols, protocol-locked screening, pose clustering, manifests, and scientific reports. Engine choice is retained as part of the protocol and cannot be silently changed during reuse.
 - Added an isolated `docking-universal-qvinaw` Conda environment, installer routing, cross-platform environment checks, mocked command/provenance tests, and a real QuickVina-W integration smoke stage.
 - Made QuickVina-W ligand preparation explicitly rigidify macrocycles instead of emitting newer Meeko flexible-macrocycle pseudo-atoms that its older Vina-derived implementation may not support.

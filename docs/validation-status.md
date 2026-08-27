@@ -1,6 +1,6 @@
 # Validation status
 
-Docking Universal 0.6.4 is a research preview. Validation distinguishes software-path testing from scientific validation: a command completing successfully does not establish that a predicted pose or cavity is biologically correct.
+Docking Universal 0.6.5 is a research preview. Validation distinguishes software-path testing from scientific validation: a command completing successfully does not establish that a predicted pose or cavity is biologically correct.
 
 ## Automated option coverage
 
