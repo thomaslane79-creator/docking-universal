@@ -22,7 +22,7 @@ esac
 
 version_output=$("$cli" --version)
 case "$version_output" in
-  "Docking Universal 0.6.4"*) ;;
+  "Docking Universal $(cat "$project_dir/VERSION")"*) ;;
   *) fail "version output" ;;
 esac
 
