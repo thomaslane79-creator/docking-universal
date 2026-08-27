@@ -166,7 +166,7 @@ def single_compound_summary_rows(result):
         ["Summary of docking results", "Recorded result"],
         ["Ligand docked", result["name"]],
         ["Completion status", result["status"]],
-        ["Best retained Vina score", f"{best_score} kcal/mol" if best_score != "Unavailable" else best_score],
+        ["Best retained docking score", f"{best_score} kcal/mol" if best_score != "Unavailable" else best_score],
         ["Top-ranked cluster", result["top_cluster"]],
         ["Top-cluster population", result["top_cluster_population"]],
         ["Independent-seed support", result["top_cluster_seed_support"]],
@@ -314,6 +314,7 @@ SCIENTIFIC_VERSION_LABELS = {
     "Meeko": "meeko",
     "PDBFixer": "pdbfixer",
     "AutoDock Vina": "engine_version",
+    "QuickVina-W": "engine_version",
 }
 
 SCIENTIFIC_SOFTWARE_KEYS = {
@@ -327,7 +328,12 @@ SCIENTIFIC_SOFTWARE_KEYS = {
     "Open Babel": "openbabel",
     "PLIP": "plip",
     "AutoDock Vina": "engine_version",
+    "QuickVina-W": "engine_version",
 }
+
+
+def engine_display_name(engine):
+    return "QuickVina-W" if str(engine).lower() == "qvinaw" else "AutoDock Vina"
 
 
 def retained_artifact_versions(study):
@@ -597,7 +603,7 @@ def fpocket_version():
             return str(version)
     return "detected; version not recorded" if (prefix / "bin" / "fpocket").is_file() else "not detected"
 
-def compare_scientific_versions(recorded, current):
+def compare_scientific_versions(recorded, current, engine_name="AutoDock Vina"):
     """Compare the software that can change preparation, docking, or analysis."""
     fields = [
         ("Docking Universal", "docking_universal"),
@@ -606,7 +612,7 @@ def compare_scientific_versions(recorded, current):
         ("MolScrub", "molscrub"),
         ("Meeko", "meeko"),
         ("PDBFixer", "pdbfixer"),
-        ("AutoDock Vina", "engine_version"),
+        (engine_name, "engine_version"),
     ]
     entries = []
     for label, key in fields:
@@ -650,13 +656,20 @@ def reproducibility_record(protocol, study, control):
         "reportlab": installed_version("reportlab"),
     }
     engine_version = run_versions["engine_version"]
+    engine = (
+        docking_manifest.get("engine")
+        or (protocol or {}).get("engine")
+        or summary.get("configured_engine")
+        or "vina"
+    )
+    docking_engine_name = engine_display_name(engine)
     engine_source = docking_manifest.get("engine_source")
     if engine_source:
         engine_version += f" ({engine_source})"
     software = [
         {"role": "Scientific workflow", "software": "Docking Universal", "version": run_versions["docking_universal"]},
         {"role": "Ligand-free cavity detection", "software": "fpocket", "version": run_versions["fpocket"]},
-        {"role": "Docking scores and poses", "software": "AutoDock Vina", "version": engine_version},
+        {"role": "Docking scores and poses", "software": docking_engine_name, "version": engine_version},
         {"role": "Receptor and ligand parameterization", "software": "Meeko", "version": run_versions["meeko"]},
         {"role": "Conditional conservative receptor repair", "software": "PDBFixer", "version": run_versions["pdbfixer"]},
         {"role": "Protonation/conformer preparation", "software": "MolScrub", "version": run_versions["molscrub"]},
@@ -680,16 +693,21 @@ def reproducibility_record(protocol, study, control):
         {"citation": "RDKit: Open-source cheminformatics software.", "url": "https://www.rdkit.org/"},
         {"citation": f"The PyMOL Molecular Graphics System, Version {next(item['version'] for item in software if item['software'] == 'PyMOL')}, Schrodinger, LLC.", "url": "https://www.pymol.org/support.html"},
     ]
+    if engine == "qvinaw":
+        references.insert(1, {
+            "citation": "Hassan NM, Alhossary AA, Mu Y, Kwoh CK. Protein-Ligand Blind Docking Using QuickVina-W With Inter-Process Spatio-Temporal Integration. Sci Rep. 2017;7:15451.",
+            "url": "https://doi.org/10.1038/s41598-017-15571-7",
+        })
     return {
         "schema_name": "docking-universal-report-provenance", "schema_version": 1,
         "study": str(study), "control": str(control) if control else None,
         "software": software,
         "receptor_preparation": receptor_preparation,
-        "control_to_new_run_version_check": compare_scientific_versions(recorded, run_versions) if protocol else None,
+        "control_to_new_run_version_check": compare_scientific_versions(recorded, run_versions, docking_engine_name) if protocol else None,
         "report_generation": report_runtime,
         "methods": {
             "cavity_detection": "fpocket geometric cavity detection, descriptor calculation, and recorded geometry/overlap filtering" if discover_cavity_record(study) else "not used in the retained report study",
-            "docking_scores_and_poses": "AutoDock Vina",
+            "docking_scores_and_poses": docking_engine_name,
             "interaction_detection": "PLIP rule-based calls; retained PLIP XML is authoritative",
             "interaction_diagram": figure_manifest.get("interaction_diagram_renderer", "native SDF plus PLIP XML"),
             "rmsd_and_clustering": clustering.get("method", "RDKit symmetry-aware heavy-atom CalcRMS without fitting; Butina clustering"),
@@ -710,7 +728,7 @@ def retain_used_report_methods(provenance, cavity, has_docking):
     if cavity:
         used_software.add("fpocket")
     if has_docking:
-        used_software.update({"AutoDock Vina", "MolScrub", "RDKit", "Open Babel", "PLIP"})
+        used_software.update({provenance["methods"]["docking_scores_and_poses"], "MolScrub", "RDKit", "Open Babel", "PLIP"})
     if preparation.get("pdbfixer_used"):
         used_software.add("PDBFixer")
 
@@ -740,7 +758,7 @@ def retain_used_report_methods(provenance, cavity, has_docking):
 
     def reference_was_used(reference):
         citation = reference.get("citation", "")
-        if "AutoDock Vina" in citation:
+        if "AutoDock Vina" in citation or "QuickVina-W" in citation:
             return has_docking
         if "Fpocket" in citation:
             return bool(cavity)
@@ -802,7 +820,7 @@ def reproducibility_summary(provenance, cavity, has_docking):
     if has_docking:
         cutoff = provenance["methods"]["cluster_cutoff_angstrom"]
         sentences.append(
-            "AutoDock Vina produced docking scores and poses. PLIP supplied rule-based "
+            f"{provenance['methods']['docking_scores_and_poses']} produced docking scores and poses. PLIP supplied rule-based "
             "protein-ligand interaction calls, with retained PLIP XML as the authoritative "
             "interaction record. RDKit supplied symmetry-aware heavy-atom RMSD calculations "
             f"and Butina clustering at a {cutoff} A cutoff. PyMOL produced the molecular "
@@ -1049,7 +1067,7 @@ def main():
         if len(compound_results) == 1:
             at_a_glance = single_compound_summary_rows(compound_results[0])
         else:
-            at_a_glance = [["Ligand", "Best Vina score", "Top cluster", "Clusters", "Status"]]
+            at_a_glance = [["Ligand", "Best docking score", "Top cluster", "Clusters", "Status"]]
             for result in compound_results:
                 score = result["best_energy_kcal_per_mol"]
                 at_a_glance.append([
@@ -1230,7 +1248,7 @@ def main():
         # A continued screen carries the control result as compact provenance.
         # Repeating its figures is reserved for an explicitly requested appendix.
         if args.include_control_appendix and control_ab:
-            story += [KeepTogether([image(control_ab,7.0,4.1),Paragraph(f"<b>Figure {figure_number}. Retrospective control performance and pose recovery.</b> (A) Control-cluster Vina score versus symmetry-aware, no-fit heavy-atom RMSD to experimental {experimental_label} in the receptor coordinate frame. (B) Experimental ligand (magenta), lowest-energy pose (red), and lowest-RMSD pose (blue) superimposed in that frame; receptor residues within 5 A of the displayed ligands are gray.",styles["SmallDU"])]),Spacer(1,8)]
+            story += [KeepTogether([image(control_ab,7.0,4.1),Paragraph(f"<b>Figure {figure_number}. Retrospective control performance and pose recovery.</b> (A) Control-cluster docking score versus symmetry-aware, no-fit heavy-atom RMSD to experimental {experimental_label} in the receptor coordinate frame. (B) Experimental ligand (magenta), lowest-energy pose (red), and lowest-RMSD pose (blue) superimposed in that frame; receptor residues within 5 A of the displayed ligands are gray.",styles["SmallDU"])]),Spacer(1,8)]
             figure_number += 1
         elif control_ab:
             # Reused protocols retain the single approved A/B control figure
@@ -1239,7 +1257,7 @@ def main():
             story += [KeepTogether([
                 Paragraph("Control pose-recovery results", styles["Heading2"]),
                 image(control_ab,7.0,3.6),
-                Paragraph(f"<b>Figure {figure_number}. Retrospective control performance and pose recovery.</b> (A) Control-cluster Vina score versus symmetry-aware, no-fit heavy-atom RMSD to experimental {experimental_label} in the receptor coordinate frame. (B) Experimental ligand (magenta), lowest-energy pose (red), and lowest-RMSD pose (blue) superimposed in that frame; receptor residues within 5 A of the displayed ligands are gray.",styles["SmallDU"]),
+                Paragraph(f"<b>Figure {figure_number}. Retrospective control performance and pose recovery.</b> (A) Control-cluster docking score versus symmetry-aware, no-fit heavy-atom RMSD to experimental {experimental_label} in the receptor coordinate frame. (B) Experimental ligand (magenta), lowest-energy pose (red), and lowest-RMSD pose (blue) superimposed in that frame; receptor residues within 5 A of the displayed ligands are gray.",styles["SmallDU"]),
             ]), PageBreak()]
             figure_number += 1
         elif args.include_control_appendix:
@@ -1256,7 +1274,7 @@ def main():
                     figure_number += 1
         control_diagrams = [
             (first(args.control,["report/control_experimental_plip2d.png", "**/control_experimental_plip2d.png", "**/experimental_interactions.png"]), f"Experimental {experimental_label} pose used as the control reference."),
-            (first(args.control,["report/control_top_ranked_plip2d.png", "**/control_top_ranked_plip2d.png", "**/top_ranked_interactions.png"]), f"Globally lowest-energy redocked pose (Vina score {g.get('top_score_affinity_kcal_per_mol','NA')} kcal/mol; RMSD {g.get('top_score_rmsd_angstrom',g.get('best_rmsd_angstrom','NA'))} A)."),
+            (first(args.control,["report/control_top_ranked_plip2d.png", "**/control_top_ranked_plip2d.png", "**/top_ranked_interactions.png"]), f"Globally lowest-energy redocked pose (docking score {g.get('top_score_affinity_kcal_per_mol','NA')} kcal/mol; RMSD {g.get('top_score_rmsd_angstrom',g.get('best_rmsd_angstrom','NA'))} A)."),
             (first(args.control,["report/control_lowest_rmsd_plip2d.png", "**/control_lowest_rmsd_plip2d.png", "**/best_sampled_interactions.png"]), f"Globally lowest-RMSD redocked pose (RMSD {b.get('best_rmsd_angstrom','NA')} A)."),
         ] if args.control and args.include_control_appendix else []
         control_diagrams = [(path, description) for path, description in control_diagrams if path]
@@ -1415,7 +1433,7 @@ def main():
         else:
             scope_text = "Docking used the configured protocol shown above. No target-specific bound-ligand control was supplied, so pose-recovery performance for this target was not evaluated."
         result_subject = f"Target: {target_name} | Ligand: {name}" if protocol else f"Ligand: {name}"
-        story += [Paragraph(result_subject,styles["Heading2"]),Paragraph(scope_text + " More favorable Vina scores are more negative; RMSD and cluster population are separate measures.",styles["BodyText"]),Spacer(1,6)]
+        story += [Paragraph(result_subject,styles["Heading2"]),Paragraph(scope_text + " More favorable docking scores are more negative; RMSD and cluster population are separate measures.",styles["BodyText"]),Spacer(1,6)]
         if len(report_compounds) > 1 and cid in compound_results_by_id:
             ligand_result = compound_results_by_id[cid]
             story += [
@@ -1448,7 +1466,7 @@ def main():
         # This table is deliberately read from Panel A's exported data, not
         # re-derived from a different summary.  It therefore lists the same
         # maximum 20 clusters, scores, RMSDs, and population values as the plot.
-        rows=[["Rank","Cluster","Vina score","RMSD (A)","Population"]]
+        rows=[["Rank","Cluster","Docking score","RMSD (A)","Population"]]
         cluster_colors={1:"#d62728",2:"#1f77b4",3:"#d9a400"}
         plotted_cluster_path = args.study / "report" / f"{cid}_panel_A_clusters.csv"
         if plotted_cluster_path.is_file():
@@ -1500,7 +1518,7 @@ def main():
                 image(snapshot_panel, 6.5, 4.4),
                 Paragraph(
                     f"<b>Figure {figure_number}. Three-dimensional interaction snapshots for {name}.</b> "
-                    f"Shown are {snapshot_count} energy-ranked distinct cluster {representative_label}, ordered by Vina score. "
+                    f"Shown are {snapshot_count} energy-ranked distinct cluster {representative_label}, ordered by docking score. "
                     f"{panel_description} {color_description} in {cluster_reference}. These views support structural inspection; docking score rank does not establish pose correctness.",
                     styles["SmallDU"],
                 ), Spacer(1,6),
@@ -1546,7 +1564,7 @@ def main():
                 visual_label = "view" if len(fallback_images) == 1 else "views"
                 story += [Paragraph(f"Selected cluster structural {visual_label}",styles["CaptionDU"])]
                 for cluster_row, interaction_png in fallback_images:
-                    story += [Paragraph(f"Cluster {cluster_row.get('cluster_id','NA')} - Vina score {cluster_row.get('best_energy_kcal_per_mol','NA')} kcal/mol", styles["SmallDU"]), image(interaction_png,6.8,3.2), Spacer(1,4)]
+                    story += [Paragraph(f"Cluster {cluster_row.get('cluster_id','NA')} - docking score {cluster_row.get('best_energy_kcal_per_mol','NA')} kcal/mol", styles["SmallDU"]), image(interaction_png,6.8,3.2), Spacer(1,4)]
         story += [Paragraph("<b>Interpretation and limitations</b><br/>Docking scores are ranking estimates, not measured binding free energies. Rigid-receptor docking does not model induced fit. Cluster population and seed support describe computational convergence, not biological correctness. Protonation, tautomer, receptor preparation, and box choices can affect results. Experimental validation remains necessary.",styles["SmallDU"])]
         if compound_index < len(report_compounds)-1:
             story.append(PageBreak())

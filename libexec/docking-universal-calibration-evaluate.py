@@ -50,8 +50,13 @@ def engine_version(engine):
     source = executable or "not detected"
     if not command:
         conda = shutil.which("conda")
-        engine_env = os.environ.get("DOCKING_UNIVERSAL_VINA_ENV", "docking-universal-vina")
-        if conda and engine == "vina":
+        environment_defaults = {
+            "vina": ("DOCKING_UNIVERSAL_VINA_ENV", "docking-universal-vina"),
+            "qvinaw": ("DOCKING_UNIVERSAL_QVINAW_ENV", "docking-universal-qvinaw"),
+        }
+        environment_variable, default_environment = environment_defaults.get(engine, ("", ""))
+        engine_env = os.environ.get(environment_variable, default_environment) if environment_variable else ""
+        if conda and engine_env:
             command = [conda, "run", "-n", engine_env, engine, "--version"]
             source = f"conda environment {engine_env}"
     if not command:
@@ -70,7 +75,7 @@ def engine_version(engine):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("comparison_root", type=Path, nargs="+")
-    parser.add_argument("--engine", required=True, choices=("vina",))
+    parser.add_argument("--engine", required=True, choices=("vina", "qvinaw"))
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--receptor", required=True, type=Path)
     parser.add_argument("--box", required=True, type=Path)

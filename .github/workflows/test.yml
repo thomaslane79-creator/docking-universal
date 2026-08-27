@@ -27,3 +27,8 @@ jobs:
       - name: Run CLI checks
         shell: bash -el {0}
         run: make test
+      - name: Verify QuickVina-W engine environment
+        shell: bash -el {0}
+        run: |
+          conda env create -f environments/qvinaw.yml
+          conda run --no-capture-output -n docking-universal-qvinaw qvinaw --version

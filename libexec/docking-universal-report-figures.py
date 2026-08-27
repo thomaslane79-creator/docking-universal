@@ -461,7 +461,7 @@ def plot_clusters(analysis, output, reference_sdf=None, control_label=None):
 
     fig, ax = plt.subplots(figsize=(11, 6.5))
     ax.scatter(energies, rmsds, s=sizes, c=colors, edgecolor="black", linewidth=0.7, alpha=0.9)
-    ax.set_xlabel("Best cluster Vina score (kcal/mol)", fontsize=15)
+    ax.set_xlabel("Best cluster docking score (kcal/mol)", fontsize=15)
     if control_label:
         ax.set_ylabel(f"No-fit heavy-atom RMSD to experimental {control_label} (A)", fontsize=15)
         ax.set_title("Top 20 control pose clusters and experimental-pose recovery", fontsize=17)

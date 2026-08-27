@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Low-level AutoDock Vina runner for an already prepared receptor, ligand PDBQT
-# directory, and box. It records executable versions and parameters; scientific
-# preparation and protocol approval are handled by higher-level commands.
+# Low-level Vina-family engine runner for an already prepared receptor, ligand
+# PDBQT directory, and box. It records executable versions and parameters;
+# scientific preparation and protocol approval are handled by higher-level
+# commands.
 
 usage() {
   cat <<'EOF'
@@ -16,7 +17,7 @@ receptor, docking box, ligand input, and output directory. Headless sessions ask
 for exact paths. An SDF ligand input is prepared automatically.
 
 Options:
-  --engine vina            Docking engine (only Vina is supported in this release)
+  --engine NAME            vina or qvinaw (QuickVina-W)
   --engine-command PATH    Explicit engine executable
   --engine-env NAME        Conda environment containing the engine
   --exhaustiveness N       Forwarded to the selected engine when provided
@@ -131,16 +132,26 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+case "$engine" in
+  quickvina-w|qvina-w) engine="qvinaw" ;;
+esac
+
 [ -n "$receptor" ] && [ -n "$ligand_dir" ] && [ -n "$config" ] && [ -n "$out_dir" ] || {
   echo "ERROR: prepared docking inputs are required. Run 'docking-universal prepare' first." >&2
   echo "Then prepare the compounds with 'docking-universal ligands' before running dock." >&2
   usage >&2
   exit 2
 }
-[ "$engine" = "vina" ] || { echo "ERROR: only AutoDock Vina is supported in this release; smina may be evaluated in a future version" >&2; exit 2; }
+case "$engine" in
+  vina|qvinaw) ;;
+  *) echo "ERROR: --engine must be vina or qvinaw (QuickVina-W)" >&2; exit 2 ;;
+esac
 
 if [ -z "$engine_command" ]; then
-  engine_command="${DOCKING_UNIVERSAL_VINA:-}"
+  case "$engine" in
+    vina) engine_command="${DOCKING_UNIVERSAL_VINA:-}" ;;
+    qvinaw) engine_command="${DOCKING_UNIVERSAL_QVINAW:-}" ;;
+  esac
 fi
 
 engine_cmd=()
@@ -154,7 +165,10 @@ elif command -v "$engine" >/dev/null 2>&1; then
   engine_source="PATH"
 else
   if [ -z "$engine_env" ]; then
-    engine_env="${DOCKING_UNIVERSAL_VINA_ENV:-docking-universal-vina}"
+    case "$engine" in
+      vina) engine_env="${DOCKING_UNIVERSAL_VINA_ENV:-docking-universal-vina}" ;;
+      qvinaw) engine_env="${DOCKING_UNIVERSAL_QVINAW_ENV:-docking-universal-qvinaw}" ;;
+    esac
   fi
   [ -n "$engine_env" ] || { echo "ERROR: $engine not found in PATH; use --engine-command or --engine-env" >&2; exit 1; }
   command -v conda >/dev/null 2>&1 || { echo "ERROR: conda is required to use --engine-env $engine_env" >&2; exit 1; }

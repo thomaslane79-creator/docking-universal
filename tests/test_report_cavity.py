@@ -93,6 +93,14 @@ class CavityReportTests(unittest.TestCase):
         self.assertEqual(comparison["overall"], "NOT THE SAME")
         self.assertEqual(next(row for row in comparison["entries"] if row["software"] == "Meeko")["status"], "DIFFERENT")
 
+    def test_quickvinaw_has_distinct_report_identity(self):
+        self.assertEqual(REPORT.engine_display_name("qvinaw"), "QuickVina-W")
+        recorded = {key: "1.0" for key in ("docking_universal", "python", "rdkit", "molscrub", "meeko", "pdbfixer", "engine_version")}
+        comparison = REPORT.compare_scientific_versions(recorded, dict(recorded), "QuickVina-W")
+        engines = [row for row in comparison["entries"] if row["software"] == "QuickVina-W"]
+        self.assertEqual(len(engines), 1)
+        self.assertEqual(engines[0]["status"], "SAME")
+
     def test_retained_versions_do_not_use_later_report_environment(self):
         with tempfile.TemporaryDirectory() as temporary:
             study = Path(temporary)

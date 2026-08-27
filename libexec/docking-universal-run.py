@@ -1321,7 +1321,7 @@ def parse_args():
     parser.add_argument("--receptor-pdb", type=Path)
     parser.add_argument("--receptor-pdbqt", type=Path)
     parser.add_argument("--box", type=Path)
-    parser.add_argument("--engine", choices=("vina",), default="vina", help="docking engine (Vina only in this release)")
+    parser.add_argument("--engine", choices=("vina", "qvinaw"), default="vina", help="docking engine: Vina or QuickVina-W")
     parser.add_argument("--control-tier", choices=("quick", "repeatability", "broader", "conformers", "robust"), default="quick")
     parser.add_argument("--seeds", type=int, default=5, help="exploratory independent seeds (default: 5)")
     parser.add_argument("--conformers", type=int, default=3, help="exploratory conformers per state (default: 3)")

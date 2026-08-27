@@ -1,6 +1,6 @@
 # Validation status
 
-Docking Universal 0.6.4 is a research preview. Validation distinguishes software-path testing from scientific validation: a command completing successfully does not establish that a predicted pose or cavity is biologically correct.
+Docking Universal 0.6.5 is a research preview. Validation distinguishes software-path testing from scientific validation: a command completing successfully does not establish that a predicted pose or cavity is biologically correct.
 
 ## Automated option coverage
 
@@ -13,7 +13,7 @@ The test suite exercises:
 - all approved-protocol resume routes and multiple-protocol disambiguation;
 - each prepared pocket selection plus single-pocket, competitive-pocket, and no-PyMOL review choices;
 - docking-box validation, rejected choices, unapproved-protocol blocking, result parsing, and all command help entry points;
-- primary AutoDock Vina command/output routing with a deterministic mock engine.
+- AutoDock Vina and QuickVina-W command/output routing with deterministic mock engines.
 
 Run the automated suite with:
 
@@ -37,7 +37,7 @@ The release suite is intentionally slow. It first repeats the integration probes
 
 ## Real-tool smoke checks
 
-The maintained scientific environment has been checked with fpocket, Meeko, PDBFixer 1.11, MolScrub, RDKit, Open Babel, PLIP, PyMOL Open-Source, and AutoDock Vina 1.2.7. Real fixture-based checks cover:
+The maintained scientific environment has been checked with fpocket, Meeko, PDBFixer 1.11, MolScrub, RDKit, Open Babel, PLIP, PyMOL Open-Source, AutoDock Vina 1.2.7, and QuickVina-W 1.1 from the qvina 2.1.0 Conda package. Real fixture-based checks cover:
 
 - ligand-centered 1HVR/XK2 receptor preparation and box generation;
 - strict-Meeko-first receptor conversion, conservative PDBFixer fallback auditing, and explicit user-approved component-removal behavior after safe attempts fail;

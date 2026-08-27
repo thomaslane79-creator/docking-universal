@@ -31,6 +31,7 @@ case "${1:-} ${2:-}" in
     ;;
   "env create")
     case "$*" in
+      *environments/qvinaw.yml*) environment_name=docking-universal-qvinaw ;;
       *environments/vina.yml*) environment_name=docking-universal-vina ;;
       *environment.yml*) environment_name=docking-universal ;;
       *) exit 2 ;;
@@ -55,6 +56,7 @@ bootstrap_output=$(env PATH="$mock_bin:$PATH" \
 
 grep -q "env create -f $project_dir/environment.yml" "$log_file" || fail "main environment creation"
 grep -q "env create -f $project_dir/environments/vina.yml" "$log_file" || fail "Vina environment creation"
+grep -q "env create -f $project_dir/environments/qvinaw.yml" "$log_file" || fail "QuickVina-W environment creation"
 grep -q "run --no-capture-output -n docking-universal make -C $project_dir install-conda" "$log_file" || fail "command installation"
 grep -q "run --no-capture-output -n docking-universal docking-universal check-install --full" "$log_file" || fail "full installation check"
 case "$bootstrap_output" in
@@ -97,6 +99,7 @@ env PATH="$mock_bin:$PATH" BOOTSTRAP_TEST_STATE="$state_file" \
 
 grep -q "env update -f $project_dir/environment.yml" "$log_file" || fail "main environment update"
 grep -q "env update -f $project_dir/environments/vina.yml" "$log_file" || fail "Vina environment update"
+grep -q "env update -f $project_dir/environments/qvinaw.yml" "$log_file" || fail "QuickVina-W environment update"
 if grep -q -- '--prune' "$log_file"; then
   fail "automatic update pruned user-added packages"
 fi

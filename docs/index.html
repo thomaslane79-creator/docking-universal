@@ -27,8 +27,8 @@
       <div class="hero-copy">
         <p class="eyebrow">Structural docking workflows · Ubuntu and macOS</p>
         <h1>Scientific docking workflow orchestration, validation, analysis, visualization, and reporting.</h1>
-        <p class="lede"><strong>Docking Universal is built around AutoDock Vina and established open-source structural-bioinformatics tools.</strong> It provides guided workflows for complete studies, reusable protocol creation, and protocol-based screening while retaining composable commands, complete provenance, PyMOL Open-Source visualizations, and automatic scientific PDF reports.</p>
-        <p class="lede"><strong>AutoDock Vina performs the docking search and scoring.</strong> Docking Universal makes the surrounding established open-source toolchain reproducible, reviewable, batch-capable, and easier to run without launching each script manually.</p>
+        <p class="lede"><strong>Docking Universal supports AutoDock Vina, QuickVina-W, and established open-source structural-bioinformatics tools.</strong> It provides guided workflows for complete studies, reusable protocol creation, and protocol-based screening while retaining composable commands, complete provenance, PyMOL Open-Source visualizations, and automatic scientific PDF reports.</p>
+        <p class="lede"><strong>The selected Vina-family engine performs the docking search and scoring.</strong> Docking Universal makes the surrounding established open-source toolchain reproducible, reviewable, batch-capable, and easier to run without launching each script manually.</p>
         <div class="actions">
           <a class="button primary" href="#install">Get started</a>
           <a class="button secondary" href="guided-workflow.md">Run a study</a>
@@ -151,7 +151,7 @@
       <div>
         <p class="eyebrow">Package interface</p>
         <h2>One interface, specialized scientific commands</h2>
-        <p>The installer creates the preparation, analysis, and visualization environment plus a small isolated AutoDock Vina environment. The installed launcher uses both automatically, so normal operation does not require manual Conda activation.</p>
+        <p>The installer creates the preparation, analysis, and visualization environment plus isolated AutoDock Vina and QuickVina-W engine environments. The installed launcher selects them automatically, so normal operation does not require manual Conda activation.</p>
         <p><a href="installation.md">Complete installation guide and dependency roles →</a></p>
       </div>
       <div class="terminal" role="region" aria-label="Docking Universal terminal example">
@@ -166,6 +166,7 @@ available  obabel
 available  plip
 available  pymol
 available  vina (isolated engine environment)
+available  qvinaw / QuickVina-W (isolated engine environment)
 
 <b>$</b> docking-universal run
 <b>$</b> docking-universal create-protocol
@@ -189,7 +190,7 @@ available  vina (isolated engine environment)
       </div>
       <div class="output-list">
         <article><span>DU</span><div><h3>Cite this workflow</h3><p>The repository citation recognizes Docking Universal's orchestration, validation logic, implementation, visualization, and reporting.</p></div></article>
-        <article><span>REF</span><div><h3>Cite the underlying methods</h3><p>Citing Docking Universal does not replace citations for AutoDock Vina, fpocket, RDKit, Meeko, PDBFixer/OpenMM, Open Babel, PLIP, PyMOL Open-Source, or other tools used in the relevant stages.</p></div></article>
+        <article><span>REF</span><div><h3>Cite the underlying methods</h3><p>Citing Docking Universal does not replace citations for the selected docking engine (AutoDock Vina or QuickVina-W), fpocket, RDKit, Meeko, PDBFixer/OpenMM, Open Babel, PLIP, PyMOL Open-Source, or other tools used in the relevant stages.</p></div></article>
         <article><span>PDF</span><div><h3>Run-specific references</h3><p>Automatically generated reports record software versions and applicable references so the original work can be credited accurately.</p></div></article>
       </div>
     </section>

@@ -22,7 +22,7 @@ esac
 
 version_output=$("$cli" --version)
 case "$version_output" in
-  "Docking Universal 0.6.4"*) ;;
+  "Docking Universal $(cat "$project_dir/VERSION")"*) ;;
   *) fail "version output" ;;
 esac
 
@@ -64,6 +64,24 @@ done
 printf 'MODEL 1\nREMARK VINA RESULT: -7.0 0.0 0.0\nENDMDL\n' > "$output"
 EOF
 chmod +x "$mock_vina"
+mock_qvinaw="$mock_dir/qvinaw"
+cat > "$mock_qvinaw" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = "--version" ]; then
+  echo "QuickVina-W fake-0.1"
+  exit 0
+fi
+output=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --out) output="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+[ -n "$output" ] || exit 2
+printf 'MODEL 1\nREMARK VINA RESULT: -7.1 0.0 0.0\nENDMDL\n' > "$output"
+EOF
+chmod +x "$mock_qvinaw"
 "$cli" dock --engine vina --engine-command "$mock_vina" \
   --receptor "$mock_dir/receptor.pdbqt" --ligands "$mock_dir/ligands" \
   --config "$mock_dir/box.conf" --out "$mock_dir/vina_results" >/dev/null || fail "vina dock engine command"
@@ -71,8 +89,14 @@ grep -q $'engine_version\tAutoDock Vina fake-0.1' "$mock_dir/vina_results/run_ma
 [ -s "$mock_dir/vina_results/example_vina.pdbqt" ] || fail "vina dock output"
 [ -s "$mock_dir/vina_results/example_two_vina.pdbqt" ] || fail "vina multi-ligand dock output"
 
-# The research-preview interface is deliberately Vina-only. Obsolete smina
-# selections must fail before any external engine is launched.
+"$cli" dock --engine qvinaw --engine-command "$mock_qvinaw" \
+  --receptor "$mock_dir/receptor.pdbqt" --ligands "$mock_dir/ligands" \
+  --config "$mock_dir/box.conf" --out "$mock_dir/qvinaw_results" >/dev/null || fail "QuickVina-W dock engine command"
+grep -q $'engine\tqvinaw' "$mock_dir/qvinaw_results/run_manifest.tsv" || fail "QuickVina-W engine manifest"
+grep -q $'engine_version\tQuickVina-W fake-0.1' "$mock_dir/qvinaw_results/run_manifest.tsv" || fail "QuickVina-W version manifest"
+[ -s "$mock_dir/qvinaw_results/example_qvinaw.pdbqt" ] || fail "QuickVina-W dock output"
+
+# Unsupported engines must fail before any external engine is launched.
 if "$cli" dock --engine smina --engine-command "$mock_vina" \
   --receptor "$mock_dir/receptor.pdbqt" --ligands "$mock_dir/ligands" \
   --config "$mock_dir/box.conf" --out "$mock_dir/rejected_smina" >/dev/null 2>&1; then

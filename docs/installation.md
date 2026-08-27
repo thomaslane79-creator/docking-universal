@@ -7,7 +7,7 @@ state for reproducibility, and report problems without exposing research data.
 
 ## Recommended Conda installation
 
-Docking Universal uses external scientific programs as composable stages. The repository's `environment.yml` contains the direct dependency set exercised on current Ubuntu and macOS GitHub runners. The 0.6.4 validation interface uses this declared environment; run integration or release validation on the intended workstation before production use because compiled scientific packages can differ across platforms.
+Docking Universal uses external scientific programs as composable stages. The repository's `environment.yml` contains the direct dependency set exercised on current Ubuntu and macOS GitHub runners. The 0.6.5 validation interface uses this declared environment; run integration or release validation on the intended workstation before production use because compiled scientific packages can differ across platforms.
 
 ### Beginner route: no Git required
 
@@ -50,19 +50,20 @@ user-added packages. Experts who want strict declared-only environments can use
 The installed `docking-universal` launcher works for every subcommand without
 manual activation, including `run`, `prepare-ligand`, `prepare-receptor`,
 `check-install`, and `validate`. It routes the command through the main
-environment and the software invokes the separate Vina environment when needed.
+environment and the software invokes the selected isolated engine environment when needed.
 The interactive runner asks for a parent folder before creating its named study
 folder. Graphical Ubuntu sessions prefer the desktop-native Zenity/GTK chooser,
 with Tk as a fallback; macOS opens Finder initially at the front Finder folder.
 Headless Linux falls back to a path prompt. Supplying `--out` bypasses all
 automatic folder selection.
 
-For manual installation, create both environments and install the public
+For manual installation, create all three environments and install the public
 command into the active main environment:
 
 ```bash
 conda env create -f environment.yml
 conda env create -f environments/vina.yml
+conda env create -f environments/qvinaw.yml
 conda activate docking-universal
 make install-conda
 docking-universal check-install --full
@@ -81,7 +82,7 @@ docking-universal check-install
 
 The final check reports whether PDBFixer is available. The strict Meeko path remains first, but PDBFixer must be installed so the documented automatic repair path is available when a receptor needs it.
 
-No manual activation is required for normal package use. If `vina` is not already on `PATH`, Docking Universal automatically looks for it in `docking-universal-vina`.
+No manual activation is required for normal package use. If an engine is not already on `PATH`, Docking Universal automatically looks for `vina` in `docking-universal-vina` or `qvinaw` in `docking-universal-qvinaw`.
 
 An installed copy can run validation from any writable directory without manual Conda activation:
 
@@ -94,12 +95,13 @@ docking-universal validate integration
 
 Installed validation uses packaged scientific fixtures and writes a new `validation_runs/` directory below the invocation directory. It does not write inside the Conda installation. Source checkouts additionally run the repository's developer unit tests.
 
-The installer updates declared packages but does not replace either environment.
+The installer updates declared packages but does not prune user-added packages from any environment.
 To remove the complete installation later:
 
 ```bash
 conda env remove -n docking-universal
 conda env remove -n docking-universal-vina
+conda env remove -n docking-universal-qvinaw
 ```
 
 ## PyMOL and compiled dependencies
@@ -124,17 +126,17 @@ Conda installs Qt, Cairo, OpenGL support libraries, and other low-level PyMOL de
 | Compound preparation | Open Babel plus Meeko | Split, validate, convert, optimize, and create ligand PDBQT |
 | Chemical states + conformers | MolScrub 0.2.2 plus RDKit | pH-aware protomer/tautomer enumeration and independent seeded ETKDG/MMFF ensembles |
 | Pocket discovery | fpocket | Detect and rank candidate cavities |
-| Docking | AutoDock Vina 1.2.7 (engine environment) | Perform docking search and scoring |
+| Docking | AutoDock Vina 1.2.7 or QuickVina-W 1.1 (qvina package 2.1.0; isolated engine environments) | Perform docking search and scoring |
 | Interaction analysis | PLIP | Calculate interactions and write XML/text/fixed-coordinate output |
 | Interaction scene | Docking Universal | Convert PLIP output into one consolidated PyMOL `.pml` scene |
 | 3D image | PyMOL Open Source | Render `.pml` or coordinate files headlessly to PNG |
 | Generic 2D image | RDKit, with Open Babel fallback | Render molecule depictions to PNG or SVG |
 
-Only the packages needed by the selected stage must be available. `environment.yml` installs preparation, analysis, and visualization tools. `environments/vina.yml` supplies AutoDock Vina without destabilizing the PyMOL and chemistry library set.
+Only the packages needed by the selected stage must be available. `environment.yml` installs preparation, analysis, and visualization tools. `environments/vina.yml` supplies AutoDock Vina and `environments/qvinaw.yml` supplies QuickVina-W without destabilizing the PyMOL and chemistry library set.
 
-## Why Vina has a small separate environment
+## Why the docking engines have small separate environments
 
-On some conda-forge platforms, Vina 1.2.7 requires a different Python/libboost generation than parts of the visualization and preparation stack. Keeping Vina isolated avoids that compiled-library conflict. It is still accessed through the same Docking Universal command, and all outputs remain in the same study directory.
+The Vina-family packages can require different compiled-library generations from parts of the visualization and preparation stack. Keeping Vina and QuickVina-W in separate engine environments avoids those conflicts and prevents their differently versioned binaries from replacing one another. Both are accessed through the same Docking Universal command, and all outputs remain in the same study directory.
 
 Run Vina explicitly:
 
@@ -142,9 +144,15 @@ Run Vina explicitly:
 docking-universal dock --engine vina  --receptor receptor.pdbqt --ligands prepared_ligands --config box.conf --out results_vina
 ```
 
+Run QuickVina-W explicitly:
+
+```bash
+docking-universal dock --engine qvinaw --receptor receptor.pdbqt --ligands prepared_ligands --config box.conf --out results_qvinaw
+```
+
 Each output directory receives a manifest containing the selected engine, version, executable source, receptor, ligand directory, and configuration file.
 
-All report-producing workflows use this arrangement automatically. Users do not switch environments manually. Vina is the only docking engine supported in this release.
+All report-producing workflows use this arrangement automatically. Users do not switch environments manually. AutoDock Vina is the default; `--engine qvinaw` selects QuickVina-W when creating or running an engine-specific workflow.
 
 After creating a reusable protocol, use its portable Docking Universal bundle for new compounds:
 
@@ -190,6 +198,7 @@ The following checks passed in the declared scientific environment:
 - the custom interaction stage wrote a fixed PDB, consolidated PML scene, and run manifest.
 - matched 1HVR/XK2 raw inputs passed strict receptor preparation, ligand preparation, ligand-centered preparation, and ligand-free pocket recovery;
 - Vina 1.2.7 completed smoke runs on the prepared inputs;
+- QuickVina-W 1.1 from the qvina 2.1.0 package completed the same integration smoke route with engine-compatible ligand preparation;
 - the PLIP interaction scene and ligand-centered pocket scene rendered to visually inspected nonblank PNGs.
 
 These are software and representative-data checks. They are not a claim that every receptor, ligand chemistry, operating system, or scientific use case has been validated.

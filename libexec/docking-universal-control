@@ -29,7 +29,7 @@ Options:
   --override-reason TEXT    Required audit note with --force-ligand
   --ligand-sdf SDF          Deprecated alias for --ligand-template
   --ligand-resname NAME     Deprecated; allowed only when the instance is unique
-  --engine NAME             vina (only supported engine in this release)
+  --engine NAME             vina or qvinaw (QuickVina-W)
   --control-tier NAME       quick, repeatability, broader, conformers, or robust
                             (default: quick, followed by an interactive retry menu)
   --approval-min-seeds N    Independent seeds required for approval (default: 5)
@@ -148,7 +148,13 @@ done
   echo "ERROR: --infer-ligand-chemistry cannot be combined with --ligand-template" >&2
   exit 2
 }
-[ "$engine" = "vina" ] || { echo "ERROR: only AutoDock Vina is supported in this release; smina may be evaluated later" >&2; exit 2; }
+case "$engine" in
+  quickvina-w|qvina-w) engine="qvinaw" ;;
+esac
+case "$engine" in
+  vina|qvinaw) ;;
+  *) echo "ERROR: --engine must be vina or qvinaw (QuickVina-W)" >&2; exit 2 ;;
+esac
 case "$control_tier" in quick|repeatability|broader|conformers|robust) ;; *) echo "ERROR: invalid --control-tier" >&2; exit 2 ;; esac
 case "$forcefield" in mmff94|mmff94s|uff) ;; *) echo "ERROR: --forcefield must be mmff94, mmff94s, or uff" >&2; exit 2 ;; esac
 [ -z "$conformers_override" ] || [[ "$conformers_override" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: --conformers-override must be a positive integer" >&2; exit 2; }
@@ -488,7 +494,7 @@ fi
 # the tier logic and protocol record independently testable. The legacy branch
 # below is retained only to reproduce historical output layouts.
 if [ "$legacy_single_conformer" -eq 0 ]; then
-  engines=(vina)
+  engines=("$engine")
   for current_engine in "${engines[@]}"; do
     calibration_args=(
       --reference-sdf "$sdf_copy"
@@ -526,11 +532,11 @@ if [ "$legacy_single_conformer" -eq 0 ]; then
 fi
 
 log "CONTROL 4/6: preparing the generated experimental ligand for redocking"
-target_engines="vina"
+target_engines="$engine"
 "$CLI" ligands "$sdf_copy" --out "$control_ligand_dir" --target-engines "$target_engines"
 
 printf 'engine\ttop_score_model\taffinity_kcal_per_mol\ttop_score_rmsd_angstrom\twithin_threshold\tbest_rmsd_model\tbest_rmsd_angstrom\n' > "$out_dir/control_summary.tsv"
-engines=(vina)
+engines=("$engine")
 
 log "CONTROL 5/6: redocking the experimental ligand"
 for current_engine in "${engines[@]}"; do

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Collect AutoDock Vina PDBQT results into a tidy CSV."""
+"""Collect Vina-family PDBQT results into a tidy CSV."""
 
 import argparse
 import csv

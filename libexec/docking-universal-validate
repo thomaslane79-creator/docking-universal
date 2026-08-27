@@ -168,6 +168,15 @@ run_integration() {
   "$CLI" collect "$out/vina_smoke" --out "$out/vina_smoke_scores.csv"
   [ "$(wc -l < "$out/vina_smoke_scores.csv" | tr -d ' ')" -ge 3 ]
 
+  current_stage="real QuickVina-W smoke docking"; write_status "RUNNING"
+  "$CLI" ligands "$out/ensemble_mmff94.sdf" --out "$out/qvinaw_ligand_preparation" \
+    --geometry-mode preserve --target-engines qvinaw
+  "$CLI" dock --engine qvinaw --receptor "$receptor" \
+    --ligands "$out/qvinaw_ligand_preparation/pdbqt_ligands" --config "$box" \
+    --out "$out/qvinaw_smoke" --exhaustiveness 1 --num-modes 1 --energy-range 3 --seed 41001
+  "$CLI" collect "$out/qvinaw_smoke" --out "$out/qvinaw_smoke_scores.csv"
+  [ "$(wc -l < "$out/qvinaw_smoke_scores.csv" | tr -d ' ')" -ge 3 ]
+
   current_stage="synthetic approved-protocol fixture generation"; write_status "RUNNING"
   comparison_args=""
   seed_args=""

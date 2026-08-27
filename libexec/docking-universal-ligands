@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Convert SDF records to auditable AutoDock Vina-ready PDBQTs. Meeko may retain
-# its flexible-macrocycle representation when supported by the ligand chemistry.
-# Preserve mode is used for independently generated calibration conformers.
+# Convert SDF records to auditable Vina-family PDBQTs. Meeko may retain its
+# flexible-macrocycle representation for Vina. QuickVina-W receives rigid
+# macrocycles because its older Vina-derived atom types do not support Meeko's
+# flexible-macrocycle pseudo-atoms. Preserve mode is used for independently
+# generated calibration conformers.
 
 usage() {
   cat <<'EOF'
@@ -14,7 +16,7 @@ Options:
   -n, --name-field FIELD     SDF property used as the compound name
   -o, --out DIR              Output root (default: sanitized SDF basename)
   --backend NAME             auto, meeko, or adfr (default: auto)
-  --target-engines NAME      vina (accepted for explicit provenance)
+  --target-engines NAME      vina or qvinaw (QuickVina-W)
   --geometry-mode NAME       optimize or preserve (default: optimize)
   --charge-model NAME        gasteiger, espaloma, or zero (default: gasteiger)
   --prepare-ligand PATH      Backend executable path
@@ -56,7 +58,13 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-[ "$target_engines" = "vina" ] || { echo "ERROR: only --target-engines vina is supported in this release" >&2; exit 2; }
+case "$target_engines" in
+  quickvina-w|qvina-w) target_engines="qvinaw" ;;
+esac
+case "$target_engines" in
+  vina|qvinaw) ;;
+  *) echo "ERROR: --target-engines must be vina or qvinaw (QuickVina-W)" >&2; exit 2 ;;
+esac
 case "$geometry_mode" in optimize|preserve) ;; *) echo "ERROR: --geometry-mode must be optimize or preserve" >&2; exit 2 ;; esac
 case "$charge_model" in gasteiger|espaloma|zero) ;; *) echo "ERROR: unsupported --charge-model" >&2; exit 2 ;; esac
 
@@ -146,7 +154,9 @@ for one_sdf in "$temp_root"/ligand*.sdf; do
   fi
   if [ "$backend" = "meeko" ]; then
     meeko_result=0
-    "$prep_ligand" -i "$opt_sdf" -o "$prepared" --charge_model "$charge_model" >/dev/null 2>&1 || meeko_result=$?
+    meeko_args=(-i "$opt_sdf" -o "$prepared" --charge_model "$charge_model")
+    [ "$target_engines" != "qvinaw" ] || meeko_args+=(--rigid_macrocycles)
+    "$prep_ligand" "${meeko_args[@]}" >/dev/null 2>&1 || meeko_result=$?
     if [ "$meeko_result" -ne 0 ]; then
       printf 'warning  Meeko ligand preparation failed for %s\n' "$compound_id" >&2
       failed=$((failed + 1))

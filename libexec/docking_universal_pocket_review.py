@@ -92,6 +92,22 @@ def build_combined_review_scene(root, records):
     ]
     for color_name, rgb in POCKET_COLORS:
         lines.append(f"set_color {color_name}, {rgb}")
+    ligand_dir = next(iter(sorted(root.glob("*_receptor_prep/ligand"))), None)
+    if ligand_dir is None and (root / "ligand").is_dir():
+        ligand_dir = root / "ligand"
+    ligand_objects = []
+    if ligand_dir:
+        for ligand_path in sorted(ligand_dir.glob("*.pdb")):
+            ligand_name = re.sub(r"[^A-Za-z0-9_]", "_", ligand_path.stem)
+            object_name = f"deposited_ligand_{ligand_name}"
+            ligand_objects.append(object_name)
+            lines += [
+                f"load {ligand_path.resolve()}, {object_name}",
+                f"show sticks, {object_name}",
+                f"color magenta, {object_name}",
+                f"set stick_radius, 0.22, {object_name}",
+                f'label first {object_name}, "{ligand_path.stem}"',
+            ]
     for index, record in enumerate(records, start=1):
         color_name = POCKET_COLORS[(index - 1) % len(POCKET_COLORS)][0]
         row = record["row"]
@@ -137,7 +153,10 @@ def build_combined_review_scene(root, records):
         else:
             lines.append(f"group Pocket_{index}, pocket_{index}_*")
     pocket_selection = " or ".join(f"pocket_{index}_cavity" for index in range(1, len(records) + 1))
-    lines += [f"orient ({pocket_selection})", f"zoom ({pocket_selection}), 8"]
+    review_selection = pocket_selection
+    if ligand_objects:
+        review_selection += " or " + " or ".join(ligand_objects)
+    lines += [f"orient ({review_selection})", f"zoom ({review_selection}), 8"]
     scene.write_text("\n".join(lines) + "\n")
     return scene
 

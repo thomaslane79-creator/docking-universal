@@ -8,6 +8,7 @@ Three levels of environment information are included:
 - `environment-lock-osx-arm64.txt`: a supplemental exact conda build snapshot for `osx-arm64`;
 - `requirements-pip-lock.txt`: versioned Python distributions visible in that environment without machine-local build paths.
 - `environments/vina.yml`: isolated current AutoDock Vina environment for comparison runs;
+- `environments/qvinaw.yml`: isolated QuickVina-W 1.1 engine from the qvina 2.1.0 Conda package;
 - `environments/vina-lock-osx-arm64.txt`: a supplemental exact Vina build snapshot for `osx-arm64`.
 
 Key tested versions:
@@ -25,7 +26,7 @@ Key tested versions:
 | Meeko | 0.7.1 |
 | PDBFixer | 1.11 |
 
-AutoDock Vina 1.2.7 is intentionally separated from the main compatibility matrix because its conda package can require a different Python/libboost generation than parts of the preparation and visualization stack. Docking Universal invokes it from `docking-universal-vina` and records that environment in the run manifest.
+AutoDock Vina 1.2.7 and QuickVina-W 1.1 (distributed in the qvina 2.1.0 Conda package) are intentionally separated from the main compatibility matrix because their conda packages can require different compiled-library generations from parts of the preparation and visualization stack. Docking Universal invokes them from `docking-universal-vina` and `docking-universal-qvinaw`, respectively, and records the selected executable, environment, and version in the run manifest.
 
 The packaged commands use strict Meeko conversion first. Only after rejection do they apply conservative PDBFixer repair—alternate-location resolution, recognized nonstandard-residue mapping, and missing side-chain heavy atoms, without constructing missing loops or terminal atoms—and retry strict Meeko. If a depositor-annotated disulfide causes Meeko's padding error, the workflow retries with paired `CYX` templates and records the retained bridge; it does not remove the cysteines. If Meeko specifically rejects linked deposited chemistry, a final, logged ADFRsuite compatibility fallback can be tried to retain the component; approval still requires target-matched control redocking. When safe options fail, the interactive workflow offers a final explicit component-removal attempt; it is never automatic, and the decision and log are retained. Reports identify the path actually used and record the relevant software versions. Advanced backend overrides exist for compatibility testing, but preparation routes must not be treated as scientifically interchangeable without comparison.
 
