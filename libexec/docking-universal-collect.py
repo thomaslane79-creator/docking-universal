@@ -14,6 +14,7 @@ def iter_files(path: Path):
 
 
 def parse_file(path: Path):
+    """Parse Vina-family model remarks into one row per retained pose."""
     compound_name = ""
     smiles = ""
     model = None
@@ -53,6 +54,7 @@ def parse_file(path: Path):
 
 
 def main():
+    """Collect retained Vina-family poses and scores into an auditable CSV."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path, help="PDBQT file or directory")
     parser.add_argument("--out", type=Path, help="Output CSV path")

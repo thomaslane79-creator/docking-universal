@@ -334,6 +334,7 @@ def validated_box_size(value):
 
 
 def explain_workflow(mode):
+    """Explain the selected guided-study stages before collecting choices."""
     explanations = {
         "control": (
             "BOUND-LIGAND CONTROL", "Find a relevant experimental ligand, use it to define the site, "
@@ -995,6 +996,7 @@ def report_compound_library(compounds, output):
 
 
 def discover_preparation(root, interactive=True, defer_box_selection=False):
+    """Locate prepared receptor, ligand candidates, and retained docking boxes."""
     prep_roots = sorted(root.glob("*_receptor_prep"))
     if len(prep_roots) != 1:
         raise SystemExit(f"Expected one receptor-preparation folder under {root}; found {len(prep_roots)}")
@@ -1058,7 +1060,6 @@ def relative_to_study(path, study):
 
 def receptor_preparation_summary(study):
     """Summarize the observed or protocol-carried receptor preparation path."""
-    audit_paths = sorted(study.glob("preparation/**/receptor/pdbfixer_audit.json"))
     post_fix_logs = sorted(study.glob("preparation/**/receptor/receptor_after_pdbfixer.log"))
     removal_logs = [path for path in sorted(study.glob("preparation/**/receptor/receptor_user_approved_removal.log")) if path.stat().st_size]
     adfr_logs = [path for path in sorted(study.glob("preparation/**/receptor/receptor_adfr_fallback.log")) if path.stat().st_size]
@@ -1296,6 +1297,7 @@ def write_reports(study, manifest, compounds):
 
 
 def parse_args():
+    """Parse guided-run inputs while preserving interactive defaults."""
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -1355,6 +1357,7 @@ def parse_args():
 
 
 def main():
+    """Orchestrate a complete guided control, exploratory, or screening study."""
     args = parse_args()
     project = Path(__file__).resolve().parent.parent
     cli = Path(os.environ.get("DOCKING_UNIVERSAL_CLI", project / "bin/docking-universal"))

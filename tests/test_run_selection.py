@@ -18,6 +18,10 @@ SPEC.loader.exec_module(RUNNER)
 
 
 class RunCommandSyntaxTests(unittest.TestCase):
+    def test_pocket_review_helpers_remain_public_compatibility_exports(self):
+        self.assertTrue(callable(RUNNER.describe_prepared_boxes))
+        self.assertTrue(callable(RUNNER.prepared_box_records))
+
     def test_run_screen_positional_workflow(self):
         with patch.object(sys, "argv", ["docking-universal-run.py", "screen"]):
             args = RUNNER.parse_args()

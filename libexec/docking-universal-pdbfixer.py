@@ -14,6 +14,7 @@ def atom_count(residues):
 
 
 def main():
+    """Apply conservative PDBFixer repair and retain an exact change audit."""
     parser = argparse.ArgumentParser()
     parser.add_argument("input_pdb")
     parser.add_argument("output_pdb")

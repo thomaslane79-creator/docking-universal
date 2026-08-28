@@ -167,6 +167,7 @@ def choose_retry_strategy(current_tier, result):
 
 
 def parse_args():
+    """Parse reproducible calibration settings and optional guided choices."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reference-sdf", required=True, type=Path, help="withheld experimental-coordinate SDF")
     parser.add_argument("--crystal-ligand", required=True, type=Path, help="selected ligand coordinates from the complex")
@@ -207,6 +208,7 @@ def parse_args():
 
 
 def run_tier(args, tier_name, cli, libexec, tier_root):
+    """Run and evaluate one retained sampling tier before any escalation."""
     started = time.monotonic()
     settings = tier_settings(args, tier_name)
     tier_root.mkdir(parents=True, exist_ok=True)
@@ -409,6 +411,7 @@ def run_tier(args, tier_name, cli, libexec, tier_root):
 
 
 def main():
+    """Execute tiered pose-recovery calibration and record approval status."""
     args = parse_args()
     if args.conformers_override is not None and args.conformers_override < 1:
         raise SystemExit("--conformers-override must be positive")

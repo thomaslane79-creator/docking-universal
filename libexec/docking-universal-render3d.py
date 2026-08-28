@@ -13,6 +13,7 @@ from pathlib import Path
 
 
 def main():
+    """Render an existing scene or coordinate file reproducibly with PyMOL."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path, help="Existing .pml, .pse, .pdb, .pdbqt, .mol2, or .sdf file")
     parser.add_argument("--out", type=Path, help="PNG output path")

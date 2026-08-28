@@ -508,6 +508,7 @@ def generate_all_in_one_pml(
 # -----------------------------
 
 def main():
+    """Run PLIP-authoritative interaction analysis and retain 2D/3D evidence."""
     parser = argparse.ArgumentParser(
         description="Run PLIP locally and create a timestamped all-in-one PyMOL PML scene."
     )

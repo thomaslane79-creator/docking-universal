@@ -24,6 +24,33 @@ CREATE_SPEC.loader.exec_module(CREATE)
 
 
 class ProtocolTypeTests(unittest.TestCase):
+    def test_protocol_authority_scenario_matrix(self):
+        scenarios = (
+            ({
+                "protocol_type": BUNDLE.CONTROL_VALIDATED,
+                "control_status": "approved",
+                "unknown_docking_allowed": True,
+            }, True),
+            ({
+                "protocol_type": BUNDLE.LIGAND_GUIDED_EXPLORATORY,
+                "exploratory_screening_allowed": True,
+                "screening_authority": "user-confirmed-exploratory-use",
+            }, True),
+            ({
+                "protocol_type": BUNDLE.SITE_GUIDED_EXPLORATORY,
+                "exploratory_screening_allowed": True,
+                "screening_authority": "user-confirmed-exploratory-use",
+            }, True),
+            ({
+                "protocol_type": BUNDLE.SITE_GUIDED_EXPLORATORY,
+                "exploratory_screening_allowed": True,
+                "screening_authority": "automatic",
+            }, False),
+        )
+        for record, expected in scenarios:
+            with self.subTest(protocol_type=record["protocol_type"], expected=expected):
+                self.assertEqual(BUNDLE.protocol_can_screen(record), expected)
+
     def test_legacy_approved_protocol_is_control_validated(self):
         record = {"control_status": "approved", "unknown_docking_allowed": True}
         self.assertEqual(BUNDLE.protocol_type(record), BUNDLE.CONTROL_VALIDATED)
@@ -105,12 +132,20 @@ class ProtocolTypeTests(unittest.TestCase):
             BUNDLE.create_bundle(protocol, root, output)
             extracted = BUNDLE.extract_bundle(output)
             record = json.loads(extracted.read_text())
-            retained = extracted.parent / record["receptor_preparation"]["user_approved_component_removal_manifest"]
+            preparation = record["receptor_preparation"]
+            retained = extracted.parent / preparation["user_approved_component_removal_manifest"]
+            retained_log = extracted.parent / preparation["user_approved_component_removal_log"]
+            retained_approval = extracted.parent / preparation["user_approved_component_removal_record"]
             self.assertTrue(retained.is_file())
+            self.assertTrue(retained_log.is_file())
+            self.assertTrue(retained_approval.is_file())
             self.assertIn("CSO", retained.read_text())
-            warning = record["receptor_preparation"]["receptor_modification_warning"]
+            self.assertIn("Files written", retained_log.read_text())
+            self.assertIn("User approved", retained_approval.read_text())
+            warning = preparation["receptor_modification_warning"]
             self.assertEqual(warning["code"], "user-approved-receptor-component-removal")
             self.assertTrue(warning["structural_review_required"])
+            self.assertIn("explicit user-approved removal", warning["summary"])
 
     def test_protocol_warning_records_standard_amino_acid_count(self):
         warning = BUNDLE.build_receptor_modification_warning([

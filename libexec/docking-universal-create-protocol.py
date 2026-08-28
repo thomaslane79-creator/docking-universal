@@ -211,6 +211,7 @@ def graphical_chooser_available():
 
 
 def choose_path_graphically(prompt, folder=False):
+    """Select and validate one path with the platform's available GUI chooser."""
     if platform.system() == "Darwin" and shutil.which("osascript"):
         chooser = "choose folder" if folder else "choose file"
         script = f'POSIX path of ({chooser} with prompt "{prompt}")'
@@ -269,6 +270,7 @@ def choose_output_parent():
 
 
 def choose_structure(inputs):
+    """Acquire one deposited or local PDB structure and return its source path."""
     finder = graphical_chooser_available()
     print("Choose the input structure:")
     print("  1) Download from RCSB by PDB ID")
@@ -377,6 +379,7 @@ def crop_balanced(source, destination):
 
 
 def render_box_figure(cli, preparation, report, no_visuals, receptor_pdb=None, ligand_pdb=None, box_conf=None):
+    """Render the approved search box without changing retained molecular files."""
     if no_visuals:
         return None
     if not receptor_pdb or not box_conf:
@@ -431,6 +434,7 @@ def report_table(Table, TableStyle, Paragraph, rows, widths, styles, colors):
 
 
 def write_ligand_guided_pdf(out, protocol, figure):
+    """Write a protocol-only report that explicitly excludes docking validation."""
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_CENTER
     from reportlab.lib.pagesizes import letter
@@ -447,7 +451,6 @@ def write_ligand_guided_pdf(out, protocol, figure):
     styles.add(ParagraphStyle(name="CaptionDU", parent=styles["BodyText"], fontSize=8.5, leading=11, spaceBefore=10, spaceAfter=7))
     P = lambda text, style="BodyDU": Paragraph(text, styles[style])
     parameters = protocol["parameters"]
-    locked = protocol["locked_inputs"]
     box = protocol["docking_box"]
     provenance = [
         ["Protocol provenance", "Recorded value"],
@@ -519,6 +522,7 @@ def write_ligand_guided_pdf(out, protocol, figure):
 
 
 def write_site_guided_report(cli, study, manifest):
+    """Build cavity figures and the standard report for a site-guided protocol."""
     report = study / "report"
     report.mkdir(exist_ok=True)
     (report / "study_summary.json").write_text(json.dumps(manifest, indent=2) + "\n")
@@ -532,6 +536,7 @@ def write_site_guided_report(cli, study, manifest):
 
 
 def parse_args():
+    """Parse interactive and reproducible non-interactive protocol options."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--type", choices=(CONTROL_VALIDATED, LIGAND_GUIDED_EXPLORATORY, SITE_GUIDED_EXPLORATORY))
     parser.add_argument("--complex", type=Path, help="selected structure PDB")
@@ -560,6 +565,7 @@ def parse_args():
 
 
 def main():
+    """Create, report, and bundle one auditable reusable docking protocol."""
     args = parse_args()
     project = Path(__file__).resolve().parent.parent
     cli = Path(os.environ.get("DOCKING_UNIVERSAL_CLI", project / "bin/docking-universal"))

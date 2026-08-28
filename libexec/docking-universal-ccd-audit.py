@@ -50,6 +50,7 @@ def retained_components(path):
 
 
 def main():
+    """Audit MODRES/CCD handling against components retained in receptor PDBQT."""
     parser = argparse.ArgumentParser()
     parser.add_argument("input_pdb")
     parser.add_argument("receptor_pdbqt")

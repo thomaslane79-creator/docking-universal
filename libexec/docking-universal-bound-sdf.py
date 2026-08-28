@@ -38,6 +38,7 @@ def read_first_sdf(path):
 
 
 def main():
+    """Extract one exact PDB ligand residue and write a typed reference SDF."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ligand-pdb", required=True, type=Path)
     parser.add_argument("--ligand-id", required=True, help="Exact RESNAME:CHAIN:RESNUM identifier")
@@ -62,7 +63,7 @@ def main():
     parts = args.ligand_id.split(":")
     if len(parts) != 3 or not all(parts):
         parser.error("--ligand-id must be RESNAME:CHAIN:RESNUM")
-    resname, chain, residue_number = parts
+    resname, _chain, _residue_number = parts
     resname = resname.upper()
 
     output = args.out.expanduser().resolve()

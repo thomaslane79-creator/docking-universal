@@ -46,6 +46,7 @@ def run(command):
 
 
 def main():
+    """Screen new ligands with one materialized, authorized reusable protocol."""
     parser = argparse.ArgumentParser(description=__doc__)
     authority = parser.add_mutually_exclusive_group(required=True)
     authority.add_argument("--protocol", type=Path, help="reusable .duprotocol bundle or legacy protocol.json")

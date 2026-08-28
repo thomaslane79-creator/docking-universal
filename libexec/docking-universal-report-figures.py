@@ -131,6 +131,7 @@ def cavity_artifacts(study):
 
 
 def plot_cavity_selection(diagnostics, selected_config, output):
+    """Plot retained fpocket candidates and distinguish the approved region."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -199,6 +200,7 @@ def plot_cavity_selection(diagnostics, selected_config, output):
 
 
 def render_cavity_scene(scene, output, session, pymol, overview=False):
+    """Render a retained cavity-review scene for the scientific report."""
     if not pymol or not scene or not Path(scene).is_file():
         return False
     wrapper = output.with_suffix(".pml")
@@ -287,6 +289,7 @@ def render_all_cavity_candidates(diagnostics, selected_config, output, session, 
 
 
 def build_cavity_figures(study, pymol):
+    """Build cavity figures solely from retained preparation evidence."""
     diagnostics, selected_config, scene = cavity_artifacts(study)
     if not diagnostics:
         return []
@@ -310,6 +313,7 @@ def build_cavity_figures(study, pymol):
 
 
 def ensure_control_clusters(control, protocol_path):
+    """Recover reportable control clusters without rerunning docking."""
     output = control / "report" / "control_pose_analysis"
     if (output / "cluster_summary.csv").is_file():
         return output
@@ -425,6 +429,7 @@ def materialize_cluster_representatives(analysis, rows, report, compound_id):
 
 
 def plot_clusters(analysis, output, reference_sdf=None, control_label=None):
+    """Plot retained pose clusters with score, population, and structural distance."""
     import math
     import matplotlib
     matplotlib.use("Agg")
@@ -513,6 +518,7 @@ def plot_clusters(analysis, output, reference_sdf=None, control_label=None):
 
 
 def render_overlay(receptor, ligands, colors, output, session, pymol, ligand_surfaces=False):
+    """Render selected poses in one receptor frame for structural comparison."""
     if not pymol or not receptor or not Path(receptor).is_file() or any(not Path(path).is_file() for path in ligands):
         return False
     pml = output.with_suffix(".pml")
@@ -569,6 +575,7 @@ def plip_ligand_id(report_xml):
 
 
 def trim_white_png(path, padding=45):
+    """Crop empty margins while retaining consistent report-panel padding."""
     from PIL import Image, ImageChops
 
     image = Image.open(path).convert("RGB")
@@ -739,7 +746,6 @@ def render_sdf_plip2d(interactions, ligand_sdf, output, ligand_id=None):
     legend_font = ImageFont.truetype(str(font_path), 24) if font_path.is_file() else ImageFont.load_default()
 
     center_x = sum(point.x for point in draw_coordinates.values()) / len(draw_coordinates)
-    center_y = sum(point.y for point in draw_coordinates.values()) / len(draw_coordinates)
     molecule_min_x = min(point.x for point in draw_coordinates.values())
     molecule_max_x = max(point.x for point in draw_coordinates.values())
     molecule_min_y = min(point.y for point in draw_coordinates.values())
@@ -813,6 +819,7 @@ def render_sdf_plip2d(interactions, ligand_sdf, output, ligand_id=None):
 
 
 def render_plip2d(interactions, ligand_sdf, output, runner, ligand_id=None):
+    """Draw a compact 2D diagram using retained PLIP calls as authority."""
     if render_sdf_plip2d(interactions, ligand_sdf, output, ligand_id=ligand_id):
         return True
     if not runner:
@@ -845,6 +852,7 @@ def render_plip2d(interactions, ligand_sdf, output, runner, ligand_id=None):
 
 
 def combine_panels(panel_a, panel_b, output, control=False):
+    """Compose labeled report panels without changing scientific content."""
     from PIL import Image, ImageChops, ImageDraw, ImageFont
 
     a = Image.open(panel_a).convert("RGB")
@@ -915,11 +923,11 @@ def combine_cluster_snapshots(analysis, rows, output):
     font_path = Path("/System/Library/Fonts/Helvetica.ttc")
     label_font = ImageFont.truetype(str(font_path), 84) if font_path.is_file() else ImageFont.load_default()
     caption_font = ImageFont.truetype(str(font_path), 60) if font_path.is_file() else ImageFont.load_default()
-    cell_w, cell_h, image_h = 1800, 1260, 1200
+    cell_w, image_h = 1800, 1200
     if len(entries) == 1:
         canvas_w, canvas_h = 1400, 970
         positions = [(175, 70)]
-        cell_w, cell_h, image_h = 1050, 780, 660
+        cell_w, image_h = 1050, 660
     elif len(entries) == 2:
         canvas_w, canvas_h = 3772, 1390
         positions = [(10, 30), (1930, 30)]
@@ -1006,6 +1014,7 @@ def ensure_control_interactions(control, protocol, protocol_path, plip):
 
 
 def build_control_figures(control, protocol_path, pymol, plip2d, plip):
+    """Build pose-recovery and interaction figures for a retained control."""
     protocol = read_json(protocol_path)
     report = control / "report"
     report.mkdir(parents=True, exist_ok=True)
@@ -1037,6 +1046,7 @@ def build_control_figures(control, protocol_path, pymol, plip2d, plip):
 
 
 def build_compound_figures(study, pymol, plip2d):
+    """Build cluster and interaction figures independently for each compound."""
     outputs = []
     report = study / "report"
     report.mkdir(parents=True, exist_ok=True)
@@ -1074,6 +1084,7 @@ def build_compound_figures(study, pymol, plip2d):
 
 
 def main():
+    """Generate every applicable report figure from a completed study folder."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("study", type=Path)
     parser.add_argument("--control", type=Path)
