@@ -79,6 +79,19 @@ class ProtocolRegionTests(unittest.TestCase):
         self.assertEqual(REGION.recommend_engine(broad, REGION.REGION_RESIDUES)[0], "qvinaw")
         self.assertEqual(REGION.recommend_engine(localized, REGION.REGION_WHOLE_PROTEIN)[0], "qvinaw")
 
+    def test_engine_recommendation_boundary_is_explicit(self):
+        base = {"center_x": 0, "center_y": 0, "center_z": 0, "size_y": 20, "size_z": 20}
+        immediately_below = dict(base, size_x=39.999)
+        at_threshold = dict(base, size_x=40.0)
+        self.assertEqual(
+            REGION.recommend_engine(immediately_below, REGION.REGION_FPOCKET)[0],
+            "vina",
+        )
+        self.assertEqual(
+            REGION.recommend_engine(at_threshold, REGION.REGION_FPOCKET)[0],
+            "qvinaw",
+        )
+
     def test_engine_override_is_recorded(self):
         box = {
             "center_x": 0, "center_y": 0, "center_z": 0,

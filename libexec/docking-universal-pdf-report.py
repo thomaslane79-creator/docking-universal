@@ -62,6 +62,7 @@ def read_tsv_rows(path):
         return []
 
 def read_fpocket_descriptors(cavity_dir):
+    """Parse retained fpocket descriptors without recomputing pocket rankings."""
     import re
     info = first(cavity_dir, ["**/*_info.txt"])
     if not info:
@@ -200,6 +201,7 @@ def descriptive_report_name(target_name, ligand_names, summary):
     return f"{target}_{subject}_{created}_{kind}.pdf"
 
 def discover_cavity_record(study):
+    """Recover selected-cavity and docking-box evidence from retained files."""
     selection = first(study, [
         "preparation/*_receptor_prep/cavity/pocket_selection_diagnostics.tsv",
         "**/cavity/pocket_selection_diagnostics.tsv",
@@ -809,6 +811,7 @@ def require_complete_used_versions(provenance):
 
 
 def reproducibility_summary(provenance, cavity, has_docking):
+    """Describe recorded tools and scientific operations for this report type."""
     preparation = provenance["receptor_preparation"]
     sentences = []
     if cavity:
@@ -890,6 +893,7 @@ def has_retained_docking_results(study):
     )
 
 def main():
+    """Assemble the scenario-specific scientific PDF from retained artifacts."""
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("study", type=Path)
     ap.add_argument("--control", type=Path)
@@ -1108,9 +1112,6 @@ def main():
         detail = cavity["detail"]
         descriptor = cavity["descriptors"].get(cavity["selected_file"], {})
         box_dimensions = cavity["box_dimensions"]
-        box_volume = box_dimensions[0] * box_dimensions[1] * box_dimensions[2] if box_dimensions else None
-        selected_count = sum(row.get("decision") == "selected" for row in cavity["rows"])
-        skipped_count = sum(row.get("decision") == "skipped" for row in cavity["rows"])
         story += [
             Paragraph(f"{section_number}. Exploratory pocket configuration", styles["Heading1"]),
             Paragraph(
@@ -1201,11 +1202,8 @@ def main():
         return
 
     if protocol:
-        a=protocol.get("acceptance",{}); p=protocol.get("parameters",{}); g=protocol.get("global_top_ranked_pose",{}); b=protocol.get("global_best_sampled_pose",{})
-        recorded_software = protocol.get("software", {})
+        p=protocol.get("parameters",{}); g=protocol.get("global_top_ranked_pose",{}); b=protocol.get("global_best_sampled_pose",{})
         locked_inputs = protocol.get("locked_inputs", {})
-        history=protocol.get("escalation_history",[]); last=history[-1] if history else {}
-        passed=bool(a.get("sampling_pass") and a.get("ranking_pass") and a.get("seed_requirement_pass"))
         control_ligand_sdf = first(args.control, ["00_inputs/*_experimental.sdf", "**/crystal_ligand.sdf"]) if args.control else None
         control_ligand_name = (
             control_ligand_sdf.stem.removesuffix("_experimental")

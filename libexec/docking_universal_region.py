@@ -18,6 +18,7 @@ REGION_CHOICES = (
 
 
 def choose_region():
+    """Prompt for one of the four scientifically distinct region definitions."""
     print("How should the docking region be defined?")
     print("  1) Selected bound ligand — investigate its observed binding site")
     print("  2) Predicted pocket — use fpocket candidates")
@@ -31,6 +32,7 @@ def choose_region():
 
 
 def choose_fpocket_selection():
+    """Choose automatic top-pocket selection or explicit structural review."""
     print("How should the fpocket cavity be selected?")
     print("  1) Automatically use the highest-ranked acceptable pocket")
     print("  2) Review the ranked pockets in PyMOL and choose one")
@@ -41,6 +43,7 @@ def choose_fpocket_selection():
 
 
 def parse_coordinates(path):
+    """Parse fixed-column PDB/PDBQT coordinates without altering the model."""
     records = []
     for line in Path(path).read_text(errors="replace").splitlines():
         if not line.startswith(("ATOM  ", "HETATM")):
@@ -64,6 +67,7 @@ def parse_coordinates(path):
 
 
 def bounds_box(records, margin):
+    """Return an axis-aligned box enclosing records plus a margin per side."""
     axes = list(zip(*(record["xyz"] for record in records)))
     minima = [min(axis) for axis in axes]
     maxima = [max(axis) for axis in axes]
@@ -74,6 +78,7 @@ def bounds_box(records, margin):
 
 
 def whole_protein_box(path, margin=4.0):
+    """Enclose prepared protein ATOM records; exclude retained hetero records."""
     records = [record for record in parse_coordinates(path) if record["record"] == "ATOM"]
     if not records:
         raise SystemExit("The prepared receptor has no protein atoms for whole-protein box construction")
@@ -81,6 +86,7 @@ def whole_protein_box(path, margin=4.0):
 
 
 def parse_residue_identifier(text):
+    """Parse chain-qualified or unqualified residue notation for box selection."""
     value = text.strip().upper()
     patterns = (
         r"(?P<chain>[A-Z0-9]):(?:(?P<resname>[A-Z]{3}))?(?P<resnum>-?[0-9]+)(?P<icode>[A-Z]?)",
@@ -94,6 +100,11 @@ def parse_residue_identifier(text):
 
 
 def residue_box(path, identifiers, margin=8.0):
+    """Build a box around selected residues and return resolved residue labels.
+
+    An unqualified identifier must resolve uniquely; the workflow stops rather
+    than silently choosing the same residue number from an arbitrary chain.
+    """
     requested = [parse_residue_identifier(item) for item in identifiers]
     records = parse_coordinates(path)
     selected = []
@@ -125,11 +136,13 @@ def residue_box(path, identifiers, margin=8.0):
 
 
 def format_residue(record):
+    """Format a parsed residue record as a compact, auditable identifier."""
     prefix = f"{record.get('chain')}:" if record.get("chain") else ""
     return f"{prefix}{record.get('resname', '')}{record.get('resnum', '')}{record.get('icode', '')}"
 
 
 def numeric_box(values):
+    """Validate and normalize the six center/dimension fields used by engines."""
     try:
         box = {key: float(values[key]) for key in (
             "center_x", "center_y", "center_z", "size_x", "size_y", "size_z"
@@ -142,6 +155,11 @@ def numeric_box(values):
 
 
 def recommend_engine(values, region_definition):
+    """Recommend QuickVina-W for broad boxes and Vina for localized boxes.
+
+    The threshold is a routing heuristic, not a scientific accuracy claim.
+    Whole-protein searches always count as broad regardless of dimensions.
+    """
     box = numeric_box(values)
     dimensions = [box[f"size_{axis}"] for axis in "xyz"]
     volume = math.prod(dimensions)
@@ -152,6 +170,7 @@ def recommend_engine(values, region_definition):
 
 
 def choose_engine(values, region_definition, requested=None, interactive=True):
+    """Select an engine and retain whether the recommendation was overridden."""
     recommended, basis = recommend_engine(values, region_definition)
     if requested:
         selected = requested
@@ -188,6 +207,7 @@ def choose_engine(values, region_definition, requested=None, interactive=True):
 
 
 def write_box_files(conf, values):
+    """Write matching engine configuration and inspectable box-coordinate files."""
     box = numeric_box(values)
     conf = Path(conf)
     conf.parent.mkdir(parents=True, exist_ok=True)

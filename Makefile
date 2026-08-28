@@ -8,7 +8,7 @@ test:
 	./tests/test_install.sh
 	./tests/test_bootstrap_install.sh
 	./tests/test_cli.sh
-	$${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_run_selection.py tests/test_guided_options.py tests/test_report_cavity.py tests/test_pdbfixer_preclean.py tests/test_ccd_audit.py tests/test_protocol_types.py tests/test_protocol_region.py tests/test_graphical_chooser.py
+	$${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_run_selection.py tests/test_guided_options.py tests/test_report_cavity.py tests/test_pdbfixer_preclean.py tests/test_ccd_audit.py tests/test_protocol_types.py tests/test_protocol_region.py tests/test_graphical_chooser.py tests/test_depict2d.py tests/test_retained_report_artifacts.py
 
 test-integration:
 	./bin/docking-universal validate integration

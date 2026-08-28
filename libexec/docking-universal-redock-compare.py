@@ -54,6 +54,7 @@ def set_ligand_pdb_info(molecule, resname="UNL", chain="Z", residue_number=1):
 
 
 def write_complex(receptor_path, ligand_path, output_path):
+    """Write receptor and one pose as a viewable complex without coordinate fitting."""
     receptor_lines = []
     for line in receptor_path.read_text(errors="replace").splitlines():
         if line.startswith(("ATOM  ", "HETATM", "TER")):
@@ -86,6 +87,7 @@ def write_complex(receptor_path, ligand_path, output_path):
 
 
 def write_overlay_pml(output_dir, rmsd):
+    """Write a color-coded experimental/top/best-RMSD comparison scene."""
     pml_path = output_dir / "crystal_vs_top_pose.pml"
     lines = [
         "# Crystallographic ligand versus top-scoring redocked pose",
@@ -123,6 +125,7 @@ def safe_value(value):
 
 
 def write_all_poses_pml(output_dir, rows, top_index, best_rmsd_index):
+    """Write an inspectable PyMOL browser for every scored retained pose."""
     pml_path = output_dir / "crystal_vs_all_poses.pml"
     carbon_colors = [
         "gray70", "cyan", "orange", "violet", "salmon",
@@ -302,6 +305,7 @@ def write_pose_browser_pml(output_dir, rows, top_index, best_rmsd_index, contact
 
 
 def main():
+    """Compare retained poses to experiment by symmetry-aware, no-fit RMSD."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reference-sdf", required=True, type=Path, help="Matching ligand SDF with bond orders")
     parser.add_argument("--crystal-ligand", required=True, type=Path, help="Bound ligand coordinates extracted from the complex PDB")

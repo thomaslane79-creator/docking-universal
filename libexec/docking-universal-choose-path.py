@@ -36,6 +36,7 @@ def backend():
 
 
 def choose(prompt, folder=False, sdf=False):
+    """Use Finder, Zenity, or Tk to select one validated file-system path."""
     selected_backend = backend()
     if selected_backend == "Finder":
         command = executable("DOCKING_UNIVERSAL_OSASCRIPT", "osascript")
@@ -84,6 +85,7 @@ def choose(prompt, folder=False, sdf=False):
 
 
 def main():
+    """Return one user-selected path through the best available GUI backend."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--available", action="store_true")
     parser.add_argument("--label", action="store_true")

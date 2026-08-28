@@ -248,6 +248,7 @@ def load_from_docking(root, ligand_work, exporter, engine, export_root):
 
 
 def main():
+    """Cluster retained poses and write energy-ranked representatives and scenes."""
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,

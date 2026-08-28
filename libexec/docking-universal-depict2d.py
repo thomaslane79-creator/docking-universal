@@ -28,6 +28,7 @@ def rdkit_molecule(path: Path):
 
 
 def draw_with_rdkit(source: Path, output: Path, width: int, height: int, legend: str):
+    """Read supported coordinates, generate 2D geometry, and draw with RDKit."""
     from rdkit import Chem
     from rdkit.Chem import AllChem, Draw
 
@@ -74,6 +75,7 @@ def draw_with_obabel(source: Path, output: Path):
 
 
 def main():
+    """Create generic 2D depictions with RDKit and an Open Babel fallback."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("inputs", nargs="+", type=Path, help="Existing PDB, PDBQT, SDF, MOL, or MOL2 files")
     parser.add_argument("--out-dir", type=Path, default=Path("2d_depictions"))
@@ -85,7 +87,7 @@ def main():
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     try:
-        import rdkit  # noqa: F401
+        __import__("rdkit")
         backend = "rdkit"
     except ImportError:
         backend = "obabel"

@@ -45,6 +45,7 @@ def distribution_version(*names):
 
 
 def engine_version(engine):
+    """Resolve the executed docking-engine version for retained provenance."""
     executable = shutil.which(engine)
     command = [executable, "--version"] if executable else []
     source = executable or "not detected"
@@ -73,6 +74,7 @@ def engine_version(engine):
 
 
 def main():
+    """Evaluate retained control poses against sampling, ranking, and seed gates."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("comparison_root", type=Path, nargs="+")
     parser.add_argument("--engine", required=True, choices=("vina", "qvinaw"))

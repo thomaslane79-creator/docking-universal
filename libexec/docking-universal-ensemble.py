@@ -20,6 +20,7 @@ def first_molecule(path):
 
 
 def main():
+    """Generate and record pH-aware ligand states and independent conformers."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("template_sdf", type=Path, help="Authoritative bond-order/stereo template")
     parser.add_argument("--out", required=True, type=Path, help="Independent ensemble SDF")
