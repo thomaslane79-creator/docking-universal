@@ -39,7 +39,7 @@ case "$doctor_output" in
 esac
 
 mkdir -p "$mock_dir/ligands"
-printf 'ATOM\n' > "$mock_dir/receptor.pdbqt"
+printf 'ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00  0.00           C\n' > "$mock_dir/receptor.pdbqt"
 printf 'MODEL\n' > "$mock_dir/ligands/example.pdbqt"
 printf 'MODEL\n' > "$mock_dir/ligands/example_two.pdbqt"
 printf 'center_x = 0\ncenter_y = 0\ncenter_z = 0\nsize_x = 20\nsize_y = 20\nsize_z = 20\n' > "$mock_dir/box.conf"

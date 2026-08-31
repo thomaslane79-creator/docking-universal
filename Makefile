@@ -8,7 +8,9 @@ test:
 	./tests/test_install.sh
 	./tests/test_bootstrap_install.sh
 	./tests/test_cli.sh
-	$${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_run_selection.py tests/test_guided_options.py tests/test_report_cavity.py tests/test_pdbfixer_preclean.py tests/test_ccd_audit.py tests/test_protocol_types.py tests/test_protocol_region.py tests/test_graphical_chooser.py tests/test_depict2d.py tests/test_retained_report_artifacts.py
+	./tests/test_failure_semantics.sh
+	./tests/test_receptor_input_validation.sh
+	PYTHONPATH="$(CURDIR)/libexec$${PYTHONPATH:+:$$PYTHONPATH}" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_run_selection.py tests/test_guided_options.py tests/test_report_cavity.py tests/test_pdbfixer_preclean.py tests/test_ccd_audit.py tests/test_protocol_types.py tests/test_protocol_region.py tests/test_graphical_chooser.py tests/test_depict2d.py tests/test_retained_report_artifacts.py tests/test_process_runner.py tests/test_reuse_equivalence.py
 
 test-integration:
 	./bin/docking-universal validate integration
@@ -29,7 +31,9 @@ install:
 	install -m 0755 libexec/docking-universal-* "$(DESTDIR)$(LIBEXECDIR)/"
 	install -m 0644 libexec/docking_universal_bundle.py "$(DESTDIR)$(LIBEXECDIR)/"
 	install -m 0644 libexec/docking_universal_pocket_review.py "$(DESTDIR)$(LIBEXECDIR)/"
+	install -m 0644 libexec/docking_universal_process.py "$(DESTDIR)$(LIBEXECDIR)/"
 	install -m 0644 libexec/docking_universal_region.py "$(DESTDIR)$(LIBEXECDIR)/"
+	install -m 0644 libexec/docking_universal_reuse.py "$(DESTDIR)$(LIBEXECDIR)/"
 	install -m 0644 VERSION "$(DESTDIR)$(LIBEXECDIR)/VERSION"
 	install -m 0644 examples/test_inputs/two_compounds.sdf "$(DESTDIR)$(LIBEXECDIR)/validation-assets/test_inputs/"
 	install -m 0644 examples/tutorials/01_bound_ligand/inputs/1HVR.pdb examples/tutorials/01_bound_ligand/inputs/rilpivirine_pubchem.sdf "$(DESTDIR)$(LIBEXECDIR)/validation-assets/tutorials/01_bound_ligand/inputs/"

@@ -66,6 +66,20 @@ def parse_coordinates(path):
     return records
 
 
+def validate_protein_pdb(path):
+    """Require at least one parseable fixed-column protein ATOM record."""
+    try:
+        records = parse_coordinates(path)
+    except SystemExit:
+        records = []
+    if not any(record["record"] == "ATOM" for record in records):
+        raise SystemExit(
+            "input is not a valid protein PDB: no valid protein ATOM records "
+            "with parseable coordinates were found"
+        )
+    return True
+
+
 def bounds_box(records, margin):
     """Return an axis-aligned box enclosing records plus a margin per side."""
     axes = list(zip(*(record["xyz"] for record in records)))
@@ -152,6 +166,42 @@ def numeric_box(values):
     if min(box[key] for key in ("size_x", "size_y", "size_z")) <= 0:
         raise SystemExit("Docking-box dimensions must be positive")
     return box
+
+
+def parse_box_config(path):
+    """Read the six Vina box fields while ignoring unrelated config entries."""
+    values = {}
+    for line in Path(path).read_text(errors="replace").splitlines():
+        match = re.match(r"\s*(center_[xyz]|size_[xyz])\s*=\s*([^#\s]+)", line)
+        if match:
+            values[match.group(1)] = match.group(2)
+    return numeric_box(values)
+
+
+def receptor_atoms_in_box(receptor, config):
+    """Require the configured search volume to contain a receptor atom.
+
+    This is a geometric input-consistency check, not a claim that the selected
+    site is biologically meaningful.  It catches mismatched or stale box files
+    before a docking engine emits a less useful low-level failure.
+    """
+    box = parse_box_config(config)
+    records = parse_coordinates(receptor)
+    count = 0
+    for record in records:
+        inside = all(
+            abs(record["xyz"][index] - box[f"center_{axis}"])
+            <= box[f"size_{axis}"] / 2.0
+            for index, axis in enumerate("xyz")
+        )
+        count += int(inside)
+    if count == 0:
+        raise SystemExit(
+            "Docking-box preflight failed: the configured search box does not "
+            "overlap any receptor atoms. Select the receptor and box from the "
+            "same preparation/protocol, or review the box coordinates."
+        )
+    return count
 
 
 def recommend_engine(values, region_definition):

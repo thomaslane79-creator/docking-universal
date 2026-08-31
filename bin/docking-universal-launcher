@@ -29,8 +29,8 @@ if [ "${1:-}" = "validate" ]; then
     shift
     level="${1:-}"
     case "$level" in
-      quick|integration|release) shift ;;
-      *) printf 'Error: validation level must be quick, integration, or release.\n' >&2; exit 2 ;;
+      smoke|quick|integration|release) shift ;;
+      *) printf 'Error: validation level must be smoke, quick, integration, or release.\n' >&2; exit 2 ;;
     esac
     output=""
     while [ "$#" -gt 0 ]; do

@@ -66,10 +66,12 @@ seed=""
 skip_existing=0
 engine_command=""
 engine_env=""
+PYTHON_COMMAND="${DOCKING_UNIVERSAL_PYTHON:-python}"
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+REGION_CHECK="$SCRIPT_DIR/docking-universal-region-check.py"
 
 if [ "$#" -eq 0 ]; then
-  PYTHON_COMMAND="${DOCKING_UNIVERSAL_PYTHON:-python}"
-  CHOOSER_HELPER="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/docking-universal-choose-path.py"
+  CHOOSER_HELPER="$SCRIPT_DIR/docking-universal-choose-path.py"
   [ -f "$CHOOSER_HELPER" ] || { echo "ERROR: graphical-selection helper is missing: $CHOOSER_HELPER" >&2; exit 2; }
 
   receptor=$(choose_interactively "Choose the prepared receptor PDBQT" file)
@@ -147,6 +149,12 @@ case "$engine" in
   *) echo "ERROR: --engine must be vina or qvinaw (QuickVina-W)" >&2; exit 2 ;;
 esac
 
+[ -f "$receptor" ] || { echo "ERROR: prepared receptor not found: $receptor. Run 'docking-universal prepare' first." >&2; exit 1; }
+[ -f "$config" ] || { echo "ERROR: prepared docking-box config not found: $config. Run 'docking-universal prepare' first." >&2; exit 1; }
+[ -d "$ligand_dir" ] || { echo "ERROR: prepared ligand directory not found: $ligand_dir. Run 'docking-universal ligands' first." >&2; exit 1; }
+[ -f "$REGION_CHECK" ] || { echo "ERROR: docking-box preflight helper is missing: $REGION_CHECK" >&2; exit 1; }
+"$PYTHON_COMMAND" "$REGION_CHECK" --receptor "$receptor" --config "$config"
+
 if [ -z "$engine_command" ]; then
   case "$engine" in
     vina) engine_command="${DOCKING_UNIVERSAL_VINA:-}" ;;
@@ -180,10 +188,6 @@ else
   engine_source="conda environment $engine_env"
 fi
 
-[ -f "$receptor" ] || { echo "ERROR: prepared receptor not found: $receptor. Run 'docking-universal prepare' first." >&2; exit 1; }
-[ -f "$config" ] || { echo "ERROR: prepared docking-box config not found: $config. Run 'docking-universal prepare' first." >&2; exit 1; }
-[ -d "$ligand_dir" ] || { echo "ERROR: prepared ligand directory not found: $ligand_dir. Run 'docking-universal ligands' first." >&2; exit 1; }
-
 mkdir -p "$out_dir"
 version_output=$("${engine_cmd[@]}" --version 2>&1 || true)
 engine_version=$(printf '%s\n' "$version_output" | awk 'NF {print; exit}')
@@ -205,6 +209,9 @@ engine_version=$(printf '%s\n' "$version_output" | awk 'NF {print; exit}')
 cp "$config" "$out_dir/$(basename "$config").used"
 
 found=0
+success=0
+failed=0
+skipped=0
 for ligand in "$ligand_dir"/*.pdbqt; do
   [ -e "$ligand" ] || continue
   case "$ligand" in *_out.pdbqt) continue ;; esac
@@ -214,6 +221,7 @@ for ligand in "$ligand_dir"/*.pdbqt; do
   log_file="$out_dir/${base}_${engine}.log"
   if [ "$skip_existing" -eq 1 ] && [ -s "$output" ]; then
     printf 'skip  %s\n' "$base"
+    skipped=$((skipped + 1))
     continue
   fi
 
@@ -225,10 +233,22 @@ for ligand in "$ligand_dir"/*.pdbqt; do
   [ -z "$seed" ] || args+=(--seed "$seed")
   if ! "${engine_cmd[@]}" "${args[@]}" > "$log_file" 2>&1; then
     echo "ERROR: $engine failed for $base; see $log_file" >&2
-    exit 1
+    failed=$((failed + 1))
+    rm -f "$output"
+    continue
   fi
-  [ -s "$output" ] || { echo "ERROR: no output for $base; see $log_file" >&2; exit 1; }
+  if [ ! -s "$output" ]; then
+    echo "ERROR: no output for $base; see $log_file" >&2
+    failed=$((failed + 1))
+    rm -f "$output"
+    continue
+  fi
+  success=$((success + 1))
 done
 
 [ "$found" -eq 1 ] || { echo "ERROR: no PDBQT ligands found in $ligand_dir" >&2; exit 1; }
 printf 'Batch complete: %s\n' "$out_dir"
+printf 'Successful docking jobs: %s\n' "$success"
+printf 'Failed docking jobs: %s\n' "$failed"
+printf 'Skipped existing jobs: %s\n' "$skipped"
+[ "$failed" -eq 0 ] || exit 1

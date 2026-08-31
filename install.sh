@@ -63,16 +63,37 @@ environment_exists() {
   '
 }
 
+run_with_retry() {
+  description=$1
+  shift
+  attempts=${DOCKING_UNIVERSAL_INSTALL_RETRIES:-3}
+  delay=${DOCKING_UNIVERSAL_INSTALL_RETRY_DELAY:-3}
+  attempt=1
+  while ! "$@"; do
+    if [ "$attempt" -ge "$attempts" ]; then
+      printf '\nError: %s failed after %s attempts.\n' "$description" "$attempts" >&2
+      printf 'Installation is resumable: check the network connection and run ./install.sh again.\n' >&2
+      return 1
+    fi
+    printf '\nWarning: %s failed (attempt %s/%s); retrying in %s seconds.\n' \
+      "$description" "$attempt" "$attempts" "$delay" >&2
+    sleep "$delay"
+    attempt=$((attempt + 1))
+  done
+}
+
 install_environment() {
   environment_name=$1
   environment_file=$2
 
   if environment_exists "$environment_name"; then
     printf '\nUpdating Conda environment: %s\n' "$environment_name"
-    "$conda_command" env update -f "$environment_file"
+    run_with_retry "Conda environment update for $environment_name" \
+      "$conda_command" env update -f "$environment_file"
   else
     printf '\nCreating Conda environment: %s\n' "$environment_name"
-    "$conda_command" env create -f "$environment_file"
+    run_with_retry "Conda environment creation for $environment_name" \
+      "$conda_command" env create -f "$environment_file"
   fi
 }
 

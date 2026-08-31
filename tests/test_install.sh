@@ -3,6 +3,15 @@ set -eu
 
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
+grep -q 'conda env create -f environments/vina.yml' "$project_dir/.github/workflows/test.yml" || {
+  printf 'FAIL: CI must create the real Vina engine environment\n' >&2
+  exit 1
+}
+grep -q 'make test-integration' "$project_dir/.github/workflows/test.yml" || {
+  printf 'FAIL: CI must run real-tool integration validation\n' >&2
+  exit 1
+}
+
 grep -q '^[[:space:]]*- gemmi' "$project_dir/environment.yml" || {
   printf 'FAIL: environment.yml must declare Meeko receptor dependency gemmi\n' >&2
   exit 1
@@ -46,7 +55,12 @@ expected_version="Docking Universal $(cat "$project_dir/VERSION")"
   docking-universal create-protocol --help >/dev/null || fail "installed create-protocol help"
   docking-universal prepare --help >/dev/null || fail "installed prepare help"
   docking-universal validate --help >/dev/null || fail "installed validate help"
-  docking-universal validate quick --out "$installed_dir/quick" >/dev/null || fail "installed quick validation"
+  docking-universal validate smoke --out "$installed_dir/smoke" >/dev/null || fail "installed smoke validation"
+  if docking-universal validate quick --out "$installed_dir/quick" >"$installed_dir/quick.stdout" 2>"$installed_dir/quick.stderr"; then
+    fail "installed quick validation claimed to run the unavailable source test suite"
+  fi
+  grep -q "requires a source checkout" "$installed_dir/quick.stderr" || fail "installed quick validation guidance"
+  grep -q "validate smoke" "$installed_dir/quick.stderr" || fail "installed smoke replacement guidance"
 )
 
 bash -n "$project_dir/install.sh" || fail "installer syntax"

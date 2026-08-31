@@ -103,7 +103,7 @@ def main():
                 draw_with_rdkit(source, output, args.width, args.height, legend)
             else:
                 draw_with_obabel(source, output)
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             raise SystemExit(f"Could not depict {source.name}: {exc}") from exc
         print(f"Depicted {output}")
 

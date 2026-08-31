@@ -355,6 +355,16 @@ write_fpocket_run_summary() {
 }
 
 ###############################################################################
+# INPUT VALIDATION
+###############################################################################
+[ "$#" -eq 1 ] || { print_help >&2; exit 2; }
+INPUT_PDB="$1"
+[ -f "$INPUT_PDB" ] || { echo "ERROR: input PDB not found: $INPUT_PDB" >&2; exit 2; }
+REGION_CHECK="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/docking-universal-region-check.py"
+[ -f "$REGION_CHECK" ] || { echo "ERROR: receptor input-validation helper is missing: $REGION_CHECK" >&2; exit 2; }
+"$PYTHON_COMMAND" "$REGION_CHECK" --validate-protein-pdb "$INPUT_PDB"
+
+###############################################################################
 # USER DEFAULTS
 ###############################################################################
 BOX_SIZE="${BOX_SIZE:-26.0}"
@@ -417,9 +427,6 @@ case "$ADFR_FALLBACK" in 0|1) ;; *) echo "ERROR: DOCKING_UNIVERSAL_ADFR_FALLBACK
 ###############################################################################
 # INPUT
 ###############################################################################
-[ "$#" -eq 1 ] || { print_help >&2; exit 2; }
-INPUT_PDB="$1"
-[ -f "$INPUT_PDB" ] || { echo "ERROR: input PDB not found: $INPUT_PDB" >&2; exit 2; }
 TIMESTAMP="$(date '+%Y-%m-%d %H:%M:%S')"
 
 RAW="$(basename "$INPUT_PDB" .pdb)"

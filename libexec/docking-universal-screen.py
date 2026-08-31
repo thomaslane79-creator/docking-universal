@@ -28,8 +28,10 @@ from docking_universal_bundle import (
     protocol_can_screen,
     protocol_type,
     protocol_type_label,
+    reconcile_protocol_engine,
     resolve_locked_path,
 )
+from docking_universal_process import run_checked
 
 
 def sha256(path):
@@ -41,8 +43,7 @@ def sha256(path):
 
 
 def run(command):
-    print("+ " + " ".join(map(str, command)), flush=True)
-    subprocess.run([str(value) for value in command], check=True)
+    return run_checked(command)
 
 
 def main():
@@ -68,7 +69,7 @@ def main():
     parser.add_argument("--mk-export", default="mk_export.py")
     parser.add_argument("--pymol", default="pymol")
     parser.add_argument("--plip-command", default="plip")
-    parser.add_argument("--engine", choices=("vina", "qvinaw"), default="vina", help="docking engine: Vina or QuickVina-W")
+    parser.add_argument("--engine", choices=("vina", "qvinaw"), help="docking engine: Vina or QuickVina-W")
     parser.add_argument("--seeds", type=int, default=5, help="exploratory independent seeds")
     parser.add_argument("--conformers", type=int, default=3, help="exploratory conformers per chemical state")
     parser.add_argument("--exhaustiveness", type=int, default=16, help="exploratory search effort")
@@ -130,9 +131,10 @@ def main():
             answer = input("Use it to screen new ligands as an exploratory study? [y/N]: ").strip().lower()
             if answer not in {"y", "yes"}:
                 raise SystemExit("Exploratory screening cancelled")
-        engine = protocol["engine"]
-        if engine not in {"vina", "qvinaw"}:
-            raise SystemExit(f"Protocol records an unsupported docking engine: {engine}")
+        try:
+            engine = reconcile_protocol_engine(protocol, args.engine)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from None
         expected_macrocycle = "flexible_meeko" if engine == "vina" else "rigid_conformer_ensemble"
         if protocol["parameters"].get("macrocycle_treatment") != expected_macrocycle:
             raise SystemExit("Protocol macrocycle treatment does not match the recorded engine")
@@ -171,7 +173,7 @@ def main():
         box = args.box.expanduser().resolve()
         if not receptor.is_file() or not box.is_file():
             parser.error("exploratory receptor and box must exist")
-        engine = args.engine
+        engine = args.engine or "vina"
         parameters = {
             "ph": args.ph, "conformers_per_state": args.conformers,
             "ensemble_seed": args.base_seed, "forcefield": args.forcefield,

@@ -36,6 +36,15 @@ case "${1:-} ${2:-}" in
       *environment.yml*) environment_name=docking-universal ;;
       *) exit 2 ;;
     esac
+    if [ "$environment_name" = "docking-universal-qvinaw" ] && [ -n "${BOOTSTRAP_TEST_FAIL_ONCE:-}" ] && [ ! -e "$BOOTSTRAP_TEST_FAIL_ONCE" ]; then
+      : > "$BOOTSTRAP_TEST_FAIL_ONCE"
+      printf 'CondaHTTPError: transient mock download failure\n' >&2
+      exit 1
+    fi
+    if [ "$environment_name" = "docking-universal-qvinaw" ] && [ "${BOOTSTRAP_TEST_ALWAYS_FAIL:-0}" = "1" ]; then
+      printf 'CondaHTTPError: persistent mock download failure\n' >&2
+      exit 1
+    fi
     printf '%s\n' "$environment_name" >> "$BOOTSTRAP_TEST_STATE"
     ;;
   "env update")
@@ -106,6 +115,31 @@ fi
 if grep -q 'env create' "$log_file"; then
   fail "existing environment was recreated"
 fi
+
+retry_state="$work_dir/retry-environments"
+retry_log="$work_dir/retry-conda.log"
+retry_marker="$work_dir/transient-failure-used"
+env PATH="$mock_bin:$PATH" BOOTSTRAP_TEST_STATE="$retry_state" \
+  BOOTSTRAP_TEST_LOG="$retry_log" BOOTSTRAP_TEST_FAIL_ONCE="$retry_marker" \
+  DOCKING_UNIVERSAL_INSTALL_RETRY_DELAY=0 \
+  DOCKING_UNIVERSAL_CONDA=conda "$project_dir/install.sh" >/dev/null \
+  || fail "installer did not recover from one transient Conda failure"
+[ "$(grep -c "env create -f $project_dir/environments/qvinaw.yml" "$retry_log")" -eq 2 ] \
+  || fail "QuickVina-W environment creation was not retried exactly once"
+
+failure_state="$work_dir/failure-environments"
+failure_log="$work_dir/failure-conda.log"
+failure_output=""
+if failure_output=$(env PATH="$mock_bin:$PATH" BOOTSTRAP_TEST_STATE="$failure_state" \
+  BOOTSTRAP_TEST_LOG="$failure_log" BOOTSTRAP_TEST_ALWAYS_FAIL=1 \
+  DOCKING_UNIVERSAL_INSTALL_RETRIES=2 DOCKING_UNIVERSAL_INSTALL_RETRY_DELAY=0 \
+  DOCKING_UNIVERSAL_CONDA=conda "$project_dir/install.sh" 2>&1); then
+  fail "installer accepted exhausted Conda retries"
+fi
+case "$failure_output" in
+  *"failed after 2 attempts"*"Installation is resumable"*"run ./install.sh again"*) ;;
+  *) fail "exhausted retry guidance was incomplete" ;;
+esac
 
 missing_conda_output=""
 if missing_conda_output=$(env PATH="$mock_bin:/usr/bin:/bin" DOCKING_UNIVERSAL_CONDA=missing-conda \

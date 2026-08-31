@@ -18,6 +18,19 @@ SPEC.loader.exec_module(RUNNER)
 
 
 class RunCommandSyntaxTests(unittest.TestCase):
+    def test_engine_option_distinguishes_omitted_from_explicit_request(self):
+        with patch.object(sys, "argv", ["docking-universal-run.py", "screen"]):
+            self.assertIsNone(RUNNER.parse_args().engine)
+        with patch.object(
+            sys, "argv", ["docking-universal-run.py", "screen", "--engine", "qvinaw"]
+        ):
+            self.assertEqual(RUNNER.parse_args().engine, "qvinaw")
+
+    def test_partial_guided_batch_returns_failure_after_retaining_outputs(self):
+        RUNNER.require_complete_batch(0)
+        with self.assertRaisesRegex(SystemExit, "completed outputs and reports were retained"):
+            RUNNER.require_complete_batch(2)
+
     def test_pocket_review_helpers_remain_public_compatibility_exports(self):
         self.assertTrue(callable(RUNNER.describe_prepared_boxes))
         self.assertTrue(callable(RUNNER.prepared_box_records))
