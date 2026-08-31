@@ -18,7 +18,7 @@ AutoDock Vina and QuickVina-W are the supported docking engines: each searches a
 | **Site and docking-box selection** | fpocket cavity detection, descriptor collection, candidate filtering and ranking, numbered and color-matched PyMOL review, docking-box generation, and explicit user selection. |
 | **Experimental control** | Bound-ligand pose-recovery redocking, multi-conformer and independent-seed sampling, symmetry-aware RMSD evaluation, reproducibility criteria, and failure-closed screening authorization. |
 | **Reusable protocols** | Control-validated, ligand-guided exploratory, and site-guided exploratory protocols that lock the prepared receptor, selected box, search settings, evidence status, and supporting records in a portable Docking Universal `.duprotocol` bundle. |
-| **Screening execution** | Guided single- or multi-compound screening with AutoDock Vina or QuickVina-W, isolated per-compound outputs, partial-failure retention, and normalized score collection. |
+| **Screening execution** | Guided single- or multi-compound screening with AutoDock Vina or QuickVina-W, isolated per-compound outputs, partial-failure retention, a nonzero final status when any compound fails, and normalized score collection. |
 | **Pose analysis** | Cross-seed and cross-conformer symmetry-aware RMSD matrices, Butina pose clustering, cluster populations, energy-ranked representatives, and retained machine-readable tables. |
 | **Interaction analysis and visualization** | PLIP-authoritative interaction calls, customized 2D interaction diagrams, color-matched 3D PyMOL pose and interaction views, and retained PyMOL sessions. |
 | **Scientific reporting** | Scenario-specific PDF reports for controls, protocol creation, cavity selection, protocol reuse, and single- or multi-compound screening, with both study summaries and detailed individual-compound results. |
@@ -30,6 +30,8 @@ AutoDock Vina and QuickVina-W are the supported docking engines: each searches a
 ### Docking engines
 
 AutoDock Vina remains the default. QuickVina-W can be selected with `--engine qvinaw` and is intended especially for broader search regions. The engine is part of every protocol's locked scientific method: a Vina control authorizes only Vina screening, while a QuickVina-W control authorizes only QuickVina-W screening. Scores and poses from the two searches are retained separately and are not treated as interchangeable results.
+
+When a reusable protocol is supplied, an explicit conflicting `--engine` request is rejected rather than ignored. Before either engine starts, Docking Universal also verifies that the selected receptor and docking-box files are geometrically consistent; this catches accidentally mixed inputs but does not validate the biological relevance of the selected site.
 
 ```bash
 docking-universal dock --engine qvinaw --receptor receptor.pdbqt --ligands prepared_ligands --config box.conf --out results_qvinaw

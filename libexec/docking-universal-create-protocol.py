@@ -30,6 +30,7 @@ from docking_universal_bundle import (  # noqa: E402
     protocol_type_label,
 )
 from docking_universal_pocket_review import choose_prepared_box, review_pocket_scene  # noqa: E402
+from docking_universal_process import run_checked  # noqa: E402
 from docking_universal_region import (  # noqa: E402
     REGION_BOUND_LIGAND,
     REGION_CHOICES,
@@ -59,8 +60,7 @@ def sha256(path):
 
 
 def run(command, cwd=None, env=None):
-    print("+ " + " ".join(map(str, command)), flush=True)
-    subprocess.run([str(value) for value in command], cwd=cwd, env=env, check=True)
+    return run_checked(command, cwd=cwd, env=env)
 
 
 def package_version():
@@ -374,7 +374,7 @@ def crop_balanced(source, destination):
         cropped = picture.crop(bounds)
         padding = max(24, round(min(cropped.size) * 0.035))
         ImageOps.expand(cropped, border=padding, fill="white").save(destination)
-    except Exception:
+    except (ImportError, OSError, ValueError):
         shutil.copy2(source, destination)
 
 

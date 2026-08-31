@@ -24,6 +24,13 @@ CREATE_SPEC.loader.exec_module(CREATE)
 
 
 class ProtocolTypeTests(unittest.TestCase):
+    def test_locked_protocol_engine_rejects_contradictory_request(self):
+        protocol = {"engine": "vina"}
+        self.assertEqual(BUNDLE.reconcile_protocol_engine(protocol), "vina")
+        self.assertEqual(BUNDLE.reconcile_protocol_engine(protocol, "vina"), "vina")
+        with self.assertRaisesRegex(ValueError, "locked to vina.*--engine qvinaw"):
+            BUNDLE.reconcile_protocol_engine(protocol, "qvinaw")
+
     def test_protocol_authority_scenario_matrix(self):
         scenarios = (
             ({

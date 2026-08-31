@@ -147,7 +147,7 @@ def find_pdb_for_pml(output_dir, input_pdb, xml_path):
             xml_pdb_path = Path(pdbfile_text).expanduser()
             if xml_pdb_path.exists():
                 return xml_pdb_path
-    except Exception:
+    except (ET.ParseError, OSError):
         pass
 
     candidates = sorted(output_dir.rglob("plipfixed*.pdb"))
@@ -675,6 +675,8 @@ def main():
 
         manifest["status"] = "succeeded"
 
+    # This is the command boundary: retain any unexpected third-party failure
+    # in the manifest, then re-raise it so callers still receive a nonzero exit.
     except Exception as exc:
         manifest["status"] = "failed"
         manifest["error"] = str(exc)

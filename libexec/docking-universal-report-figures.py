@@ -455,7 +455,7 @@ def plot_clusters(analysis, output, reference_sdf=None, control_label=None):
     for _, molecule in entries:
         try:
             value = rmsd_between(reference, molecule)
-        except Exception:
+        except (RuntimeError, ValueError):
             value = float("nan")
         rmsds.append(value)
     finite = [value for value in rmsds if math.isfinite(value)]

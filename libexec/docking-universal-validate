@@ -7,12 +7,14 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
+  docking-universal validate smoke [--out DIR] [--background]
   docking-universal validate quick [--out DIR] [--background]
   docking-universal validate integration [--out DIR] [--background]
   docking-universal validate release [--out DIR] [--background]
 
 Levels:
-  quick        All menu, routing, validation, parser, and mock-engine tests.
+  smoke        Verify an installed command, helpers, assets, help, and version.
+  quick        Run the full source-tree interface, routing, and unit test suite.
   integration Real fpocket, Meeko, RDKit/MolScrub, Vina, and report probes.
   release     Integration checks plus long control-guided and ligand-free runs.
 
@@ -27,7 +29,7 @@ EOF
 }
 
 level="${1:-}"
-case "$level" in quick|integration|release) shift ;; -h|--help|"") usage; exit 0 ;; *) echo "ERROR: validation level must be quick, integration, or release" >&2; exit 2 ;; esac
+case "$level" in smoke|quick|integration|release) shift ;; -h|--help|"") usage; exit 0 ;; *) echo "ERROR: validation level must be smoke, quick, integration, or release" >&2; exit 2 ;; esac
 out=""
 background=0
 while [ "$#" -gt 0 ]; do
@@ -99,26 +101,35 @@ fail_status() {
 trap fail_status ERR HUP INT TERM
 write_status "RUNNING"
 
+run_smoke() {
+  current_stage="installed command and asset smoke checks"; write_status "RUNNING"
+  [ -x "$CLI" ]
+  [ -x "$SCRIPT_DIR/docking-universal-prepare" ]
+  [ -f "$ASSETS/tutorials/01_bound_ligand/inputs/1HVR.pdb" ]
+  [ -f "$ASSETS/tutorials/01_bound_ligand/inputs/rilpivirine_pubchem.sdf" ]
+  [ -f "$ASSETS/tutorials/02_ligand_free_cavity/inputs/2R8N.pdb" ]
+  [ -f "$ASSETS/tutorials/02_ligand_free_cavity/inputs/indinavir_pubchem_5362440.sdf" ]
+  [ -f "$ASSETS/test_inputs/two_compounds.sdf" ]
+  "$CLI" --help > "$out/cli-help.txt"
+  "$CLI" version > "$out/version.txt"
+  "$CLI" validate --help > "$out/validate-help.txt"
+}
+
 run_quick() {
   current_stage="fast interface and routing tests"; write_status "RUNNING"
-  if [ "$SOURCE_TREE" -eq 1 ]; then
-    (cd "$PROJECT" && make test)
-  else
-    [ -x "$CLI" ]
-    [ -x "$SCRIPT_DIR/docking-universal-prepare" ]
-    [ -f "$ASSETS/tutorials/01_bound_ligand/inputs/1HVR.pdb" ]
-    [ -f "$ASSETS/tutorials/01_bound_ligand/inputs/rilpivirine_pubchem.sdf" ]
-    [ -f "$ASSETS/tutorials/02_ligand_free_cavity/inputs/2R8N.pdb" ]
-    [ -f "$ASSETS/tutorials/02_ligand_free_cavity/inputs/indinavir_pubchem_5362440.sdf" ]
-    [ -f "$ASSETS/test_inputs/two_compounds.sdf" ]
-    "$CLI" --help > "$out/cli-help.txt"
-    "$CLI" version > "$out/version.txt"
-    "$CLI" validate --help > "$out/validate-help.txt"
+  if [ "$SOURCE_TREE" -ne 1 ]; then
+    echo "ERROR: validate quick requires a source checkout containing the Makefile and tests; use 'docking-universal validate smoke' for an installed-copy check." >&2
+    return 2
   fi
+  (cd "$PROJECT" && make test)
 }
 
 run_integration() {
-  run_quick
+  if [ "$SOURCE_TREE" -eq 1 ]; then
+    run_quick
+  else
+    run_smoke
+  fi
   current_stage="installed-tool discovery"; write_status "RUNNING"
   "$CLI" doctor > "$out/doctor.txt"
 
@@ -194,8 +205,8 @@ run_integration() {
   # shellcheck disable=SC2086
   "$CLI" evaluate-control $comparison_args --engine vina \
     --out "$out/protocol_fixture/protocol.json" --receptor "$receptor" --box "$box" \
-    --threshold 2 --exhaustiveness 16 --num-modes 20 --energy-range 8 \
-    $seed_args --min-seeds 5 --conformers 3 \
+    --threshold 2 --exhaustiveness 1 --num-modes 2 --energy-range 3 \
+    $seed_args --min-seeds 5 --conformers 1 \
     --macrocycle-treatment flexible_meeko --no-prompt
 
   current_stage="synthetic approved-protocol batch planning and report"; write_status "RUNNING"
@@ -204,6 +215,25 @@ run_integration() {
     --ligands "$ASSETS/test_inputs/two_compounds.sdf" --out "$out/approved_screen_plan" \
     --name validation_screen --plan-only --non-interactive
   find "$out/approved_screen_plan/report" -type f -name '*.pdf' -size +1000c | grep -q .
+
+  current_stage="real immediate protocol screen for restart equivalence"; write_status "RUNNING"
+  "$CLI" run --mode screen \
+    --protocol "$out/protocol_fixture/protocol.json" \
+    --ligands "$ASSETS/tutorials/01_bound_ligand/inputs/rilpivirine_pubchem.sdf" \
+    --out "$out/reuse_equivalence_immediate" --name reuse_immediate \
+    --analysis summary --non-interactive --no-visuals
+
+  current_stage="real restarted protocol screen for equivalence"; write_status "RUNNING"
+  "$CLI" run --mode screen \
+    --protocol "$out/protocol_fixture/protocol.json" \
+    --ligands "$ASSETS/tutorials/01_bound_ligand/inputs/rilpivirine_pubchem.sdf" \
+    --out "$out/reuse_equivalence_restarted" --name reuse_restarted \
+    --analysis summary --non-interactive --no-visuals
+
+  current_stage="protocol restart scientific-output equivalence"; write_status "RUNNING"
+  "$PYTHON_COMMAND" "$SCRIPT_DIR/docking-universal-reuse-check.py" \
+    "$out/reuse_equivalence_immediate" "$out/reuse_equivalence_restarted" \
+    > "$out/reuse_equivalence.json"
 
   current_stage="ligand-free planning, fallback, and report"; write_status "RUNNING"
   "$CLI" run --mode exploratory \
@@ -245,6 +275,7 @@ PY
 }
 
 case "$level" in
+  smoke) run_smoke ;;
   quick) run_quick ;;
   integration) run_integration ;;
   release) run_release ;;

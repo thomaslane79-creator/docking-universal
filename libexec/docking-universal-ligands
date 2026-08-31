@@ -201,3 +201,4 @@ printf 'Prepared PDBQT:   %s\n' "$success"
 printf 'Failed/skipped:   %s\n' "$failed"
 printf 'Output directory: %s\n' "$out_dir"
 [ "$success" -gt 0 ] || exit 1
+[ "$failed" -eq 0 ] || exit 1

@@ -42,6 +42,7 @@ from docking_universal_bundle import (
     protocol_can_screen,
     protocol_type,
     protocol_type_label,
+    reconcile_protocol_engine,
 )
 from docking_universal_pocket_review import (
     choose_prepared_box,
@@ -49,6 +50,7 @@ from docking_universal_pocket_review import (
     prepared_box_records,
     review_pocket_scene,
 )
+from docking_universal_process import run_checked
 
 
 STATUSES = {
@@ -70,8 +72,13 @@ class StartExploratoryRequested(Exception):
 
 
 def run(command, cwd=None):
-    print("+ " + " ".join(map(str, command)), flush=True)
-    subprocess.run([str(value) for value in command], cwd=cwd, check=True)
+    return run_checked(command, cwd=cwd)
+
+
+def require_complete_batch(failures):
+    """Return failure after reports are retained when any compound failed."""
+    if failures:
+        raise SystemExit(f"{failures} compound workflow(s) failed; completed outputs and reports were retained")
 
 
 def package_version():
@@ -1323,7 +1330,7 @@ def parse_args():
     parser.add_argument("--receptor-pdb", type=Path)
     parser.add_argument("--receptor-pdbqt", type=Path)
     parser.add_argument("--box", type=Path)
-    parser.add_argument("--engine", choices=("vina", "qvinaw"), default="vina", help="docking engine: Vina or QuickVina-W")
+    parser.add_argument("--engine", choices=("vina", "qvinaw"), help="docking engine: Vina or QuickVina-W")
     parser.add_argument("--control-tier", choices=("quick", "repeatability", "broader", "conformers", "robust"), default="quick")
     parser.add_argument("--seeds", type=int, default=5, help="exploratory independent seeds (default: 5)")
     parser.add_argument("--conformers", type=int, default=3, help="exploratory conformers per state (default: 3)")
@@ -1418,6 +1425,10 @@ def main():
         args.complex = choose_complex_source()
     if mode == "screen":
         selected_record = read_json(args.protocol) or {}
+        try:
+            args.engine = reconcile_protocol_engine(selected_record, args.engine)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from None
         selected_type = protocol_type(selected_record)
         if not args.non_interactive:
             print_selected_protocol(selected_record)
@@ -1437,6 +1448,8 @@ def main():
         print(f"  RMSD pruning: {locked_parameters.get('rmsd_prune_angstrom', 0.75)} A")
         print(f"  Tautomers enumerated: {locked_parameters.get('tautomers_enumerated', True)}")
         print(f"  Charge model: {locked_parameters.get('charge_model', 'NA')}")
+    elif args.engine is None:
+        args.engine = "vina"
     study_name = args.name or f"docking_universal_{mode}"
     default_control_output = mode == "control" and args.out is None
     output_parent = choose_output_parent() if args.out is None and not args.non_interactive else Path.cwd()
@@ -1841,6 +1854,7 @@ def main():
     print(f"Readable report: {report_dir / 'index.html'}")
     print(f"Machine summary: {report_dir / 'study_summary.json'}")
     print(f"Run details: {report_dir / 'run_details.md'}")
+    require_complete_batch(failures)
 
 
 if __name__ == "__main__":

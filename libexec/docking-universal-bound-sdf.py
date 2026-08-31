@@ -161,7 +161,7 @@ def main():
                 typed_crystal = AllChem.AssignBondOrdersFromTemplate(template, crystal_raw)
                 Chem.SanitizeMol(typed_crystal)
                 manifest["checks"]["bond_order_mapping"] = "passed"
-            except Exception as exc:
+            except (RuntimeError, ValueError) as exc:
                 manifest["checks"]["bond_order_mapping"] = f"failed: {exc}"
 
     if typed_crystal is not None:

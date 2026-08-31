@@ -91,6 +91,8 @@ Open Babel splits ordinary SDF input and can generate an optimized 3D representa
 
 QuickVina-W uses Vina's scoring model but changes the search strategy, particularly for wide search spaces. Engine choice is therefore locked into every reusable protocol. Passing a control with one engine does not authorize silently switching the associated screening to the other, and scores or poses from separate engines are not treated as identical results.
 
+If a caller explicitly requests an engine that conflicts with the selected protocol, screening stops with an engine-lock error; omission of the option uses the recorded engine. The low-level runner also checks that the configured box geometrically overlaps the receptor before launching either engine. This is an input-consistency safeguard rather than site validation.
+
 ## Limitations
 
 - Alternate locations are resolved to one recorded choice rather than modeled as an ensemble; insertion-code handling remains constrained by the selected external templates.

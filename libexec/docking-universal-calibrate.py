@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from docking_universal_bundle import build_receptor_modification_warning
+from docking_universal_process import run_checked
 
 
 TIERS = {
@@ -61,8 +62,7 @@ def tier_settings(args, tier_name):
 
 def run(command):
     """Run one auditable stage and stop immediately if it fails."""
-    print("+ " + " ".join(map(str, command)), flush=True)
-    subprocess.run([str(item) for item in command], check=True)
+    return run_checked(command)
 
 
 def distribution_version(name):

@@ -89,11 +89,13 @@ An installed copy can run validation from any writable directory without manual 
 ```bash
 mkdir -p validation-work
 cd validation-work
-docking-universal validate quick
+docking-universal validate smoke
 docking-universal validate integration
 ```
 
-Installed validation uses packaged scientific fixtures and writes a new `validation_runs/` directory below the invocation directory. It does not write inside the Conda installation. Source checkouts additionally run the repository's developer unit tests.
+`validate smoke` checks the installed command, helpers, packaged fixtures, help, and version without claiming to execute scientific tools. `validate integration` uses the packaged fixtures and real installed scientific tools. Both write a new `validation_runs/` directory below the invocation directory and do not write inside the Conda installation. The complete `validate quick` interface, routing, and unit suite requires a source checkout containing the repository tests.
+
+Conda environment creation and update are retried for transient download failures. If all attempts fail, installation remains resumable: correct the network or package-channel problem and rerun `./install.sh`.
 
 The installer updates declared packages but does not prune user-added packages from any environment.
 To remove the complete installation later:

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Made batch ligand preparation and docking return failure when any compound fails while retaining and reporting every successful compound output.
+- Added early protein-PDB validation and receptor/docking-box geometric preflight checks so invalid or mismatched inputs stop with a specific explanation before an engine is launched.
+- Made explicit engine requests fail on conflict with a protocol's locked engine instead of silently ignoring the request.
+- Added resumable Conda installation retries for transient network failures and clearer guidance after retry exhaustion.
+- Added real Vina and QuickVina-W integration validation to Ubuntu and macOS CI, and separated installed-copy `validate smoke` checks from the full source-only `validate quick` suite.
+- Began the staged preparation refactor by moving protein-PDB validation and receptor/box geometry checks into a unit-tested Python structure module; also consolidated common audited subprocess execution, narrowed nonessential broad exception handling, and added focused robustness regressions.
+- Added a real protocol-restart equivalence stage that runs the same ligand twice with one locked receptor, box, engine, ensemble policy, and seed list, then requires identical prepared ligand files, per-seed poses, scores, and cluster assignments after excluding paths and timestamps.
+
 ## 0.6.5 — 2026-08-27
 
 **Patch release focus:** QuickVina-W broad-search support and explicit docking-region selection.

@@ -356,7 +356,7 @@ def main():
     try:
         crystal = AllChem.AssignBondOrdersFromTemplate(template, crystal_raw)
         Chem.SanitizeMol(crystal)
-    except Exception as exc:
+    except (RuntimeError, ValueError) as exc:
         raise SystemExit(f"could not map SDF chemistry onto crystallographic coordinates: {exc}") from exc
 
     poses = [Chem.RemoveHs(mol) for mol in Chem.SDMolSupplier(str(exported_sdf), removeHs=False) if mol]
@@ -374,7 +374,7 @@ def main():
             )
         try:
             rmsd = rdMolAlign.CalcRMS(pose, crystal, maxMatches=100000)
-        except Exception as exc:
+        except (RuntimeError, ValueError) as exc:
             raise SystemExit(f"symmetry-aware atom mapping failed for pose {index}: {exc}") from exc
 
         set_ligand_pdb_info(pose)

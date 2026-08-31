@@ -21,6 +21,16 @@ def atom(serial, name, resname, chain, resnum, x, y, z):
 
 
 class ProtocolRegionTests(unittest.TestCase):
+    def test_protein_pdb_validation_requires_parseable_atom_records(self):
+        with tempfile.TemporaryDirectory() as directory:
+            valid = Path(directory) / "valid.pdb"
+            invalid = Path(directory) / "invalid.pdb"
+            valid.write_text(atom(1, "CA", "ALA", "A", 1, 0, 0, 0))
+            invalid.write_text("ATOM malformed\nHETATM also malformed\n")
+            self.assertTrue(REGION.validate_protein_pdb(valid))
+            with self.assertRaisesRegex(SystemExit, "not a valid protein PDB"):
+                REGION.validate_protein_pdb(invalid)
+
     def test_four_interactive_region_choices(self):
         for answer, expected in enumerate(REGION.REGION_CHOICES, 1):
             with self.subTest(answer=answer), patch("builtins.input", return_value=str(answer)):
@@ -113,6 +123,24 @@ class ProtocolRegionTests(unittest.TestCase):
             })
             self.assertIn("size_z = 62.000", conf.read_text())
             self.assertTrue(conf.with_name("whole-protein_box.pdb").is_file())
+
+    def test_receptor_box_preflight_rejects_nonoverlapping_inputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receptor = Path(directory) / "receptor.pdbqt"
+            receptor.write_text(atom(1, "CA", "ALA", "A", 1, 0, 0, 0))
+            near = Path(directory) / "near.conf"
+            near.write_text(
+                "center_x = 0\ncenter_y = 0\ncenter_z = 0\n"
+                "size_x = 20\nsize_y = 20\nsize_z = 20\n"
+            )
+            far = Path(directory) / "far.conf"
+            far.write_text(
+                "center_x = 999\ncenter_y = 999\ncenter_z = 999\n"
+                "size_x = 20\nsize_y = 20\nsize_z = 20\n"
+            )
+            self.assertEqual(REGION.receptor_atoms_in_box(receptor, near), 1)
+            with self.assertRaisesRegex(SystemExit, "does not overlap any receptor atoms"):
+                REGION.receptor_atoms_in_box(receptor, far)
 
 
 if __name__ == "__main__":

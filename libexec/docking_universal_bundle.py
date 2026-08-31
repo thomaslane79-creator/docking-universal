@@ -75,6 +75,18 @@ def protocol_can_screen(record):
     )
 
 
+def reconcile_protocol_engine(record, requested=None):
+    """Return the locked engine, rejecting an explicit contradictory request."""
+    locked = str((record or {}).get("engine", "")).strip().lower()
+    if locked not in {"vina", "qvinaw"}:
+        raise ValueError(f"protocol records an unsupported docking engine: {locked or 'missing'}")
+    if requested and requested != locked:
+        raise ValueError(
+            f"protocol is locked to {locked}; requested --engine {requested} conflicts with the approved protocol"
+        )
+    return locked
+
+
 def protocol_type_label(value):
     return {
         CONTROL_VALIDATED: "Control-validated",
@@ -253,6 +265,8 @@ def extract_bundle(bundle_path):
         if not protocol.is_file():
             raise ValueError("protocol bundle does not contain protocol.json")
         return protocol
+    # Transaction boundary: every verification failure must remove the partial
+    # extraction, but the original exception is deliberately re-raised.
     except Exception:
         shutil.rmtree(root, ignore_errors=True)
         raise

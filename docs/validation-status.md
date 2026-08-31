@@ -28,10 +28,13 @@ The [complete two-cohort, 100-public-PDB receptor-preparation record](receptor-p
 The same checks and the real-tool suites are available through the public interface:
 
 ```bash
+docking-universal validate smoke
 docking-universal validate quick
 docking-universal validate integration
 docking-universal validate release --background
 ```
+
+`smoke` verifies an installed command and its packaged assets. `quick` runs the complete fast developer suite and therefore requires a source checkout. `integration` runs real scientific-tool probes from either a source checkout or an installed copy, while `release` adds the long reference workflows.
 
 The release suite is intentionally slow. It first repeats the integration probes, then runs the 1HVR/XK2 multi-seed pose-recovery control, a protocol-locked Rilpivirine screen, and a ligand-free 2R8N/Indinavir exploratory study. Every invocation creates a new timestamped directory in `validation_runs/` and writes `status.json`; `PASSED` means the expected software stages and artifacts completed, not that every predicted pose is biologically correct.
 
@@ -48,6 +51,7 @@ The maintained scientific environment has been checked with fpocket, Meeko, PDBF
 - deepest-pocket and centroid box centers, including whole-protein and per-chain centroid scope;
 - automatic documented fallback from fpocket score threshold 0.10 to 0.0 when no candidate passes, while retaining geometry and overlap filters;
 - a two-compound approved-protocol screen plan with locked-input hash verification;
+- two real executions of the same protocol-locked ligand screen, compared for identical prepared ligand files, per-seed poses, scores, and pose clusters after excluding run paths and timestamps;
 - MMFF94, MMFF94s, and UFF ensemble generation with custom pH, seeds, and tautomer policies;
 - automatic HTML, JSON, Markdown, and PDF report generation, followed by rendered-page inspection.
 
