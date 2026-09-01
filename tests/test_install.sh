@@ -31,6 +31,10 @@ libexec="$prefix/libexec/docking-universal"
 
 [ -x "$cli" ] || fail "installed public command"
 [ -x "$libexec/docking-universal-prepare" ] || fail "installed preparation helper"
+[ -r "$libexec/docking-universal-prepare-support.sh" ] || fail "installed preparation support library"
+for module in interaction runtime receptor ligands pockets artifacts; do
+  [ -r "$libexec/docking-universal-prepare.d/$module.sh" ] || fail "installed preparation module: $module"
+done
 [ -x "$libexec/docking-universal-validate" ] || fail "installed validation helper"
 [ -f "$libexec/docking_universal_bundle.py" ] || fail "installed bundle helper"
 [ -f "$libexec/docking_universal_pocket_review.py" ] || fail "installed pocket-review helper"
