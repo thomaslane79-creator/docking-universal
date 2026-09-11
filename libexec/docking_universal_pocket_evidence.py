@@ -21,6 +21,12 @@ from pathlib import Path
 
 import numpy as np
 
+from docking_universal.structural_evidence import (
+    retain_accepted_alignment,
+    retain_source_structure,
+    write_ensemble_manifest,
+)
+
 
 SEARCH_URL = "https://search.rcsb.org/rcsbsearch/v2/query"
 DOWNLOAD_URL = "https://files.rcsb.org/download/{entry}.pdb"
@@ -884,6 +890,9 @@ def collect_pocket_evidence(
             pocket_atoms_by_number[pocket_number] = pdb_atom_coordinates(pocket_file)
     evidence = []
     skipped = []
+    ensemble_root = output_dir / "structural_ensemble"
+    ensemble_sources = []
+    ensemble_alignments = []
     downloaded_components = {}
     for index, entry in enumerate(entries, 1):
         print(f"  Checking related structure {index}/{len(entries)}: {entry}", flush=True)
@@ -892,6 +901,7 @@ def collect_pocket_evidence(
         except (OSError, urllib.error.URLError) as exc:
             skipped.append({"entry": entry, "reason": f"download failed: {exc}"})
             continue
+        ensemble_sources.append(retain_source_structure(ensemble_root, entry, text))
         candidates = protein_chains(text)
         protein_atoms_by_chain = protein_heavy_atoms_by_chain(text)
         candidate_identifiers_by_chain = protein_database_identifiers(text)
@@ -926,6 +936,7 @@ def collect_pocket_evidence(
                 "rmsd": rmsd, "candidate_identifiers": candidate_identifiers,
                 "shared_identifiers": shared_identifiers,
                 "protein_identity_basis": protein_identity_basis,
+                "chain": chain, "pairs": pairs,
             })
         if not valid_alignments:
             selected_rank = choose_alignment_candidate(
@@ -952,6 +963,24 @@ def collect_pocket_evidence(
                 "maximum_ca_rmsd_angstrom": maximum_ca_rmsd_angstrom,
             })
             continue
+        for alignment in valid_alignments:
+            ensemble_alignments.append(retain_accepted_alignment(
+                ensemble_root,
+                entry=entry,
+                pdb_text=text,
+                reference_chain=reference_id,
+                reference_residues=reference,
+                source_chain=alignment["chain_id"],
+                source_residues=alignment["chain"],
+                pairs=alignment["pairs"],
+                rotation=alignment["rotation"],
+                translation=alignment["translation"],
+                sequence_identity=alignment["identity"],
+                query_coverage=alignment["coverage"],
+                ca_rmsd_angstrom=alignment["rmsd"],
+                protein_identity_basis=alignment["protein_identity_basis"],
+                shared_protein_identifiers=alignment["shared_identifiers"],
+            ))
         for ligand in deposited_ligands(text, entry):
             associated = []
             for alignment in valid_alignments:
@@ -1098,6 +1127,23 @@ def collect_pocket_evidence(
         "ambiguous_chain_assignments_excluded": [
             source_ligand_id(row) for row in ambiguous_rows if source_ligand_id(row)
         ],
+    }
+    ensemble_manifest = write_ensemble_manifest(
+        ensemble_root,
+        reference_file=receptor_pdb.name,
+        sources=ensemble_sources,
+        alignments=ensemble_alignments,
+        qualification={
+            "minimum_alignment_identity": minimum_alignment_identity,
+            "minimum_query_coverage": minimum_query_coverage,
+            "maximum_ca_rmsd_angstrom": maximum_ca_rmsd_angstrom,
+        },
+    )
+    record["structural_ensemble"] = {
+        "manifest": str(ensemble_manifest.relative_to(output_dir)),
+        "downloaded_source_count": len(ensemble_sources),
+        "accepted_alignment_count": len(ensemble_alignments),
+        "reuse_policy": "authoritative shared input for pocket, B-factor, and rotamer evidence",
     }
     json_path = output_dir / "pdb_ligand_site_evidence.json"
     json_path.write_text(json.dumps(record, indent=2) + "\n")

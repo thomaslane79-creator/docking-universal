@@ -213,6 +213,15 @@ class ProtocolTypeTests(unittest.TestCase):
             evidence_tsv = evidence_dir / "pdb_ligand_site_evidence.tsv"
             evidence_json.write_text('{"status":"completed"}\n')
             evidence_tsv.write_text("entry\tligand\n4EY7\tE20\n")
+            ensemble_dir = evidence_dir / "structural_ensemble"
+            observations_dir = ensemble_dir / "atom_observations"
+            observations_dir.mkdir(parents=True)
+            ensemble_manifest = ensemble_dir / "structural_ensemble_manifest.json"
+            observations = observations_dir / "4EY7_A_to_A.jsonl"
+            ensemble_manifest.write_text(json.dumps({
+                "accepted_alignments": [{"atom_observations": "atom_observations/4EY7_A_to_A.jsonl"}],
+            }) + "\n")
+            observations.write_text('{"b_factor":20.0}\n')
             protocol = root / "multi_protocol.json"
             protocol.write_text(json.dumps({
                 "schema_name": "docking-universal-protocol", "schema_version": 1,
@@ -227,6 +236,7 @@ class ProtocolTypeTests(unittest.TestCase):
                 "docking_regions": regions,
                 "pdb_pocket_evidence": {
                     "status": "completed", "record": str(evidence_json),
+                    "structural_ensemble": {"manifest": str(ensemble_manifest)},
                 },
             }))
             output = root / "multi.duprotocol"
@@ -241,6 +251,14 @@ class ProtocolTypeTests(unittest.TestCase):
             self.assertEqual(retained_evidence["table"], "evidence/pdb_ligand_site_evidence.tsv")
             self.assertTrue((extracted.parent / retained_evidence["record"]).is_file())
             self.assertTrue((extracted.parent / retained_evidence["table"]).is_file())
+            bundled_ensemble = extracted.parent / "evidence/structural_ensemble/structural_ensemble_manifest.json"
+            self.assertTrue(bundled_ensemble.is_file())
+            self.assertEqual(
+                retained_evidence["structural_ensemble"]["manifest"],
+                "evidence/structural_ensemble/structural_ensemble_manifest.json",
+            )
+            relative_observations = json.loads(bundled_ensemble.read_text())["accepted_alignments"][0]["atom_observations"]
+            self.assertTrue((bundled_ensemble.parent / relative_observations).is_file())
 
     def test_bundle_retains_user_approved_removal_manifest(self):
         with tempfile.TemporaryDirectory() as directory:

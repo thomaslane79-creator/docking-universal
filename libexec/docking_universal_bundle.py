@@ -205,6 +205,7 @@ def create_bundle(protocol_path, control_root, output, control_compound=None):
             "report/*protocol*.pdf", "report/*box*.png", "report/*cavity*.png",
             "**/pdb_site_evidence/**/*.json", "**/pdb_site_evidence/**/*.tsv",
             "**/pdb_site_evidence/**/*.pdb", "**/pdb_site_evidence/**/*.sdf",
+            "**/pdb_site_evidence/**/*.jsonl",
             "**/selected_visuals/*.png", "**/selected_visuals/**/*.png",
             "**/experimental_interactions.png", "**/comparison_summary.json",
         )
@@ -214,7 +215,15 @@ def create_bundle(protocol_path, control_root, output, control_compound=None):
                 if not source.is_file() or source.resolve() in seen:
                     continue
                 seen.add(source.resolve())
-                destination = _copy(source, evidence / source.name)
+                structural_root = next(
+                    (parent for parent in source.parents if parent.name == "structural_ensemble"),
+                    None,
+                )
+                destination = _copy(
+                    source,
+                    evidence / "structural_ensemble" / source.relative_to(structural_root)
+                    if structural_root else evidence / source.name,
+                )
                 evidence_files.append({
                     "path": str(destination.relative_to(packaged_control)),
                     "sha256": sha256(destination),
@@ -228,6 +237,10 @@ def create_bundle(protocol_path, control_root, output, control_compound=None):
             elif artifact["path"].endswith("pdb_ligand_site_evidence.tsv"):
                 pocket_evidence["table"] = artifact["path"]
                 pocket_evidence["table_sha256"] = artifact["sha256"]
+            elif artifact["path"].endswith("structural_ensemble_manifest.json"):
+                ensemble = pocket_evidence.setdefault("structural_ensemble", {})
+                ensemble["manifest"] = artifact["path"]
+                ensemble["manifest_sha256"] = artifact["sha256"]
         # The evidence summary points to the representative ligand selected
         # by heavy-atom count. Rewrite those source-tree-relative paths to the
         # portable bundle locations copied above.

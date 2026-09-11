@@ -327,6 +327,19 @@ class PocketEvidenceTests(unittest.TestCase):
             self.assertNotIn("selected_pocket", record)
             self.assertTrue((root / "evidence/pdb_ligand_site_evidence.json").is_file())
             self.assertTrue((root / "evidence/pdb_ligand_site_evidence.tsv").is_file())
+            ensemble_path = root / "evidence" / record["structural_ensemble"]["manifest"]
+            ensemble = json.loads(ensemble_path.read_text())
+            self.assertEqual(ensemble["schema_name"], "docking-universal-structural-ensemble")
+            self.assertEqual(ensemble["sources"][0]["entry"], "9XYZ")
+            self.assertTrue((ensemble_path.parent / ensemble["sources"][0]["source_coordinates"]).is_file())
+            alignment = ensemble["accepted_alignments"][0]
+            self.assertIn("per_structure_b_factor_analysis", alignment["available_for"])
+            self.assertIn("cross_structure_rotamer_analysis", alignment["available_for"])
+            observations = ensemble_path.parent / alignment["atom_observations"]
+            first_atom = json.loads(observations.read_text().splitlines()[0])
+            self.assertEqual(first_atom["b_factor"], 20.0)
+            self.assertEqual(first_atom["occupancy"], 1.0)
+            self.assertEqual(first_atom["reference_residue_number"], "1")
             headings = (root / "evidence/pdb_ligand_site_evidence.tsv").read_text().splitlines()[0]
             self.assertIn("protein_identity_basis", headings)
             self.assertIn("shared_protein_identifiers", headings)
@@ -376,6 +389,32 @@ class PocketEvidenceTests(unittest.TestCase):
                 == "ligand contact to structurally accepted protein chain"
                 for row in record["evidence"]
             ))
+
+    def test_accepted_ligand_free_structure_is_retained_for_ensemble_analysis(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            receptor = root / "target.pdb"
+            receptor.write_text(protein())
+            box = root / "pocket1.conf"
+            box.write_text(
+                "center_x = 5\ncenter_y = 0\ncenter_z = 0\n"
+                "size_x = 10\nsize_y = 10\nsize_z = 10\n"
+            )
+            search = json.dumps({"result_set": [{"identifier": "9APO_1"}]}).encode()
+
+            def opener(request, timeout=30):
+                if "search.rcsb.org" in request.full_url:
+                    return FakeResponse(search)
+                return FakeResponse(protein(offset=(4, -2, 1)).encode())
+
+            record = EVIDENCE.collect_pocket_evidence(
+                receptor, [box], root / "evidence", opener=opener,
+            )
+            self.assertEqual(record["evidence"], [])
+            self.assertEqual(record["structural_ensemble"]["accepted_alignment_count"], 1)
+            manifest_path = root / "evidence" / record["structural_ensemble"]["manifest"]
+            manifest = json.loads(manifest_path.read_text())
+            self.assertEqual(manifest["accepted_alignments"][0]["entry"], "9APO")
 
     def test_collection_rejects_sequence_match_with_excessive_ca_rmsd(self):
         with tempfile.TemporaryDirectory() as temporary:

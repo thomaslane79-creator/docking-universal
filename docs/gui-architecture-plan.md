@@ -315,6 +315,16 @@ user can accept the suggested set, add or remove residues, or retain a rigid
 receptor. `Scientific Workflow Detail` controls how much of the calculation is
 expanded, but the evidence and rationale remain available.
 
+The related-PDB search is a shared upstream evidence stage, not a disposable
+pocket-only lookup. During the initial rigid workflow it centrally retains each
+downloaded source structure and, for every accepted chain alignment, the
+source-to-reference transformation, residue mapping, aligned coordinates, raw
+per-atom B-factor, occupancy, alternate-location, and element records. The
+portable structural-ensemble manifest identifies these artifacts as inputs for
+both the current pocket/ligand-context review and later B-factor and rotamer
+analysis. Derived flexibility summaries may be regenerated from this retained
+record; they must not trigger a second search whose evidence set could differ.
+
 The detachable **Flexible Residue Evidence** view is the primary selection
 surface. Each residue row exposes, without requiring Technical detail:
 
