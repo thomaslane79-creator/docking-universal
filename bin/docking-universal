@@ -212,7 +212,7 @@ case "$command_name" in
     ;;
   dock)
     shift
-    exec "$LIBEXEC_DIR/docking-universal-dock" "$@"
+    exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking_universal_dock.py" "$@"
     ;;
   collect)
     shift

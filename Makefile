@@ -26,7 +26,7 @@ test:
 	./tests/test_ligand_detection_helpers.sh
 	./tests/test_fpocket_runner.sh
 	./tests/test_receptor_preparation_routes.sh
-	PYTHONPATH="$(CURDIR)/libexec$${PYTHONPATH:+:$$PYTHONPATH}" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_run_selection.py tests/test_guided_options.py tests/test_report_cavity.py tests/test_pdbfixer_preclean.py tests/test_ccd_audit.py tests/test_protocol_types.py tests/test_protocol_region.py tests/test_graphical_chooser.py tests/test_depict2d.py tests/test_retained_report_artifacts.py tests/test_process_runner.py tests/test_reuse_equivalence.py tests/test_pocket_evidence.py tests/test_multisite_protocol.py tests/test_multisite_report_figures.py
+	PYTHONPATH="$(CURDIR)/libexec$${PYTHONPATH:+:$$PYTHONPATH}" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_run_selection.py tests/test_guided_options.py tests/test_report_cavity.py tests/test_pdbfixer_preclean.py tests/test_ccd_audit.py tests/test_protocol_types.py tests/test_protocol_region.py tests/test_graphical_chooser.py tests/test_depict2d.py tests/test_retained_report_artifacts.py tests/test_process_runner.py tests/test_reuse_equivalence.py tests/test_dock_runner.py tests/test_pocket_evidence.py tests/test_multisite_protocol.py tests/test_multisite_report_figures.py
 
 test-integration:
 	./bin/docking-universal validate integration
@@ -49,6 +49,7 @@ install:
 	install -m 0644 libexec/docking-universal-prepare.d/*.sh "$(DESTDIR)$(LIBEXECDIR)/docking-universal-prepare.d/"
 	install -m 0644 libexec/docking_universal_bundle.py "$(DESTDIR)$(LIBEXECDIR)/"
 	install -m 0644 libexec/docking_universal_box_candidates.py "$(DESTDIR)$(LIBEXECDIR)/"
+	install -m 0644 libexec/docking_universal_dock.py "$(DESTDIR)$(LIBEXECDIR)/"
 	install -m 0644 libexec/docking_universal_pocket_review.py "$(DESTDIR)$(LIBEXECDIR)/"
 	install -m 0644 libexec/docking_universal_pocket_evidence.py "$(DESTDIR)$(LIBEXECDIR)/"
 	install -m 0644 libexec/docking_universal_process.py "$(DESTDIR)$(LIBEXECDIR)/"
