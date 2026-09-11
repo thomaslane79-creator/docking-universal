@@ -1,6 +1,6 @@
 # Docking Universal
 
-**v0.6.5 · Research preview**
+**v0.7.0 · Research preview**
 
 Docking Universal provides fully guided, interactive docking workflows on Ubuntu and macOS, from selecting inputs through generating scientific PDF reports. It supports AutoDock Vina and QuickVina-W alongside established open-source tools for receptor and ligand preparation, site selection, docking, analysis, and visualization.
 
@@ -15,7 +15,7 @@ AutoDock Vina and QuickVina-W are the supported docking engines: each searches a
 | **Structure and component records** | RCSB PDB retrieval, deposited-component inventories, ligand identifiers, Chemical Component Dictionary checks, and retained source records. |
 | **Protein preparation** | Iterative Meeko preparation, conditional PDBFixer repair, diagnosed compatibility fallbacks, prepared receptor PDBQT output, and an explicit stop for review before any model-changing component removal. |
 | **Ligand preparation** | SDF validation and splitting, molecular-graph handling, protonation and tautomer enumeration, conformer generation and pruning, charge assignment, and one prepared ligand PDBQT per compound. |
-| **Site and docking-box selection** | fpocket cavity detection, descriptor collection, candidate filtering and ranking, numbered and color-matched PyMOL review, docking-box generation, and explicit user selection. |
+| **Site and docking-box selection** | fpocket cavity detection, descriptor collection, candidate filtering and ranking, optional related-structure ligand evidence, aligned same-site grouping, numbered and color-matched PyMOL review, one- or multi-box generation, and explicit user selection. |
 | **Experimental control** | Bound-ligand pose-recovery redocking, multi-conformer and independent-seed sampling, symmetry-aware RMSD evaluation, reproducibility criteria, and failure-closed screening authorization. |
 | **Reusable protocols** | Control-validated, ligand-guided exploratory, and site-guided exploratory protocols that lock the prepared receptor, selected box, search settings, evidence status, and supporting records in a portable Docking Universal `.duprotocol` bundle. |
 | **Screening execution** | Guided single- or multi-compound screening with AutoDock Vina or QuickVina-W, isolated per-compound outputs, partial-failure retention, a nonzero final status when any compound fails, and normalized score collection. |
@@ -76,9 +76,9 @@ These are the three commands most users need. Each launches an interactive inter
 | --- | --- | --- |
 | **Control-validated** | A known bound ligand is redocked and must pass pose-recovery criteria. | Supports screening with target-specific control evidence. |
 | **Ligand-guided exploratory** | A ligand in the selected structure defines the region but is not redocked. | Explicitly exploratory. |
-| **Site-guided exploratory** | fpocket cavity analysis and a user-reviewed box define the region. | Explicitly exploratory. |
+| **Site-guided exploratory** | fpocket cavity analysis defines candidate regions; optional aligned ligands from qualifying related PDB structures provide independent site evidence, and the user may select one or multiple boxes. | Explicitly exploratory; related-structure evidence supports site review but is not a pose-recovery control. |
 
-A `.duprotocol` contains the prepared receptor, docking box, settings, provenance, and supporting evidence. It can be saved, shared, and reused by another Docking Universal installation, but it is not a general protocol format for other docking software. Exploratory use remains identified as exploratory and requires explicit user authorization.
+A `.duprotocol` contains the prepared receptor, every selected docking box, settings, provenance, and supporting evidence. It can be saved, shared, and reused by another Docking Universal installation, but it is not a general protocol format for other docking software. Exploratory use remains identified as exploratory and requires explicit user authorization.
 
 Every guided workflow retains its report, machine-readable summaries, parameters, intermediate artifacts, and raw tool logs. Single-record SDFs, multi-record SDFs, and directories of SDF files are supported for compound screening.
 
