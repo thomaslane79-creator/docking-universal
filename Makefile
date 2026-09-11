@@ -50,6 +50,7 @@ install:
 	install -m 0644 libexec/docking_universal_bundle.py "$(DESTDIR)$(LIBEXECDIR)/"
 	install -m 0644 libexec/docking_universal_box_candidates.py "$(DESTDIR)$(LIBEXECDIR)/"
 	install -m 0644 libexec/docking_universal_dock.py "$(DESTDIR)$(LIBEXECDIR)/"
+	install -m 0644 libexec/docking_universal_ligands.py "$(DESTDIR)$(LIBEXECDIR)/"
 	install -m 0644 libexec/docking_universal_pocket_review.py "$(DESTDIR)$(LIBEXECDIR)/"
 	install -m 0644 libexec/docking_universal_pocket_evidence.py "$(DESTDIR)$(LIBEXECDIR)/"
 	install -m 0644 libexec/docking_universal_process.py "$(DESTDIR)$(LIBEXECDIR)/"

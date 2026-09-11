@@ -194,7 +194,7 @@ case "$command_name" in
     ;;
   ligands|prepare-ligand)
     shift
-    exec "$LIBEXEC_DIR/docking-universal-ligands" "$@"
+    exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking_universal_ligands.py" "$@"
     ;;
   pockets)
     shift
