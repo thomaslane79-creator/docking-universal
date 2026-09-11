@@ -210,6 +210,127 @@ should support:
 The job manager should consume the same application API used by noninteractive
 tests. Qt-specific code belongs only in the GUI-facing bridge.
 
+### 6. Performance without scientific shortcuts
+
+Speed is a product requirement, but acceleration must not silently reduce the
+evidence collected or change a locked protocol. The first release still runs
+only one scientific stage at a time. A selected engine may use its own bounded
+internal CPU parallelism, while the application prevents oversubscription and
+records the assigned CPU count. Later batch concurrency is a separate feature
+that requires resource controls and equivalence testing.
+
+Safe initial acceleration includes:
+
+- hash-validated reuse of completed receptor, ligand, box, and report inputs;
+- restart from retained valid stage artifacts rather than repeating a study;
+- lazy generation of optional visualizations while authoritative numerical
+  outputs are retained immediately;
+- cached parsing and thumbnails keyed to authoritative artifact hashes;
+- bounded live-log rendering so terminal output cannot slow or freeze the GUI;
+- observed per-job timing and transparent estimates before expensive tiers;
+- explicit engine CPU controls with oversubscription prevention;
+- preserving successful compound, site, conformer, and seed results after a
+  later independent job fails.
+
+Reduced exhaustiveness, fewer seeds or conformers, smaller evidence searches,
+or skipped controls are scientific policy changes rather than UI performance
+optimizations. They must be presented, justified, and recorded as such.
+Vina's simultaneous multiple-ligand feature represents co-docking and must not
+be substituted for independent library screening merely to improve throughput.
+
+### 7. Flexible-receptor docking
+
+The architecture must accommodate AutoDock Vina's limited flexible-receptor
+mode. This means selected receptor side chains are prepared as a flexible
+PDBQT component while the remaining receptor is prepared separately as the
+rigid component; Vina receives both the rigid receptor and `--flex` input. It
+does not mean whole-protein flexibility, induced fit, molecular dynamics, or
+free-energy refinement.
+
+Rigid-receptor docking remains the initial default and existing protocol
+behavior. Flexible docking is a distinct, visibly labeled protocol mode with:
+
+- an explicit list of flexible residues and the evidence or user rationale for
+  choosing each residue;
+- synchronized residue selection in PyMOL and a reviewable residue table;
+- retained original, rigid-component, and flexible-component structures;
+- preparation validation that the components are compatible and nonoverlapping;
+- an estimated search-cost warning before execution;
+- protocol hashes covering both receptor components and the residue selection;
+- flexible-side-chain conformations retained with each output pose;
+- target-matched control and equivalence requirements distinct from a rigid
+  protocol;
+- reports that distinguish ligand flexibility from selected side-chain
+  flexibility and state the method's limitations.
+
+#### B-factor-guided flexible-residue suggestions
+
+Docking Universal should help the user identify plausible flexible side chains
+rather than require manual selection from an unlabeled structure. For suitable
+experimental structures, it generates a ranked, reviewable candidate list from
+the deposited atomic displacement parameters commonly reported as B-factors.
+This is decision-support evidence, not an automatic claim that a residue is
+mobile or that making it flexible will improve docking.
+
+Candidate generation should:
+
+- verify the structure source and experimental method before interpreting the
+  temperature-factor field; predicted-structure confidence values stored in
+  the same coordinate column must follow a separate interpretation;
+- retain the original per-atom values, occupancies, alternate locations, and
+  missing-atom observations used by the calculation;
+- summarize side-chain values per residue and normalize them relative to the
+  relevant chain, local backbone, and structure rather than apply an
+  unexplained universal raw-value cutoff;
+- combine relative B-factor evidence with distance from the selected docking
+  region and whether the residue has a Vina-supported movable side chain;
+- flag rather than silently recommend residues affected by low occupancy,
+  alternate conformations, unresolved atoms, covalent links, metal
+  coordination, modified chemistry, or other preparation ambiguity;
+- cap the suggested set using a documented computational-cost policy while
+  allowing the user to inspect every eligible candidate;
+- produce `flexible_residue_candidates.json` and a readable table containing
+  each score component, exclusion or warning reason, and source coordinates.
+
+The GUI presents candidates as a B-factor-colored structural layer synchronized
+with a sortable residue table. The user can accept the suggested set, add or
+remove residues, compare with ligand-contact or related-structure evidence, or
+retain a rigid receptor. `Scientific Workflow Detail` controls how much of the
+calculation is expanded, but the evidence and rationale remain available.
+
+An automated policy may select only candidates that pass the validated
+eligibility and ambiguity rules, and its threshold, cap, and selected residues
+must be obvious and audited. Ambiguous chemistry is never resolved from a
+B-factor. A flexible selection changes the search model, so it creates a new
+protocol designation and requires target-matched control evidence before it can
+authorize screening.
+
+Initial support is limited to a validated AutoDock Vina path. QuickVina-W or
+other engine support must not be inferred from compatible-looking command-line
+options; it requires its own capability probe, fixtures, scientific controls,
+and protocol designation. The implementation should follow the official
+[AutoDock Vina flexible docking tutorial](https://autodock-vina.readthedocs.io/en/latest/docking_flexible.html)
+and supported Meeko receptor-preparation interface.
+
+Flexible docking may be activated after the first rigid workflow, but it is not
+an optional architectural afterthought. The first application contracts must
+already represent:
+
+- a `ReceptorConfiguration` containing a required rigid component and optional
+  flexible component and selected-residue records;
+- engine capability records rather than assumptions based on engine names;
+- docking requests that accept the complete receptor configuration;
+- protocol locks over an extensible collection of receptor artifacts;
+- pose results that may contain both ligand and flexible-side-chain coordinates;
+- visualization layers and selection identities that work for receptor
+  components as well as ligands;
+- report and audit records that declare the receptor flexibility mode.
+
+The rigid implementation supplies no flexible component and uses the same
+contracts. Consequently, enabling the validated flexible path later adds an
+adapter and workflow choices without replacing the domain model, job manager,
+window controller, protocol format abstraction, or structural-view interface.
+
 ## Proposed desktop interface
 
 ### Home
@@ -265,6 +386,33 @@ Teaching content should be attached to the real decision where it matters—for
 example, explaining why an fpocket rank is a geometric hypothesis while the
 user compares candidate sites—rather than interrupting work with generic
 tutorial pop-ups.
+
+### Enhanced Vina workspace
+
+The GUI should provide a Vina-focused scientific workspace rather than expose
+only a generic command form. It should include:
+
+- a three-dimensional docking-box editor synchronized with numeric center and
+  size controls;
+- rigid and selected-flexible-residue visualization;
+- protocol-aware settings that are editable during exploratory design and
+  visibly locked during approved-protocol screening;
+- plain-language explanations for exhaustiveness, modes, energy range, seed,
+  CPU allocation, scoring choice, and flexible residues;
+- receptor/box geometric preflight before the engine can start;
+- a complete command preview and parameter provenance in Technical detail;
+- live bounded progress and log views, cancellation, and retained partial
+  outputs;
+- estimated job count and cost across sites, conformers, and seeds;
+- side-by-side comparison of rigid and flexible controls or results without
+  combining their scientific authority.
+
+The workspace may make Vina substantially easier to configure and inspect, but
+it must not unlock protocol-bound parameters, label scores as affinities, or
+present greater computation as greater biological certainty. Vina officially
+supports multicore execution, batch operation, Python bindings, and selected
+flexible side chains; each capability still enters Docking Universal through a
+version-checked adapter and a recorded protocol contract.
 
 ### Interactive structural review
 
@@ -405,6 +553,16 @@ component ADFRsuite fallback, and an explicit decision before component
 removal. The missing target-adaptive fallback fixture in the receptor refactor
 matrix must be added before translating that later stage.
 
+Flexible-receptor docking follows this rigid-receptor vertical slice rather
+than expanding its initial executable acceptance surface. Before activation it
+needs
+fixtures for rigid/flexible receptor splitting, residue identity mapping,
+B-factor candidate generation and exclusions, engine command construction,
+output parsing, restart, reporting, and a target-matched rigid-versus-flexible
+control. The shared models and GUI controls must implement the flexible-capable
+contracts from the outset so activation does not require a later architectural
+rewrite.
+
 ## What to borrow from Dockey
 
 Use as architectural reference:
@@ -445,6 +603,15 @@ although acknowledging Dockey as interface inspiration may still be useful.
   restart.
 - Detached windows remain synchronized views of the same run.
 - The initial job manager never starts more than one scientific stage at once.
+- Engine CPU use is bounded, recorded, and cannot oversubscribe the configured
+  application limit.
+- Artifact reuse is hash-validated and produces the same scientific records as
+  a fresh equivalent stage.
+- Flexible-receptor protocols record and lock every selected residue plus both
+  receptor components, and remain distinct from rigid protocols.
+- B-factor suggestions retain their raw evidence, normalization, eligibility,
+  exclusions, warnings, and user or automation selection rationale.
+- The Vina workspace explains and records every editable engine parameter.
 - Closing the GUI cannot leave untracked child processes running.
 - A failed ligand does not discard successful ligands.
 - Existing `.duprotocol` bundles remain readable.
