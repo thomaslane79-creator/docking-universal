@@ -1480,7 +1480,7 @@ def plot_clusters(analysis, output, reference_sdf=None, control_label=None):
         # Keep the axis label compact enough to remain fully visible when the
         # figure is reduced into the PDF; the caption and in-plot legend state
         # the RMSD reference explicitly.
-        ax.set_ylabel("No-fit heavy-atom RMSD (A)", fontsize=15)
+        ax.set_ylabel("No-fit heavy-atom RMSD from lowest-energy pose (A)", fontsize=13)
         ax.set_title("Top 20 clusters: docking score, population, and structural distance", fontsize=17)
         ax.add_patch(FancyBboxPatch((.54, .015), .44, .28, transform=ax.transAxes, boxstyle="round,pad=.012", fc="white", ec="0.6", alpha=.95, zorder=5))
         ax.text(.95, .265, "Top clusters", transform=ax.transAxes, fontsize=12, va="top", ha="right", zorder=6)

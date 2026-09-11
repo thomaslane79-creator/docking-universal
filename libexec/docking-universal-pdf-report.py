@@ -2049,7 +2049,7 @@ def main():
                 f"<b>Figure {figure_number}. Docking pose-cluster analysis for {caption_subject}.</b> "
                 "Docking score versus symmetry-aware, no-fit heavy-atom RMSD from the lowest-energy cluster representative in the receptor coordinate frame; point size denotes cluster population."
                 if is_cluster_plot else
-                f"<b>Figure {figure_number}. Docking pose-cluster analysis for {caption_subject}.</b> (A) Docking score versus symmetry-aware, no-fit heavy-atom RMSD from the lowest-energy cluster representative in the receptor coordinate frame; point size denotes cluster population. (B) Representative structures from the highlighted clusters, using matching cluster colors."
+                f"<b>Figure {figure_number}. Docking pose-cluster analysis for {caption_subject}.</b> (A) Docking score versus symmetry-aware, no-fit heavy-atom RMSD from the lowest-energy cluster representative in the receptor coordinate frame; point size denotes cluster population. (B) Representative structures from the highlighted clusters, using matching cluster colors. Gray protein residues are the residues within 5 A of the displayed representative ligands."
             )
             story += [KeepTogether([image(panel,6.0,3.75),Paragraph(caption,styles["SmallDU"])]),Spacer(1,4)]
             figure_number += 1
