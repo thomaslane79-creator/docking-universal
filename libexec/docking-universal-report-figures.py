@@ -1887,7 +1887,10 @@ def combine_panels(panel_a, panel_b, output, control=False, panel_b_legend=()):
     # Keep the two control panels vertically centered on the same frame; the
     # previous downward offset made panel B visibly lower than panel A in the
     # combined Figure 1 image.
-    b_offset = 0
+    # Panel B is tightly cropped around the molecular overlay, whereas Panel A
+    # contains unavoidable plot margins.  A small upward visual correction
+    # centers the displayed content, not merely the underlying image boxes.
+    b_offset = -45 if control else 0
     b = fit(
         b, right_w - 80,
         max(300, a.height - b_offset) if control else 1600,
