@@ -1495,7 +1495,10 @@ def plot_clusters(analysis, output, reference_sdf=None, control_label=None):
     ax.axhline(0, color="0.45", linewidth=0.8, zorder=0)
     ax.tick_params(labelsize=12)
     ax.grid(alpha=.25)
-    fig.tight_layout(rect=[.04, .06, .99, .97])
+    # Leave enough left margin for the long vertical RMSD label.  The compact
+    # figure is embedded at reduced size in the PDF, so a default tight layout
+    # can clip the first characters even when the source PNG looks acceptable.
+    fig.tight_layout(rect=[.10, .06, .99, .97])
     fig.savefig(output, dpi=240)
     plt.close(fig)
     # Keep a tabular record of exactly the values drawn in the cluster plot so
