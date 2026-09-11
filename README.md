@@ -97,6 +97,8 @@ The workflow does not convert a cavity prediction or a related-structure ligand 
 
 A `.duprotocol` contains the prepared receptor, every selected docking box, settings, provenance, and supporting evidence. It can be saved, shared, and reused by another Docking Universal installation, but it is not a general protocol format for other docking software. Exploratory use remains identified as exploratory and requires explicit user authorization.
 
+If a protocol contains more than one selected docking site, `docking-universal screen` runs the same ligand ensemble and locked settings independently at each site. Docking, scores, pose clusters, PLIP interactions, and PyMOL sessions remain separated and labeled by site; the final report summarizes the sites together without combining them into one oversized search box.
+
 Every guided workflow retains its report, machine-readable summaries, parameters, intermediate artifacts, and raw tool logs. Single-record SDFs, multi-record SDFs, and directories of SDF files are supported for compound screening.
 
 ![Two end-to-end Docking Universal pathways: control-guided screening and ligand-free exploratory screening](docs/assets/end-to-end-workflows-current-capabilities.png)
