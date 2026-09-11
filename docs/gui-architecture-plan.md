@@ -315,6 +315,37 @@ user can accept the suggested set, add or remove residues, or retain a rigid
 receptor. `Scientific Workflow Detail` controls how much of the calculation is
 expanded, but the evidence and rationale remain available.
 
+The detachable **Flexible Residue Evidence** view is the primary selection
+surface. Each residue row exposes, without requiring Technical detail:
+
+- chain, residue name and number, insertion code, and mapping confidence;
+- selected-structure side-chain B-factor percentile and side-chain-versus-local-
+  backbone difference;
+- occupancy, alternate-location, missing-atom, and chemistry-quality flags;
+- number and identity of qualifying PDB structures in which it was observed;
+- observed rotamer identities, chi-angle ranges, and aligned side-chain
+  displacement across those structures;
+- apo, ligand-bound, mutation-bearing, and different-ligand context;
+- ligand-contact frequency, closest observed ligand distance, and distance to
+  the selected docking region;
+- Vina flexibility eligibility, recommendation strength, and the incremental
+  search-cost warning associated with selecting it.
+
+Selecting a table row highlights that residue in the primary receptor and
+overlays its mapped conformations from contributing structures in PyMOL.
+Selecting a conformation identifies its PDB entry, chain, experimental context,
+alignment quality, and ligand contact. Filters may show evidence agreement,
+rotamer changes, pocket-local residues, warnings, or currently selected
+residues, but filtering never removes evidence from the retained record.
+
+The final `DecisionRequired` presents the complete proposed residue set, its
+combined cost, evidence coverage, warnings, and rigid-receptor alternative. The
+resulting `ApprovalRecord` stores the exact candidate-data version, selected and
+rejected residues, whether the set was suggested, edited, or policy-selected,
+and an optional user rationale. The protocol therefore preserves not just which
+residues were flexible, but the consolidated experimental evidence available
+when that scientific decision was made.
+
 Crystal packing, refinement choices, mutations, missing atoms, and differing
 experimental conditions can also produce cross-structure differences. The
 workflow therefore reports evidence coverage and disagreement, does not treat
