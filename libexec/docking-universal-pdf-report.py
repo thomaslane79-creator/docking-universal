@@ -1237,7 +1237,11 @@ def main():
     control_title_name = control_title_sdf.stem.removesuffix("_experimental") if control_title_sdf else None
     out = args.out or args.study / "report" / descriptive_report_name(target_name, ligand_names, summary)
     out.parent.mkdir(parents=True, exist_ok=True)
-    if protocol and control_title_name:
+    # A screen may inherit a control for provenance and pose-recovery context,
+    # but its heading must identify the ligand(s) actually docked in this run.
+    # The control ligand belongs in the inherited-control section, not in the
+    # screen's top-level target descriptor.
+    if protocol and control_title_name and summary.get("workflow") == "control":
         study_descriptor = f"Target: {target_name} | Ligand: {control_title_name}"
     elif protocol or workflow_is_exploratory:
         # Protocol, control, and exploratory pocket-selection sections are

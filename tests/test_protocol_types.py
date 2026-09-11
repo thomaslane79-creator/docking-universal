@@ -187,7 +187,12 @@ class ProtocolTypeTests(unittest.TestCase):
             extracted = BUNDLE.extract_bundle(output)
             extracted_record = json.loads(extracted.read_text())
             self.assertEqual(extracted_record["protocol_type"], BUNDLE.LIGAND_GUIDED_EXPLORATORY)
-            self.assertTrue((extracted.parent / extracted_record["locked_inputs"]["receptor_pdb"]).is_file())
+            retained_receptor_pdb = extracted.parent / extracted_record["locked_inputs"]["receptor_pdb"]
+            self.assertTrue(retained_receptor_pdb.is_file())
+            self.assertEqual(
+                extracted_record["locked_inputs"]["receptor_pdb_sha256"],
+                digest(retained_receptor_pdb),
+            )
 
     def test_exploratory_bundle_retains_multiple_locked_docking_sites(self):
         with tempfile.TemporaryDirectory() as directory:

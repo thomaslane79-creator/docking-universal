@@ -160,6 +160,7 @@ def create_bundle(protocol_path, control_root, output, control_compound=None):
             if receptor_pdb_source.is_file():
                 receptor_pdb_copy = _copy(receptor_pdb_source, assets / receptor_pdb_source.name)
                 protocol["locked_inputs"]["receptor_pdb"] = f"assets/{receptor_pdb_copy.name}"
+                protocol["locked_inputs"]["receptor_pdb_sha256"] = sha256(receptor_pdb_copy)
         audit_value = protocol.get("receptor_preparation", {}).get("pdbfixer_audit")
         if audit_value:
             audit_source = Path(audit_value).expanduser().resolve()
