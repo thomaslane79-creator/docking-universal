@@ -18,6 +18,7 @@ from typing import Any, Iterable
 
 SCHEMA_NAME = "docking-universal-structural-ensemble"
 SCHEMA_VERSION = 1
+BACKBONE_ATOMS = {"N", "CA", "C", "O", "OXT"}
 
 
 def _sha256_bytes(value: bytes) -> str:
@@ -191,3 +192,80 @@ def write_ensemble_manifest(
     path = root / "structural_ensemble_manifest.json"
     path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
     return path
+
+
+class StructuralEnsembleReader:
+    """Validated access to the shared inputs needed by downstream analyses."""
+
+    def __init__(self, manifest: Path | str):
+        self.manifest = Path(manifest).resolve()
+        self.root = self.manifest.parent
+        self.record = json.loads(self.manifest.read_text())
+        if (
+            self.record.get("schema_name") != SCHEMA_NAME
+            or self.record.get("schema_version") != SCHEMA_VERSION
+        ):
+            raise ValueError("Unsupported Docking Universal structural-ensemble schema")
+
+    def atom_observations(self) -> list[dict[str, Any]]:
+        observations = []
+        for alignment in self.record.get("accepted_alignments", []):
+            path = self._resolve(alignment["atom_observations"])
+            for line_number, line in enumerate(path.read_text().splitlines(), 1):
+                if not line.strip():
+                    continue
+                try:
+                    observations.append(json.loads(line))
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"Invalid atom observation at {path}:{line_number}") from exc
+        return observations
+
+    def b_factor_inputs(self) -> list[dict[str, Any]]:
+        """Return deposited values without normalizing or interpreting them."""
+        return [
+            row for row in self.atom_observations()
+            if row.get("b_factor") is not None
+        ]
+
+    def residue_conformation_inputs(self) -> dict[str, list[dict[str, Any]]]:
+        """Group mapped side-chain atoms for later rotamer/chi analysis."""
+        conformations: dict[str, dict[str, dict[str, Any]]] = {}
+        for row in self.atom_observations():
+            if row.get("record_type") != "ATOM":
+                continue
+            if row.get("element", "").upper() == "H" or row.get("atom_name") in BACKBONE_ATOMS:
+                continue
+            residue_key = "/".join((
+                str(row.get("reference_chain", "_")),
+                str(row.get("reference_residue_name", "UNK")),
+                str(row.get("reference_residue_number", "?")),
+            ))
+            alignment_id = str(row.get("alignment_id", "unknown"))
+            conformation = conformations.setdefault(residue_key, {}).setdefault(alignment_id, {
+                "entry": row.get("entry"),
+                "alignment_id": alignment_id,
+                "source_chain": row.get("source_chain"),
+                "source_residue_name": row.get("source_residue_name"),
+                "source_residue_number": row.get("source_residue_number"),
+                "atoms": [],
+            })
+            conformation["atoms"].append({
+                "atom_name": row.get("atom_name"),
+                "alternate_location": row.get("alternate_location", ""),
+                "occupancy": row.get("occupancy"),
+                "aligned_xyz": row.get("aligned_xyz"),
+            })
+        return {
+            residue: list(by_alignment.values())
+            for residue, by_alignment in conformations.items()
+        }
+
+    def _resolve(self, relative: str) -> Path:
+        path = (self.root / relative).resolve()
+        try:
+            path.relative_to(self.root)
+        except ValueError as exc:
+            raise ValueError(f"Structural-ensemble artifact escapes its root: {relative}") from exc
+        if not path.is_file():
+            raise FileNotFoundError(f"Structural-ensemble artifact is missing: {path}")
+        return path

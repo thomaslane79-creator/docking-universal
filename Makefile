@@ -26,7 +26,7 @@ test:
 	./tests/test_ligand_detection_helpers.sh
 	./tests/test_fpocket_runner.sh
 	./tests/test_receptor_preparation_routes.sh
-	PYTHONPATH="$(CURDIR)/libexec$${PYTHONPATH:+:$$PYTHONPATH}" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_run_selection.py tests/test_guided_options.py tests/test_report_cavity.py tests/test_pdbfixer_preclean.py tests/test_ccd_audit.py tests/test_protocol_types.py tests/test_protocol_region.py tests/test_graphical_chooser.py tests/test_depict2d.py tests/test_retained_report_artifacts.py tests/test_process_runner.py tests/test_reuse_equivalence.py tests/test_dock_runner.py tests/test_pocket_evidence.py tests/test_multisite_protocol.py tests/test_multisite_report_figures.py tests/test_application_contracts.py
+	PYTHONPATH="$(CURDIR)/libexec$${PYTHONPATH:+:$$PYTHONPATH}" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_run_selection.py tests/test_guided_options.py tests/test_report_cavity.py tests/test_pdbfixer_preclean.py tests/test_ccd_audit.py tests/test_protocol_types.py tests/test_protocol_region.py tests/test_graphical_chooser.py tests/test_depict2d.py tests/test_retained_report_artifacts.py tests/test_process_runner.py tests/test_process_adapter.py tests/test_reuse_equivalence.py tests/test_dock_runner.py tests/test_pocket_evidence.py tests/test_pocket_review_service.py tests/test_structural_evidence.py tests/test_multisite_protocol.py tests/test_multisite_report_figures.py tests/test_application_contracts.py
 
 test-integration:
 	./bin/docking-universal validate integration
@@ -41,6 +41,7 @@ install:
 	install -d "$(DESTDIR)$(BINDIR)"
 	install -d "$(DESTDIR)$(LIBEXECDIR)"
 	install -d "$(DESTDIR)$(LIBEXECDIR)/docking_universal"
+	install -d "$(DESTDIR)$(LIBEXECDIR)/docking_universal/services"
 	install -d "$(DESTDIR)$(LIBEXECDIR)/docking-universal-prepare.d"
 	install -d "$(DESTDIR)$(LIBEXECDIR)/validation-assets/test_inputs"
 	install -d "$(DESTDIR)$(LIBEXECDIR)/validation-assets/tutorials/01_bound_ligand/inputs"
@@ -58,6 +59,7 @@ install:
 	install -m 0644 libexec/docking_universal_region.py "$(DESTDIR)$(LIBEXECDIR)/"
 	install -m 0644 libexec/docking_universal_reuse.py "$(DESTDIR)$(LIBEXECDIR)/"
 	install -m 0644 libexec/docking_universal/*.py "$(DESTDIR)$(LIBEXECDIR)/docking_universal/"
+	install -m 0644 libexec/docking_universal/services/*.py "$(DESTDIR)$(LIBEXECDIR)/docking_universal/services/"
 	install -m 0644 VERSION "$(DESTDIR)$(LIBEXECDIR)/VERSION"
 	install -m 0644 examples/test_inputs/two_compounds.sdf "$(DESTDIR)$(LIBEXECDIR)/validation-assets/test_inputs/"
 	install -m 0644 examples/tutorials/01_bound_ligand/inputs/1HVR.pdb examples/tutorials/01_bound_ligand/inputs/rilpivirine_pubchem.sdf "$(DESTDIR)$(LIBEXECDIR)/validation-assets/tutorials/01_bound_ligand/inputs/"

@@ -28,5 +28,8 @@ class AutomationPolicy:
         for rule in self.rules:
             if rule.decision_kind == decision.kind:
                 decision.validate_response(rule.selections)
+                options = {option.value: option for option in decision.options}
+                if any(not options[value].automation_eligible for value in rule.selections):
+                    return None
                 return rule.selections
         return None

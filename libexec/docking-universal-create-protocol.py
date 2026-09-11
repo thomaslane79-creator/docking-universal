@@ -38,7 +38,9 @@ from docking_universal_pocket_review import (  # noqa: E402
     review_labeled_candidate_scene,
     review_pocket_scene,
 )
-from docking_universal_box_candidates import grouped_fpocket_boxes  # noqa: E402
+from docking_universal.services.pocket_review import (  # noqa: E402
+    build_labeled_candidate_mappings,
+)
 from docking_universal_pocket_evidence import (  # noqa: E402
     collect_pocket_evidence,
     group_ligand_sites,
@@ -396,72 +398,8 @@ def ordered_pocket_boxes(cavity):
 
 
 def build_labeled_box_candidates(target, boxes, pocket_evidence, cavity):
-    """Materialize every report-visible and individual selectable box.
-
-    Individual P# candidates remain available even when evidence supports a
-    ligand-defined or consolidated alternative.  This keeps evidence advisory
-    and makes every displayed box label a real CLI selection target.
-    """
-    candidates = []
-    ligand_groups = (pocket_evidence or {}).get("ligand_site_groups") or []
-    groups_by_pocket = {}
-    for group in ligand_groups:
-        pocket = (group.get("fpocket_recovery") or {}).get("best_matching_pocket")
-        if pocket:
-            groups_by_pocket.setdefault(str(pocket), []).append(group)
-    for index, path in enumerate(ordered_pocket_boxes(cavity), 1):
-        # Filesystem ordering puts pocket10 before pocket2. Labels identify
-        # the retained pocket number, never its position in a filename list.
-        match = re.search(r"_pocket(\d+)\.conf$", Path(path).name)
-        if match:
-            index = int(match.group(1))
-        supporting = groups_by_pocket.get(str(index), [])
-        description = "individual fpocket cavity box"
-        if supporting:
-            description += "; direct deposited-ligand correspondence recorded"
-        candidates.append({"label": f"P{index}", "path": Path(path), "description": description})
-
-    diagnostics = Path(cavity) / "pocket_selection_diagnostics.tsv"
-    if diagnostics.is_file():
-        with diagnostics.open(newline="") as handle:
-            retained = [
-                row for row in csv.DictReader(handle, delimiter="\t")
-                if row.get("decision") == "selected"
-            ]
-        retained.sort(key=lambda row: int(row.get("rank_order", 999999)))
-        displayed_files = [row.get("pocket_file", "") for row in retained[:3]]
-        for group in grouped_fpocket_boxes(diagnostics, retained, displayed_files):
-            if len(group["numbers"]) < 2:
-                continue
-            label = "/".join(f"P{number}" for number in group["numbers"])
-            path = write_box_files(
-                Path(cavity) / f"{target}_consolidated_{label.replace('/', '-')}.conf",
-                group["geometry"],
-            )
-            candidates.append({
-                "label": label, "path": path,
-                "description": "consolidated box spanning the named overlapping fpocket cavities",
-            })
-
-    for group in ligand_groups:
-        identity = group.get("site_identity") or {}
-        matching_pocket = (group.get("fpocket_recovery") or {}).get("best_matching_pocket")
-        # A unique fpocket match already means the deposited ligand is fully
-        # contained by that P# box. Other poses grouped into the broader site
-        # remain supporting evidence; they must not silently enlarge the box.
-        if matching_pocket:
-            continue
-        label = identity.get("canonical_label", f"L{group.get('site_number', '?')}")
-        path = write_box_files(
-            Path(cavity) / f"{target}_evidence_{safe_id(label)}.conf", group["box"],
-        )
-        evidence_classes = group.get("evidence_class_counts") or {}
-        candidates.append({
-            "label": label, "path": path,
-            "description": "ligand-defined box without a corresponding fpocket cavity",
-            "requires_homolog_approval": bool(evidence_classes.get("close_structural_homolog")),
-        })
-    return candidates
+    """Backward-compatible CLI view of the shared pocket-review service."""
+    return build_labeled_candidate_mappings(target, boxes, pocket_evidence, cavity)
 
 
 def box_candidate_records(candidates):

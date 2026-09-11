@@ -11,7 +11,7 @@ from typing import Any
 
 from .decisions import ApprovalRecord, DecisionOption, DecisionRequired, DecisionStatus
 from .events import EventType, WorkflowEvent
-from .models import CompletionStatus, Job, JobStatus, ScientificAuthority, record_to_dict, utc_now
+from .models import ArtifactRecord, CompletionStatus, Job, JobStatus, ScientificAuthority, record_to_dict, utc_now
 
 
 SCHEMA_NAME = "docking-universal-application-state"
@@ -30,6 +30,7 @@ class StudyState:
     decisions: list[DecisionRequired] = field(default_factory=list)
     approvals: list[ApprovalRecord] = field(default_factory=list)
     jobs: list[Job] = field(default_factory=list)
+    artifacts: list[ArtifactRecord] = field(default_factory=list)
     events: list[WorkflowEvent] = field(default_factory=list)
     workflow_data: dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=utc_now)
@@ -69,6 +70,7 @@ class StudyState:
             item["selections"] = tuple(item.get("selections", []))
             approvals.append(ApprovalRecord(**item))
         jobs = [Job(**{**item, "status": JobStatus(item["status"])}) for item in value.get("jobs", [])]
+        artifacts = [ArtifactRecord(**item) for item in value.get("artifacts", [])]
         events = [
             WorkflowEvent(**{**item, "type": EventType(item["type"])})
             for item in value.get("events", [])
@@ -84,6 +86,7 @@ class StudyState:
             decisions=decisions,
             approvals=approvals,
             jobs=jobs,
+            artifacts=artifacts,
             events=events,
             workflow_data=dict(value.get("workflow_data", {})),
             created_at=value["created_at"],

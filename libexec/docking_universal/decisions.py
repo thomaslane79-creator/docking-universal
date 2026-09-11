@@ -20,6 +20,7 @@ class DecisionOption:
     label: str
     consequence: str
     recommended: bool = False
+    automation_eligible: bool = True
 
 
 @dataclass

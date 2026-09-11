@@ -7,7 +7,7 @@ from uuid import uuid4
 from .automation import AutomationPolicy
 from .decisions import ApprovalRecord, DecisionOption, DecisionRequired, DecisionStatus
 from .events import EventType, ScientificDetail, WorkflowEvent
-from .models import CompletionStatus, Job, JobStatus, PocketCandidate, ScientificAuthority, record_to_dict, utc_now
+from .models import ArtifactRecord, CompletionStatus, Job, JobStatus, PocketCandidate, ScientificAuthority, record_to_dict, utc_now
 from .state import JsonStudyStore, StudyState
 
 
@@ -40,6 +40,19 @@ class StudyController:
         candidates: list[PocketCandidate],
         automation: AutomationPolicy | None = None,
     ) -> DecisionRequired:
+        return self.start_pocket_review(study_id, candidates, automation=automation)
+
+    def start_pocket_review(
+        self,
+        study_id: str,
+        candidates: list[PocketCandidate],
+        *,
+        artifacts: tuple[ArtifactRecord, ...] = (),
+        review_artifact_ids: tuple[str, ...] = (),
+        source: dict | None = None,
+        automation: AutomationPolicy | None = None,
+    ) -> DecisionRequired:
+        """Start a review from real or simulated candidate artifact records."""
         state = self.get_study(study_id)
         if state.active_job:
             raise ActiveStageError(f"Study {study_id} already has an active stage: {state.active_job.stage}")
@@ -57,6 +70,13 @@ class StudyController:
         state.current_stage = job.stage
         state.completion_status = CompletionStatus.RUNNING
         state.workflow_data["pocket_candidates"] = [record_to_dict(candidate) for candidate in candidates]
+        if source:
+            state.workflow_data["pocket_review_source"] = source
+        known_artifacts = {artifact.id for artifact in state.artifacts}
+        for artifact in artifacts:
+            if artifact.id not in known_artifacts:
+                state.artifacts.append(artifact)
+                known_artifacts.add(artifact.id)
         if automation and automation.enabled:
             state.workflow_data["active_automation_policy"] = record_to_dict(automation)
             self._event(
@@ -96,10 +116,13 @@ class StudyController:
                     label=candidate.label,
                     consequence=candidate.summary,
                     recommended=candidate.rank == 1,
+                    automation_eligible=candidate.evidence.get("automation_eligible", True),
                 )
                 for candidate in candidates
             ),
-            artifact_ids=tuple(candidate.box_artifact_id for candidate in candidates),
+            artifact_ids=tuple(dict.fromkeys(
+                [candidate.box_artifact_id for candidate in candidates] + list(review_artifact_ids)
+            )),
             maximum_selections=len(candidates),
             automation_eligible=True,
         )
