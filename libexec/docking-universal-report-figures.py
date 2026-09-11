@@ -1884,7 +1884,10 @@ def combine_panels(panel_a, panel_b, output, control=False, panel_b_legend=()):
         return image.resize((int(image.width * ratio), int(image.height * ratio)), Image.Resampling.LANCZOS)
 
     a = fit(a, left_w, canvas_h - 2 * margin - label_h)
-    b_offset = 55 if control else 0
+    # Keep the two control panels vertically centered on the same frame; the
+    # previous downward offset made panel B visibly lower than panel A in the
+    # combined Figure 1 image.
+    b_offset = 0
     b = fit(
         b, right_w - 80,
         max(300, a.height - b_offset) if control else 1600,
