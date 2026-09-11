@@ -85,7 +85,8 @@ Choosing a docking box is a scientific decision, not merely a file-setting step.
 | Evidence presented | What it contributes |
 | --- | --- |
 | **fpocket candidates** | Independent geometric cavity hypotheses with their original scores and ranked locations. |
-| **Deposited ligands from qualifying related PDB structures** | Experimentally observed ligand locations transformed into the selected receptor frame after recorded sequence, coverage, chain-contact, and structural-alignment checks. |
+| **RCSB PDB sequence and structure search** | Searches related protein entities using the selected receptor chain, then verifies sequence, coverage, C-alpha structural alignment, and physical ligand contact with the accepted source chain before transferring a deposited ligand. Failed or ambiguous chain assignments are excluded and recorded. |
+| **Deposited ligands from qualifying related PDB structures** | Experimentally observed ligand locations transformed into the selected receptor frame only after those sequence, structural-alignment, and ligand-contact checks. Exact-sequence and qualified related-sequence evidence remain distinguishable. |
 | **Agreement between ligand evidence and fpocket** | Directly shows when a predicted cavity corresponds to an experimentally occupied region. |
 | **Ligand evidence without an fpocket cavity** | Preserves an experimentally supported site as a separate selectable box instead of pretending that fpocket recovered it. |
 | **Bound-ligand pose-recovery control, when available** | Tests whether the complete target-specific protocol can reproducibly recover a known pose; this is stronger evidence than cavity or related-structure correspondence alone. |
@@ -126,16 +127,19 @@ Additional component commands can also be used independently in compatible workf
 | --- | --- |
 | Automated workflow checks | Installation, routing, preparation, protocol reuse, docking, analysis, visualization, and reporting pass on current Ubuntu and macOS CI systems. |
 | End-to-end validation | Completed a public 1HVR/XK2 control, a held-out screen using its saved protocol, and a ligand-free 2R8N/Indinavir exploratory study. |
+| Evidence-led protocol checks | Six contrasting PDB structures completed preliminary review reports, final protocol reports, and checksum-verified protocol bundles: three with qualifying aligned related-structure ligand evidence and three without it. [See the test set, alignment safeguards, and results.](docs/pocket-evidence-validation-v0.7.0.md) |
 | Receptor-preparation testing | 46/50 general public structures and 39/50 deliberately difficult linked-chemistry structures produced receptor PDBQTs under the documented safety policies. |
 
 Known preparation limitations include some covalent adducts, linked glycans, metals/heme, modified backbones, and nucleic-acid complexes. These results test workflow behavior and safeguards; they do not establish broad prospective docking accuracy or biological validity. See the [validation index](docs/validation.md) and [100-PDB receptor-preparation record](docs/receptor-preparation-validation-2026-08-21.md).
 
 ## Example scientific reports
 
+- [Preliminary evidence and docking-box review report—not yet a protocol](docs/assets/pocket-evidence-review-example.pdf)
+- [Final protocol report after a docking region is selected](docs/assets/pocket-evidence-protocol-example.pdf)
 - [Complete current-style docking report](docs/assets/docking-universal-example-report.pdf)
 - [Site-guided protocol report after explicit user-approved receptor-component removal](docs/assets/5KRH-user-approved-removal-cavity-report.pdf)
 
-Reports adapt to control-validated, exploratory, protocol-reuse, and single- or multi-compound studies while retaining individual compound results. The 5KRH example shows how removal of 31 standard amino-acid residues is identified as a high-severity receptor-model change; its exact inventory and raw preparation log remain in the retained study artifacts and `.duprotocol` bundle, and the warning is carried into every later screening report that reuses that protocol.
+The first two files show the same 2R8N evidence-led workflow before and after selection: the preliminary report presents the available choices without authorizing screening, while the final report records the selected box and reusable protocol. Reports also adapt to control-validated, protocol-reuse, and single- or multi-compound studies while retaining individual compound results. The 5KRH example shows how removal of 31 standard amino-acid residues is identified as a high-severity receptor-model change; its exact inventory and raw preparation log remain in the retained study artifacts and `.duprotocol` bundle, and the warning is carried into every later screening report that reuses that protocol.
 
 ## Documentation
 
