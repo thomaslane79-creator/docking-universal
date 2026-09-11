@@ -18,6 +18,27 @@ Both clients must create the same protocols, invoke the same scientific tools,
 apply the same validation rules, retain the same audit evidence, and generate
 the same reports.
 
+### Product definition
+
+Docking Universal is a **scientific decision-support system for structural
+docking**, not merely a graphical engine launcher. It gathers and organizes
+evidence, explains consequential choices, supports structural review, and
+preserves the reasoning and provenance behind each decision. Docking engines
+perform the search; Docking Universal helps the user decide what should be
+searched, whether the workflow is defensible, and what the results can
+legitimately support.
+
+The interface and application core therefore follow these principles:
+
+- evidence before action;
+- explanation before approval;
+- user judgment at scientific boundaries;
+- explicit uncertainty and interpretation limits;
+- reproducible decisions, not only reproducible commands;
+- automation of technical repetition without silent scientific assumptions;
+- visibility may be reduced by the user, but the underlying detail is always
+  retained and recoverable.
+
 ## Does everything need to become Python?
 
 No. A complete rewrite would add risk without improving the science.
@@ -139,6 +160,11 @@ A service emits structured events such as `StageStarted`, `ProgressUpdated`,
 `StageCompleted`. The CLI renders these as text; the GUI renders them as status,
 dialogs, tables, and progress indicators.
 
+"UI-independent" does not mean interaction-free. A service may pause with a
+durable `DecisionRequired` record and resume only after a CLI or GUI client
+returns a validated response. Terminal prompts and widget callbacks are
+presenters for this shared interaction model, not owners of scientific logic.
+
 ### 4. Decision and approval boundary
 
 Scientific ambiguity must not be hidden inside a modal GUI callback. A
@@ -155,10 +181,24 @@ Scientific ambiguity must not be hidden inside a modal GUI callback. A
 The returned selection becomes an `ApprovalRecord` stored in the audit trail
 and propagated to subsequent protocol and screening reports.
 
+Interaction is the default. Eligible repeatable choices may be automated only
+through an explicit, scoped user policy. An automated choice still creates a
+visible decision record containing its rule, evidence, consequence, timestamp,
+and a way to review why it was selected. The GUI must display a persistent
+`AUTOMATED SCIENTIFIC DECISIONS` indicator while such a policy is active.
+
+Decisions that change the receptor model, accept ambiguous chemistry, or grant
+scientific screening authority continue to require explicit approval. Hiding a
+panel must never imply approval. Pending decisions belong to the persisted study
+state, so they survive window closure and application restart.
+
 ### 5. Job execution
 
 Long-running work should run outside the GUI event loop. Start with a local job
-manager using Qt signals over a Python worker/process layer. It should support:
+manager using Qt signals over a Python worker/process layer. The first release
+supports one active study run and one active scientific stage/process at a time;
+it does not attempt multi-study scheduling or broad concurrent execution. It
+should support:
 
 - queued, running, completed, failed, cancelled, and interrupted states;
 - per-stage and overall progress;
@@ -196,6 +236,35 @@ Use a restrained, task-oriented layout:
 
 Panels may be resized or hidden, but the default arrangement should guide the
 user through one decision at a time rather than expose every parameter.
+
+The Study Workspace should open maximized or full-screen by default. Its major
+views are dockable: a user may focus a view full-screen, detach it into a
+floating window or another display, and dock it back later. Home, Study
+Workspace, Structural Review, Report/Audit, and Job windows are synchronized
+views of one application and one persisted run, not independent copies of the
+workflow. Closing a detached view must not cancel, approve, or mutate the run.
+
+### Scientific Workflow Detail
+
+General Options provides a presentation-only **Scientific Workflow Detail**
+setting:
+
+- **Concise:** essential progress, results, warnings, and decisions;
+- **Guided (default):** the current CLI level of explanation, including
+  scientific implications and interpretation boundaries;
+- **Teaching:** expanded concepts, examples, and suggested review steps;
+- **Technical:** guided detail plus commands, parameters, paths, versions, and
+  live external-tool output.
+
+The setting may change during a run and never changes protocol parameters,
+scientific state, results, or the retained audit record. Mandatory warnings and
+approval consequences remain visible at every level. Every workflow panel
+offers `Show full details`, and the complete event timeline, raw logs, evidence,
+and artifacts remain available even if the user hides their live presentation.
+Teaching content should be attached to the real decision where it matters—for
+example, explaining why an fpocket rank is a geometric hypothesis while the
+user compares candidate sites—rather than interrupting work with generic
+tutorial pop-ups.
 
 ### Interactive structural review
 
@@ -236,10 +305,17 @@ The GUI should make transparency useful without overwhelming the main flow:
 
 - Create domain models and structured workflow events.
 - Wrap the current commands behind Python application services.
-- Build a noninteractive Python API exercised by tests.
+- Build a UI-independent, resumable Python API exercised by tests.
 - Keep existing scripts as the implementation behind those adapters initially.
 
 This phase enables an early GUI without first rewriting every workflow.
+
+The first contract implementation includes typed decision options and
+responses, approval records, automation policies, workflow events, artifact and
+job records, separate scientific-authority and completion states, persistent
+pause/resume state, and a window-independent application controller. A
+simulated pocket-selection workflow must prove the contracts before real
+scientific commands are connected.
 
 ### Phase 2 — GUI shell and read-only workspace
 
@@ -303,6 +379,32 @@ Recommended order:
 5. migrate ligand preparation and direct docking stages;
 6. leave reporting Python code in place, replacing only its invocation API.
 
+## Agreed first vertical slice
+
+The first write-capable GUI workflow is site-guided protocol creation because
+it exercises Docking Universal's defining interaction without requiring the
+complete screening-results interface:
+
+1. select or explicitly download a receptor;
+2. run the established receptor-preparation sequence through an adapter;
+3. present preparation routes, warnings, and retained artifacts;
+4. run fpocket and assemble candidate-region evidence;
+5. generate the preliminary pocket-review report;
+6. show every candidate in the embedded or detached PyMOL review;
+7. synchronize structural selection with the candidate table;
+8. pause for selection of one or multiple docking regions;
+9. present the scientific implications and record explicit approval;
+10. generate the final report and portable `.duprotocol` bundle.
+
+Existing tested commands may remain behind adapters during this slice. Their
+large internals are migrated only after the interaction contract works, using
+the characterization and equivalence sequence above. In particular, receptor
+preparation preserves strict Meeko first, conservative PDBFixer followed by
+strict Meeko, diagnosed disulfide or histidine handling, the narrow linked-
+component ADFRsuite fallback, and an explicit decision before component
+removal. The missing target-adaptive fallback fixture in the receptor refactor
+matrix must be added before translating that later stage.
+
 ## What to borrow from Dockey
 
 Use as architectural reference:
@@ -336,6 +438,13 @@ although acknowledging Dockey as interface inspiration may still be useful.
 - GUI and CLI use the same workflow services and scientific rules.
 - No scientific decision exists only in widget code.
 - Every model-changing choice requires explicit recorded approval.
+- Scientific explanations and evidence remain recoverable when their live
+  panels are hidden or the run uses eligible automation.
+- Automated decisions are visibly identified and fully auditable.
+- Pending decisions and approvals survive window closure and application
+  restart.
+- Detached windows remain synchronized views of the same run.
+- The initial job manager never starts more than one scientific stage at once.
 - Closing the GUI cannot leave untracked child processes running.
 - A failed ligand does not discard successful ligands.
 - Existing `.duprotocol` bundles remain readable.
@@ -343,4 +452,3 @@ although acknowledging Dockey as interface inspiration may still be useful.
 - Reports are identical in scientific content for equivalent runs.
 - Ubuntu and macOS integration tests cover both the core and GUI-launch smoke
   path before a GUI release.
-
