@@ -263,14 +263,15 @@ behavior. Flexible docking is a distinct, visibly labeled protocol mode with:
 - reports that distinguish ligand flexibility from selected side-chain
   flexibility and state the method's limitations.
 
-#### B-factor-guided flexible-residue suggestions
+#### B-factor- and structural-ensemble-guided residue suggestions
 
 Docking Universal should help the user identify plausible flexible side chains
 rather than require manual selection from an unlabeled structure. For suitable
 experimental structures, it generates a ranked, reviewable candidate list from
-the deposited atomic displacement parameters commonly reported as B-factors.
-This is decision-support evidence, not an automatic claim that a residue is
-mobile or that making it flexible will improve docking.
+the deposited atomic displacement parameters commonly reported as B-factors
+and from the qualifying related PDB structures already gathered by the pocket-
+evidence workflow. This is decision-support evidence, not an automatic claim
+that a residue is mobile or that making it flexible will improve docking.
 
 Candidate generation should:
 
@@ -282,6 +283,18 @@ Candidate generation should:
 - summarize side-chain values per residue and normalize them relative to the
   relevant chain, local backbone, and structure rather than apply an
   unexplained universal raw-value cutoff;
+- map equivalent residues only through the workflow's accepted chain,
+  sequence-coverage, and structural-alignment records; excluded or ambiguous
+  related structures must not contribute;
+- measure observed side-chain variation across aligned structures using
+  reviewable quantities such as rotamer/chi-angle differences and side-chain
+  heavy-atom displacement after local backbone alignment;
+- distinguish apo, ligand-bound, mutation-bearing, and different-ligand
+  observations and retain ligand-contact frequency and proximity as separate
+  evidence rather than collapse them into one unexplained score;
+- normalize B-factor evidence within each source structure before combining it
+  across structures, because raw values from independently refined structures
+  are not directly interchangeable;
 - combine relative B-factor evidence with distance from the selected docking
   region and whether the residue has a Vina-supported movable side chain;
 - flag rather than silently recommend residues affected by low occupancy,
@@ -290,13 +303,25 @@ Candidate generation should:
 - cap the suggested set using a documented computational-cost policy while
   allowing the user to inspect every eligible candidate;
 - produce `flexible_residue_candidates.json` and a readable table containing
-  each score component, exclusion or warning reason, and source coordinates.
+  each B-factor, cross-structure variation, ligand-contact, proximity, and
+  eligibility component, every contributing PDB entry, each exclusion or
+  warning reason, and the source coordinates.
 
 The GUI presents candidates as a B-factor-colored structural layer synchronized
-with a sortable residue table. The user can accept the suggested set, add or
-remove residues, compare with ligand-contact or related-structure evidence, or
-retain a rigid receptor. `Scientific Workflow Detail` controls how much of the
-calculation is expanded, but the evidence and rationale remain available.
+with a sortable residue table and aligned-structure comparison. The user can
+inspect whether a suggestion came from high relative B-factor, an observed
+rotamer change, repeated ligand contact, or agreement among those sources. The
+user can accept the suggested set, add or remove residues, or retain a rigid
+receptor. `Scientific Workflow Detail` controls how much of the calculation is
+expanded, but the evidence and rationale remain available.
+
+Crystal packing, refinement choices, mutations, missing atoms, and differing
+experimental conditions can also produce cross-structure differences. The
+workflow therefore reports evidence coverage and disagreement, does not treat
+absence from a related structure as rigidity, and never converts structural
+variation directly into screening authority. Residue suggestions must be fixed
+and recorded before the corresponding control is evaluated so they cannot be
+silently tuned to recover a withheld pose.
 
 An automated policy may select only candidates that pass the validated
 eligibility and ambiguity rules, and its threshold, cap, and selected residues
@@ -557,11 +582,11 @@ Flexible-receptor docking follows this rigid-receptor vertical slice rather
 than expanding its initial executable acceptance surface. Before activation it
 needs
 fixtures for rigid/flexible receptor splitting, residue identity mapping,
-B-factor candidate generation and exclusions, engine command construction,
-output parsing, restart, reporting, and a target-matched rigid-versus-flexible
-control. The shared models and GUI controls must implement the flexible-capable
-contracts from the outset so activation does not require a later architectural
-rewrite.
+B-factor and related-structure candidate generation and exclusions, engine
+command construction, output parsing, restart, reporting, and a target-matched
+rigid-versus-flexible control. The shared models and GUI controls must implement
+the flexible-capable contracts from the outset so activation does not require a
+later architectural rewrite.
 
 ## What to borrow from Dockey
 
@@ -609,8 +634,9 @@ although acknowledging Dockey as interface inspiration may still be useful.
   a fresh equivalent stage.
 - Flexible-receptor protocols record and lock every selected residue plus both
   receptor components, and remain distinct from rigid protocols.
-- B-factor suggestions retain their raw evidence, normalization, eligibility,
-  exclusions, warnings, and user or automation selection rationale.
+- Flexible-residue suggestions retain their per-structure B-factor evidence,
+  aligned-structure variation, ligand-contact context, normalization,
+  eligibility, exclusions, warnings, and selection rationale.
 - The Vina workspace explains and records every editable engine parameter.
 - Closing the GUI cannot leave untracked child processes running.
 - A failed ligand does not discard successful ligands.
