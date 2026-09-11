@@ -1468,7 +1468,7 @@ def plot_clusters(analysis, output, reference_sdf=None, control_label=None):
     ax.scatter(energies, rmsds, s=sizes, c=colors, edgecolor="black", linewidth=0.7, alpha=0.9)
     ax.set_xlabel("Best cluster docking score (kcal/mol)", fontsize=15)
     if control_label:
-        ax.set_ylabel(f"No-fit heavy-atom RMSD to experimental {control_label} (A)", fontsize=15)
+        ax.set_ylabel(f"No-fit heavy-atom RMSD to experimental {control_label} (A)", fontsize=13)
         ax.set_title("Top 20 control pose clusters and experimental-pose recovery", fontsize=17)
         ax.text(
             .98, .98,
@@ -1477,11 +1477,14 @@ def plot_clusters(analysis, output, reference_sdf=None, control_label=None):
             bbox=dict(fc="white", ec="0.6", alpha=.95),
         )
     else:
-        ax.set_ylabel("No-fit heavy-atom RMSD from lowest-energy representative (A)", fontsize=15)
+        # Keep the axis label compact enough to remain fully visible when the
+        # figure is reduced into the PDF; the caption and in-plot legend state
+        # the RMSD reference explicitly.
+        ax.set_ylabel("No-fit heavy-atom RMSD (A)", fontsize=15)
         ax.set_title("Top 20 clusters: docking score, population, and structural distance", fontsize=17)
-        ax.add_patch(FancyBboxPatch((.54, .02), .44, .22, transform=ax.transAxes, boxstyle="round,pad=.012", fc="white", ec="0.6", alpha=.95, zorder=5))
-        ax.text(.95, .22, "Top clusters", transform=ax.transAxes, fontsize=12, va="top", ha="right", zorder=6)
-        for y, index, color in zip((.185, .158, .131), range(min(3, len(entries))), TOP_COLORS):
+        ax.add_patch(FancyBboxPatch((.54, .015), .44, .28, transform=ax.transAxes, boxstyle="round,pad=.012", fc="white", ec="0.6", alpha=.95, zorder=5))
+        ax.text(.95, .265, "Top clusters", transform=ax.transAxes, fontsize=12, va="top", ha="right", zorder=6)
+        for y, index, color in zip((.215, .175, .135), range(min(3, len(entries))), TOP_COLORS):
             row = entries[index][0]
             ax.text(.95, y, f"C{row['cluster_id']}: {energies[index]:.2f} kcal/mol | {rmsds[index]:.2f} A", transform=ax.transAxes, fontsize=11, va="top", ha="right", color=color, zorder=6)
         ax.text(.95, .095, "Point size = cluster population\nRMSD reference: lowest-energy cluster representative", transform=ax.transAxes, fontsize=10, va="top", ha="right", zorder=6)
