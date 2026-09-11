@@ -46,10 +46,12 @@ from docking_universal_bundle import (
 )
 from docking_universal_pocket_review import (
     choose_prepared_box,
+    choose_prepared_boxes,
     describe_prepared_boxes,
     prepared_box_records,
     review_pocket_scene,
 )
+from docking_universal_pocket_evidence import collect_pocket_evidence, summarize_pocket_evidence
 from docking_universal_process import run_checked
 
 
@@ -1027,11 +1029,18 @@ def discover_preparation(root, interactive=True, defer_box_selection=False):
 
 
 def read_cluster_rows(compound_dir):
-    table = compound_dir / "pose_analysis" / "cluster_summary.csv"
-    if not table.is_file():
-        return []
-    with table.open(newline="") as handle:
-        return list(csv.DictReader(handle))
+    """Read one-site legacy output or aggregate independently clustered sites."""
+    tables = [compound_dir / "pose_analysis" / "cluster_summary.csv"]
+    tables += sorted(compound_dir.glob("site_*/pose_analysis/cluster_summary.csv"))
+    rows = []
+    for table in tables:
+        if not table.is_file():
+            continue
+        site_match = re.search(r"site_(\d+)", str(table))
+        with table.open(newline="") as handle:
+            for row in csv.DictReader(handle):
+                rows.append({"docking_site": site_match.group(1) if site_match else "1", **row})
+    return rows
 
 def protocol_allows_screening(protocol_path):
     """Return True when a control or exploratory protocol authorizes reuse."""
@@ -1150,6 +1159,12 @@ def write_run_details(study, manifest, compounds, report_dir):
                 f"- Receptor: `{relative_to_study(screen_manifest.get('receptor', ''), study)}`",
                 f"- Box: `{relative_to_study(screen_manifest.get('box', ''), study)}`",
             ]
+            if screen_manifest.get("docking_site_count", 1) > 1:
+                lines.append(f"- Independently docked sites: `{screen_manifest['docking_site_count']}`")
+                for region in screen_manifest.get("boxes", []):
+                    lines.append(
+                        f"  - Site {region.get('site_number')}: `{relative_to_study(region.get('box', ''), study)}`"
+                    )
             if screen_manifest.get("protocol"):
                 lines.append(f"- Protocol: `{screen_manifest['protocol']}`")
         elif failure:
@@ -1199,6 +1214,7 @@ def write_reports(study, manifest, compounds):
         compound_dir = study / "compounds" / compound["compound_id"]
         screen_manifest = compound_dir / "screen_manifest.json"
         clusters = read_cluster_rows(compound_dir)
+        retained_screen_manifest = read_json(screen_manifest) or {}
         selected = [row for row in clusters if row.get("selected") == "yes"]
         failure = compound_dir / "failure.json"
         if compound.get("run_status"):
@@ -1213,6 +1229,7 @@ def write_reports(study, manifest, compounds):
         rows.append({
             "compound_id": compound["compound_id"], "compound_name": compound["compound_name"],
             "status": status, "cluster_count": len(clusters), "selected_representatives": len(selected),
+            "docking_site_count": retained_screen_manifest.get("docking_site_count", 1),
             "best_cluster_energy_kcal_per_mol": selected[0].get("best_energy_kcal_per_mol", "") if selected else "",
             "best_cluster_seed_support": selected[0].get("seed_support", "") if selected else "",
             "warning": warning,
@@ -1350,6 +1367,10 @@ def parse_args():
     parser.add_argument("--non-interactive", action="store_true")
     parser.add_argument("--no-visuals", action="store_true")
     parser.add_argument("--review-pockets", action="store_true", help="open the prepared exploratory cavity scene in PyMOL before docking")
+    parser.add_argument(
+        "--pdb-pocket-evidence", choices=("off", "related-structures", "same-sequence"),
+        help="compare exploratory fpocket candidates with ligands in related PDB structures",
+    )
     parser.add_argument("--pockets-only", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--pymol", default="pymol", help="PyMOL executable for --review-pockets")
     parser.add_argument("--cavity-mode", choices=("1", "2", "3"), default="1", help="ligand-free fpocket mode: conservative (default), expanded, or permissive")
@@ -1658,7 +1679,11 @@ def main():
     receptor_pdb = args.receptor_pdb
     receptor_pdbqt = args.receptor_pdbqt
     box = args.box
+    selected_boxes = [box] if box else []
     pocket_review_scene = None
+    pocket_evidence = None
+    pocket_evidence_error = None
+    pocket_evidence_mode = args.pdb_pocket_evidence
     score_threshold_used = None
     if mode == "exploratory" and not (receptor_pdb and receptor_pdbqt and box):
         if not args.complex:
@@ -1702,12 +1727,55 @@ def main():
         receptor_pdb, receptor_pdbqt, prepared_boxes = discover_preparation(
             prep_parent, interactive=not args.non_interactive, defer_box_selection=True
         )
+        if not pocket_evidence_mode:
+            if args.non_interactive or args.plan_only:
+                pocket_evidence_mode = "off"
+            else:
+                print("\nDocking-site evidence search")
+                print("Related PDB structures can be aligned to show whether deposited ligands support these pockets.")
+                print("This supplies evidence only; it does not select or approve a pocket.")
+                answer = input(
+                    "Search related PDB structures using sequence similarity and C-alpha backbone RMSD? [Y/n]: "
+                ).strip().lower()
+                pocket_evidence_mode = "off" if answer in {"n", "no"} else "related-structures"
+        if pocket_evidence_mode == "same-sequence":
+            # Backward-compatible spelling for early development invocations.
+            pocket_evidence_mode = "related-structures"
+        if pocket_evidence_mode == "related-structures":
+            print("\nSearching the PDB for related ligand-bound structures...")
+            try:
+                evidence_dir = prepared_boxes[0].parent / "pdb_site_evidence"
+                # The prepared receptor is atom-only.  Retain the imported PDB
+                # as the evidence reference so authoritative DBREF/UniProt
+                # protein identity can be checked before structural alignment.
+                pocket_evidence = collect_pocket_evidence(raw_complex, prepared_boxes, evidence_dir)
+                summary = summarize_pocket_evidence(pocket_evidence)
+                if summary:
+                    print("PDB ligand-site evidence near retained pockets:")
+                    for pocket_number, item in sorted(summary.items()):
+                        entries = ", ".join(item["entries"][:8])
+                        suffix = " ..." if len(item["entries"]) > 8 else ""
+                        print(f"  Pocket {pocket_number}: {item['contained_ligands']} ligands fully inside, "
+                              f"{item['overlapping_ligands']} partially overlapping the docking box; {entries}{suffix}")
+                else:
+                    print("No close deposited-ligand evidence was found among the searched structures.")
+                print("The search record is retained; the user still chooses the pocket.")
+            except (OSError, ValueError, urllib.error.URLError) as exc:
+                pocket_evidence_error = str(exc)
+                print(f"PDB evidence search was unavailable: {exc}")
+                print("Continuing with fpocket evidence and explicit user review.")
         pocket_review_scene = review_pocket_scene(
             prep_parent, args.pymol,
             interactive=(not args.non_interactive and not args.plan_only),
             requested=(args.review_pockets and not args.plan_only),
         )
-        box = choose_prepared_box(prepared_boxes, interactive=not args.non_interactive)
+        selected_boxes = choose_prepared_boxes(
+            prepared_boxes,
+            interactive=not args.non_interactive,
+            evidence_summary=summarize_pocket_evidence(pocket_evidence) if pocket_evidence else None,
+            allow_multiple=True,
+        )
+        box = selected_boxes[0]
 
     manifest = {
         "schema_name": "docking-universal-study", "schema_version": 1,
@@ -1718,6 +1786,14 @@ def main():
         "completion_status": "PLANNED" if args.plan_only else "RUNNING",
         "pocket_review_scene": pocket_review_scene,
         "cavity_score_threshold_used": score_threshold_used,
+        "pdb_pocket_evidence": {
+            "mode": pocket_evidence_mode,
+            "status": "completed" if pocket_evidence else ("failed" if pocket_evidence_error else "not_requested"),
+            "criteria": pocket_evidence.get("query", {}) if pocket_evidence else {},
+            "summary": summarize_pocket_evidence(pocket_evidence) if pocket_evidence else {},
+            "error": pocket_evidence_error,
+            "selection_policy": "evidence_only_user_decides",
+        },
     }
     if mode == "screen":
         approved_record = read_json(args.protocol) or {}
@@ -1765,6 +1841,7 @@ def main():
             "configured_locked_inputs": {
                 "receptor": str(receptor_pdbqt),
                 "box": str(box),
+                "boxes": [str(path) for path in selected_boxes],
             },
             "protocol_validation_status": "Configured exploratory protocol; not evaluated by bound-ligand control",
         })
@@ -1809,7 +1886,7 @@ def main():
         else:
             command += [
                 "--exploratory", "--receptor", receptor_pdbqt, "--receptor-pdb", receptor_pdb,
-                "--box", box, "--engine", args.engine, "--seeds", args.seeds,
+                "--boxes", *selected_boxes, "--engine", args.engine, "--seeds", args.seeds,
                 "--conformers", args.conformers, "--exhaustiveness", args.exhaustiveness,
                 "--num-modes", args.num_modes, "--energy-range", args.energy_range, "--ph", args.ph,
                 "--base-seed", args.base_seed, "--forcefield", args.forcefield,

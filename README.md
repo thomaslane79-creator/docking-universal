@@ -1,21 +1,21 @@
 # Docking Universal
 
-**v0.6.5 · Research preview**
+**v0.7.0 · Research preview**
 
-Docking Universal provides fully guided, interactive docking workflows on Ubuntu and macOS, from selecting inputs through generating scientific PDF reports. It supports AutoDock Vina and QuickVina-W alongside established open-source tools for receptor and ligand preparation, site selection, docking, analysis, and visualization.
+Docking Universal provides fully guided, interactive docking workflows on Ubuntu and macOS, from selecting inputs through generating scientific PDF reports. It supports AutoDock Vina and QuickVina-W alongside established open-source tools for receptor and ligand preparation, site selection, docking, analysis, and visualization. Its central purpose is to gather and preserve the evidence needed for the user to make an informed, scientifically defensible docking decision.
 
 **A Vina-family engine performs the docking; Docking Universal manages and documents the surrounding workflow.**
 
 ## What Docking Universal adds beyond Vina
 
-AutoDock Vina and QuickVina-W are the supported docking engines: each searches an already defined box using already prepared receptor and ligand files, then returns scored poses. Docking Universal turns that calculation into a guided, reproducible scientific workflow. It prepares and checks the inputs, helps establish where docking should occur, tests whether a protocol can recover known evidence, analyzes the resulting poses and interactions, and retains an audit trail of how every result was produced.
+AutoDock Vina and QuickVina-W are the supported docking engines: each searches an already defined box using already prepared receptor and ligand files, then returns scored poses. Docking Universal turns that calculation into a guided, reproducible scientific workflow. It prepares and checks the inputs, gathers evidence about where docking should occur, identifies agreement and disagreement between evidence sources, tests whether a protocol can recover a known pose when a control is available, analyzes the resulting poses and interactions, and retains an audit trail of how every result was produced.
 
 | Scientific stage | What Docking Universal adds |
 | --- | --- |
 | **Structure and component records** | RCSB PDB retrieval, deposited-component inventories, ligand identifiers, Chemical Component Dictionary checks, and retained source records. |
 | **Protein preparation** | Iterative Meeko preparation, conditional PDBFixer repair, diagnosed compatibility fallbacks, prepared receptor PDBQT output, and an explicit stop for review before any model-changing component removal. |
 | **Ligand preparation** | SDF validation and splitting, molecular-graph handling, protonation and tautomer enumeration, conformer generation and pruning, charge assignment, and one prepared ligand PDBQT per compound. |
-| **Site and docking-box selection** | fpocket cavity detection, descriptor collection, candidate filtering and ranking, numbered and color-matched PyMOL review, docking-box generation, and explicit user selection. |
+| **Site and docking-box selection** | fpocket cavity detection, descriptor collection, candidate filtering and ranking, optional related-structure ligand evidence, aligned same-site grouping, numbered and color-matched PyMOL review, one- or multi-box generation, and explicit user selection. |
 | **Experimental control** | Bound-ligand pose-recovery redocking, multi-conformer and independent-seed sampling, symmetry-aware RMSD evaluation, reproducibility criteria, and failure-closed screening authorization. |
 | **Reusable protocols** | Control-validated, ligand-guided exploratory, and site-guided exploratory protocols that lock the prepared receptor, selected box, search settings, evidence status, and supporting records in a portable Docking Universal `.duprotocol` bundle. |
 | **Screening execution** | Guided single- or multi-compound screening with AutoDock Vina or QuickVina-W, isolated per-compound outputs, partial-failure retention, a nonzero final status when any compound fails, and normalized score collection. |
@@ -39,7 +39,7 @@ docking-universal dock --engine qvinaw --receptor receptor.pdbqt --ligands prepa
 
 ## Why I built it: a scientist's perspective
 
-Docking Universal began with a practical question: **how should I determine where to dock?** While building it, I learned how many consequential assumptions can sit behind an apparently straightforward result. I wanted a practical workflow that would make those choices reviewable rather than hide them. [Read more about the design philosophy](docs/design-philosophy.md).
+Docking Universal began with a practical question: **how should I determine where to dock?** While building it, I learned how many consequential assumptions can sit behind an apparently straightforward result. I wanted a practical workflow that would gather the relevant evidence, make uncertainty visible, and help the user make and document the scientific decision rather than hide it inside a black box. [Read more about the design philosophy](docs/design-philosophy.md).
 
 ## Install
 
@@ -67,7 +67,7 @@ These are the three commands most users need. Each launches an interactive inter
 | What you want to do | Command | What you get |
 | --- | --- | --- |
 | Start a complete new study | `docking-universal run` | A complete control-validated or exploratory study, optionally including one or multiple new compounds, with a scientific PDF report and retained supporting files. |
-| Create a reusable Docking Universal protocol | `docking-universal create-protocol` | A prepared receptor and docking region, a scientific protocol report, and a reusable `.duprotocol` bundle. |
+| Create a reusable Docking Universal protocol | `docking-universal create-protocol` | Evidence for one or more candidate docking regions, a preliminary review report, the user-selected region or regions, a final scientific protocol report, and a reusable `.duprotocol` bundle. |
 | Dock new compounds with a saved protocol | `docking-universal screen` | A complete screening report plus individual docking, clustering, 3D, and 2D interaction results for every compound. |
 
 ### Docking Universal protocol types
@@ -76,9 +76,26 @@ These are the three commands most users need. Each launches an interactive inter
 | --- | --- | --- |
 | **Control-validated** | A known bound ligand is redocked and must pass pose-recovery criteria. | Supports screening with target-specific control evidence. |
 | **Ligand-guided exploratory** | A ligand in the selected structure defines the region but is not redocked. | Explicitly exploratory. |
-| **Site-guided exploratory** | fpocket cavity analysis and a user-reviewed box define the region. | Explicitly exploratory. |
+| **Site-guided exploratory** | fpocket cavity analysis defines candidate regions; optional aligned ligands from qualifying related PDB structures provide independent site evidence, and the user may select one or multiple boxes. | Explicitly exploratory; related-structure evidence supports site review but is not a pose-recovery control. |
 
-A `.duprotocol` contains the prepared receptor, docking box, settings, provenance, and supporting evidence. It can be saved, shared, and reused by another Docking Universal installation, but it is not a general protocol format for other docking software. Exploratory use remains identified as exploratory and requires explicit user authorization.
+### Evidence-led docking-region decisions
+
+Choosing a docking box is a scientific decision, not merely a file-setting step. For site-guided protocol creation, Docking Universal can assemble several forms of evidence before asking the user to choose:
+
+| Evidence presented | What it contributes |
+| --- | --- |
+| **fpocket candidates** | Independent geometric cavity hypotheses with their original scores and ranked locations. |
+| **RCSB PDB sequence and structure search** | Searches related protein entities using the selected receptor chain, then verifies sequence, coverage, C-alpha structural alignment, and physical ligand contact with the accepted source chain before transferring a deposited ligand. Failed or ambiguous chain assignments are excluded and recorded. |
+| **Deposited ligands from qualifying related PDB structures** | Experimentally observed ligand locations transformed into the selected receptor frame only after those sequence, structural-alignment, and ligand-contact checks. Exact-sequence and qualified related-sequence evidence remain distinguishable. |
+| **Agreement between ligand evidence and fpocket** | Directly shows when a predicted cavity corresponds to an experimentally occupied region. |
+| **Ligand evidence without an fpocket cavity** | Preserves an experimentally supported site as a separate selectable box instead of pretending that fpocket recovered it. |
+| **Bound-ligand pose-recovery control, when available** | Tests whether the complete target-specific protocol can reproducibly recover a known pose; this is stronger evidence than cavity or related-structure correspondence alone. |
+
+Before a site is approved, the workflow can generate a **Preliminary Pocket-Review Report (Not a Protocol)** containing the available evidence and every selectable box. The user may choose one or multiple regions, use the highest-ranked acceptable fpocket candidate automatically, or stop for further review. The final protocol report records the evidence available, the selected region geometry, whether the sources agreed, and exactly how the choice was made.
+
+The workflow does not convert a cavity prediction or a related-structure ligand into a claim of biological validity. Missing, conflicting, partial, or excluded evidence is stated explicitly. The purpose is to give the user a transparent basis for a scientifically defensible choice—and to preserve that basis so the decision can later be inspected, challenged, or reproduced.
+
+A `.duprotocol` contains the prepared receptor, every selected docking box, settings, provenance, and supporting evidence. It can be saved, shared, and reused by another Docking Universal installation, but it is not a general protocol format for other docking software. Exploratory use remains identified as exploratory and requires explicit user authorization.
 
 Every guided workflow retains its report, machine-readable summaries, parameters, intermediate artifacts, and raw tool logs. Single-record SDFs, multi-record SDFs, and directories of SDF files are supported for compound screening.
 
@@ -110,16 +127,19 @@ Additional component commands can also be used independently in compatible workf
 | --- | --- |
 | Automated workflow checks | Installation, routing, preparation, protocol reuse, docking, analysis, visualization, and reporting pass on current Ubuntu and macOS CI systems. |
 | End-to-end validation | Completed a public 1HVR/XK2 control, a held-out screen using its saved protocol, and a ligand-free 2R8N/Indinavir exploratory study. |
+| Evidence-led protocol checks | Six contrasting PDB structures completed preliminary review reports, final protocol reports, and checksum-verified protocol bundles: three with qualifying aligned related-structure ligand evidence and three without it. [See the test set, alignment safeguards, and results.](docs/pocket-evidence-validation-v0.7.0.md) |
 | Receptor-preparation testing | 46/50 general public structures and 39/50 deliberately difficult linked-chemistry structures produced receptor PDBQTs under the documented safety policies. |
 
 Known preparation limitations include some covalent adducts, linked glycans, metals/heme, modified backbones, and nucleic-acid complexes. These results test workflow behavior and safeguards; they do not establish broad prospective docking accuracy or biological validity. See the [validation index](docs/validation.md) and [100-PDB receptor-preparation record](docs/receptor-preparation-validation-2026-08-21.md).
 
 ## Example scientific reports
 
+- [Preliminary evidence and docking-box review report—not yet a protocol](docs/assets/pocket-evidence-review-example.pdf)
+- [Final protocol report after a docking region is selected](docs/assets/pocket-evidence-protocol-example.pdf)
 - [Complete current-style docking report](docs/assets/docking-universal-example-report.pdf)
 - [Site-guided protocol report after explicit user-approved receptor-component removal](docs/assets/5KRH-user-approved-removal-cavity-report.pdf)
 
-Reports adapt to control-validated, exploratory, protocol-reuse, and single- or multi-compound studies while retaining individual compound results. The 5KRH example shows how removal of 31 standard amino-acid residues is identified as a high-severity receptor-model change; its exact inventory and raw preparation log remain in the retained study artifacts and `.duprotocol` bundle, and the warning is carried into every later screening report that reuses that protocol.
+The first two files show the same 2R8N evidence-led workflow before and after selection: the preliminary report presents the available choices without authorizing screening, while the final report records the selected box and reusable protocol. Reports also adapt to control-validated, protocol-reuse, and single- or multi-compound studies while retaining individual compound results. The 5KRH example shows how removal of 31 standard amino-acid residues is identified as a high-severity receptor-model change; its exact inventory and raw preparation log remain in the retained study artifacts and `.duprotocol` bundle, and the warning is carried into every later screening report that reuses that protocol.
 
 ## Documentation
 

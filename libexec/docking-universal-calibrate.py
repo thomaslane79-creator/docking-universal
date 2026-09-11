@@ -267,7 +267,8 @@ def run_tier(args, tier_name, cli, libexec, tier_root):
     evaluate = [
         sys.executable, libexec / "docking-universal-calibration-evaluate.py",
         *comparisons, "--engine", args.engine, "--out", protocol,
-        "--receptor", args.receptor_pdbqt, "--box", args.box,
+        "--receptor", args.receptor_pdbqt, "--receptor-pdb", args.receptor_pdb,
+        "--box", args.box,
         "--threshold", args.rmsd_threshold, "--exhaustiveness", settings["exhaustiveness"],
         "--num-modes", settings["modes"], "--energy-range", settings["energy_range"],
         "--min-seeds", args.approval_min_seeds, "--ph", args.ph,

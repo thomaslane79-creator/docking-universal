@@ -80,6 +80,11 @@ def main():
     parser.add_argument("--engine", required=True, choices=("vina", "qvinaw"))
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--receptor", required=True, type=Path)
+    parser.add_argument(
+        "--receptor-pdb",
+        type=Path,
+        help="structural receptor PDB retained for clustering and interaction analysis",
+    )
     parser.add_argument("--box", required=True, type=Path)
     parser.add_argument("--threshold", type=float, default=2.0)
     parser.add_argument("--exhaustiveness", type=int, required=True)
@@ -138,6 +143,7 @@ def main():
     approved = sampling_pass and ranking_pass and seed_requirement_pass
 
     receptor = args.receptor.expanduser().resolve()
+    receptor_pdb = args.receptor_pdb.expanduser().resolve() if args.receptor_pdb else None
     box = args.box.expanduser().resolve()
     detected_engine_version, detected_engine_source = engine_version(args.engine)
     result = {
@@ -190,6 +196,11 @@ def main():
             "engine_source": detected_engine_source,
         },
     }
+    if receptor_pdb:
+        result["locked_inputs"].update({
+            "receptor_pdb": str(receptor_pdb),
+            "receptor_pdb_sha256": sha256(receptor_pdb),
+        })
     if approved:
         result.update({
             "protocol_type": "control-validated",

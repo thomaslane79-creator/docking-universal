@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## 0.7.0 — 2026-09-11
+
+**Feature release focus:** evidence-led, auditable selection of one or multiple docking regions during exploratory protocol creation.
+
+- Added an optional related-structure evidence search for site-guided protocol creation. Candidate PDB structures are checked through explicit sequence-identity, coverage, aligned-chain, and C-alpha RMSD gates before deposited ligands are transformed into the target receptor frame.
+- Added safeguards against symmetry-mate and wrong-chain assignments. Each retained ligand is associated with its contacting source chain before alignment; ambiguous, poorly aligned, excluded, and unmatched cases remain visible in the evidence record rather than silently becoming site support.
+- Grouped overlapping aligned ligands into evidence-supported sites and retained representative source PDB IDs, ligand identifiers, exact-versus-qualified relationship status, containment, and fpocket correspondence for audit and review.
+- Kept fpocket scores and related-structure evidence scientifically separate. Direct correspondence is highlighted, while ligand-supported regions without a qualifying fpocket cavity remain explicit ligand-defined alternatives instead of receiving an invented fpocket score.
+- Added a preliminary **Pocket-Review Report (Not a Protocol)** before site approval. It presents the ranked fpocket candidates, related-structure evidence when available, every selectable labeled box, and the limitations of that evidence without implying that screening has been authorized.
+- Added final evidence-led protocol reporting after selection. The report removes the unresolved choice inventory, records the selected box or boxes and their geometry, shows the final docking region without clipping, and retains the complete reusable `.duprotocol` filename.
+- Added labeled `P#`, consolidated `P#/P#`, and ligand-defined `L#` box candidates. Any report-visible candidate can be selected from the CLI, and multiple labels run complete independent workflows at the chosen sites.
+- Added evidence-based box construction that begins with the standard local search size, expands only when needed to contain same-site evidence or cavity geometry, and splits spatially distinct or excessive-volume regions into the minimum practical number of bounded boxes.
+- Reworked the pocket figures and PyMOL evidence scenes: the top three fpocket cavities use one consistent color scheme, supported sites and boxes use matching labels, ligand-defined boxes are visually distinct, complete box boundaries remain visible, and legends no longer claim evidence that is absent.
+- Added automatic highest-ranked fpocket selection and explicit reviewed selection as distinct recorded decisions. Supplying `--pockets` now forces reviewed selection; contradictory automatic-selection requests fail instead of ignoring the requested boxes.
+- Corrected numeric pocket ordering so `P10` can never sort before `P2` or alter the automatic rank choice when lower-numbered files are absent.
+- Propagated selected-region provenance, related-structure evidence, user decisions, warnings, and candidate inventories through protocol JSON, reports, screening reuse, and checksum-verified `.duprotocol` bundles.
+- Added reusable Python modules for pocket evidence and box-candidate construction, expanded progress feedback during evidence retrieval and alignment, and retained the prior least-invasive receptor-preparation behavior.
+- Added focused regression coverage for chain alignment, evidence grouping, box containment and splitting, multi-site protocol execution, report figures, CLI selection conflicts, natural pocket ordering, installed-copy packaging, and protocol reuse.
+- Validated six contrasting local protocol-creation cases through preliminary report, final report, and bundle generation. All six bundles passed checksum verification; the full fast repository suite, including installed-copy checks and 174 Python tests, passed before branch publication.
+
 - Made batch ligand preparation and docking return failure when any compound fails while retaining and reporting every successful compound output.
 - Added early protein-PDB validation and receptor/docking-box geometric preflight checks so invalid or mismatched inputs stop with a specific explanation before an engine is launched.
 - Made explicit engine requests fail on conflict with a protocol's locked engine instead of silently ignoring the request.

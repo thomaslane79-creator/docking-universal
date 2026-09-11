@@ -204,24 +204,30 @@ def receptor_atoms_in_box(receptor, config):
     return count
 
 
-def recommend_engine(values, region_definition):
-    """Recommend QuickVina-W for broad boxes and Vina for localized boxes.
+def recommend_engine(values, region_definition, requires_vina=False):
+    """Recommend the normal engine independently of box geometry.
 
-    The threshold is a routing heuristic, not a scientific accuracy claim.
-    Whole-protein searches always count as broad regardless of dimensions.
+    QuickVina-W is the default Vina-family search engine for both localized
+    and broad evidence-based regions.  Box dimensions describe the scientific
+    search region; they must not silently select a different engine or inflate
+    the region merely to satisfy an implementation heuristic.  Standard Vina
+    is recommended only when a recorded compatibility requirement (currently
+    flexible Meeko macrocycle handling) explicitly requires it.
     """
     box = numeric_box(values)
     dimensions = [box[f"size_{axis}"] for axis in "xyz"]
     volume = math.prod(dimensions)
-    broad = region_definition == REGION_WHOLE_PROTEIN or max(dimensions) >= 40.0 or volume >= 64000.0
-    if broad:
-        return "qvinaw", "large-region or whole-protein search"
-    return "vina", "localized docking region"
+    if requires_vina:
+        return "vina", "explicit compatibility requirement (flexible Meeko macrocycles)"
+    if region_definition == REGION_WHOLE_PROTEIN:
+        return "qvinaw", "QuickVina-W default for whole-protein search"
+    return "qvinaw", "QuickVina-W default; box geometry is evidence-driven"
 
 
-def choose_engine(values, region_definition, requested=None, interactive=True):
+def choose_engine(values, region_definition, requested=None, interactive=True,
+                  requires_vina=False):
     """Select an engine and retain whether the recommendation was overridden."""
-    recommended, basis = recommend_engine(values, region_definition)
+    recommended, basis = recommend_engine(values, region_definition, requires_vina=requires_vina)
     if requested:
         selected = requested
     elif not interactive:

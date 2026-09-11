@@ -1,6 +1,6 @@
 # Validation status
 
-Docking Universal 0.6.5 is a research preview. Validation distinguishes software-path testing from scientific validation: a command completing successfully does not establish that a predicted pose or cavity is biologically correct.
+Docking Universal 0.7.0 is a research preview. Validation distinguishes software-path testing from scientific validation: a command completing successfully does not establish that a predicted pose, cavity, or related-structure site assignment is biologically correct.
 
 ## Automated option coverage
 
@@ -12,6 +12,7 @@ The test suite exercises:
 - macOS Finder, Ubuntu Zenity/Tk, exact-file, directory/batch, and headless input routing;
 - all approved-protocol resume routes and multiple-protocol disambiguation;
 - each prepared pocket selection plus single-pocket, competitive-pocket, and no-PyMOL review choices;
+- automatic and reviewed fpocket selection, related-structure ligand-site evidence, exact and qualified sequence matches, same-site grouping, ligand-defined alternatives, and selection of one or multiple labeled docking boxes;
 - docking-box validation, rejected choices, unapproved-protocol blocking, result parsing, and all command help entry points;
 - AutoDock Vina and QuickVina-W command/output routing with deterministic mock engines.
 
@@ -56,6 +57,8 @@ The maintained scientific environment has been checked with fpocket, Meeko, PDBF
 - automatic HTML, JSON, Markdown, and PDF report generation, followed by rendered-page inspection.
 
 Completed example studies retain evidence for actual multi-seed Vina redocking, ligand-free cavity analysis, unknown-compound docking, pose clustering, PyMOL sessions, interaction diagrams, and final reports.
+
+The v0.7.0 pocket-evidence implementation was also exercised locally across six deliberately different protocol-creation cases: evidence-rich related structures, partial fpocket correspondence, and structures with no qualifying related-ligand evidence. Each case generated a preliminary pocket-review report, a final protocol report, and a checksum-verified `.duprotocol` bundle. The [complete six-PDB record](pocket-evidence-validation-v0.7.0.md) documents the RCSB sequence search, structural-alignment and ligand-to-chain safeguards, case selection, observed outcomes, example reports, and interpretation limits. These checks validate workflow behavior and reporting across the tested cases; they do not establish biological correctness of an automatically or manually selected site.
 
 The integration suite builds a clearly labelled synthetic passing protocol to test fail-closed software gates, input hashes, planning, and report plumbing. It is not scientific pose-recovery evidence. The longer release suite produces the genuine bound-ligand control used for its subsequent screen; only that computed control path can establish target-specific protocol approval.
 

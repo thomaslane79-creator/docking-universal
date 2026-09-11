@@ -10,6 +10,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from docking_universal_pocket_review import build_labeled_candidate_scene, choose_labeled_boxes
+
 MODULE_PATH = Path(__file__).resolve().parents[1] / "libexec" / "docking-universal-run.py"
 SPEC = importlib.util.spec_from_file_location("docking_universal_guided", MODULE_PATH)
 RUNNER = importlib.util.module_from_spec(SPEC)
@@ -295,6 +297,99 @@ class PocketChoiceTests(unittest.TestCase):
                 with self.subTest(index=index), patch("builtins.input", return_value=str(index)):
                     self.assertEqual(RUNNER.choose_prepared_box(boxes), expected)
 
+    def test_multiple_reviewed_sites_can_be_selected_in_user_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            boxes = self.fixture(Path(directory))
+            with patch("builtins.input", return_value="3,1"):
+                selected = RUNNER.choose_prepared_boxes(
+                    boxes,
+                    evidence_summary={1: {"contained_ligands": 4, "overlapping_ligands": 0}},
+                )
+            self.assertEqual(selected, [boxes[2], boxes[0]])
+
+    def test_report_visible_box_labels_are_directly_selectable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = []
+            for label in ("P1", "P2/P3", "L1"):
+                path = root / f"{label.replace('/', '-')}.conf"
+                path.write_text("center_x = 0\n")
+                paths.append(path)
+            candidates = [
+                {"label": "P1", "path": paths[0], "description": "individual fpocket box"},
+                {"label": "P2/P3", "path": paths[1], "description": "consolidated fpocket box"},
+                {"label": "L1", "path": paths[2], "description": "ligand-defined box"},
+            ]
+            selected, labels = choose_labeled_boxes(
+                candidates, interactive=False, requested="L1,P2/P3",
+            )
+            self.assertEqual(labels, ["L1", "P2/P3"])
+            self.assertEqual(selected, [paths[2], paths[1]])
+
+    def test_pocket_scene_attaches_the_directly_matching_ligand_to_p1(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cavity = root / "cavity"
+            evidence_root = cavity / "pdb_site_evidence"
+            frozen = cavity / "frozen_pockets"
+            evidence_root.mkdir(parents=True)
+            frozen.mkdir()
+            receptor = root / "receptor.pdb"
+            receptor.write_text("END\n")
+            config = cavity / "target_pocket1.conf"
+            config.write_text("center_x = 0\n")
+            config.with_name("target_pocket1_box.pdb").write_text("END\n")
+            (frozen / "pocket1_atm.pdb").write_text("END\n")
+            diagnostics = cavity / "pocket_selection_diagnostics.tsv"
+            diagnostics.write_text(
+                "rank_order\tpocket_file\tscore\tdecision\n"
+                "1\tpocket1_atm.pdb\t0.4\tselected\n"
+            )
+            direct = evidence_root / "direct.pdb"
+            indirect = evidence_root / "indirect.pdb"
+            direct.write_text("END\n")
+            indirect.write_text("END\n")
+            evidence = {"ligand_site_groups": [{
+                "fpocket_recovery": {"best_matching_pocket": 1},
+                "representative_ligand": {
+                    "aligned_ligand_pdb": "indirect.pdb",
+                },
+                "members": [
+                    {"matched_cavity": None, "aligned_ligand_pdb": "indirect.pdb", "ligand_heavy_atom_count": 30},
+                    {"matched_cavity": 1, "aligned_ligand_pdb": "direct.pdb", "ligand_heavy_atom_count": 20},
+                ],
+            }]}
+            output = root / "review.pml"
+            build_labeled_candidate_scene(
+                receptor,
+                [{"label": "P1", "path": config, "description": "fpocket box"}],
+                evidence, evidence_root, diagnostics, output,
+            )
+            scene = output.read_text()
+            self.assertIn(str(direct.resolve()), scene)
+            self.assertNotIn(str(indirect.resolve()), scene)
+            self.assertIn("group Candidate_P1", scene)
+            self.assertIn("color forest, P1_representative_ligand", scene)
+
+    def test_labeled_selection_still_works_without_ligand_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "p3.conf"
+            path.write_text("center_x = 0\n")
+            selected, labels = choose_labeled_boxes(
+                [{"label": "P3", "path": path, "description": "individual fpocket box"}],
+                interactive=False, requested="P3",
+            )
+            self.assertEqual(labels, ["P3"])
+            self.assertEqual(selected, [path])
+
+    def test_duplicate_site_numbers_are_deduplicated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            boxes = self.fixture(Path(directory))
+            self.assertEqual(
+                RUNNER.choose_prepared_boxes(boxes, interactive=False, requested="2,2,1"),
+                [boxes[1], boxes[0]],
+            )
+
     def test_terminal_list_names_the_matching_pymol_colors(self):
         with tempfile.TemporaryDirectory() as directory:
             boxes = self.fixture(Path(directory))
@@ -302,10 +397,22 @@ class PocketChoiceTests(unittest.TestCase):
             with contextlib.redirect_stdout(output), patch("builtins.input", return_value="1"):
                 RUNNER.choose_prepared_box(boxes)
             text = output.getvalue()
-            self.assertIn("Pocket 1 (blue)", text)
-            self.assertIn("Pocket 2 (gold)", text)
-            self.assertIn("Pocket 3 (magenta)", text)
+            self.assertIn("Pocket 1 (red)", text)
+            self.assertIn("Pocket 2 (blue)", text)
+            self.assertIn("Pocket 3 (gold)", text)
             self.assertIn("colors match the unified PyMOL review", text)
+
+    def test_selected_overlapping_boxes_emit_redundancy_warning(self):
+        with tempfile.TemporaryDirectory() as directory:
+            boxes = self.fixture(Path(directory))[:2]
+            boxes[0].write_text("center_x = 0\ncenter_y = 0\ncenter_z = 0\nsize_x = 20\nsize_y = 20\nsize_z = 20\n")
+            boxes[1].write_text("center_x = 10\ncenter_y = 0\ncenter_z = 0\nsize_x = 20\nsize_y = 20\nsize_z = 20\n")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                selected = RUNNER.choose_prepared_boxes(boxes, interactive=False, requested="1,2")
+            self.assertEqual(selected, boxes)
+            self.assertIn("overlap by 50.0%", output.getvalue())
+            self.assertIn("partly redundant", output.getvalue())
 
     def test_review_none_or_one_labeled_combined_scene(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -321,8 +428,8 @@ class PocketChoiceTests(unittest.TestCase):
                 self.assertIn('"Pocket 2"', scene)
                 self.assertIn('"Pocket 3"', scene)
                 self.assertIn("group Pocket_1__fpocket_0_1000__priority_1, pocket_1_*", scene)
-                self.assertIn("color du_blue, pocket_1_cavity", scene)
-                self.assertIn("color du_gold, pocket_2_cavity", scene)
+                self.assertIn("color du_red, pocket_1_cavity", scene)
+                self.assertIn("color du_blue, pocket_2_cavity", scene)
                 self.assertIn("disable pocket_1_box", scene)
 
 

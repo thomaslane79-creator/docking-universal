@@ -12,6 +12,72 @@ SPEC.loader.exec_module(REPORT)
 
 
 class CavityReportTests(unittest.TestCase):
+    def test_selectable_box_inventory_is_only_for_preselection_report(self):
+        self.assertTrue(REPORT.includes_selectable_box_inventory({
+            "report_purpose": "pocket-review",
+        }))
+        self.assertFalse(REPORT.includes_selectable_box_inventory({
+            "report_purpose": "protocol",
+        }))
+        self.assertFalse(REPORT.includes_selectable_box_inventory({}))
+
+    def test_pdb_ligand_labels_include_source_and_collapse_symmetry_copies(self):
+        members = [
+            {"entry": "2r5p", "ligand": "MK1", "ligand_chain": "B"},
+            {"entry": "2r5p", "ligand": "MK1", "ligand_chain": "D"},
+            {"entry": "2r5q", "ligand": "1UN", "ligand_chain": "B"},
+        ]
+        self.assertEqual(
+            REPORT.format_pdb_ligand_pairs(members),
+            "2R5P/MK1, 2R5Q/1UN",
+        )
+
+    def test_pdb_ligand_evidence_defines_exact_and_partial_matches(self):
+        members = [
+            {"entry": "1abc", "ligand": "LIG", "evidence_class": "same_protein"},
+            {"entry": "2def", "ligand": "INH", "evidence_class": "exact_sequence_match"},
+            {"entry": "3ghi", "ligand": "SUB", "evidence_class": "close_structural_homolog"},
+        ]
+        text = REPORT.format_pdb_ligand_evidence(members)
+        self.assertIn("Exact matches (same protein identifier): 1ABC/LIG", text)
+        self.assertIn("Exact matches (100% sequence identity): 2DEF/INH", text)
+        self.assertIn("Partial matches (close structural homolog): 3GHI/SUB", text)
+
+    def test_unique_pdb_ligand_source_count_collapses_symmetry_copies(self):
+        members = [
+            {"entry": "2r5p", "ligand": "MK1", "ligand_chain": "B"},
+            {"entry": "2r5p", "ligand": "MK1", "ligand_chain": "D"},
+            {"entry": "2r5q", "ligand": "1UN", "ligand_chain": "B"},
+        ]
+        self.assertEqual(REPORT.unique_pdb_ligand_source_count(members), 2)
+
+    def test_repeated_source_in_different_sites_is_position_disambiguated(self):
+        groups = [
+            {"site_identity": {"canonical_label": "L1"}, "members": [
+                {"entry": "4ig0", "ligand": "1FG", "ligand_chain": "A", "ligand_residue": "601"},
+            ]},
+            {"site_identity": {"canonical_label": "P1"}, "members": [
+                {"entry": "4ig0", "ligand": "1FG", "ligand_chain": "A", "ligand_residue": "602"},
+            ]},
+        ]
+        repeated = REPORT.multi_site_source_pairs(groups)
+        self.assertEqual(repeated, {("4IG0", "1FG")})
+        text = REPORT.format_pdb_ligand_evidence([
+            {"entry": "4ig0", "ligand": "1FG", "ligand_chain": "A", "ligand_residue": "601",
+             "evidence_class": "same_protein"},
+        ], repeated)
+        self.assertIn("4IG0/1FG (chain A, residue 601)", text)
+
+    def test_adfr_note_allows_explicit_exploratory_approval(self):
+        styles = __import__("reportlab.lib.styles", fromlist=["getSampleStyleSheet"]).getSampleStyleSheet()
+        note = REPORT.adfr_fallback_report_note(
+            {"adfr_fallback_log": "retained.log"}, Path("."), styles
+        )
+        text = note[0].text
+        self.assertIn("not control-validated", text)
+        self.assertIn("explicitly approved by the user for exploratory screening", text)
+        self.assertNotIn("required before the protocol can be approved", text)
+
     def test_removal_note_names_removed_components(self):
         with tempfile.TemporaryDirectory() as temporary:
             manifest = Path(temporary) / "user_approved_component_removal.tsv"
@@ -331,6 +397,30 @@ class CavityReportTests(unittest.TestCase):
             self.assertIn(["Selected representatives", "3"], summary_rows)
             self.assertNotIn("Scientific status", [row[0] for row in summary_rows])
             self.assertNotIn("Protocol source", [row[0] for row in summary_rows])
+
+    def test_multi_site_results_are_retained_separately_and_summarized(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            study = Path(temporary)
+            compound = {
+                "compound_id": "ligand_a", "compound_name": "Ligand A",
+                "status": "COMPLETED", "selected_representatives": 3,
+            }
+            for site, score, cluster in (("site_10", "-9.1", "5"), ("site_2", "-7.4", "2")):
+                analysis = study / "compounds" / "ligand_a" / site / "pose_analysis"
+                analysis.mkdir(parents=True)
+                (analysis / "cluster_summary.csv").write_text(
+                    "energy_rank,cluster_id,best_energy_kcal_per_mol,pose_count,seed_support,conformer_support\n"
+                    f"1,{cluster},{score},12,4,3\n"
+                )
+            result = REPORT.compound_result_records(study, [compound], ["Ligand A"])[0]
+            self.assertEqual(result["docking_site_count"], 2)
+            self.assertEqual(result["best_energy_kcal_per_mol"], "-9.1")
+            self.assertEqual(result["best_site"], "site_10")
+            self.assertEqual([site["site"] for site in result["sites"]], ["site_2", "site_10"])
+            self.assertEqual([site["asset_id"] for site in result["sites"]], [
+                "ligand_a_site_2", "ligand_a_site_10",
+            ])
+            self.assertIn(["Docking sites evaluated", 2], REPORT.single_compound_summary_rows(result))
 
     def test_fpocket_descriptors_and_box_volume_inputs(self):
         with tempfile.TemporaryDirectory() as temporary:
