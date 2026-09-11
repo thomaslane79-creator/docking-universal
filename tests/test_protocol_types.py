@@ -24,6 +24,90 @@ CREATE_SPEC.loader.exec_module(CREATE)
 
 
 class ProtocolTypeTests(unittest.TestCase):
+    def test_explicit_box_requests_reach_reviewed_selection(self):
+        for labels in ("P2", "L1", "P1,L1"):
+            self.assertEqual(CREATE.resolve_fpocket_selection(None, labels, True), "reviewed")
+        self.assertEqual(CREATE.resolve_fpocket_selection(None, None, True), "automatic")
+        with self.assertRaisesRegex(ValueError, "requires reviewed"):
+            CREATE.resolve_fpocket_selection("automatic", "P2", True)
+
+    def test_labels_preserve_pocket_numbers_with_double_digit_filenames(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            boxes = []
+            for number in (1, 10, 2):
+                box = root / f"target_pocket{number}.conf"
+                box.write_text("center_x = 0\ncenter_y = 0\ncenter_z = 0\nsize_x = 26\nsize_y = 26\nsize_z = 26\n")
+                boxes.append(box)
+            candidates = CREATE.build_labeled_box_candidates("target", boxes, {}, root)
+            self.assertEqual([c['label'] for c in candidates], ['P1', 'P2', 'P10'])
+            selected, labels = CREATE.choose_labeled_boxes(candidates, interactive=False, requested="P2,P10")
+            self.assertEqual(labels, ['P2', 'P10'])
+            self.assertEqual([p.name for p in selected], ['target_pocket2.conf', 'target_pocket10.conf'])
+
+    def test_direct_fpocket_evidence_does_not_create_an_expanded_box(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cavity = Path(directory)
+            pocket = cavity / "target_pocket1.conf"
+            pocket.write_text(
+                "center_x = 0\ncenter_y = 0\ncenter_z = 0\n"
+                "size_x = 26\nsize_y = 26\nsize_z = 26\n"
+            )
+            evidence = {"ligand_site_groups": [{
+                "site_number": 1,
+                "box": {
+                    "center_x": 0, "center_y": 0, "center_z": 0,
+                    "size_x": 26, "size_y": 31, "size_z": 26,
+                },
+                "fpocket_recovery": {"best_matching_pocket": 1},
+                "members": [
+                    {"entry": "4IG0", "ligand": "1FG", "matched_cavity": 1},
+                    {"entry": "4IDK", "ligand": "1FE", "matched_cavity": None},
+                ],
+            }]}
+            candidates = CREATE.build_labeled_box_candidates(
+                "target", [pocket], evidence, cavity,
+            )
+            self.assertEqual([candidate["label"] for candidate in candidates], ["P1"])
+            self.assertFalse((cavity / "target_evidence_P1_expanded.conf").exists())
+
+    def test_evidence_decision_requires_explicit_homolog_approval(self):
+        record = {
+            "evidence": [{
+                "entry": "1ABC", "ligand": "LIG", "ligand_chain": "A",
+                "evidence_class": "close_structural_homolog",
+                "aligned_ligand_pdb": "ligand.pdb", "matched_cavity": 1,
+            }],
+            "ligand_site_groups": [{"site_number": 1, "member_count": 1, "box": {}}],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "ligand.pdb").write_text(
+                "HETATM    1  C1  LIG A   1       0.000   0.000   0.000  1.00 20.00           C\n"
+            )
+            with self.assertRaisesRegex(SystemExit, "requires explicit approval"):
+                CREATE.evidence_decision(
+                    record, directory, 0.1,
+                    requested="include-homolog-ligands", interactive=False,
+                )
+
+    def test_evidence_decision_returns_same_protein_ligand_box(self):
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "ligand.pdb").write_text(
+                "HETATM    1  C1  LIG A   1       0.000   0.000   0.000  1.00 20.00           C\n"
+            )
+            record = {"evidence": [{
+                "entry": "1ABC", "ligand": "LIG", "ligand_chain": "A",
+                "evidence_class": "same_protein", "aligned_ligand_pdb": "ligand.pdb",
+                "matched_cavity": 1,
+            }]}
+            record["ligand_site_groups"] = CREATE.group_ligand_sites(record, directory)
+            decision = CREATE.evidence_decision(
+                record, directory, 0.1,
+                requested="same-protein-ligands", interactive=False,
+            )
+            self.assertEqual(decision["selected_ligand_site_group"]["box"]["size_x"], 26.0)
+            self.assertEqual(decision["choice"], "same-protein-ligands")
+
     def test_locked_protocol_engine_rejects_contradictory_request(self):
         protocol = {"engine": "vina"}
         self.assertEqual(BUNDLE.reconcile_protocol_engine(protocol), "vina")
@@ -104,6 +188,54 @@ class ProtocolTypeTests(unittest.TestCase):
             extracted_record = json.loads(extracted.read_text())
             self.assertEqual(extracted_record["protocol_type"], BUNDLE.LIGAND_GUIDED_EXPLORATORY)
             self.assertTrue((extracted.parent / extracted_record["locked_inputs"]["receptor_pdb"]).is_file())
+
+    def test_exploratory_bundle_retains_multiple_locked_docking_sites(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            receptor = root / "target.pdbqt"; receptor.write_text("RECEPTOR\n")
+            boxes = [root / f"target_pocket{i}.conf" for i in (1, 2)]
+            for index, box in enumerate(boxes, 1):
+                box.write_text(f"center_x = {index}\n")
+            digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+            regions = [
+                {"site_number": index, "box": str(box), "box_name": box.name,
+                 "box_sha256": digest(box), "geometry": {"center_x": index}}
+                for index, box in enumerate(boxes, 1)
+            ]
+            evidence_dir = root / "preparation/cavity/pdb_site_evidence"
+            evidence_dir.mkdir(parents=True)
+            evidence_json = evidence_dir / "pdb_ligand_site_evidence.json"
+            evidence_tsv = evidence_dir / "pdb_ligand_site_evidence.tsv"
+            evidence_json.write_text('{"status":"completed"}\n')
+            evidence_tsv.write_text("entry\tligand\n4EY7\tE20\n")
+            protocol = root / "multi_protocol.json"
+            protocol.write_text(json.dumps({
+                "schema_name": "docking-universal-protocol", "schema_version": 1,
+                "protocol_type": BUNDLE.SITE_GUIDED_EXPLORATORY,
+                "control_status": "not_performed", "unknown_docking_allowed": False,
+                "exploratory_screening_allowed": True,
+                "screening_authority": "user-confirmed-exploratory-use",
+                "locked_inputs": {
+                    "receptor": str(receptor), "receptor_sha256": digest(receptor),
+                    "box": str(boxes[0]), "box_sha256": digest(boxes[0]), "boxes": regions,
+                },
+                "docking_regions": regions,
+                "pdb_pocket_evidence": {
+                    "status": "completed", "record": str(evidence_json),
+                },
+            }))
+            output = root / "multi.duprotocol"
+            BUNDLE.create_bundle(protocol, root, output)
+            extracted = BUNDLE.extract_bundle(output)
+            record = json.loads(extracted.read_text())
+            self.assertEqual(len(record["locked_inputs"]["boxes"]), 2)
+            for region in record["locked_inputs"]["boxes"]:
+                self.assertTrue((extracted.parent / region["box"]).is_file())
+            retained_evidence = record["pdb_pocket_evidence"]
+            self.assertEqual(retained_evidence["record"], "evidence/pdb_ligand_site_evidence.json")
+            self.assertEqual(retained_evidence["table"], "evidence/pdb_ligand_site_evidence.tsv")
+            self.assertTrue((extracted.parent / retained_evidence["record"]).is_file())
+            self.assertTrue((extracted.parent / retained_evidence["table"]).is_file())
 
     def test_bundle_retains_user_approved_removal_manifest(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -255,7 +255,7 @@ Number of cavities selected:
 $MAX_POCKETS
 
 Selection ordering:
-Combined rank = fpocket score * exp(-distance_to_protein_centroid / 10)
+Candidate order = raw fpocket score (descending); protein-centroid weighting is not applied
 Higher scores and more interior locations are favored; overlapping boxes are suppressed.
 
 ###############################################################################
@@ -486,4 +486,3 @@ report_preparation_completion() {
   log "Receptor and pocket preparation complete"
   log "No docking has been run by this command"
 }
-

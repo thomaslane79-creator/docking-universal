@@ -24,10 +24,17 @@ printf '%s\n' "$tmp/pockets/p1.pdb" "$tmp/pockets/p2.pdb" "$tmp/pockets/p3.pdb" 
 
 select_ranked_fpocket_candidates "$tmp/eligible.list" centroid 0 0 0 2 13 0.60 "$tmp/selected" "$tmp/diagnostic.tsv"
 [ "$(wc -l < "$tmp/selected" | tr -d ' ')" -eq 2 ] || fail "retained pocket count changed"
-grep -q '|p1.pdb|' <(sed "s|$tmp/pockets/||" "$tmp/selected") || fail "highest weighted-rank pocket was not selected"
+grep -q '|p1.pdb|' <(sed "s|$tmp/pockets/||" "$tmp/selected") || fail "highest raw-score pocket was not selected"
 grep -q $'p2.pdb\t.*\tskipped\tbox_overlap_exceeds_MAX_OVERLAP_FRAC' "$tmp/diagnostic.tsv" || fail "overlap suppression changed"
 grep -q $'p4.pdb\t.*\tskipped\tnot_retained_after_max_pockets\tNA' "$tmp/diagnostic.tsv" || fail "post-maximum audit changed"
 [ "$(awk 'END{print NR}' "$tmp/diagnostic.tsv")" -eq 5 ] || fail "complete ranked audit changed"
+
+# Protein-centroid coordinates remain accepted for compatibility with older
+# callers, but must not influence fpocket ordering or the retained sites.
+select_ranked_fpocket_candidates "$tmp/eligible.list" centroid 1000 -750 500 2 13 0.60 \
+  "$tmp/selected-shifted-centroid" "$tmp/diagnostic-shifted-centroid.tsv"
+cmp -s "$tmp/selected" "$tmp/selected-shifted-centroid" || \
+  fail "protein centroid still changes raw fpocket selection"
 
 # fpocket can emit a valid pocket whose depth values are all zero. Deepest-site
 # selection must still use a real atom rather than silently defaulting to the

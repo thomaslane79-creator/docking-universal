@@ -137,6 +137,23 @@ def create_bundle(protocol_path, control_root, output, control_compound=None):
             "receptor": f"assets/{receptor_copy.name}",
             "box": f"assets/{box_copy.name}",
         })
+        packaged_regions = []
+        for index, region in enumerate(protocol["locked_inputs"].get("boxes", []), 1):
+            source = Path(region.get("box", "")).expanduser().resolve()
+            if not source.is_file():
+                raise ValueError(f"selected docking region {index} is missing: {source}")
+            copied = _copy(source, assets / source.name)
+            packaged = dict(region)
+            packaged.update({
+                "site_number": region.get("site_number", index),
+                "box": f"assets/{copied.name}",
+                "box_name": copied.name,
+                "box_sha256": sha256(copied),
+            })
+            packaged_regions.append(packaged)
+        if packaged_regions:
+            protocol["locked_inputs"]["boxes"] = packaged_regions
+            protocol["docking_regions"] = packaged_regions
         receptor_pdb_value = protocol.get("locked_inputs", {}).get("receptor_pdb")
         if receptor_pdb_value:
             receptor_pdb_source = Path(receptor_pdb_value).expanduser().resolve()
@@ -185,6 +202,8 @@ def create_bundle(protocol_path, control_root, output, control_compound=None):
         patterns = (
             "report/control_*.png", "report/control_*.json", "report/control_*.csv",
             "report/*protocol*.pdf", "report/*box*.png", "report/*cavity*.png",
+            "**/pdb_site_evidence/**/*.json", "**/pdb_site_evidence/**/*.tsv",
+            "**/pdb_site_evidence/**/*.pdb", "**/pdb_site_evidence/**/*.sdf",
             "**/selected_visuals/*.png", "**/selected_visuals/**/*.png",
             "**/experimental_interactions.png", "**/comparison_summary.json",
         )
@@ -199,6 +218,26 @@ def create_bundle(protocol_path, control_root, output, control_compound=None):
                     "path": str(destination.relative_to(packaged_control)),
                     "sha256": sha256(destination),
                 })
+
+        pocket_evidence = protocol.get("pdb_pocket_evidence", {})
+        for artifact in evidence_files:
+            if artifact["path"].endswith("pdb_ligand_site_evidence.json"):
+                pocket_evidence["record"] = artifact["path"]
+                pocket_evidence["record_sha256"] = artifact["sha256"]
+            elif artifact["path"].endswith("pdb_ligand_site_evidence.tsv"):
+                pocket_evidence["table"] = artifact["path"]
+                pocket_evidence["table_sha256"] = artifact["sha256"]
+        # The evidence summary points to the representative ligand selected
+        # by heavy-atom count. Rewrite those source-tree-relative paths to the
+        # portable bundle locations copied above.
+        bundled_by_name = {
+            Path(item["path"]).name: item["path"] for item in evidence_files
+        }
+        for item in (pocket_evidence.get("summary") or {}).values():
+            for key in ("example_aligned_ligand_pdb", "example_ccd_ideal_sdf"):
+                source_value = item.get(key)
+                if source_value and Path(source_value).name in bundled_by_name:
+                    item[key] = bundled_by_name[Path(source_value).name]
 
         source_ligand = next(iter(sorted(control_root.glob("**/*_experimental.sdf"))), None)
         if source_ligand is None:

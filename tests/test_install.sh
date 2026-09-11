@@ -37,7 +37,9 @@ for module in interaction runtime receptor ligands pockets artifacts; do
 done
 [ -x "$libexec/docking-universal-validate" ] || fail "installed validation helper"
 [ -f "$libexec/docking_universal_bundle.py" ] || fail "installed bundle helper"
+[ -f "$libexec/docking_universal_box_candidates.py" ] || fail "installed box-candidate helper"
 [ -f "$libexec/docking_universal_pocket_review.py" ] || fail "installed pocket-review helper"
+[ -f "$libexec/docking_universal_pocket_evidence.py" ] || fail "installed pocket-evidence helper"
 [ -f "$libexec/docking_universal_region.py" ] || fail "installed protocol-region helper"
 [ -f "$libexec/VERSION" ] || fail "installed version file"
 [ -f "$libexec/validation-assets/test_inputs/two_compounds.sdf" ] || fail "installed test input"

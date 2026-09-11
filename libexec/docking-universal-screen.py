@@ -57,6 +57,7 @@ def main():
     parser.add_argument("--receptor", type=Path, help="override stored receptor path; hash must still match")
     parser.add_argument("--receptor-pdb", type=Path, help="coordinate receptor used for clustering, PLIP, and PyMOL")
     parser.add_argument("--box", type=Path, help="override stored box path; hash must still match")
+    parser.add_argument("--boxes", type=Path, nargs="+", help="one or more explicit exploratory docking boxes")
     parser.add_argument("--engine-command")
     parser.add_argument("--engine-env")
     parser.add_argument("--protocol-source-name", help=argparse.SUPPRESS)
@@ -144,15 +145,35 @@ def main():
         box = args.box.expanduser().resolve() if args.box else resolve_locked_path(
             protocol_path, protocol["locked_inputs"]["box"]
         )
+        region_records = protocol.get("locked_inputs", {}).get("boxes") or []
+        boxes = []
+        if args.box:
+            boxes = [{"site_number": 1, "box": box, "box_sha256": protocol["locked_inputs"].get("box_sha256")}]
+        elif region_records:
+            for index, region in enumerate(region_records, 1):
+                boxes.append({
+                    **region,
+                    "site_number": region.get("site_number", index),
+                    "box": resolve_locked_path(protocol_path, region["box"]),
+                })
+        else:
+            boxes = [{"site_number": 1, "box": box, "box_sha256": protocol["locked_inputs"]["box_sha256"]}]
         if not args.receptor_pdb and protocol.get("locked_inputs", {}).get("receptor_pdb"):
             args.receptor_pdb = resolve_locked_path(
                 protocol_path, protocol["locked_inputs"]["receptor_pdb"]
             )
-        for path, key, label in ((receptor, "receptor_sha256", "receptor"), (box, "box_sha256", "box")):
+        for path, key, label in ((receptor, "receptor_sha256", "receptor"),):
             if not path.is_file():
                 raise SystemExit(f"Locked {label} not found: {path}")
             if sha256(path) != protocol["locked_inputs"][key]:
                 raise SystemExit(f"Locked {label} hash mismatch; rerun the control for the changed input")
+        for region in boxes:
+            path = Path(region["box"])
+            if not path.is_file():
+                raise SystemExit(f"Locked docking box not found: {path}")
+            expected = region.get("box_sha256")
+            if expected and sha256(path) != expected:
+                raise SystemExit(f"Locked docking-box hash mismatch for site {region['site_number']}")
         parameters = protocol["parameters"]
         workflow_status = "CONTROL_APPROVED" if kind == CONTROL_VALIDATED else kind.upper().replace("-", "_")
         print("Selected protocol:")
@@ -161,18 +182,25 @@ def main():
         print(f"  Evidence basis: {protocol.get('evidence_basis', 'not recorded by this older protocol')}")
         print(f"  Screening authority: {protocol.get('screening_authority', 'control approval')}")
         print(f"  Created: {str(protocol.get('created_utc', 'not recorded'))[:10]}")
-        print(f"  Docking box: {Path(protocol['locked_inputs']['box']).name}")
+        print(f"  Docking sites: {len(boxes)}")
+        for region in boxes:
+            print(f"    Site {region['site_number']}: {Path(region['box']).name}")
     else:
-        if not args.receptor or not args.box:
-            parser.error("--exploratory requires --receptor and --box")
+        if not args.receptor or not (args.box or args.boxes):
+            parser.error("--exploratory requires --receptor and --box/--boxes")
         if min(args.seeds, args.conformers, args.exhaustiveness, args.num_modes) < 1:
             parser.error("exploratory seeds, conformers, exhaustiveness, and num-modes must be positive")
         if args.base_seed < 0 or args.rmsd_prune < 0:
             parser.error("exploratory base seed and RMSD pruning threshold must be non-negative")
         receptor = args.receptor.expanduser().resolve()
-        box = args.box.expanduser().resolve()
-        if not receptor.is_file() or not box.is_file():
-            parser.error("exploratory receptor and box must exist")
+        explicit_boxes = args.boxes or [args.box]
+        boxes = [
+            {"site_number": index, "box": value.expanduser().resolve()}
+            for index, value in enumerate(explicit_boxes, 1)
+        ]
+        box = Path(boxes[0]["box"])
+        if not receptor.is_file() or any(not Path(item["box"]).is_file() for item in boxes):
+            parser.error("exploratory receptor and every selected box must exist")
         engine = args.engine or "vina"
         parameters = {
             "ph": args.ph, "conformers_per_state": args.conformers,
@@ -192,6 +220,7 @@ def main():
         print("Input check: PASS")
         print(f"Engine: {engine}")
         print(f"Independent seeds: {len(parameters['seeds'])}")
+        print(f"Docking sites: {len(boxes)}")
         if protocol_path:
             print(f"Protocol status: {protocol_type_label(kind)}; locked inputs verified")
         else:
@@ -211,9 +240,9 @@ def main():
     ])
     conformers = int(parameters["conformers_per_state"])
     seeds = [int(seed) for seed in parameters["seeds"]]
-    job_count = conformers * len(seeds)
+    job_count = conformers * len(seeds) * len(boxes)
     print(f"Reusable protocol: {protocol_path}" if protocol_path else "Exploratory workflow: no reusable protocol")
-    print(f"Planned docking jobs: {conformers} conformers × {len(seeds)} seeds = {job_count} jobs")
+    print(f"Planned docking jobs: {conformers} conformers × {len(seeds)} seeds × {len(boxes)} sites = {job_count} jobs")
     if not args.non_interactive and sys.stdin.isatty():
         answer = input("Run docking with these recorded settings? [y/N]: ").strip().lower()
         if answer not in {"y", "yes"}:
@@ -237,36 +266,41 @@ def main():
         "--charge-model", parameters["charge_model"],
     ])
     score_files = []
-    for seed in seeds:
-        docking = out / f"seed_{seed}" / "docking"
-        command = [
-            cli, "dock", "--engine", engine,
-            "--receptor", receptor, "--ligands", prep / "pdbqt_ligands",
-            "--config", box, "--out", docking,
-            "--exhaustiveness", parameters["exhaustiveness"],
-            "--num-modes", parameters["num_modes"],
-            "--energy-range", parameters["energy_range_kcal_per_mol"], "--seed", seed, "--skip-existing",
-        ]
-        if args.engine_command:
-            command += ["--engine-command", args.engine_command]
-        if args.engine_env:
-            command += ["--engine-env", args.engine_env]
-        run(command)
-        scores = docking.parent / "scores.csv"
-        run([cli, "collect", docking, "--out", scores])
-        score_files.append(scores)
+    site_roots = []
+    for region in boxes:
+        site_number = int(region["site_number"])
+        site_root = out if len(boxes) == 1 else out / f"site_{site_number}"
+        site_roots.append((site_number, site_root, Path(region["box"])))
+        for seed in seeds:
+            docking = site_root / f"seed_{seed}" / "docking"
+            command = [
+                cli, "dock", "--engine", engine,
+                "--receptor", receptor, "--ligands", prep / "pdbqt_ligands",
+                "--config", region["box"], "--out", docking,
+                "--exhaustiveness", parameters["exhaustiveness"],
+                "--num-modes", parameters["num_modes"],
+                "--energy-range", parameters["energy_range_kcal_per_mol"], "--seed", seed, "--skip-existing",
+            ]
+            if args.engine_command:
+                command += ["--engine-command", args.engine_command]
+            if args.engine_env:
+                command += ["--engine-env", args.engine_env]
+            run(command)
+            scores = docking.parent / "scores.csv"
+            run([cli, "collect", docking, "--out", scores])
+            score_files.append((site_number, seed, scores))
 
     combined = out / "all_scores.csv"
     rows = []
     fields = []
-    for seed, path in zip(seeds, score_files):
+    for site_number, seed, path in score_files:
         with path.open(newline="") as handle:
             reader = csv.DictReader(handle)
             fields = reader.fieldnames or fields
             for row in reader:
-                rows.append({"seed": seed, **row})
+                rows.append({"site": site_number, "seed": seed, **row})
     with combined.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["seed", *fields])
+        writer = csv.DictWriter(handle, fieldnames=["site", "seed", *fields])
         writer.writeheader()
         writer.writerows(rows)
     manifest = {
@@ -280,6 +314,8 @@ def main():
         "ligand_sha256": sha256(ligand),
         "receptor": str(receptor),
         "box": str(box),
+        "boxes": [{"site_number": site, "box": str(path)} for site, _, path in site_roots],
+        "docking_site_count": len(boxes),
         "engine": engine,
         "seeds": seeds,
         "ensemble_parameters": {
@@ -300,9 +336,10 @@ def main():
     }
     (out / "screen_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     if args.analysis != "none":
-        analysis = out / "pose_analysis"
+      for site_number, site_root, site_box in site_roots:
+        analysis = site_root / "pose_analysis"
         run([
-            cli, "cluster-poses", "--docking-root", out,
+            cli, "cluster-poses", "--docking-root", site_root,
             "--ligand-work", prep / "ligand_work", "--engine", engine,
             "--receptor", args.receptor_pdb.expanduser().resolve() if args.receptor_pdb else (receptor.with_suffix(".pdb") if receptor.with_suffix(".pdb").is_file() else receptor),
             "--out", analysis, "--cluster-rmsd", args.cluster_rmsd,

@@ -573,7 +573,7 @@ EOF
         PREP_SUCCESS=1
         PREP_ROUTE=adfr_legacy_linked_component_fallback
         cp "$RECEPTOR_FILTERED_PDB" "$RECEPTOR_PDB"
-        log "Legacy ADFRsuite preparation succeeded after Meeko's linked-component rejection; control redocking is required before protocol approval"
+        log "Legacy ADFRsuite preparation succeeded after Meeko's linked-component rejection; a target-matched control is required for the control-validated designation, while explicit user-reviewed exploratory approval remains available"
       else
         log "Legacy ADFRsuite fallback did not produce a receptor PDBQT; retaining Meeko diagnostics for structural review"
       fi

@@ -85,7 +85,7 @@ class ProtocolRegionTests(unittest.TestCase):
             "size_x": 26, "size_y": 26, "size_z": 26,
         }
         broad = dict(localized, size_x=51, size_y=48, size_z=62)
-        self.assertEqual(REGION.recommend_engine(localized, REGION.REGION_FPOCKET)[0], "vina")
+        self.assertEqual(REGION.recommend_engine(localized, REGION.REGION_FPOCKET)[0], "qvinaw")
         self.assertEqual(REGION.recommend_engine(broad, REGION.REGION_RESIDUES)[0], "qvinaw")
         self.assertEqual(REGION.recommend_engine(localized, REGION.REGION_WHOLE_PROTEIN)[0], "qvinaw")
 
@@ -93,13 +93,11 @@ class ProtocolRegionTests(unittest.TestCase):
         base = {"center_x": 0, "center_y": 0, "center_z": 0, "size_y": 20, "size_z": 20}
         immediately_below = dict(base, size_x=39.999)
         at_threshold = dict(base, size_x=40.0)
+        self.assertEqual(REGION.recommend_engine(immediately_below, REGION.REGION_FPOCKET)[0], "qvinaw")
+        self.assertEqual(REGION.recommend_engine(at_threshold, REGION.REGION_FPOCKET)[0], "qvinaw")
         self.assertEqual(
-            REGION.recommend_engine(immediately_below, REGION.REGION_FPOCKET)[0],
+            REGION.recommend_engine(immediately_below, REGION.REGION_FPOCKET, requires_vina=True)[0],
             "vina",
-        )
-        self.assertEqual(
-            REGION.recommend_engine(at_threshold, REGION.REGION_FPOCKET)[0],
-            "qvinaw",
         )
 
     def test_engine_override_is_recorded(self):
@@ -108,10 +106,10 @@ class ProtocolRegionTests(unittest.TestCase):
             "size_x": 26, "size_y": 26, "size_z": 26,
         }
         selection = REGION.choose_engine(
-            box, REGION.REGION_FPOCKET, requested="qvinaw", interactive=False
+            box, REGION.REGION_FPOCKET, requested="vina", interactive=False
         )
-        self.assertEqual(selection["recommended_engine"], "vina")
-        self.assertEqual(selection["selected_engine"], "qvinaw")
+        self.assertEqual(selection["recommended_engine"], "qvinaw")
+        self.assertEqual(selection["selected_engine"], "vina")
         self.assertTrue(selection["user_overrode_recommendation"])
 
     def test_box_files_include_configuration_and_wireframe(self):

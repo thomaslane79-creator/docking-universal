@@ -612,10 +612,9 @@ classify_fpocket_candidates() {
 }
 
 # Rank ligand-free pocket candidates and suppress redundant docking boxes.
-# The scientific ranking combines fpocket score with an exponential distance
-# penalty from the selected protein centroid. Box overlap is then used only to
-# avoid retaining substantially duplicate search regions; it does not alter
-# the underlying fpocket score. Every ranked candidate remains in the audit,
+# Candidates are ordered by their raw fpocket score. Box overlap is then used
+# only to avoid retaining substantially duplicate search regions; it does not
+# alter the underlying fpocket score. Every ranked candidate remains in the audit,
 # including candidates skipped after the requested maximum is reached.
 # Inputs: eligible-list path, center mode (centroid/deepest), protein centroid,
 # maximum retained pockets, box half-width, maximum overlap fraction,
@@ -642,7 +641,11 @@ select_ranked_fpocket_candidates() {
     else
       read -r cx cy cz <<< "$(awk '/^ATOM/{x=substr($0,31,8);y=substr($0,39,8);z=substr($0,47,8);if(!seen || $11>m){seen=1;m=$11;bx=x;by=y;bz=z}} END{printf "%.6f %.6f %.6f",bx,by,bz}' "$geom")"
     fi
-    rank=$(awk -v s="$score" -v x="$cx" -v y="$cy" -v z="$cz" -v px="$prot_x" -v py="$prot_y" -v pz="$prot_z" 'BEGIN{d=sqrt((x-px)^2+(y-py)^2+(z-pz)^2);printf "%.6f",s*exp(-d/10)}')
+    # Keep the diagnostic rank_score column for file compatibility, but make
+    # its meaning explicit: it is now the unmodified fpocket score. Spatial
+    # context is available in the center coordinates for user review rather
+    # than being hidden inside an automatic centroid penalty.
+    rank="$score"
     printf '%s|%s|%s|%s|%s|%s\n' "$rank" "$geom" "$cx" "$cy" "$cz" "$score" >> "$work_records"
   done < "$eligible_list"
 
