@@ -1890,7 +1890,7 @@ def combine_panels(panel_a, panel_b, output, control=False, panel_b_legend=()):
     # Panel B is tightly cropped around the molecular overlay, whereas Panel A
     # contains unavoidable plot margins.  A small upward visual correction
     # centers the displayed content, not merely the underlying image boxes.
-    b_offset = -45 if control else 0
+    b_offset = -80 if control else 0
     b = fit(
         b, right_w - 80,
         max(300, a.height - b_offset) if control else 1600,
