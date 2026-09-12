@@ -17,7 +17,8 @@ from pymol import cgo, cmd
 
 PROTOCOL_VERSION = 1
 SAFE_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
-SAFE_SUFFIXES = {".pdb", ".pdbqt", ".mol2", ".sdf"}
+SAFE_SUFFIXES = {".pdb", ".pdbqt", ".mol2", ".sdf", ".pqr"}
+SAFE_COLORS = {"cyan", "marine", "orange", "salmon", "yellow", "violet"}
 
 
 class BridgeCore:
@@ -76,6 +77,20 @@ class BridgeCore:
                 raise ValueError("Structure path does not name a supported existing file")
             self.cmd.load(str(path), name)
             return {"object_name": name, "path": str(path), "atoms": int(self.cmd.count_atoms(name))}
+        if operation == "load_pocket":
+            path = Path(str(payload.get("path", ""))).expanduser().resolve()
+            name = self._name(payload.get("object_name", ""))
+            color = str(payload.get("color", "cyan"))
+            if not path.is_file() or path.suffix.lower() not in SAFE_SUFFIXES:
+                raise ValueError("Pocket path does not name a supported existing coordinate file")
+            if color not in SAFE_COLORS:
+                raise ValueError("Pocket color is not supported")
+            self.cmd.load(str(path), name)
+            self.cmd.hide("everything", name)
+            self.cmd.show("spheres", name)
+            self.cmd.color(color, name)
+            self.cmd.set("sphere_scale", 0.35, name)
+            return {"object_name": name, "path": str(path), "atoms": int(self.cmd.count_atoms(name)), "color": color}
         if operation in {"apply_selection", "get_selection"}:
             name = self._name(payload.get("name", ""))
             if operation == "apply_selection":

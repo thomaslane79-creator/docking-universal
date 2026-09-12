@@ -28,6 +28,13 @@ class FakeCmd:
         self.selected_indices = []
         self.box = None
         self.selection_names = set()
+        self.loaded = []
+
+    def load(self, path, name):
+        self.loaded.append((path, name))
+
+    def count_atoms(self, _name):
+        return len(self.rows)
 
     def iterate(self, selection, _expression, space):
         rows = self.rows
@@ -49,6 +56,12 @@ class FakeCmd:
         return None
 
     def color(self, _color, _name):
+        return None
+
+    def hide(self, _representation, _name):
+        return None
+
+    def set(self, _setting, _value, _name):
         return None
 
     def get_names(self, kind):
@@ -102,6 +115,16 @@ class PymolSpikeTests(unittest.TestCase):
         result = core.dispatch("show_box", {"name": "du_box", "center": [1, 2, 3], "size": [10, 12, 14]})
         self.assertEqual(result["center"], [1.0, 2.0, 3.0])
         self.assertEqual(result["size"], [10.0, 12.0, 14.0])
+
+    def test_pocket_loading_accepts_only_coordinate_files_and_known_colors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pocket = Path(directory) / "pocket 1.pdb"
+            pocket.write_text("END\n")
+            core = self.bridge.BridgeCore(FakeCmd())
+            result = core.dispatch("load_pocket", {"path": str(pocket), "object_name": "du_pocket_1", "color": "marine"})
+            self.assertEqual(result["color"], "marine")
+            with self.assertRaisesRegex(ValueError, "color"):
+                core.dispatch("load_pocket", {"path": str(pocket), "object_name": "du_pocket_2", "color": "user_expression"})
 
     def test_bridge_rejects_arbitrary_operations_and_unsafe_names(self):
         core = self.bridge.BridgeCore(FakeCmd())

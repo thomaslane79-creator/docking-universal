@@ -19,6 +19,7 @@ def main() -> int:
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--chain", default="A")
     parser.add_argument("--residue", action="append", required=True, help="residue number, including insertion code")
+    parser.add_argument("--pocket", type=Path, action="append", default=[], help="fpocket coordinate artifact to display")
     parser.add_argument("--center", type=float, nargs=3, default=(0.0, 0.0, 0.0))
     parser.add_argument("--size", type=float, nargs=3, default=(20.0, 20.0, 20.0))
     parser.add_argument("--log-directory", type=Path)
@@ -29,7 +30,7 @@ def main() -> int:
     snapshot = None
     with PymolSpikeController(args.pymol, args.bridge, log_directory) as controller:
         client = controller.start(headless=args.headless)
-        result = run_spike(client, args.structure, residues, args.center, args.size)
+        result = run_spike(client, args.structure, residues, args.center, args.size, args.pocket)
         print(json.dumps({"status": "passed", "log_directory": str(log_directory), **result}, indent=2))
         if not args.headless:
             input("PyMOL is ready. Make a selection if desired, then press Return to inspect pk1 and close: ")

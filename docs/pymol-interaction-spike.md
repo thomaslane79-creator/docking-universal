@@ -33,6 +33,9 @@ drive replay after relaunch.
 - The same fixture loaded from a path containing spaces.
 - Close/relaunch replay restored the structure, selection, box, and exact
   18-value camera record.
+- fpocket 4.2.2 generated six candidates from the tutorial receptor. The bridge
+  loaded candidate 1 (79 atoms) and candidate 2 (23 atoms), styled them as
+  separate colored objects, and restored both after relaunch.
 - A visible launch initialized OpenGL 2.1 and remained responsive to bridge
   requests. The process completed handshake, structure, selection, box, camera,
   and clean close operations.
@@ -40,12 +43,16 @@ drive replay after relaunch.
   window as an addressable application. This affects automated GUI testing and
   packaging; it did not prevent PyMOL or the bridge from running.
 
+fpocket 4.2.2 failed when asked to derive its output directory from an input
+filename containing spaces. The GUI should stage fpocket inputs under safe
+internal artifact names while retaining the original user path and hash in
+provenance. This does not apply to the PyMOL bridge, which successfully loaded
+the synthetic fixture from a path containing spaces.
+
 The visible run contained no `pk1` selection because no manual atom was clicked.
 Consequently literal mouse-pick return is not yet accepted. The next visible
 harness must make the pending pick obvious, observe `pk1` or use a small PyMOL
-pick wizard, and return the selection to a controller table. It must also load
-two real fpocket candidate artifacts instead of using residue selections as
-stand-ins.
+pick wizard, and return the selection to a controller table.
 
 ## Reproduction
 

@@ -159,12 +159,21 @@ def run_spike(
     selections: Sequence[Mapping[str, str]],
     center: Sequence[float],
     size: Sequence[float],
+    pockets: Sequence[Path | str] = (),
 ) -> dict[str, Any]:
     loaded = client.request("load_structure", {"path": str(Path(structure).resolve()), "object_name": "du_receptor"})
+    loaded_pockets = [
+        client.request("load_pocket", {
+            "path": str(Path(path).resolve()),
+            "object_name": f"du_pocket_{index}",
+            "color": ("marine", "orange", "violet")[(index - 1) % 3],
+        })
+        for index, path in enumerate(pockets, 1)
+    ]
     selected = client.request("apply_selection", {"name": "du_candidate", "residues": list(selections)})
     box = client.request("show_box", {"name": "du_box", "center": list(center), "size": list(size)})
     view = client.request("get_view")
-    return {"loaded": loaded, "selection": selected, "box": box, "view": view}
+    return {"loaded": loaded, "pockets": loaded_pockets, "selection": selected, "box": box, "view": view}
 
 
 def restore_spike(client: PymolSpikeClient, snapshot: Mapping[str, Any]) -> dict[str, Any]:
@@ -185,7 +194,11 @@ def restore_spike(client: PymolSpikeClient, snapshot: Mapping[str, Any]) -> dict
             seen.add(key)
             residues.append(identity)
     client.request("load_structure", {"path": loaded["path"], "object_name": loaded["object_name"]})
+    pockets = [
+        client.request("load_pocket", pocket)
+        for pocket in snapshot.get("pockets", [])
+    ]
     selection = client.request("apply_selection", {"name": snapshot["selection"]["name"], "residues": residues})
     box = client.request("show_box", snapshot["box"])
     view = client.request("set_view", snapshot["view"])
-    return {"loaded": loaded, "selection": selection, "box": box, "view": view}
+    return {"loaded": loaded, "pockets": pockets, "selection": selection, "box": box, "view": view}
