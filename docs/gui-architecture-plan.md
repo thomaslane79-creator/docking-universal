@@ -1,5 +1,12 @@
 # Docking Universal GUI architecture plan
 
+> Implementation update (2026-09-12): follow the
+> [GUI implementation roadmap](gui-implementation-roadmap.md) for execution.
+> The desktop toolkit remains undecided. References below to PySide6 and an
+> embedded PyMOL panel are earlier proposals, subject to the roadmap's Mac
+> interaction and packaging gates. The baseline under evaluation uses required
+> PyMOL visual review in a separate compatible process with a two-way bridge.
+
 ## Purpose
 
 Docking Universal should gain a graphical interface without replacing its

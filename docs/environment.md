@@ -2,6 +2,13 @@
 
 `environment.yml` records the direct packages and versions used by the scientific workflow. Ubuntu and macOS are exercised by the automated test matrix, and the graphical chooser supports Zenity/GTK with Tk fallback on Ubuntu and Finder on macOS. Because compiled chemistry packages may differ across platforms, a new workstation should still run `validate integration` before production use. Native Windows support has not been established as equivalent.
 
+Run `docking-universal runtime-inventory` for a read-only human summary or
+`docking-universal runtime-inventory --json` for the versioned record intended
+for installation diagnostics and the future GUI. The command observes declared
+Conda environments, selected solved packages, executable paths, platform
+choosers, and installation prerequisites. It does not import PyMOL, alter an
+environment, or infer incompatibility from an absent or unobserved component.
+
 Three levels of environment information are included:
 
 - `environment.yml`: clean, readable direct scientific dependencies;

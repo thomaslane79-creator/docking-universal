@@ -26,7 +26,7 @@ test:
 	./tests/test_ligand_detection_helpers.sh
 	./tests/test_fpocket_runner.sh
 	./tests/test_receptor_preparation_routes.sh
-	PYTHONPATH="$(CURDIR)/libexec$${PYTHONPATH:+:$$PYTHONPATH}" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_run_selection.py tests/test_guided_options.py tests/test_report_cavity.py tests/test_pdbfixer_preclean.py tests/test_ccd_audit.py tests/test_protocol_types.py tests/test_protocol_region.py tests/test_graphical_chooser.py tests/test_depict2d.py tests/test_retained_report_artifacts.py tests/test_process_runner.py tests/test_process_adapter.py tests/test_job_service.py tests/test_reuse_equivalence.py tests/test_dock_runner.py tests/test_pocket_evidence.py tests/test_pocket_review_service.py tests/test_structural_evidence.py tests/test_multisite_protocol.py tests/test_multisite_report_figures.py tests/test_application_contracts.py
+	PYTHONPATH="$(CURDIR)/libexec$${PYTHONPATH:+:$$PYTHONPATH}" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_run_selection.py tests/test_guided_options.py tests/test_report_cavity.py tests/test_pdbfixer_preclean.py tests/test_ccd_audit.py tests/test_protocol_types.py tests/test_protocol_region.py tests/test_graphical_chooser.py tests/test_depict2d.py tests/test_retained_report_artifacts.py tests/test_process_runner.py tests/test_process_adapter.py tests/test_job_service.py tests/test_runtime_inventory.py tests/test_reuse_equivalence.py tests/test_dock_runner.py tests/test_pocket_evidence.py tests/test_pocket_review_service.py tests/test_structural_evidence.py tests/test_multisite_protocol.py tests/test_multisite_report_figures.py tests/test_application_contracts.py
 
 test-integration:
 	./bin/docking-universal validate integration
