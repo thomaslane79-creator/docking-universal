@@ -95,6 +95,7 @@ class PymolSpikeController:
             "DU_PYMOL_BRIDGE_HOST": "127.0.0.1",
             "DU_PYMOL_BRIDGE_PORT": str(port),
             "DU_PYMOL_BRIDGE_TOKEN": token,
+            "DU_PYMOL_BRIDGE_HEADLESS": "1" if headless else "0",
         })
         command = [str(self.pymol), "-q"]
         if headless:

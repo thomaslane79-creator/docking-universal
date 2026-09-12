@@ -221,7 +221,9 @@ class BridgeHandler(BaseHTTPRequestHandler):
             request_id = request.get("request_id")
             if request.get("version") != PROTOCOL_VERSION or not request_id:
                 raise ValueError("Unsupported protocol version or missing request ID")
-            result = self.server.core.dispatch(str(request.get("operation", "")), dict(request.get("payload") or {}))
+            operation = str(request.get("operation", ""))
+            payload = dict(request.get("payload") or {})
+            result = self.server.call(lambda: self.server.core.dispatch(operation, payload))
             response = {"version": PROTOCOL_VERSION, "request_id": request_id, "status": "ok", "result": result}
             status = 200
         except Exception as exc:
@@ -236,10 +238,11 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
 
 class BridgeServer(ThreadingHTTPServer):
-    def __init__(self, address: tuple[str, int], token: str, core: BridgeCore):
+    def __init__(self, address: tuple[str, int], token: str, core: BridgeCore, call):
         super().__init__(address, BridgeHandler)
         self.token = token
         self.core = core
+        self.call = call
 
 
 def start_from_environment() -> BridgeServer:
@@ -248,7 +251,15 @@ def start_from_environment() -> BridgeServer:
     token = os.environ["DU_PYMOL_BRIDGE_TOKEN"]
     if host not in {"127.0.0.1", "localhost"} or len(token) < 32:
         raise RuntimeError("Refusing insecure PyMOL bridge configuration")
-    server = BridgeServer((host, port), token, BridgeCore())
+    if os.environ.get("DU_PYMOL_BRIDGE_HEADLESS") == "1":
+        call = lambda operation: operation()
+    else:
+        # PyMOL supplies this compatibility helper for Qt 5 and older bindings.
+        # The object is created while the startup script is on PyMOL's GUI
+        # thread; bridge requests block their worker until GUI work completes.
+        from pymol.Qt.utils import MainThreadCaller
+        call = MainThreadCaller()
+    server = BridgeServer((host, port), token, BridgeCore(), call)
     thread = threading.Thread(target=server.serve_forever, name="du-pymol-spike", daemon=True)
     thread.start()
     print(f"Docking Universal PyMOL spike bridge listening on {host}:{port}")

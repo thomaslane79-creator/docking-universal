@@ -56,6 +56,13 @@ The pick wizard and controller return are implemented and unit-tested. A human
 click in the visible Mac window remains the final literal interaction check;
 the prior visible run occurred before the wizard was added.
 
+The bridge now distinguishes headless and visible execution. Headless requests
+use direct calls because there is no Qt event loop. Visible requests use
+PyMOL's `MainThreadCaller`, so structure, selection, pocket, box, camera and
+wizard operations execute on the viewer's Qt thread. A visible 1HVR/two-pocket
+run completed this handshake and remained responsive on 2026-09-12; no atom
+was clicked during that automated run.
+
 ## Reproduction
 
 Headless tests use the source checkout and existing environment:
