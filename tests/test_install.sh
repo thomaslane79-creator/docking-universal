@@ -44,6 +44,8 @@ done
 [ -f "$libexec/docking_universal/processes.py" ] || fail "installed cancellable process adapter"
 [ -f "$libexec/docking_universal/jobs.py" ] || fail "installed persisted job service"
 [ -f "$libexec/docking_universal/runtime_inventory.py" ] || fail "installed runtime inventory service"
+[ -f "$libexec/docking_universal/pymol_spike.py" ] || fail "installed PyMOL spike controller"
+[ -f "$libexec/docking-universal-pymol-spike-bridge.py" ] || fail "installed PyMOL spike bridge"
 [ -f "$libexec/docking_universal/services/pocket_review.py" ] || fail "installed pocket-review service"
 [ -f "$libexec/VERSION" ] || fail "installed version file"
 [ -f "$libexec/validation-assets/test_inputs/two_compounds.sdf" ] || fail "installed test input"

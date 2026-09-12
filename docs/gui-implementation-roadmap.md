@@ -7,7 +7,9 @@ for toolkit selection, process ownership, viewer integration, and sequencing.
 Implementation status: task 01 is implemented by the read-only
 `docking-universal runtime-inventory` command and recorded in the
 [2026-09-12 macOS arm64 audit](runtime-inventory-audit-2026-09-12.md). Task 02
-is next.
+has a working restricted bridge for controller-driven selection, box, camera,
+and relaunch replay. Its [spike record](pymol-interaction-spike.md) identifies
+the remaining manual mouse-pick and real-pocket acceptance checks.
 
 ## Product contract
 
