@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from docking_universal.pymol_spike import PymolSpikeClient, PymolSpikeError
@@ -20,6 +21,7 @@ def load_bridge_module():
 
 class FakeCmd:
     def __init__(self):
+        self._pymol = SimpleNamespace(session=SimpleNamespace())
         self.rows = [
             ["receptor", "", "A", "10", "SER", "CA", "", 1],
             ["receptor", "", "B", "10", "SER", "CA", "", 2],
@@ -29,6 +31,7 @@ class FakeCmd:
         self.box = None
         self.selection_names = set()
         self.loaded = []
+        self.wizard = None
 
     def load(self, path, name):
         self.loaded.append((path, name))
@@ -38,6 +41,11 @@ class FakeCmd:
 
     def iterate(self, selection, _expression, space):
         rows = self.rows
+        if selection == "pk1":
+            rows = self.rows[:1]
+        elif selection == "du_user_pick":
+            picked = self.rows[0]
+            rows = [row for row in self.rows if row[:4] == picked[:4]]
         if selection == "du_residue":
             rows = [row for row in rows if row[7] in self.selected_indices]
         space["rows"].extend(rows)
@@ -67,6 +75,15 @@ class FakeCmd:
     def get_names(self, kind):
         self.assert_kind = kind
         return sorted(self.selection_names)
+
+    def set_wizard(self, wizard=None):
+        self.wizard = wizard
+
+    def refresh_wizard(self):
+        return None
+
+    def unpick(self):
+        return None
 
     def load_cgo(self, graphic, name):
         self.box = (name, graphic)
@@ -144,6 +161,18 @@ class PymolSpikeTests(unittest.TestCase):
         })):
             with self.assertRaisesRegex(PymolSpikeError, "mismatched"):
                 client.request("ping")
+
+    def test_pick_wizard_returns_picked_atom_and_complete_residue(self):
+        fake = FakeCmd()
+        core = self.bridge.BridgeCore(fake)
+        waiting = core.dispatch("start_pick", {})
+        self.assertTrue(waiting["waiting_for_pick"])
+        self.assertIsNone(core.dispatch("get_pick", {})["pick"])
+        fake.wizard.do_pick(0)
+        picked = core.dispatch("get_pick", {})
+        self.assertEqual(picked["sequence"], 1)
+        self.assertEqual(picked["pick"]["picked_atoms"][0]["model"], "receptor")
+        self.assertGreaterEqual(len(picked["pick"]["residue_atoms"]), 1)
 
 
 if __name__ == "__main__":

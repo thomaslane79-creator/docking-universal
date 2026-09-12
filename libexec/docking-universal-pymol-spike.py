@@ -33,9 +33,11 @@ def main() -> int:
         result = run_spike(client, args.structure, residues, args.center, args.size, args.pocket)
         print(json.dumps({"status": "passed", "log_directory": str(log_directory), **result}, indent=2))
         if not args.headless:
-            input("PyMOL is ready. Make a selection if desired, then press Return to inspect pk1 and close: ")
+            client.request("start_pick")
+            input("PyMOL is ready. Click an atom, then press Return to return its residue and close: ")
             try:
-                print(json.dumps(client.request("get_selection", {"name": "pk1"}), indent=2))
+                print(json.dumps(client.request("get_pick"), indent=2))
+                client.request("stop_pick")
             except Exception as exc:
                 print(json.dumps({"picked_selection": "unavailable", "detail": str(exc)}, indent=2))
         snapshot = result

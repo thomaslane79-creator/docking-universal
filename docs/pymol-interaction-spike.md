@@ -20,7 +20,9 @@ inputs because those formats require a separate trust and replay policy.
 Selection responses include model, segment, chain, residue number, insertion
 code, residue name, atom name, alternate location, and the current PyMOL atom
 index. The index is returned for diagnosis only; the other structural fields
-drive replay after relaunch.
+drive replay after relaunch. A dedicated PyMOL pick wizard captures a clicked
+atom, expands it to its complete residue, and exposes both through `get_pick`.
+The GUI can poll that structured record without parsing PyMOL console output.
 
 ## Results on the development Mac
 
@@ -50,10 +52,9 @@ study directory. Callers retain the original user path and hash in provenance.
 This does not apply to the PyMOL bridge, which successfully loaded the synthetic
 fixture directly from a path containing spaces.
 
-The visible run contained no `pk1` selection because no manual atom was clicked.
-Consequently literal mouse-pick return is not yet accepted. The next visible
-harness must make the pending pick obvious, observe `pk1` or use a small PyMOL
-pick wizard, and return the selection to a controller table.
+The pick wizard and controller return are implemented and unit-tested. A human
+click in the visible Mac window remains the final literal interaction check;
+the prior visible run occurred before the wizard was added.
 
 ## Reproduction
 

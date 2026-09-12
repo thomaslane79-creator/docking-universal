@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from pymol import cgo, cmd
+from pymol.wizard import Wizard
 
 
 PROTOCOL_VERSION = 1
@@ -25,6 +26,8 @@ class BridgeCore:
     def __init__(self, pymol_cmd=cmd):
         self.cmd = pymol_cmd
         self.boxes: dict[str, dict[str, list[float]]] = {}
+        self.pick_sequence = 0
+        self.last_pick: dict[str, Any] | None = None
 
     @staticmethod
     def _name(value: Any) -> str:
@@ -66,6 +69,18 @@ class BridgeCore:
         self.cmd.iterate(selection, expression, space={"rows": rows})
         keys = ("model", "segi", "chain", "resi", "resn", "name", "alt", "index")
         return [dict(zip(keys, row)) for row in rows]
+
+    def capture_pick(self) -> dict[str, Any]:
+        picked = [self._identity(atom) for atom in self._atoms("pk1")]
+        if not picked:
+            raise ValueError("PyMOL did not provide a picked atom")
+        self.cmd.select("du_user_pick", "byres pk1")
+        residue = [self._identity(atom) for atom in self._atoms("du_user_pick")]
+        self.cmd.show("sticks", "du_user_pick")
+        self.cmd.color("yellow", "du_user_pick")
+        self.pick_sequence += 1
+        self.last_pick = {"sequence": self.pick_sequence, "picked_atoms": picked, "residue_atoms": residue}
+        return self.last_pick
 
     def dispatch(self, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
         if operation == "ping":
@@ -150,10 +165,41 @@ class BridgeCore:
                 raise ValueError("view must contain 18 finite numbers")
             self.cmd.set_view([float(item) for item in view])
             return {"view": list(self.cmd.get_view())}
+        if operation == "start_pick":
+            self.last_pick = None
+            self.cmd.set_wizard(DockingUniversalPickWizard(self))
+            self.cmd.refresh_wizard()
+            return {"waiting_for_pick": True, "after_sequence": self.pick_sequence}
+        if operation == "get_pick":
+            return {"pick": self.last_pick, "sequence": self.pick_sequence}
+        if operation == "stop_pick":
+            self.cmd.set_wizard()
+            self.cmd.refresh_wizard()
+            return {"waiting_for_pick": False}
         if operation == "close":
             threading.Timer(0.1, self.cmd.quit).start()
             return {"closing": True}
         raise ValueError(f"Unsupported operation: {operation}")
+
+
+class DockingUniversalPickWizard(Wizard):
+    def __init__(self, core: BridgeCore):
+        super().__init__(_self=core.cmd)
+        self.core = core
+
+    def get_prompt(self):
+        return ["Docking Universal: click an atom to select its complete residue."]
+
+    def get_panel(self):
+        return [[1, "Docking Universal residue selection", ""], [2, "Cancel selection", "cmd.set_wizard()"]]
+
+    def do_pick(self, _bond_flag):
+        try:
+            self.core.capture_pick()
+        finally:
+            self.cmd.unpick()
+            self.cmd.refresh_wizard()
+        return 1
 
 
 class BridgeHandler(BaseHTTPRequestHandler):
