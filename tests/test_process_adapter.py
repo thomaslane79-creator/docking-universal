@@ -1,6 +1,7 @@
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -83,6 +84,24 @@ class ProcessAdapterTests(unittest.TestCase):
                 check=False,
             ))
             self.assertEqual(result.status, ProcessStatus.TIMED_OUT)
+
+    def test_process_is_stopped_if_its_identity_cannot_be_recorded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            started = time.monotonic()
+            with self.assertRaisesRegex(RuntimeError, "identity persistence failed"):
+                ProcessRunner().run(
+                    ProcessRequest(
+                        command=(sys.executable, "-c", "import time; time.sleep(10)"),
+                        log_directory=directory,
+                        log_name="untracked-stage",
+                        termination_grace_seconds=0.1,
+                        check=False,
+                    ),
+                    on_started=lambda _pid: (_ for _ in ()).throw(
+                        RuntimeError("identity persistence failed")
+                    ),
+                )
+            self.assertLess(time.monotonic() - started, 3.0)
 
 
 if __name__ == "__main__":

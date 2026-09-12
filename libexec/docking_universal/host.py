@@ -16,6 +16,7 @@ except ImportError:  # pragma: no cover - Windows packaging fallback
 
 from .application import StudyController
 from .models import JobStatus, PocketCandidate, record_to_dict, utc_now
+from .orchestration import ProtocolWorkflowRunner
 from .state import JsonStudyStore, RevisionConflictError
 from .viewer.messages import Command, Response
 
@@ -65,13 +66,25 @@ class ApplicationHostLease:
 class CommandDispatcher:
     """Apply a small command whitelist under one serialized mutation lock."""
 
-    MUTATIONS = {"create_study", "start_pocket_review", "resolve_decision"}
+    MUTATIONS = {
+        "create_study", "start_pocket_review", "resolve_decision",
+        "start_receptor_preparation", "cancel_active_job",
+    }
 
-    def __init__(self, controller: StudyController, session_id: str | None = None):
+    def __init__(
+        self,
+        controller: StudyController,
+        session_id: str | None = None,
+        preparation_executable: Path | str | None = None,
+    ):
         self.controller = controller
         self.session_id = session_id or f"session-{uuid4().hex}"
         self._lock = threading.RLock()
         self._responses: dict[str, Response] = {}
+        self.workflow_runner = (
+            ProtocolWorkflowRunner(controller, preparation_executable)
+            if preparation_executable is not None else None
+        )
 
     def dispatch(self, command: Command) -> Response:
         if command.session_id != self.session_id:
@@ -88,6 +101,10 @@ class CommandDispatcher:
             if command.operation in self.MUTATIONS and response.status == "applied":
                 self._responses[command.request_id] = response
             return response
+
+    def shutdown(self) -> None:
+        if self.workflow_runner is not None:
+            self.workflow_runner.shutdown()
 
     def _apply(self, command: Command) -> Response:
         if command.operation == "create_study":
@@ -112,6 +129,28 @@ class CommandDispatcher:
             cursor = int(command.payload.get("sequence", 0))
             events = [record_to_dict(event) for event in state.events if event.sequence > cursor]
             return Response(command.request_id, "applied", state.revision, {"events": events})
+        if command.operation == "start_receptor_preparation":
+            if command.expected_revision is None:
+                raise RevisionConflictError("A state revision is required for scientific mutations")
+            if self.workflow_runner is None:
+                raise RuntimeError("Receptor preparation is not configured in this application host")
+            result = self.workflow_runner.start_preparation(
+                command.study_id, command.payload,
+                request_id=command.request_id, expected_revision=command.expected_revision,
+            )
+            state = self.controller.get_study(command.study_id)
+            return Response(command.request_id, "applied", state.revision, result)
+        if command.operation == "cancel_active_job":
+            if command.expected_revision is None:
+                raise RevisionConflictError("A state revision is required to cancel scientific work")
+            state = self.controller.get_study(command.study_id)
+            if state.revision != command.expected_revision:
+                raise RevisionConflictError(
+                    f"Study {command.study_id} changed from revision {command.expected_revision} to {state.revision}"
+                )
+            if self.workflow_runner is None or not self.workflow_runner.cancel(command.study_id):
+                raise RuntimeError("No cancellable scientific job is active for this study")
+            return Response(command.request_id, "applied", state.revision, {"cancellation_requested": True})
         if command.operation == "start_pocket_review":
             if command.expected_revision is None:
                 raise RevisionConflictError("A state revision is required for scientific mutations")

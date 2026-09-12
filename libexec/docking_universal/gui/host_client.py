@@ -81,7 +81,7 @@ class ApplicationHostClient:
             if process.stdin and not process.stdin.closed:
                 process.stdin.close()
             try:
-                process.wait(timeout=2)
+                process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 process.terminate()
                 try:

@@ -127,23 +127,36 @@ class ReceptorPreparationService:
     def run(self, study_id: str, plan: ReceptorPreparationPlan, **run_options) -> ProcessResult:
         Path(plan.request.cwd).mkdir(parents=True, exist_ok=True)
         result = self.jobs.run(
-            study_id, "receptor_preparation", plan.request,
+            study_id, "preparation_and_pocket_detection", plan.request,
             required_outputs=plan.required_outputs, **run_options,
         )
         if result.status.value == "completed":
-            state = self.controller.get_study(study_id)
-            known = {artifact.id for artifact in state.artifacts}
-            for artifact_id, kind, path in (
+            discovered = [
                 ("prepared-receptor-pdb", "prepared_receptor_structure", plan.receptor_pdb),
                 ("prepared-receptor-pdbqt", "prepared_receptor", plan.receptor_pdbqt),
                 ("receptor-preparation-run-log", "preparation_log", plan.run_log),
-            ):
-                if artifact_id not in known:
-                    state.artifacts.append(ArtifactRecord(
+            ]
+            discovered.extend(
+                (_report_artifact_id(plan.output_root, path), "preliminary_report", path)
+                for path in sorted(plan.output_root.rglob("*.pdf"))
+            )
+
+            def register(latest) -> None:
+                known = {artifact.id for artifact in latest.artifacts}
+                for artifact_id, kind, path in discovered:
+                    if artifact_id in known:
+                        continue
+                    latest.artifacts.append(ArtifactRecord(
                         artifact_id, kind, str(path.resolve()), _sha256(path),
-                        "Retained noninteractive receptor-preparation output",
+                        (
+                            "Existing preliminary scientific report; registered without modification"
+                            if kind == "preliminary_report"
+                            else "Retained noninteractive receptor-preparation output"
+                        ),
                     ))
-            self.controller.store.save(state)
+                    known.add(artifact_id)
+
+            self.controller.store.update(study_id, register)
         return result
 
 
@@ -153,3 +166,9 @@ def _sha256(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _report_artifact_id(output_root: Path, path: Path) -> str:
+    relative = str(path.resolve().relative_to(output_root.resolve()))
+    identity = hashlib.sha256(relative.encode("utf-8")).hexdigest()[:16]
+    return f"preliminary-report-{identity}"

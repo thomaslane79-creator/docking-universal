@@ -131,6 +131,20 @@ class JobServiceTests(unittest.TestCase):
         self.assertEqual(state.jobs[0].status, JobStatus.FAILED)
         self.assertIsNone(state.active_job)
 
+    def test_unexpected_process_tracking_failure_is_persisted(self):
+        class BrokenRunner:
+            def run(self, _request, **_options):
+                raise RuntimeError("process identity could not be retained")
+
+        with self.assertRaisesRegex(RuntimeError, "identity could not be retained"):
+            JobService(self.controller, runner=BrokenRunner()).run(
+                "job-study", "tracked_stage", self.request("print('never')", "tracking-failure"),
+            )
+        state = self.controller.get_study("job-study")
+        self.assertEqual(state.jobs[0].status, JobStatus.FAILED)
+        self.assertIsNone(state.active_job)
+        self.assertIn("identity could not be retained", state.jobs[0].error)
+
 
 if __name__ == "__main__":
     unittest.main()

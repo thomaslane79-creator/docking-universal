@@ -17,6 +17,7 @@ class StageTransition:
 SITE_GUIDED_PROTOCOL = (
     StageTransition("receptor_input", "receptor_preparation"),
     StageTransition("receptor_preparation", "pocket_detection"),
+    StageTransition("preparation_and_pocket_detection", "pocket_review"),
     StageTransition("pocket_detection", "pocket_review"),
     StageTransition("fpocket", "pocket_review"),
     StageTransition("pocket_review", "region_approval"),

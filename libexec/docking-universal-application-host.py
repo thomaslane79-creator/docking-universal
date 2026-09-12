@@ -19,7 +19,10 @@ def main() -> int:
     parser.add_argument("--session-id")
     args = parser.parse_args()
     store = JsonStudyStore(args.state_root)
-    dispatcher = CommandDispatcher(StudyController(store), args.session_id)
+    dispatcher = CommandDispatcher(
+        StudyController(store), args.session_id,
+        preparation_executable=Path(__file__).with_name("docking-universal-prepare"),
+    )
     try:
         with ApplicationHostLease(args.state_root):
             interrupted = reconcile_interrupted_jobs(store)
@@ -31,6 +34,8 @@ def main() -> int:
     except HostAlreadyRunning as exc:
         print(json.dumps({"type": "fatal", "error": str(exc)}), file=sys.stderr)
         return 2
+    finally:
+        dispatcher.shutdown()
     return 0
 
 

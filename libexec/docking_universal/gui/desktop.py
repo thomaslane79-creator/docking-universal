@@ -35,6 +35,7 @@ if QtWidgets is not None:
             self.settings = settings or QtCore.QSettings("DockingUniversal", "Desktop")
             self.host_client = host_client
             self.viewer_coordinator = viewer_coordinator
+            self._exit_after_cancel = False
             self.setObjectName("docking_universal_study_window")
             self.setWindowTitle("Docking Universal — Scientific Decision Support")
             self.resize(1280, 820)
@@ -110,7 +111,54 @@ if QtWidgets is not None:
             self._dock("Selections", self.selection_view, QtCore.Qt.RightDockWidgetArea, "selection_dock")
             self._dock("Complete Logs", self.log_view, QtCore.Qt.BottomDockWidgetArea, "logs_dock")
             self._dock("Reports and Artifacts", self.report_list, QtCore.Qt.BottomDockWidgetArea, "reports_dock")
+            self._build_setup_dock()
             self.statusBar().showMessage("Selections are proposals until explicitly approved through the application host")
+            self.refresh_timer = QtCore.QTimer(self)
+            self.refresh_timer.setInterval(1000)
+            self.refresh_timer.timeout.connect(self.refresh)
+            self.refresh_timer.start()
+
+        def _build_setup_dock(self) -> None:
+            panel = QtWidgets.QWidget()
+            form = QtWidgets.QFormLayout(panel)
+            self.input_pdb = QtWidgets.QLineEdit()
+            self.output_directory = QtWidgets.QLineEdit()
+            self.site_mode = QtWidgets.QComboBox()
+            self.site_mode.addItem("Predicted pockets", "pockets")
+            self.site_mode.addItem("Selected bound ligand", "ligand")
+            self.site_mode.currentIndexChanged.connect(self._update_site_controls)
+            self.ligand_resname = QtWidgets.QLineEdit()
+            self.ligand_resname.setPlaceholderText("Required for ligand mode, e.g. LIG")
+            input_row = QtWidgets.QWidget()
+            input_layout = QtWidgets.QHBoxLayout(input_row)
+            input_layout.setContentsMargins(0, 0, 0, 0)
+            input_layout.addWidget(self.input_pdb)
+            input_button = QtWidgets.QPushButton("Browse…")
+            input_button.clicked.connect(self.choose_input_pdb)
+            input_layout.addWidget(input_button)
+            output_row = QtWidgets.QWidget()
+            output_layout = QtWidgets.QHBoxLayout(output_row)
+            output_layout.setContentsMargins(0, 0, 0, 0)
+            output_layout.addWidget(self.output_directory)
+            output_button = QtWidgets.QPushButton("Browse…")
+            output_button.clicked.connect(self.choose_output_directory)
+            output_layout.addWidget(output_button)
+            form.addRow("Receptor PDB", input_row)
+            form.addRow("Study output directory", output_row)
+            form.addRow("Site definition", self.site_mode)
+            form.addRow("Bound ligand residue", self.ligand_resname)
+            buttons = QtWidgets.QHBoxLayout()
+            self.start_preparation_button = QtWidgets.QPushButton("Prepare receptor and detect pockets")
+            self.start_preparation_button.setObjectName("start_preparation_button")
+            self.start_preparation_button.clicked.connect(self.start_preparation)
+            self.cancel_job_button = QtWidgets.QPushButton("Cancel active stage")
+            self.cancel_job_button.setObjectName("cancel_job_button")
+            self.cancel_job_button.clicked.connect(self.cancel_active_job)
+            buttons.addWidget(self.start_preparation_button)
+            buttons.addWidget(self.cancel_job_button)
+            form.addRow(buttons)
+            self._dock("Study Setup", panel, QtCore.Qt.LeftDockWidgetArea, "study_setup_dock")
+            self._update_site_controls()
 
         def _dock(self, title, widget, area, name):
             dock = QtWidgets.QDockWidget(title, self)
@@ -146,9 +194,27 @@ if QtWidgets is not None:
             self.viewer_button.setEnabled(self.viewer_coordinator is not None)
             if self.viewer_coordinator is None:
                 self.viewer_status.setText("Required PyMOL adapter is not configured")
+            active = state.active_job
+            preparation_complete = any(
+                job.stage == "preparation_and_pocket_detection" and job.status.value == "completed"
+                for job in state.jobs
+            )
+            self.start_preparation_button.setEnabled(bool(
+                self.host_client and not active and not pending and not preparation_complete
+            ))
+            self.cancel_job_button.setEnabled(bool(
+                self.host_client and active and active.status.value == "running"
+            ))
             self._render_candidates(state)
             self._render_artifacts(state)
             self._render_events()
+            if self._exit_after_cancel and not active:
+                self._exit_after_cancel = False
+                QtCore.QTimer.singleShot(0, self.close)
+
+        def _update_site_controls(self) -> None:
+            ligand_mode = self.site_mode.currentData() == "ligand"
+            self.ligand_resname.setEnabled(ligand_mode)
 
         def approve_selected_regions(self) -> None:
             if not self.host_client:
@@ -173,6 +239,69 @@ if QtWidgets is not None:
                 QtWidgets.QMessageBox.critical(self, "Approval rejected", str(exc))
                 self.refresh()
                 return
+            self.refresh()
+
+        def choose_input_pdb(self) -> None:
+            path, _filter = QtWidgets.QFileDialog.getOpenFileName(
+                self, "Choose receptor structure", "", "Protein Data Bank (*.pdb)",
+            )
+            if path:
+                self.input_pdb.setText(path)
+
+        def choose_output_directory(self) -> None:
+            path = QtWidgets.QFileDialog.getExistingDirectory(self, "Choose study output directory")
+            if path:
+                self.output_directory.setText(path)
+
+        def start_preparation(self) -> None:
+            if not self.host_client:
+                return
+            input_text = self.input_pdb.text().strip()
+            output_text = self.output_directory.text().strip()
+            if not input_text or not Path(input_text).is_file() or Path(input_text).suffix.lower() != ".pdb":
+                QtWidgets.QMessageBox.warning(
+                    self, "Receptor required", "Choose an existing receptor PDB file before starting.",
+                )
+                return
+            if not output_text:
+                QtWidgets.QMessageBox.warning(
+                    self, "Output directory required", "Choose a study output directory before starting.",
+                )
+                return
+            if self.site_mode.currentData() == "ligand" and not self.ligand_resname.text().strip():
+                QtWidgets.QMessageBox.warning(
+                    self, "Ligand required", "Enter the selected bound-ligand residue name.",
+                )
+                return
+            payload = {
+                "input_pdb": input_text,
+                "working_directory": output_text,
+                "site_mode": self.site_mode.currentData(),
+                "ligand_resname": self.ligand_resname.text().strip() or None,
+                "feedback_level": self.detail.currentText().lower().replace("teaching", "verbose").replace("technical", "verbose"),
+                "cavity_mode": 1,
+                "max_pockets": 3,
+                "center_mode": "deepest",
+                "centroid_mode": 1,
+            }
+            try:
+                self.host_client.request(
+                    self.study_id, "start_receptor_preparation", payload,
+                    expected_revision=self.state.revision,
+                )
+            except Exception as exc:
+                QtWidgets.QMessageBox.critical(self, "Preparation could not start", str(exc))
+            self.refresh()
+
+        def cancel_active_job(self) -> None:
+            if not self.host_client:
+                return
+            try:
+                self.host_client.request(
+                    self.study_id, "cancel_active_job", {}, expected_revision=self.state.revision,
+                )
+            except Exception as exc:
+                QtWidgets.QMessageBox.critical(self, "Cancellation could not be requested", str(exc))
             self.refresh()
 
         def open_visual_review(self) -> None:
@@ -248,6 +377,44 @@ if QtWidgets is not None:
         def closeEvent(self, event) -> None:
             self.settings.setValue("window/geometry", self.saveGeometry())
             self.settings.setValue("window/layout", self.saveState())
+            try:
+                latest = self.store.load(self.study_id)
+                active = latest.active_job
+            except (FileNotFoundError, ValueError):
+                latest = None
+                active = None
+            if active and active.status.value == "running":
+                if self._exit_after_cancel:
+                    event.ignore()
+                    return
+                message = QtWidgets.QMessageBox(self)
+                message.setIcon(QtWidgets.QMessageBox.Warning)
+                message.setWindowTitle("Scientific stage is still running")
+                message.setText("Docking Universal cannot continue scientific work in the background yet.")
+                message.setInformativeText("Cancel the active stage and exit, or return to the run.")
+                cancel_and_exit = message.addButton(
+                    "Cancel stage and exit", QtWidgets.QMessageBox.DestructiveRole,
+                )
+                return_to_run = message.addButton(
+                    "Return to run", QtWidgets.QMessageBox.RejectRole,
+                )
+                message.setDefaultButton(return_to_run)
+                message.exec_()
+                if message.clickedButton() is not cancel_and_exit:
+                    event.ignore()
+                    return
+                try:
+                    self.host_client.request(
+                        self.study_id, "cancel_active_job", {}, expected_revision=latest.revision,
+                    )
+                except Exception as exc:
+                    QtWidgets.QMessageBox.critical(self, "Cancellation could not be requested", str(exc))
+                    event.ignore()
+                    return
+                self._exit_after_cancel = True
+                self.statusBar().showMessage("Cancelling the active stage before exit…")
+                event.ignore()
+                return
             super().closeEvent(event)
 else:
     class StudyWindow:  # pragma: no cover

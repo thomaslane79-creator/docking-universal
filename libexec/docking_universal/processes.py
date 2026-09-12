@@ -73,6 +73,7 @@ class ProcessRunner:
         *,
         cancel_event: threading.Event | None = None,
         on_output: Callable[[ProcessOutput], None] | None = None,
+        on_started: Callable[[int], None] | None = None,
     ) -> ProcessResult:
         command = tuple(str(value) for value in request.command)
         if not command:
@@ -95,6 +96,15 @@ class ProcessRunner:
             bufsize=1,
             start_new_session=os.name != "nt",
         )
+        if on_started:
+            try:
+                on_started(process.pid)
+            except Exception:
+                # A child without its durable process identity cannot safely be
+                # left running. Stop it before returning the tracking failure.
+                self._terminate(process, request.termination_grace_seconds)
+                process.communicate()
+                raise
 
         def consume(stream_name: str, stream, path: Path) -> None:
             with path.open("w") as handle:

@@ -1,7 +1,7 @@
 # GUI implementation roadmap
 
-Status: proposed implementation design, 2026-09-12. No GUI toolkit is selected
-yet. This document refines the existing architecture plan and takes precedence
+Status: active implementation roadmap, 2026-09-12. PyQt5/Qt 5 is selected for
+the initial desktop client. This document refines the existing architecture plan and takes precedence
 for toolkit selection, process ownership, viewer integration, and sequencing.
 
 Implementation status (2026-09-12): task 01 is implemented by the read-only
@@ -24,8 +24,14 @@ register the receptor and pocket coordinate artifacts needed for required
 PyMOL review; choosing a table row can update the viewer box without approving
 the scientific decision. A noninteractive service boundary invokes the
 existing bash receptor-preparation engine with explicit settings and disables
-model-changing removal. Tasks 09-11 remain future integration work. The
-implemented foundations do not claim a complete end-to-end GUI workflow.
+model-changing removal. The first task-09 slice is also wired: the desktop can
+create a study, launch receptor preparation and pocket detection asynchronously,
+cancel the running stage, discover existing preliminary reports without changing
+them, and pause at the durable visual pocket decision. Application exit during
+that work offers cancellation or return to the run; silent background continuation
+is not allowed. Final protocol/report/bundle generation, screening, and flexible
+residue docking remain future integration work, so this is not yet a complete
+end-to-end GUI workflow.
 
 ## Product contract
 

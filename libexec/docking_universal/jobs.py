@@ -35,11 +35,14 @@ class JobService:
         cancel_event: threading.Event | None = None,
         on_output: Callable[[ProcessOutput], None] | None = None,
         required_outputs: tuple[Path | str, ...] = (),
+        request_id: str | None = None,
+        expected_revision: int | None = None,
     ) -> ProcessResult:
         with _ScientificJobLease(self.controller.store):
             return self._run_owned(
                 study_id, stage, request, cancel_event=cancel_event,
                 on_output=on_output, required_outputs=required_outputs,
+                request_id=request_id, expected_revision=expected_revision,
             )
 
     def _run_owned(
@@ -51,8 +54,19 @@ class JobService:
         cancel_event: threading.Event | None,
         on_output: Callable[[ProcessOutput], None] | None,
         required_outputs: tuple[Path | str, ...],
+        request_id: str | None,
+        expected_revision: int | None,
     ) -> ProcessResult:
         state = self.controller.get_study(study_id)
+        if request_id:
+            prior = next((item for item in state.jobs if item.request_id == request_id), None)
+            if prior is not None:
+                raise ActiveStageError(f"Scientific job request was already recorded: {request_id}")
+        if expected_revision is not None and state.revision != expected_revision:
+            from .state import RevisionConflictError
+            raise RevisionConflictError(
+                f"Study {study_id} changed from revision {expected_revision} to {state.revision}"
+            )
         if state.active_job:
             raise ActiveStageError(
                 f"Study {study_id} already has an active stage: {state.active_job.stage}"
@@ -62,6 +76,7 @@ class JobService:
             stage=stage,
             status=JobStatus.RUNNING,
             started_at=utc_now(),
+            request_id=request_id,
         )
         state.jobs.append(job)
         state.current_stage = stage
@@ -73,22 +88,31 @@ class JobService:
             explanation="The scientific stage is running outside the application event loop.",
             technical={"job_id": job.id, "command": list(map(str, request.command))},
         )
-        self.controller.store.save(state)
+        self.controller.store.save(state, expected_revision=expected_revision)
+
+        def record_process_id(process_id: int) -> None:
+            def mutation(latest):
+                self._job(latest, job.id).process_id = process_id
+            self.controller.store.update(study_id, mutation)
 
         try:
-            result = self.runner.run(request, cancel_event=cancel_event, on_output=on_output)
+            result = self.runner.run(
+                request, cancel_event=cancel_event, on_output=on_output,
+                on_started=record_process_id,
+            )
         except ProcessExecutionError as exc:
             self._finish(study_id, job.id, request, exc.result)
             raise
-        except OSError as exc:
-            # A missing executable is a structured stage failure, not an
-            # untracked exception in a GUI worker.
+        except Exception as exc:
+            # Spawn and process-tracking failures are structured stage
+            # failures, not untracked exceptions in a GUI worker.
             result = None
             stdout_log = Path(request.log_directory) / f"{request.log_name}.stdout.log"
             stderr_log = Path(request.log_directory) / f"{request.log_name}.stderr.log"
             stdout_log.parent.mkdir(parents=True, exist_ok=True)
             stdout_log.touch()
-            stderr_log.write_text(str(exc) + "\n")
+            with stderr_log.open("a") as handle:
+                handle.write(str(exc) + "\n")
             self._finish_spawn_failure(study_id, job.id, request, exc, stdout_log, stderr_log)
             raise
 
@@ -110,7 +134,7 @@ class JobService:
         study_id: str,
         job_id: str,
         request: ProcessRequest,
-        error: OSError,
+        error: Exception,
         stdout_log: Path,
         stderr_log: Path,
     ) -> None:

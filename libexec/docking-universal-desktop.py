@@ -19,6 +19,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state-root", type=Path, required=True)
     parser.add_argument("--study", required=True)
+    parser.add_argument("--create-name", help="create the named study if --study does not exist")
     parser.add_argument("--fullscreen", action="store_true")
     parser.add_argument("--pymol", type=Path, help="explicit PyMOL executable for required structural review")
     args = parser.parse_args()
@@ -35,8 +36,13 @@ def main() -> int:
             args.state_root / args.study / "viewer-logs",
         ))
     with ApplicationHostClient(args.state_root, host_script) as host:
+        store = JsonStudyStore(args.state_root)
+        if not store.path_for(args.study).is_file():
+            if not args.create_name:
+                parser.error("the requested study does not exist; provide --create-name to create it")
+            host.request(args.study, "create_study", {"name": args.create_name})
         window = StudyWindow(
-            JsonStudyStore(args.state_root), args.study,
+            store, args.study,
             host_client=host, viewer_coordinator=viewer,
         )
         try:

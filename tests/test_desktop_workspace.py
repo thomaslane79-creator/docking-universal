@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from docking_universal.application import StudyController
 from docking_universal.gui.desktop import QT_IMPORT_ERROR, StudyWindow
-from docking_universal.models import PocketCandidate
+from docking_universal.models import JobStatus, PocketCandidate
 from docking_universal.state import JsonStudyStore
 
 
@@ -47,7 +47,8 @@ class DesktopWorkspaceTests(unittest.TestCase):
     def test_panels_are_floatable_and_fullscreen_is_reversible(self):
         from PyQt5 import QtWidgets
         docks = self.window.findChildren(QtWidgets.QDockWidget)
-        self.assertGreaterEqual(len(docks), 4)
+        self.assertGreaterEqual(len(docks), 5)
+        self.assertIsNotNone(self.window.findChild(QtWidgets.QDockWidget, "study_setup_dock"))
         self.assertTrue(all(dock.features() & QtWidgets.QDockWidget.DockWidgetFloatable for dock in docks))
         self.window.showFullScreen()
         self.application.processEvents()
@@ -90,6 +91,48 @@ class DesktopWorkspaceTests(unittest.TestCase):
         state = self.store.load("desktop")
         self.assertEqual(state.selected_pocket_ids, ["P1"])
         self.assertEqual(state.approvals[0].rationale, "Reviewed in required structure view")
+
+    def test_completed_preparation_cannot_be_restarted_from_setup_panel(self):
+        state = self.store.load("desktop")
+        state.jobs[0].stage = "preparation_and_pocket_detection"
+        state.jobs[0].status = JobStatus.COMPLETED
+        state.decisions.clear()
+        self.store.save(state)
+        self.window.host_client = object()
+        self.window.refresh()
+        self.assertFalse(self.window.start_preparation_button.isEnabled())
+
+    def test_setup_panel_submits_only_explicit_noninteractive_options(self):
+        class FakeHost:
+            def __init__(self):
+                self.calls = []
+
+            def request(self, study_id, operation, payload, *, expected_revision):
+                self.calls.append((study_id, operation, payload, expected_revision))
+                return {"status": "applied"}
+
+        controller = StudyController(self.store)
+        controller.create_study("setup", "Setup study")
+        receptor = self.root / "input receptor.pdb"
+        receptor.write_text("ATOM\n")
+        host = FakeHost()
+        from PyQt5 import QtCore
+        settings = QtCore.QSettings(str(self.root / "setup.ini"), QtCore.QSettings.IniFormat)
+        window = StudyWindow(self.store, "setup", settings=settings, host_client=host)
+        try:
+            window.input_pdb.setText(str(receptor))
+            window.output_directory.setText(str(self.root / "output directory"))
+            window.detail.setCurrentText("Teaching")
+            window.start_preparation()
+            self.assertEqual(len(host.calls), 1)
+            study_id, operation, payload, revision = host.calls[0]
+            self.assertEqual((study_id, operation), ("setup", "start_receptor_preparation"))
+            self.assertEqual(payload["site_mode"], "pockets")
+            self.assertEqual(payload["feedback_level"], "verbose")
+            self.assertEqual(revision, self.store.load("setup").revision)
+            self.assertNotIn("command", payload)
+        finally:
+            window.close()
 
 
 if __name__ == "__main__":
