@@ -4,7 +4,10 @@ from pathlib import Path
 
 from docking_universal.protocol_finalization import (
     FinalizationSettings,
+    ProtocolRecordInputs,
     ProtocolFinalizationRequest,
+    build_protocol_record,
+    build_site_guided_report_manifest,
     publish_final_outputs,
     selected_region_records,
 )
@@ -96,6 +99,35 @@ class ProtocolFinalizationTests(unittest.TestCase):
         )
         self.assertTrue(outputs.protocol.is_file())
         self.assertEqual(set(outputs.sha256), {"protocol", "report", "bundle"})
+
+    def test_shared_builders_preserve_protocol_and_report_contracts(self):
+        box = self.box(1)
+        regions = selected_region_records([box], [{"label": "P1", "path": box}])
+        protocol = build_protocol_record(ProtocolRecordInputs(
+            protocol_type="site-guided-exploratory", target="target",
+            site_anchor="target_pocket1", evidence_basis="reviewed P1",
+            created_utc="2026-09-12T12:00:00+00:00", engine="vina",
+            software={"docking_universal": "test"}, region_definition="fpocket",
+            fpocket_selection="reviewed", pocket_evidence={"status": "completed"},
+            selected_residues=[], engine_selection={"selected_engine": "vina"},
+            parameters=FinalizationSettings().protocol_parameters(),
+            receptor_pdbqt=self.receptor_pdbqt, receptor_pdb=self.receptor_pdb,
+            regions=regions, selectable_boxes=[{"label": "P1"}],
+            docking_box=regions[0]["geometry"], receptor_preparation={},
+            receptor_preparation_summary="Strict Meeko succeeded",
+            cavity_score_threshold_used=0.1, pocket_review_scene="review.pml",
+            bundle_file_name="target.duprotocol",
+        ))
+        self.assertEqual(protocol["schema_status"], "stable_v1")
+        self.assertEqual(protocol["locked_inputs"]["boxes"], regions)
+        self.assertFalse(protocol["unknown_docking_allowed"])
+        manifest = build_site_guided_report_manifest(
+            protocol, self.source, "1.0", {"engine_version": "recorded when screening runs"},
+        )
+        self.assertEqual(manifest["selected_docking_regions"], regions)
+        self.assertEqual(manifest["configured_docking_parameters"], protocol["parameters"])
+        self.assertEqual(manifest["protocol_validation_status"],
+                         "Site-guided exploratory protocol; not evaluated by bound-ligand control")
 
 
 if __name__ == "__main__":

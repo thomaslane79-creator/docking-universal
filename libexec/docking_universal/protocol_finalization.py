@@ -22,6 +22,127 @@ class FinalizationOutputs:
     sha256: Mapping[str, str]
 
 
+@dataclass(frozen=True)
+class ProtocolRecordInputs:
+    protocol_type: str
+    target: str
+    site_anchor: str
+    evidence_basis: str
+    created_utc: str
+    engine: str
+    software: Mapping[str, Any]
+    region_definition: str
+    fpocket_selection: str | None
+    pocket_evidence: Mapping[str, Any]
+    selected_residues: Sequence[str]
+    engine_selection: Mapping[str, Any]
+    parameters: Mapping[str, Any]
+    receptor_pdbqt: Path
+    receptor_pdb: Path
+    regions: Sequence[Mapping[str, Any]]
+    selectable_boxes: Sequence[Mapping[str, Any]]
+    docking_box: Mapping[str, Any]
+    receptor_preparation: Mapping[str, Any]
+    receptor_preparation_summary: str
+    cavity_score_threshold_used: float | None
+    pocket_review_scene: str | None
+    bundle_file_name: str
+
+
+def build_protocol_record(inputs: ProtocolRecordInputs) -> dict[str, Any]:
+    """Build the stable-v1 protocol mapping shared by CLI and GUI clients."""
+    if not inputs.regions:
+        raise ValueError("A protocol record requires at least one approved docking region")
+    first = inputs.regions[0]
+    return {
+        "schema_name": "docking-universal-protocol",
+        "schema_version": 1,
+        "schema_status": "stable_v1",
+        "protocol_type": inputs.protocol_type,
+        "target": inputs.target,
+        "site_anchor": inputs.site_anchor,
+        "evidence_basis": inputs.evidence_basis,
+        "screening_authority": "user-confirmed-exploratory-use",
+        "created_utc": inputs.created_utc,
+        "control_status": "not_performed",
+        "unknown_docking_allowed": False,
+        "exploratory_screening_allowed": True,
+        "engine": inputs.engine,
+        "software": dict(inputs.software),
+        "region_definition": inputs.region_definition,
+        "fpocket_selection": inputs.fpocket_selection,
+        "pdb_pocket_evidence": dict(inputs.pocket_evidence),
+        "selected_residues": list(inputs.selected_residues),
+        "engine_selection": dict(inputs.engine_selection),
+        "parameters": dict(inputs.parameters),
+        "locked_inputs": {
+            "receptor": str(inputs.receptor_pdbqt),
+            "receptor_sha256": sha256(inputs.receptor_pdbqt),
+            "receptor_pdb": str(inputs.receptor_pdb),
+            "box": str(first["box"]),
+            "box_sha256": first["box_sha256"],
+            "boxes": list(inputs.regions),
+        },
+        "docking_regions": list(inputs.regions),
+        "selectable_docking_boxes": list(inputs.selectable_boxes),
+        "docking_box": dict(inputs.docking_box),
+        "receptor_preparation": dict(inputs.receptor_preparation),
+        "receptor_preparation_summary": inputs.receptor_preparation_summary,
+        "cavity_score_threshold_used": inputs.cavity_score_threshold_used,
+        "pocket_review_scene": inputs.pocket_review_scene,
+        "bundle_file_name": inputs.bundle_file_name,
+        "scientific_scope": {
+            "purpose": "reusable exploratory site definition",
+            "does_not_establish": [
+                "pose-recovery validation", "binding affinity accuracy", "biological activity",
+            ],
+        },
+    }
+
+
+def build_site_guided_report_manifest(
+    protocol: Mapping[str, Any],
+    source_structure: Path | str,
+    docking_universal_version: str,
+    scientific_software: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Build the existing report manifest without changing report content."""
+    return {
+        "schema_name": "docking-universal-study",
+        "schema_version": 1,
+        "workflow": "exploratory",
+        "study_name": (
+            f"{protocol['target']}_{protocol['protocol_type']}_{protocol['engine']}_"
+            f"{str(protocol['created_utc'])[:10]}"
+        ),
+        "study_status": "EXPLORATORY_NO_CONTROL",
+        "completion_status": "COMPLETED",
+        "created_utc": protocol["created_utc"],
+        "target": protocol["target"],
+        "target_source": str(source_structure),
+        "compound_count": 0,
+        "cavity_score_threshold_used": protocol.get("cavity_score_threshold_used"),
+        "protocol_type": protocol["protocol_type"],
+        "protocol_validation_status": (
+            "Site-guided exploratory protocol; not evaluated by bound-ligand control"
+        ),
+        "region_definition": protocol["region_definition"],
+        "fpocket_selection": protocol.get("fpocket_selection"),
+        "pdb_pocket_evidence": protocol["pdb_pocket_evidence"],
+        "engine_selection": protocol["engine_selection"],
+        "configured_engine": protocol["engine"],
+        "configured_engine_version": "recorded when screening runs",
+        "bundle_file_name": protocol["bundle_file_name"],
+        "configured_docking_parameters": protocol["parameters"],
+        "configured_locked_inputs": protocol["locked_inputs"],
+        "selected_docking_regions": protocol["docking_regions"],
+        "selectable_docking_boxes": protocol["selectable_docking_boxes"],
+        "docking_universal_version": docking_universal_version,
+        "scientific_software": dict(scientific_software),
+        "compounds": [],
+    }
+
+
 def write_protocol_record(path: Path | str, protocol: Mapping[str, Any]) -> Path:
     """Atomically write the stable protocol record used by reports and bundles."""
     destination = Path(path)

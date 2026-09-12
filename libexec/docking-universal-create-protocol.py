@@ -43,6 +43,9 @@ from docking_universal.services.pocket_review import (  # noqa: E402
 )
 from docking_universal.protocol_finalization import (  # noqa: E402
     FinalizationSettings,
+    ProtocolRecordInputs,
+    build_protocol_record,
+    build_site_guided_report_manifest,
     publish_final_outputs,
     selected_region_records as build_selected_region_records,
     write_protocol_record,
@@ -1153,16 +1156,7 @@ def main():
     removed_components = read_removal_manifest(removal_manifest)
     modification_warning = build_receptor_modification_warning(removed_components, bool(removal_record))
     ligand_pdb = ligand["path"] if ligand else None
-    protocol = {
-        "schema_name": "docking-universal-protocol", "schema_version": 1, "schema_status": "stable_v1",
-        "protocol_type": kind, "target": target, "site_anchor": ligand["resname"] if ligand else Path(selected_box).stem,
-        "evidence_basis": evidence_basis, "screening_authority": "user-confirmed-exploratory-use",
-        "created_utc": date, "control_status": "not_performed", "unknown_docking_allowed": False,
-        "exploratory_screening_allowed": True, "engine": engine,
-        "software": scientific_software_record(engine),
-        "region_definition": region_definition,
-        "fpocket_selection": fpocket_selection,
-        "pdb_pocket_evidence": {
+    pocket_evidence_record = {
             "mode": pocket_evidence_mode,
             "status": "completed" if pocket_evidence else ("failed" if pocket_evidence_error else "not_requested"),
             "record": str(prep_root / "cavity" / "pdb_site_evidence" / "pdb_ligand_site_evidence.json") if pocket_evidence else None,
@@ -1174,24 +1168,14 @@ def main():
             "user_evidence_decision": evidence_selection,
             "error": pocket_evidence_error,
             "selection_policy": "evidence_only_user_decides",
-        },
-        "selected_residues": selected_residues if region_definition == REGION_RESIDUES else [],
-        "engine_selection": engine_selection,
-        "parameters": FinalizationSettings(
+    }
+    parameters = FinalizationSettings(
             engine=engine, ph=args.ph, conformers=args.conformers,
             seed_count=args.seeds, base_seed=args.base_seed,
             exhaustiveness=args.exhaustiveness, num_modes=args.num_modes,
             energy_range=args.energy_range,
-        ).protocol_parameters(),
-        "locked_inputs": {
-            "receptor": str(receptor_pdbqt), "receptor_sha256": sha256(receptor_pdbqt),
-            "receptor_pdb": str(receptor_pdb), "box": str(selected_box), "box_sha256": sha256(selected_box),
-            "boxes": selected_region_records,
-        },
-        "docking_regions": selected_region_records,
-        "selectable_docking_boxes": selectable_box_records,
-        "docking_box": {key: values.get(key, "not recorded") for key in ("center_x", "center_y", "center_z", "size_x", "size_y", "size_z")},
-        "receptor_preparation": {
+        ).protocol_parameters()
+    receptor_preparation = {
             "pdbfixer_audit": str(audit) if audit else None,
             "ccd_modification_audit": str(ccd_audit) if ccd_audit else None,
             "user_approved_component_removal": bool(removal_record),
@@ -1200,13 +1184,25 @@ def main():
             "user_approved_component_removal_manifest": str(removal_manifest) if removal_manifest else None,
             "user_approved_removed_components": removed_components,
             "receptor_modification_warning": modification_warning,
-        },
-        "receptor_preparation_summary": preparation_summary(prep_root),
-        "cavity_score_threshold_used": score_threshold_used,
-        "pocket_review_scene": pocket_review_scene,
-        "bundle_file_name": bundle_name,
-        "scientific_scope": {"purpose": "reusable exploratory site definition", "does_not_establish": ["pose-recovery validation", "binding affinity accuracy", "biological activity"]},
     }
+    protocol = build_protocol_record(ProtocolRecordInputs(
+        protocol_type=kind, target=target,
+        site_anchor=ligand["resname"] if ligand else Path(selected_box).stem,
+        evidence_basis=evidence_basis, created_utc=date, engine=engine,
+        software=scientific_software_record(engine), region_definition=region_definition,
+        fpocket_selection=fpocket_selection, pocket_evidence=pocket_evidence_record,
+        selected_residues=selected_residues if region_definition == REGION_RESIDUES else [],
+        engine_selection=engine_selection, parameters=parameters,
+        receptor_pdbqt=receptor_pdbqt, receptor_pdb=receptor_pdb,
+        regions=selected_region_records, selectable_boxes=selectable_box_records,
+        docking_box={key: values.get(key, "not recorded") for key in (
+            "center_x", "center_y", "center_z", "size_x", "size_y", "size_z",
+        )},
+        receptor_preparation=receptor_preparation,
+        receptor_preparation_summary=preparation_summary(prep_root),
+        cavity_score_threshold_used=score_threshold_used,
+        pocket_review_scene=pocket_review_scene, bundle_file_name=bundle_name,
+    ))
     protocol_path = study / f"{base}_protocol.json"
     write_protocol_record(protocol_path, protocol)
     announce_stage(6, 6, "Rendering figures, assembling the PDF, and packaging the protocol")
@@ -1228,23 +1224,8 @@ def main():
         report_pdf = report / f"{base}_protocol_report.pdf"
         write_ligand_guided_pdf(report_pdf, protocol, figure)
     else:
-        manifest = {
-            "schema_name": "docking-universal-study", "schema_version": 1, "workflow": "exploratory",
-            "study_name": base, "study_status": "EXPLORATORY_NO_CONTROL", "completion_status": "COMPLETED",
-            "created_utc": date, "target": target, "target_source": str(local_structure), "compound_count": 0,
-            "cavity_score_threshold_used": score_threshold_used,
-            "protocol_type": kind, "protocol_validation_status": "Site-guided exploratory protocol; not evaluated by bound-ligand control",
-            "region_definition": region_definition,
-            "fpocket_selection": fpocket_selection,
-            "pdb_pocket_evidence": protocol["pdb_pocket_evidence"],
-            "engine_selection": engine_selection,
-            "configured_engine": engine, "configured_engine_version": "recorded when screening runs",
-            "bundle_file_name": bundle_name,
-            "configured_docking_parameters": protocol["parameters"], "configured_locked_inputs": protocol["locked_inputs"],
-            "selected_docking_regions": selected_region_records,
-            "selectable_docking_boxes": selectable_box_records,
-            "docking_universal_version": package_version(),
-            "scientific_software": {
+        manifest = build_site_guided_report_manifest(
+            protocol, local_structure, package_version(), {
                 "docking_universal": package_version(),
                 "python": sys.version.split()[0],
                 "meeko": distribution_version("meeko"),
@@ -1253,8 +1234,7 @@ def main():
                 "rdkit": distribution_version("rdkit"),
                 "engine_version": "recorded when screening runs",
             },
-            "compounds": [],
-        }
+        )
         report_pdf = write_site_guided_report(cli, study, manifest)
     outputs = publish_final_outputs(
         protocol_path, protocol, report_pdf, study / bundle_name, study,
