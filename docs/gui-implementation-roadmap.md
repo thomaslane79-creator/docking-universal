@@ -4,12 +4,24 @@ Status: proposed implementation design, 2026-09-12. No GUI toolkit is selected
 yet. This document refines the existing architecture plan and takes precedence
 for toolkit selection, process ownership, viewer integration, and sequencing.
 
-Implementation status: task 01 is implemented by the read-only
+Implementation status (2026-09-12): task 01 is implemented by the read-only
 `docking-universal runtime-inventory` command and recorded in the
 [2026-09-12 macOS arm64 audit](runtime-inventory-audit-2026-09-12.md). Task 02
-has a working restricted bridge for controller-driven selection, box, camera,
-and relaunch replay. Its [spike record](pymol-interaction-spike.md) identifies
-the remaining manual mouse-pick and real-pocket acceptance checks.
+has a working restricted bridge for controller-driven selection, structured
+residue picking, box, camera, real fpocket layers, GUI-thread dispatch and
+relaunch replay. Its [spike record](pymol-interaction-spike.md) retains the
+remaining literal human mouse-click acceptance check.
+
+Task 03 selected the already-installed Qt 5/PyQt5 stack for the initial client;
+the rationale and remaining platform packaging checks are in the
+[toolkit decision](gui-toolkit-decision.md). Tasks 04-08 now have an implemented
+foundation: revisioned/locked state, a sole serialized JSON-lines host,
+idempotent approvals, crash reconciliation, one application-wide scientific
+job slot, explicit stage transitions, viewer-neutral identity/selection/message
+contracts, a supervised PyMOL adapter, a read-only dockable desktop, and a
+noninteractive service boundary for the existing bash receptor-preparation
+engine. Tasks 09-11 remain future integration work. The implemented foundations
+do not claim a complete end-to-end GUI workflow.
 
 ## Product contract
 
@@ -224,8 +236,9 @@ and unresolved findings. Escalate when a contract must change, the Mac bridge
 fails, or scientific semantics are unclear. Do not repeatedly re-audit the
 whole repository for routine widget implementation.
 
-This plan changes documentation only. No dependency installation, runtime
-migration, GUI implementation or report modification is implied as completed.
+Implementation follows this plan incrementally. No dependency installation,
+runtime migration, report modification, complete workflow, or flexible-docking
+support is implied beyond the status explicitly recorded above.
 
 ## References
 

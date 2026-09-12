@@ -51,6 +51,7 @@ Analysis:
   interactions Generate PLIP reports and an all-in-one PyMOL scene
 
 Visualization:
+  desktop       Open the dockable scientific-workflow workspace
   render3d      Render an existing PML or coordinate file with headless PyMOL
   depict2d      Create generic 2D PNG/SVG depictions from coordinate files
 
@@ -168,6 +169,10 @@ case "$command_name" in
   runtime-inventory)
     shift
     exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-runtime-inventory.py" "$@"
+    ;;
+  desktop)
+    shift
+    exec "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-desktop.py" "$@"
     ;;
   validate)
     shift
