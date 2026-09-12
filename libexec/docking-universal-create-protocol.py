@@ -43,7 +43,9 @@ from docking_universal.services.pocket_review import (  # noqa: E402
 )
 from docking_universal.protocol_finalization import (  # noqa: E402
     FinalizationSettings,
+    publish_final_outputs,
     selected_region_records as build_selected_region_records,
+    write_protocol_record,
 )
 from docking_universal_pocket_evidence import (  # noqa: E402
     collect_pocket_evidence,
@@ -1206,7 +1208,7 @@ def main():
         "scientific_scope": {"purpose": "reusable exploratory site definition", "does_not_establish": ["pose-recovery validation", "binding affinity accuracy", "biological activity"]},
     }
     protocol_path = study / f"{base}_protocol.json"
-    protocol_path.write_text(json.dumps(protocol, indent=2) + "\n")
+    write_protocol_record(protocol_path, protocol)
     announce_stage(6, 6, "Rendering figures, assembling the PDF, and packaging the protocol")
     figure = render_box_figure(
         cli,
@@ -1221,7 +1223,7 @@ def main():
         protocol["pymol_version"] = command_version([
             sys.executable, "-c", "from pymol import cmd; print(cmd.get_version()[0])",
         ])
-        protocol_path.write_text(json.dumps(protocol, indent=2) + "\n")
+        write_protocol_record(protocol_path, protocol)
     if kind == LIGAND_GUIDED_EXPLORATORY:
         report_pdf = report / f"{base}_protocol_report.pdf"
         write_ligand_guided_pdf(report_pdf, protocol, figure)
@@ -1254,7 +1256,11 @@ def main():
             "compounds": [],
         }
         report_pdf = write_site_guided_report(cli, study, manifest)
-    bundle = create_bundle(protocol_path, study, study / bundle_name)
+    outputs = publish_final_outputs(
+        protocol_path, protocol, report_pdf, study / bundle_name, study,
+        create_bundle,
+    )
+    bundle = outputs.bundle
     print("\nSelected protocol:")
     print(f"  Target: {target}")
     print(f"  Protocol type: {protocol_type_label(kind)}")

@@ -3,12 +3,70 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
+import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from .state import StudyState
+
+
+@dataclass(frozen=True)
+class FinalizationOutputs:
+    protocol: Path
+    report: Path
+    bundle: Path
+    sha256: Mapping[str, str]
+
+
+def write_protocol_record(path: Path | str, protocol: Mapping[str, Any]) -> Path:
+    """Atomically write the stable protocol record used by reports and bundles."""
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w") as handle:
+            json.dump(protocol, handle, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+    return destination
+
+
+def publish_final_outputs(
+    protocol_path: Path | str,
+    protocol: Mapping[str, Any],
+    report_path: Path | str,
+    bundle_path: Path | str,
+    bundle_root: Path | str,
+    bundle_writer: Callable[[Path, Path, Path], Path],
+) -> FinalizationOutputs:
+    """Publish and verify the three required final protocol artifacts."""
+    protocol_file = write_protocol_record(protocol_path, protocol)
+    report_file = Path(report_path)
+    if not report_file.is_file():
+        raise FileNotFoundError(f"Final protocol report was not created: {report_file}")
+    bundle_file = Path(bundle_writer(protocol_file, Path(bundle_root), Path(bundle_path)))
+    if not bundle_file.is_file():
+        raise FileNotFoundError(f"Final protocol bundle was not created: {bundle_file}")
+    return FinalizationOutputs(
+        protocol_file.resolve(), report_file.resolve(), bundle_file.resolve(),
+        {
+            "protocol": sha256(protocol_file),
+            "report": sha256(report_file),
+            "bundle": sha256(bundle_file),
+        },
+    )
 
 def sha256(path: Path | str) -> str:
     digest = hashlib.sha256()

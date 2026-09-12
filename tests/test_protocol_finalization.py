@@ -5,6 +5,7 @@ from pathlib import Path
 from docking_universal.protocol_finalization import (
     FinalizationSettings,
     ProtocolFinalizationRequest,
+    publish_final_outputs,
     selected_region_records,
 )
 
@@ -76,6 +77,25 @@ class ProtocolFinalizationTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "explicit approval"):
             request.validate()
+
+    def test_output_publication_requires_and_hashes_all_three_artifacts(self):
+        protocol_path = self.root / "final" / "protocol.json"
+        report = self.root / "final" / "report.pdf"
+        bundle = self.root / "final" / "protocol.duprotocol"
+        report.parent.mkdir()
+        report.write_bytes(b"PDF")
+
+        def bundle_writer(written_protocol, _root, destination):
+            self.assertEqual(written_protocol, protocol_path)
+            destination.write_bytes(b"BUNDLE")
+            return destination
+
+        outputs = publish_final_outputs(
+            protocol_path, {"schema_name": "docking-universal-protocol"},
+            report, bundle, self.root, bundle_writer,
+        )
+        self.assertTrue(outputs.protocol.is_file())
+        self.assertEqual(set(outputs.sha256), {"protocol", "report", "bundle"})
 
 
 if __name__ == "__main__":
