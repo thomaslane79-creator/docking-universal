@@ -130,6 +130,8 @@ class Job:
     finished_at: str | None = None
     progress: float = 0.0
     error: str | None = None
+    request_id: str | None = None
+    process_id: int | None = None
 
 
 def record_to_dict(record: Any) -> dict[str, Any]:

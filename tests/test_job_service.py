@@ -8,7 +8,7 @@ from pathlib import Path
 from docking_universal.application import ActiveStageError, StudyController
 from docking_universal.jobs import JobService
 from docking_universal.models import CompletionStatus, JobStatus
-from docking_universal.processes import ProcessRequest, ProcessStatus
+from docking_universal.processes import ProcessExecutionError, ProcessRequest, ProcessStatus
 from docking_universal.state import JsonStudyStore
 
 
@@ -37,7 +37,8 @@ class JobServiceTests(unittest.TestCase):
         state = self.controller.get_study("job-study")
         self.assertEqual(result.status, ProcessStatus.COMPLETED)
         self.assertEqual(state.jobs[0].status, JobStatus.COMPLETED)
-        self.assertEqual(state.completion_status, CompletionStatus.COMPLETED)
+        self.assertEqual(state.completion_status, CompletionStatus.RUNNING)
+        self.assertEqual(state.workflow_data["next_stage"], "pocket_review")
         self.assertIsNone(state.active_job)
         self.assertEqual(Path(result.stdout_log).read_text(), "candidate summary\n")
         self.assertEqual({artifact.kind for artifact in state.artifacts}, {"job_stdout_log", "job_stderr_log"})
@@ -86,6 +87,49 @@ class JobServiceTests(unittest.TestCase):
         cancel.set()
         worker.join(3)
         self.assertFalse(worker.is_alive())
+
+    def test_one_scientific_slot_is_shared_across_studies(self):
+        self.controller.create_study("other-study", "Other study")
+        cancel = threading.Event()
+        worker = threading.Thread(
+            target=JobService(self.controller).run,
+            args=("job-study", "long_stage", self.request("import time; time.sleep(10)", "global")),
+            kwargs={"cancel_event": cancel},
+        )
+        worker.start()
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and self.controller.get_study("job-study").active_job is None:
+            time.sleep(0.02)
+        with self.assertRaises(ActiveStageError):
+            JobService(self.controller).run(
+                "other-study", "other", self.request("print('must not run')", "global-other")
+            )
+        cancel.set()
+        worker.join(3)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(self.controller.get_study("other-study").jobs, [])
+
+    def test_zero_exit_without_required_artifact_is_a_failure(self):
+        missing = self.root / "expected-output.json"
+        result = JobService(self.controller).run(
+            "job-study", "analysis", self.request("print('done')", "missing-output"),
+            required_outputs=(missing,),
+        )
+        state = self.controller.get_study("job-study")
+        self.assertEqual(result.status, ProcessStatus.FAILED)
+        self.assertEqual(state.jobs[0].status, JobStatus.FAILED)
+        self.assertIn("Required stage output", state.jobs[0].error)
+
+    def test_checked_process_exception_still_persists_terminal_failure(self):
+        request = ProcessRequest(
+            command=(sys.executable, "-c", "raise SystemExit(4)"),
+            log_directory=self.root / "logs", log_name="checked", check=True,
+        )
+        with self.assertRaises(ProcessExecutionError):
+            JobService(self.controller).run("job-study", "checked_stage", request)
+        state = self.controller.get_study("job-study")
+        self.assertEqual(state.jobs[0].status, JobStatus.FAILED)
+        self.assertIsNone(state.active_job)
 
 
 if __name__ == "__main__":

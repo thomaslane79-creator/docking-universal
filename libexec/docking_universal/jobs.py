@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import threading
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover
+    fcntl = None
 
 from .application import ActiveStageError, StudyController
 from .events import EventType
 from .models import ArtifactRecord, CompletionStatus, Job, JobStatus, utc_now
-from .processes import ProcessOutput, ProcessRequest, ProcessResult, ProcessRunner, ProcessStatus
+from .processes import ProcessExecutionError, ProcessOutput, ProcessRequest, ProcessResult, ProcessRunner, ProcessStatus
+from .workflow import record_stage_completion
 
 
 class JobService:
@@ -27,6 +34,23 @@ class JobService:
         *,
         cancel_event: threading.Event | None = None,
         on_output: Callable[[ProcessOutput], None] | None = None,
+        required_outputs: tuple[Path | str, ...] = (),
+    ) -> ProcessResult:
+        with _ScientificJobLease(self.controller.store):
+            return self._run_owned(
+                study_id, stage, request, cancel_event=cancel_event,
+                on_output=on_output, required_outputs=required_outputs,
+            )
+
+    def _run_owned(
+        self,
+        study_id: str,
+        stage: str,
+        request: ProcessRequest,
+        *,
+        cancel_event: threading.Event | None,
+        on_output: Callable[[ProcessOutput], None] | None,
+        required_outputs: tuple[Path | str, ...],
     ) -> ProcessResult:
         state = self.controller.get_study(study_id)
         if state.active_job:
@@ -53,6 +77,9 @@ class JobService:
 
         try:
             result = self.runner.run(request, cancel_event=cancel_event, on_output=on_output)
+        except ProcessExecutionError as exc:
+            self._finish(study_id, job.id, request, exc.result)
+            raise
         except OSError as exc:
             # A missing executable is a structured stage failure, not an
             # untracked exception in a GUI worker.
@@ -65,7 +92,17 @@ class JobService:
             self._finish_spawn_failure(study_id, job.id, request, exc, stdout_log, stderr_log)
             raise
 
+        if result.status is ProcessStatus.COMPLETED:
+            missing = [str(Path(path)) for path in required_outputs if not Path(path).is_file()]
+            if missing:
+                message = "Required stage output was not created: " + ", ".join(missing)
+                stderr_log = Path(result.stderr_log)
+                with stderr_log.open("a") as handle:
+                    handle.write(message + "\n")
+                result = replace(result, status=ProcessStatus.FAILED, returncode=1, stderr_tail=message)
         self._finish(study_id, job.id, request, result)
+        if request.check and result.status is not ProcessStatus.COMPLETED:
+            raise ProcessExecutionError(result)
         return result
 
     def _finish_spawn_failure(
@@ -101,7 +138,7 @@ class JobService:
         job.finished_at = result.finished_at
         job.progress = 1.0 if result.status is ProcessStatus.COMPLETED else job.progress
         status_map = {
-            ProcessStatus.COMPLETED: (JobStatus.COMPLETED, CompletionStatus.COMPLETED),
+            ProcessStatus.COMPLETED: (JobStatus.COMPLETED, CompletionStatus.RUNNING),
             ProcessStatus.FAILED: (JobStatus.FAILED, CompletionStatus.FAILED),
             ProcessStatus.CANCELLED: (JobStatus.CANCELLED, CompletionStatus.CANCELLED),
             ProcessStatus.TIMED_OUT: (JobStatus.INTERRUPTED, CompletionStatus.INTERRUPTED),
@@ -114,6 +151,7 @@ class JobService:
         stderr_log = Path(result.stderr_log)
         self._add_log_artifacts(state, job, request, stdout_log, stderr_log)
         if result.status is ProcessStatus.COMPLETED:
+            record_stage_completion(state, job.stage)
             StudyController._event(
                 state,
                 EventType.STAGE_COMPLETED,
@@ -159,3 +197,49 @@ class JobService:
                 description=f"Complete {job.stage} {suffix} log",
                 metadata={"job_id": job.id, "command_log_name": request.log_name},
             ))
+
+
+class _ScientificJobLease:
+    """One scientific process across all studies in an application workspace."""
+
+    _registry_guard = threading.Lock()
+    _locks: dict[str, threading.Lock] = {}
+
+    def __init__(self, store):
+        self.store = store
+        self.path = store.root / ".scientific-job.lock"
+        self.handle = None
+        key = str(store.root.resolve())
+        with self._registry_guard:
+            self.thread_lock = self._locks.setdefault(key, threading.Lock())
+
+    def __enter__(self):
+        if not self.thread_lock.acquire(blocking=False):
+            raise ActiveStageError("Another scientific stage is already running in this application")
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.handle = self.path.open("a+")
+            if fcntl is not None:
+                try:
+                    fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError as exc:
+                    raise ActiveStageError("Another scientific stage is already running in this application") from exc
+            for path in self.store.root.glob("*/application_state.json"):
+                state = self.store.load(path.parent.name)
+                if state.active_job:
+                    raise ActiveStageError(
+                        f"Study {state.study_id} already has an active stage: {state.active_job.stage}"
+                    )
+            return self
+        except Exception:
+            self.__exit__(None, None, None)
+            raise
+
+    def __exit__(self, *_error):
+        if self.handle is not None:
+            if fcntl is not None:
+                fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
+            self.handle.close()
+            self.handle = None
+        if self.thread_lock.locked():
+            self.thread_lock.release()

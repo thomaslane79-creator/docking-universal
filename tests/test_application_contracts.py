@@ -52,7 +52,8 @@ class ApplicationContractTests(unittest.TestCase):
         completed = restarted.get_study("study-1")
         self.assertEqual(approval.method, "explicit_user")
         self.assertEqual(completed.selected_pocket_ids, ["pocket-1", "pocket-2"])
-        self.assertEqual(completed.completion_status, CompletionStatus.COMPLETED)
+        self.assertEqual(completed.completion_status, CompletionStatus.RUNNING)
+        self.assertEqual(completed.workflow_data["next_stage"], "region_approval")
         self.assertEqual(completed.scientific_authority, ScientificAuthority.EXPLORATORY_NO_CONTROL)
         self.assertIsNone(completed.active_job)
 
@@ -120,6 +121,14 @@ class ApplicationContractTests(unittest.TestCase):
         with self.assertRaises(ExplicitApprovalRequired):
             self.controller.resolve_decision(
                 "study-1", "model-change", ("remove",), actor="policy", policy_id="policy-unsafe"
+            )
+
+    def test_client_cannot_claim_an_unpersisted_automation_policy(self):
+        decision = self.controller.start_simulated_pocket_review("study-1", candidates())
+        with self.assertRaisesRegex(ExplicitApprovalRequired, "enabled persisted"):
+            self.controller.resolve_decision(
+                "study-1", decision.id, ("pocket-1",), actor="policy",
+                policy_id="invented-policy",
             )
 
     def test_receptor_contract_supports_rigid_now_and_flexible_later(self):

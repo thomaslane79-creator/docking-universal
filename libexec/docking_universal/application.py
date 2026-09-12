@@ -9,6 +9,7 @@ from .decisions import ApprovalRecord, DecisionOption, DecisionRequired, Decisio
 from .events import EventType, ScientificDetail, WorkflowEvent
 from .models import ArtifactRecord, CompletionStatus, Job, JobStatus, PocketCandidate, ScientificAuthority, record_to_dict, utc_now
 from .state import JsonStudyStore, StudyState
+from .workflow import record_stage_completion
 
 
 class ActiveStageError(RuntimeError):
@@ -25,8 +26,18 @@ class StudyController:
     def __init__(self, store: JsonStudyStore):
         self.store = store
 
-    def create_study(self, study_id: str, name: str, workflow: str = "site_guided_protocol") -> StudyState:
-        return self.store.create(StudyState(study_id=study_id, name=name, workflow=workflow))
+    def create_study(
+        self,
+        study_id: str,
+        name: str,
+        workflow: str = "site_guided_protocol",
+        *,
+        request_id: str | None = None,
+    ) -> StudyState:
+        workflow_data = {"creation_request_id": request_id} if request_id else {}
+        return self.store.create(StudyState(
+            study_id=study_id, name=name, workflow=workflow, workflow_data=workflow_data,
+        ))
 
     def get_study(self, study_id: str) -> StudyState:
         return self.store.load(study_id)
@@ -51,9 +62,20 @@ class StudyController:
         review_artifact_ids: tuple[str, ...] = (),
         source: dict | None = None,
         automation: AutomationPolicy | None = None,
+        request_id: str | None = None,
+        expected_revision: int | None = None,
     ) -> DecisionRequired:
         """Start a review from real or simulated candidate artifact records."""
         state = self.get_study(study_id)
+        if request_id:
+            prior = state.workflow_data.get("pocket_review_requests", {}).get(request_id)
+            if prior:
+                return self.get_decision(study_id, prior)
+        if expected_revision is not None and state.revision != expected_revision:
+            from .state import RevisionConflictError
+            raise RevisionConflictError(
+                f"Study {study_id} changed from revision {expected_revision} to {state.revision}"
+            )
         if state.active_job:
             raise ActiveStageError(f"Study {study_id} already has an active stage: {state.active_job.stage}")
         if not candidates:
@@ -65,6 +87,7 @@ class StudyController:
             status=JobStatus.RUNNING,
             started_at=utc_now(),
             progress=0.0,
+            request_id=request_id,
         )
         state.jobs.append(job)
         state.current_stage = job.stage
@@ -127,6 +150,8 @@ class StudyController:
             automation_eligible=True,
         )
         state.decisions.append(decision)
+        if request_id:
+            state.workflow_data.setdefault("pocket_review_requests", {})[request_id] = decision.id
         job.status = JobStatus.WAITING_FOR_DECISION
         state.completion_status = CompletionStatus.WAITING_FOR_DECISION
         self._event(
@@ -170,8 +195,19 @@ class StudyController:
         actor: str,
         rationale: str | None = None,
         policy_id: str | None = None,
+        request_id: str | None = None,
+        expected_revision: int | None = None,
     ) -> ApprovalRecord:
         state = self.get_study(study_id)
+        if request_id:
+            replay = next((item for item in state.approvals if item.request_id == request_id), None)
+            if replay is not None:
+                return replay
+        if expected_revision is not None and state.revision != expected_revision:
+            from .state import RevisionConflictError
+            raise RevisionConflictError(
+                f"Study {study_id} changed from revision {expected_revision} to {state.revision}"
+            )
         decision = next((item for item in state.decisions if item.id == decision_id), None)
         if decision is None:
             raise KeyError(f"Unknown decision: {decision_id}")
@@ -179,6 +215,17 @@ class StudyController:
         method = "automated_policy" if policy_id else "explicit_user"
         if policy_id and decision.requires_explicit_user:
             raise ExplicitApprovalRequired(f"Decision {decision.id} cannot be resolved by automation")
+        if policy_id:
+            persisted = state.workflow_data.get("active_automation_policy")
+            if not isinstance(persisted, dict) or not persisted.get("enabled") or persisted.get("id") != policy_id:
+                raise ExplicitApprovalRequired("Automation policy is not the enabled persisted study policy")
+            rules = {
+                rule.get("decision_kind"): tuple(rule.get("selections", ()))
+                for rule in persisted.get("rules", ()) if isinstance(rule, dict)
+            }
+            options = {option.value: option for option in decision.options}
+            if rules.get(decision.kind) != selections or any(not options[value].automation_eligible for value in selections):
+                raise ExplicitApprovalRequired("Automation policy does not authorize this exact decision response")
 
         approval = ApprovalRecord(
             id=self._id("approval"),
@@ -189,6 +236,7 @@ class StudyController:
             rationale=rationale,
             policy_id=policy_id,
             evidence={"artifact_ids": list(decision.artifact_ids), "decision_created_at": decision.created_at},
+            request_id=request_id,
         )
         state.approvals.append(approval)
         decision.status = DecisionStatus.RESOLVED
@@ -202,7 +250,7 @@ class StudyController:
         job.status = JobStatus.COMPLETED
         job.finished_at = utc_now()
         state.current_stage = None
-        state.completion_status = CompletionStatus.COMPLETED
+        record_stage_completion(state, job.stage)
         self._event(
             state,
             EventType.DECISION_RESOLVED,

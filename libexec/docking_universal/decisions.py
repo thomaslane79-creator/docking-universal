@@ -71,4 +71,5 @@ class ApprovalRecord:
     rationale: str | None = None
     policy_id: str | None = None
     evidence: dict[str, Any] = field(default_factory=dict)
+    request_id: str | None = None
     created_at: str = field(default_factory=utc_now)
