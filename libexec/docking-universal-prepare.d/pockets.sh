@@ -767,13 +767,30 @@ write_ligand_local_fpocket_input() {
 # Protected by: tests/test_fpocket_runner.sh.
 run_fpocket_to_directory() {
   local executable="$1" input_pdb="$2" probe="$3" destination="$4"
-  local natural="${input_pdb%.pdb}_out"
-  rm -rf "$natural" "$destination"
+  local staging_dir staged_input natural status
+  staging_dir=$(mktemp -d "${TMPDIR:-/tmp}/docking-universal-fpocket.XXXXXX")
+  staged_input="$staging_dir/fpocket_input.pdb"
+  natural="$staging_dir/fpocket_input_out"
+  cp "$input_pdb" "$staged_input"
+  rm -rf "$destination"
   if [ -n "$probe" ]; then
-    "$executable" -f "$input_pdb" -m "$probe" >/dev/null
+    "$executable" -f "$staged_input" -m "$probe" >/dev/null || {
+      status=$?
+      rm -rf "$staging_dir"
+      return "$status"
+    }
   else
-    "$executable" -f "$input_pdb" >/dev/null
+    "$executable" -f "$staged_input" >/dev/null || {
+      status=$?
+      rm -rf "$staging_dir"
+      return "$status"
+    }
   fi
-  [ -d "$natural" ] || return 1
-  if [ "$natural" != "$destination" ]; then mv "$natural" "$destination"; fi
+  [ -d "$natural" ] || {
+    rm -rf "$staging_dir"
+    return 1
+  }
+  mkdir -p "$(dirname "$destination")"
+  mv "$natural" "$destination"
+  rm -rf "$staging_dir"
 }

@@ -25,4 +25,18 @@ FPOCKET_ARGS="$tmp/expanded.args" run_fpocket_to_directory "$tmp/fpocket" "$tmp/
 [ -s "$tmp/expanded/pockets/pocket1_atm.pdb" ] || fail "expanded fpocket output was not normalized"
 grep -A1 '^-m$' "$tmp/expanded.args" | grep -q '2.5' || fail "expanded probe value changed"
 
+mkdir -p "$tmp/input path with spaces" "$tmp/output path with spaces"
+printf 'ATOM\n' > "$tmp/input path with spaces/source receptor.pdb"
+FPOCKET_ARGS="$tmp/spaced.args" run_fpocket_to_directory \
+  "$tmp/fpocket" \
+  "$tmp/input path with spaces/source receptor.pdb" \
+  '' \
+  "$tmp/output path with spaces/fpocket result"
+[ -s "$tmp/output path with spaces/fpocket result/pockets/pocket1_atm.pdb" ] || \
+  fail "fpocket input and output paths containing spaces were not staged safely"
+grep -q '/docking-universal-fpocket\.' "$tmp/spaced.args" || \
+  fail "fpocket did not receive the private space-safe staged input"
+! grep -q 'source receptor.pdb' "$tmp/spaced.args" || \
+  fail "fpocket received the unsafe user-facing filename"
+
 printf 'PASS: fpocket runner checks\n'

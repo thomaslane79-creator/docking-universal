@@ -44,10 +44,11 @@ drive replay after relaunch.
   packaging; it did not prevent PyMOL or the bridge from running.
 
 fpocket 4.2.2 failed when asked to derive its output directory from an input
-filename containing spaces. The GUI should stage fpocket inputs under safe
-internal artifact names while retaining the original user path and hash in
-provenance. This does not apply to the PyMOL bridge, which successfully loaded
-the synthetic fixture from a path containing spaces.
+path containing spaces. The shared bash fpocket adapter now runs it in a private
+space-safe staging directory and moves the resulting artifacts to the requested
+study directory. Callers retain the original user path and hash in provenance.
+This does not apply to the PyMOL bridge, which successfully loaded the synthetic
+fixture directly from a path containing spaces.
 
 The visible run contained no `pk1` selection because no manual atom was clicked.
 Consequently literal mouse-pick return is not yet accepted. The next visible
