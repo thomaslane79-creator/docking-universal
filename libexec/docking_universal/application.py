@@ -227,6 +227,7 @@ class StudyController:
             if rules.get(decision.kind) != selections or any(not options[value].automation_eligible for value in selections):
                 raise ExplicitApprovalRequired("Automation policy does not authorize this exact decision response")
 
+        artifacts_by_id = {artifact.id: artifact for artifact in state.artifacts}
         approval = ApprovalRecord(
             id=self._id("approval"),
             decision_id=decision.id,
@@ -235,7 +236,15 @@ class StudyController:
             method=method,
             rationale=rationale,
             policy_id=policy_id,
-            evidence={"artifact_ids": list(decision.artifact_ids), "decision_created_at": decision.created_at},
+            evidence={
+                "artifact_ids": list(decision.artifact_ids),
+                "artifacts": [
+                    record_to_dict(artifacts_by_id[artifact_id])
+                    for artifact_id in decision.artifact_ids if artifact_id in artifacts_by_id
+                ],
+                "decision_created_at": decision.created_at,
+                "study_revision": state.revision,
+            },
             request_id=request_id,
         )
         state.approvals.append(approval)

@@ -137,6 +137,10 @@ class PocketReviewServiceTests(unittest.TestCase):
         state = restarted.get_study("real-review")
         self.assertEqual(state.selected_pocket_ids, ["P2", "L1"])
         self.assertEqual(state.approvals[0].evidence["artifact_ids"], list(decision.artifact_ids))
+        snapshots = state.approvals[0].evidence["artifacts"]
+        self.assertTrue(snapshots)
+        self.assertTrue(all(item["sha256"] for item in snapshots))
+        self.assertGreaterEqual(state.approvals[0].evidence["study_revision"], 1)
 
     def test_missing_required_box_fails_before_creating_a_job(self):
         self.boxes[0].unlink()

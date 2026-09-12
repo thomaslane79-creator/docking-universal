@@ -41,6 +41,10 @@ from docking_universal_pocket_review import (  # noqa: E402
 from docking_universal.services.pocket_review import (  # noqa: E402
     build_labeled_candidate_mappings,
 )
+from docking_universal.protocol_finalization import (  # noqa: E402
+    FinalizationSettings,
+    selected_region_records as build_selected_region_records,
+)
 from docking_universal_pocket_evidence import (  # noqa: E402
     collect_pocket_evidence,
     group_ligand_sites,
@@ -1087,28 +1091,11 @@ def main():
         selected_boxes = [selected_box]
     ligand = choose_ligand(detected_ligands(preparation), args.ligand_resname, not args.non_interactive) if region_definition == REGION_BOUND_LIGAND else None
     values = box_values(selected_box)
-    selected_label_by_path = {
-        str(Path(candidate["path"]).resolve()): candidate["label"]
-        for candidate in labeled_candidates
-    }
-    selected_region_records = [
-        {
-            "site_number": index,
-            "box_label": selected_label_by_path.get(str(Path(path).resolve()), f"Site {index}"),
-            "box": str(path),
-            "box_sha256": sha256(path),
-            "box_name": path.name,
-            "geometry": {key: box_values(path).get(key, "not recorded") for key in (
-                "center_x", "center_y", "center_z", "size_x", "size_y", "size_z"
-            )},
-            "definition_origin": (
-                ("automatic top-ranked fpocket selection" if fpocket_selection == "automatic" else "user-selected labeled candidate")
-                if str(Path(path).resolve()) in selected_label_by_path
-                else ((evidence_selection or {}).get("choice") or "fpocket-or-user-selection")
-            ),
-        }
-        for index, path in enumerate(selected_boxes, 1)
-    ]
+    selected_region_records = build_selected_region_records(
+        selected_boxes, labeled_candidates,
+        automatic=fpocket_selection == "automatic",
+        fallback_origin=(evidence_selection or {}).get("choice") or "fpocket-or-user-selection",
+    )
     if not args.non_interactive:
         print("\nProposed docking boxes:")
         for region in selected_region_records:
@@ -1188,14 +1175,12 @@ def main():
         },
         "selected_residues": selected_residues if region_definition == REGION_RESIDUES else [],
         "engine_selection": engine_selection,
-        "parameters": {
-            "ph": args.ph, "conformers_per_state": args.conformers, "ensemble_seed": args.base_seed,
-            "forcefield": "mmff94", "rmsd_prune_angstrom": 0.75, "tautomers_enumerated": True,
-            "charge_model": "gasteiger", "macrocycle_treatment": "flexible_meeko" if engine == "vina" else "rigid_conformer_ensemble",
-            "exhaustiveness": args.exhaustiveness, "num_modes": args.num_modes,
-            "energy_range_kcal_per_mol": args.energy_range,
-            "seeds": [args.base_seed + index for index in range(args.seeds)],
-        },
+        "parameters": FinalizationSettings(
+            engine=engine, ph=args.ph, conformers=args.conformers,
+            seed_count=args.seeds, base_seed=args.base_seed,
+            exhaustiveness=args.exhaustiveness, num_modes=args.num_modes,
+            energy_range=args.energy_range,
+        ).protocol_parameters(),
         "locked_inputs": {
             "receptor": str(receptor_pdbqt), "receptor_sha256": sha256(receptor_pdbqt),
             "receptor_pdb": str(receptor_pdb), "box": str(selected_box), "box_sha256": sha256(selected_box),
