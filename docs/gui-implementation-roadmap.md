@@ -18,10 +18,14 @@ the rationale and remaining platform packaging checks are in the
 foundation: revisioned/locked state, a sole serialized JSON-lines host,
 idempotent approvals, crash reconciliation, one application-wide scientific
 job slot, explicit stage transitions, viewer-neutral identity/selection/message
-contracts, a supervised PyMOL adapter, a read-only dockable desktop, and a
-noninteractive service boundary for the existing bash receptor-preparation
-engine. Tasks 09-11 remain future integration work. The implemented foundations
-do not claim a complete end-to-end GUI workflow.
+contracts, a supervised PyMOL adapter, and a dockable desktop connected to the
+host for explicit pocket approval. Preparation and pocket-review services now
+register the receptor and pocket coordinate artifacts needed for required
+PyMOL review; choosing a table row can update the viewer box without approving
+the scientific decision. A noninteractive service boundary invokes the
+existing bash receptor-preparation engine with explicit settings and disables
+model-changing removal. Tasks 09-11 remain future integration work. The
+implemented foundations do not claim a complete end-to-end GUI workflow.
 
 ## Product contract
 

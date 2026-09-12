@@ -97,7 +97,9 @@ class PocketReviewServiceTests(unittest.TestCase):
         self.assertEqual([option.value for option in decision.options], ["P1", "P2", "P1/P2", "L1"])
         state = self.controller.get_study("real-review")
         kinds = {artifact.kind for artifact in state.artifacts}
-        self.assertTrue({"docking_box", "pocket_evidence", "structural_ensemble", "pymol_scene"} <= kinds)
+        self.assertTrue({"docking_box", "pocket_coordinates", "pocket_evidence", "structural_ensemble", "pymol_scene"} <= kinds)
+        p1 = next(item for item in state.workflow_data["pocket_candidates"] if item["id"] == "P1")
+        self.assertTrue(p1["evidence"]["viewer_artifact_ids"])
         self.assertTrue(all(artifact.sha256 for artifact in state.artifacts))
         self.assertEqual(state.workflow_data["pocket_review_source"]["candidate_count"], 4)
         self.assertFalse(next(option for option in decision.options if option.value == "L1").automation_eligible)

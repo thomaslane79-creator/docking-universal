@@ -53,12 +53,13 @@ class ReceptorPreparationOptions:
 class ReceptorPreparationPlan:
     request: ProcessRequest
     output_root: Path
+    receptor_pdb: Path
     receptor_pdbqt: Path
     run_log: Path
 
     @property
     def required_outputs(self) -> tuple[Path, ...]:
-        return self.receptor_pdbqt, self.run_log
+        return self.receptor_pdb, self.receptor_pdbqt, self.run_log
 
 
 def _canonical_name(path: Path) -> str:
@@ -111,7 +112,10 @@ def build_receptor_preparation_plan(
         check=False,
     )
     return ReceptorPreparationPlan(
-        request, output_root, output_root / "receptor" / f"{canonical}.pdbqt", output_root / "run.log",
+        request, output_root,
+        output_root / "receptor" / f"{canonical}.pdb",
+        output_root / "receptor" / f"{canonical}.pdbqt",
+        output_root / "run.log",
     )
 
 
@@ -130,6 +134,7 @@ class ReceptorPreparationService:
             state = self.controller.get_study(study_id)
             known = {artifact.id for artifact in state.artifacts}
             for artifact_id, kind, path in (
+                ("prepared-receptor-pdb", "prepared_receptor_structure", plan.receptor_pdb),
                 ("prepared-receptor-pdbqt", "prepared_receptor", plan.receptor_pdbqt),
                 ("receptor-preparation-run-log", "preparation_log", plan.run_log),
             ):

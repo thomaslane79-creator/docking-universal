@@ -20,3 +20,10 @@ PySide6 migration changes the presentation binding rather than scientific
 models, application-host messages, viewer identities, bash engine runners,
 protocols, or reports. Packaging on other platforms remains an open gate and
 must test actual display/DPI/multiple-monitor behavior on those systems.
+
+The initial client now has dockable/floating workflow-detail, selection, log,
+report and artifact panels; reversible fullscreen; an explicit pocket-approval
+control routed through the sole application host; and a required PyMOL review
+launcher. A row selection is only a visual proposal. Approval is a separate
+version-checked command carrying the selected candidate IDs and optional
+scientific rationale.

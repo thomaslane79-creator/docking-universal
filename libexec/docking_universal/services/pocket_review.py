@@ -40,6 +40,16 @@ def _safe_label(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._-") or "site"
 
 
+def _pocket_coordinate_paths(cavity: Path, label: str) -> list[Path]:
+    numbers = [int(value) for value in re.findall(r"P(\d+)", label)]
+    paths = []
+    for number in numbers:
+        matches = sorted(cavity.rglob(f"pocket{number}_atm.pdb"))
+        if matches:
+            paths.append(matches[0].resolve())
+    return paths
+
+
 def build_labeled_candidate_mappings(
     target: str,
     boxes: list[Path],
@@ -184,9 +194,23 @@ class PocketReviewService:
                 metadata={"label": item["label"], "geometry": config_geometry(path)},
             ))
             candidate_evidence = dict(item.get("evidence") or {})
+            viewer_artifact_ids = []
+            for pocket_path in _pocket_coordinate_paths(cavity, item["label"]):
+                pocket_id = f"pocket-coordinates-{pocket_path.stem}"
+                if pocket_id not in {artifact.id for artifact in artifacts}:
+                    artifacts.append(ArtifactRecord(
+                        id=pocket_id,
+                        kind="pocket_coordinates",
+                        path=str(pocket_path),
+                        sha256=_sha256(pocket_path),
+                        description=f"PyMOL coordinates for {item['label']}",
+                        metadata={"candidate_label": item["label"]},
+                    ))
+                viewer_artifact_ids.append(pocket_id)
             candidate_evidence.update({
                 "geometry": config_geometry(path),
                 "requires_homolog_approval": item.get("requires_homolog_approval", False),
+                "viewer_artifact_ids": viewer_artifact_ids,
             })
             candidates.append(PocketCandidate(
                 id=item["label"],

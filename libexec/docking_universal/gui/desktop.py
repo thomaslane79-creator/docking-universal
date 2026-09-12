@@ -25,11 +25,16 @@ if QtWidgets is not None:
     class StudyWindow(QtWidgets.QMainWindow):
         """Multiple instances present the same store; none owns scientific state."""
 
-        def __init__(self, store: JsonStudyStore, study_id: str, *, settings=None):
+        def __init__(
+            self, store: JsonStudyStore, study_id: str, *, settings=None,
+            host_client=None, viewer_coordinator=None,
+        ):
             super().__init__()
             self.store = store
             self.study_id = study_id
             self.settings = settings or QtCore.QSettings("DockingUniversal", "Desktop")
+            self.host_client = host_client
+            self.viewer_coordinator = viewer_coordinator
             self.setObjectName("docking_universal_study_window")
             self.setWindowTitle("Docking Universal — Scientific Decision Support")
             self.resize(1280, 820)
@@ -56,13 +61,31 @@ if QtWidgets is not None:
             self.candidates = QtWidgets.QTableWidget(0, 4)
             self.candidates.setHorizontalHeaderLabels(("Candidate", "Rank", "Summary", "Evidence"))
             self.candidates.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+            self.candidates.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
             self.candidates.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
             central = QtWidgets.QWidget()
             layout = QtWidgets.QVBoxLayout(central)
             layout.addWidget(self.automation_banner)
             layout.addWidget(self.decision_banner)
             layout.addWidget(self.summary)
+            viewer_row = QtWidgets.QHBoxLayout()
+            self.viewer_button = QtWidgets.QPushButton("Open required PyMOL review")
+            self.viewer_button.setObjectName("open_pymol_review_button")
+            self.viewer_button.clicked.connect(self.open_visual_review)
+            self.viewer_status = QtWidgets.QLabel("PyMOL review has not been opened")
+            viewer_row.addWidget(self.viewer_button)
+            viewer_row.addWidget(self.viewer_status, 1)
+            layout.addLayout(viewer_row)
             layout.addWidget(self.candidates, 1)
+            approval_row = QtWidgets.QHBoxLayout()
+            self.rationale = QtWidgets.QLineEdit()
+            self.rationale.setPlaceholderText("Optional scientific rationale for the audit trail")
+            self.approve_button = QtWidgets.QPushButton("Approve selected docking region(s)")
+            self.approve_button.setObjectName("approve_regions_button")
+            self.approve_button.clicked.connect(self.approve_selected_regions)
+            approval_row.addWidget(self.rationale, 1)
+            approval_row.addWidget(self.approve_button)
+            layout.addLayout(approval_row)
             self.setCentralWidget(central)
 
             toolbar = self.addToolBar("View")
@@ -87,7 +110,7 @@ if QtWidgets is not None:
             self._dock("Selections", self.selection_view, QtCore.Qt.RightDockWidgetArea, "selection_dock")
             self._dock("Complete Logs", self.log_view, QtCore.Qt.BottomDockWidgetArea, "logs_dock")
             self._dock("Reports and Artifacts", self.report_list, QtCore.Qt.BottomDockWidgetArea, "reports_dock")
-            self.statusBar().showMessage("Read-only study view — approvals are applied by the application host")
+            self.statusBar().showMessage("Selections are proposals until explicitly approved through the application host")
 
         def _dock(self, title, widget, area, name):
             dock = QtWidgets.QDockWidget(title, self)
@@ -119,9 +142,63 @@ if QtWidgets is not None:
                     f"DECISION REQUIRED: {decision.prompt}\n{decision.why_stopped}\n"
                     + " ".join(decision.consequences)
                 )
+            self.approve_button.setEnabled(bool(self.host_client and pending))
+            self.viewer_button.setEnabled(self.viewer_coordinator is not None)
+            if self.viewer_coordinator is None:
+                self.viewer_status.setText("Required PyMOL adapter is not configured")
             self._render_candidates(state)
             self._render_artifacts(state)
             self._render_events()
+
+        def approve_selected_regions(self) -> None:
+            if not self.host_client:
+                return
+            pending = [item for item in self.state.pending_decisions if item.kind == "select_pockets"]
+            rows = sorted({index.row() for index in self.candidates.selectionModel().selectedRows()})
+            if not pending or not rows:
+                QtWidgets.QMessageBox.warning(self, "Selection required", "Select one or more docking regions first.")
+                return
+            candidates = self.state.workflow_data.get("pocket_candidates", [])
+            selections = [str(candidates[row]["id"]) for row in rows]
+            try:
+                self.host_client.request(
+                    self.study_id, "resolve_decision",
+                    {
+                        "decision_id": pending[0].id, "selections": selections,
+                        "actor": "desktop-user", "rationale": self.rationale.text().strip() or None,
+                    },
+                    expected_revision=self.state.revision,
+                )
+            except Exception as exc:
+                QtWidgets.QMessageBox.critical(self, "Approval rejected", str(exc))
+                self.refresh()
+                return
+            self.refresh()
+
+        def open_visual_review(self) -> None:
+            if not self.viewer_coordinator:
+                return
+            try:
+                self.viewer_coordinator.open(self.state)
+            except Exception as exc:
+                self.viewer_status.setText(f"PyMOL review unavailable: {exc}")
+                QtWidgets.QMessageBox.critical(self, "PyMOL review unavailable", str(exc))
+                return
+            self.viewer_status.setText("PyMOL review connected — visual changes do not imply approval")
+
+        def _candidate_highlight_changed(self) -> None:
+            if not self.viewer_coordinator or not self.viewer_coordinator.connected:
+                return
+            rows = self.candidates.selectionModel().selectedRows()
+            if not rows:
+                return
+            candidates = self.state.workflow_data.get("pocket_candidates", [])
+            if rows[0].row() >= len(candidates):
+                return
+            try:
+                self.viewer_coordinator.show_candidate(self.state, str(candidates[rows[0].row()]["id"]))
+            except Exception as exc:
+                self.viewer_status.setText(f"Candidate display failed: {exc}")
 
         def _render_candidates(self, state: StudyState) -> None:
             values = state.workflow_data.get("pocket_candidates", [])
@@ -135,6 +212,11 @@ if QtWidgets is not None:
                 for column, value in enumerate(columns):
                     self.candidates.setItem(row, column, QtWidgets.QTableWidgetItem(str(value)))
             self.candidates.resizeColumnsToContents()
+            try:
+                self.candidates.itemSelectionChanged.disconnect(self._candidate_highlight_changed)
+            except TypeError:
+                pass
+            self.candidates.itemSelectionChanged.connect(self._candidate_highlight_changed)
 
         def _render_artifacts(self, state: StudyState) -> None:
             self.report_list.clear()

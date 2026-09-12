@@ -32,6 +32,8 @@ class PreparationServiceTests(unittest.TestCase):
         self.assertEqual(plan.request.environment["DOCKING_UNIVERSAL_SITE_MODE"], "pockets")
         self.assertEqual(plan.request.environment["FEEDBACK_LEVEL"], "guided")
         self.assertIn("Target_with_spaces_receptor_prep", str(plan.receptor_pdbqt))
+        self.assertEqual(plan.receptor_pdb.suffix, ".pdb")
+        self.assertEqual(len(plan.required_outputs), 3)
 
     def test_ligand_mode_requires_explicit_structural_choice(self):
         options = ReceptorPreparationOptions(self.input, self.root, "ligand")

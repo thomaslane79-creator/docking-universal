@@ -63,6 +63,34 @@ class DesktopWorkspaceTests(unittest.TestCase):
         after = self.store.path_for("desktop").read_bytes()
         self.assertEqual(after, before)
 
+    def test_table_selection_is_only_a_proposal_until_approval_button(self):
+        class FakeHost:
+            def __init__(self, store):
+                self.store = store
+                self.calls = []
+
+            def request(self, study_id, operation, payload, *, expected_revision):
+                self.calls.append((study_id, operation, payload, expected_revision))
+                controller = StudyController(self.store)
+                controller.resolve_decision(
+                    study_id, payload["decision_id"], tuple(payload["selections"]),
+                    actor=payload["actor"], rationale=payload["rationale"],
+                    expected_revision=expected_revision,
+                )
+                return {"status": "applied"}
+
+        host = FakeHost(self.store)
+        self.window.host_client = host
+        self.window.refresh()
+        self.window.candidates.selectRow(0)
+        self.assertEqual(self.store.load("desktop").approvals, [])
+        self.window.rationale.setText("Reviewed in required structure view")
+        self.window.approve_button.click()
+        self.assertEqual(len(host.calls), 1)
+        state = self.store.load("desktop")
+        self.assertEqual(state.selected_pocket_ids, ["P1"])
+        self.assertEqual(state.approvals[0].rationale, "Reviewed in required structure view")
+
 
 if __name__ == "__main__":
     unittest.main()
