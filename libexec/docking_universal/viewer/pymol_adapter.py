@@ -31,6 +31,7 @@ class PymolAdapter:
         self.client: PymolSpikeClient | None = None
         self.session_id = f"viewer-{uuid4().hex}"
         self.structures: dict[str, RegisteredStructure] = {}
+        self.pockets: dict[str, dict[str, Any]] = {}
         self.snapshot: dict[str, Any] = {"structures": [], "pockets": [], "selections": {}, "box": None, "view": None}
 
     def launch(self, *, headless: bool = False) -> str:
@@ -41,6 +42,11 @@ class PymolAdapter:
         client = self._client()
         if structure.object_name in self.structures and self.structures[structure.object_name] != structure:
             raise ValueError(f"PyMOL object name is already registered: {structure.object_name}")
+        if structure.object_name in self.structures:
+            return {
+                "object_name": structure.object_name, "path": str(structure.path.resolve()),
+                "already_loaded": True,
+            }
         loaded = client.request("load_structure", {
             "path": str(structure.path.resolve()), "object_name": structure.object_name,
         })
@@ -52,10 +58,16 @@ class PymolAdapter:
         return loaded
 
     def show_pocket(self, path: Path | str, object_name: str, color: str) -> dict[str, Any]:
+        retained = {"path": str(Path(path).resolve()), "object_name": object_name, "color": color}
+        if object_name in self.pockets:
+            if self.pockets[object_name] != retained:
+                raise ValueError(f"PyMOL pocket object name is already registered: {object_name}")
+            return {**retained, "already_loaded": True}
         result = self._client().request("load_pocket", {
-            "path": str(Path(path).resolve()), "object_name": object_name, "color": color,
+            **retained,
         })
-        retained = {"path": result["path"], "object_name": object_name, "color": color}
+        retained["path"] = result["path"]
+        self.pockets[object_name] = retained
         self.snapshot["pockets"] = [item for item in self.snapshot["pockets"] if item["object_name"] != object_name]
         self.snapshot["pockets"].append(retained)
         return result
@@ -117,6 +129,7 @@ class PymolAdapter:
         box = self.snapshot["box"]
         view = self.snapshot["view"]
         self.structures.clear()
+        self.pockets.clear()
         for structure in structures:
             self.register_structure(structure)
         for pocket in pockets:

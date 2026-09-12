@@ -73,6 +73,20 @@ class PymolAdapterTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "exactly one"):
             self.adapter.apply_selection(selection)
 
+    def test_repeated_registered_loads_do_not_add_pymol_states(self):
+        before = len(self.adapter.client.requests)
+        structure = self.adapter.register_structure(self.registered)
+        self.assertTrue(structure["already_loaded"])
+        self.assertEqual(len(self.adapter.client.requests), before)
+        with tempfile.TemporaryDirectory() as directory:
+            pocket = Path(directory) / "pocket.pdb"
+            pocket.write_text("END\n")
+            self.adapter.show_pocket(pocket, "du_pocket_1", "marine")
+            after_first = len(self.adapter.client.requests)
+            replay = self.adapter.show_pocket(pocket, "du_pocket_1", "marine")
+            self.assertTrue(replay["already_loaded"])
+            self.assertEqual(len(self.adapter.client.requests), after_first)
+
 
 if __name__ == "__main__":
     unittest.main()
