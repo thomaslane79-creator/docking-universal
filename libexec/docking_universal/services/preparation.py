@@ -132,6 +132,7 @@ class ReceptorPreparationService:
         )
         if result.status.value == "completed":
             discovered = [
+                ("source-receptor-pdb", "source_receptor_structure", Path(plan.request.command[1])),
                 ("prepared-receptor-pdb", "prepared_receptor_structure", plan.receptor_pdb),
                 ("prepared-receptor-pdbqt", "prepared_receptor", plan.receptor_pdbqt),
                 ("receptor-preparation-run-log", "preparation_log", plan.run_log),
@@ -142,6 +143,7 @@ class ReceptorPreparationService:
             )
 
             def register(latest) -> None:
+                latest.workflow_data["preparation_root"] = str(plan.output_root.resolve())
                 known = {artifact.id for artifact in latest.artifacts}
                 for artifact_id, kind, path in discovered:
                     if artifact_id in known:

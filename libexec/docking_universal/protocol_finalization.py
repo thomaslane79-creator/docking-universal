@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from .state import StudyState
+
 def sha256(path: Path | str) -> str:
     digest = hashlib.sha256()
     with Path(path).open("rb") as handle:
@@ -147,3 +149,66 @@ class ProtocolFinalizationRequest:
                 raise ValueError(f"Approved docking region has incomplete geometry: {path}") from exc
             if not all(math.isfinite(value) for value in centers + sizes) or min(sizes) <= 0:
                 raise ValueError(f"Approved docking region has invalid geometry: {path}")
+
+
+def request_from_study(
+    state: StudyState,
+    settings: FinalizationSettings,
+    output_directory: Path | str,
+    *,
+    exploratory_use_approved: bool,
+) -> ProtocolFinalizationRequest:
+    """Build a finalization request only from persisted approved study state."""
+    decisions = {decision.id: decision for decision in state.decisions}
+    approval = next((
+        item for item in reversed(state.approvals)
+        if decisions.get(item.decision_id) and decisions[item.decision_id].kind == "select_pockets"
+    ), None)
+    if approval is None:
+        raise ValueError("Protocol finalization requires an approved pocket decision")
+    artifacts = {artifact.id: artifact for artifact in state.artifacts}
+    candidates = {item["id"]: item for item in state.workflow_data.get("pocket_candidates", [])}
+    selected = []
+    labels = []
+    for candidate_id in state.selected_pocket_ids:
+        candidate = candidates.get(candidate_id)
+        if not candidate or candidate.get("box_artifact_id") not in artifacts:
+            raise ValueError(f"Approved pocket has no registered docking box: {candidate_id}")
+        artifact = artifacts[candidate["box_artifact_id"]]
+        selected.append(Path(artifact.path))
+        labels.append({"label": candidate.get("label", candidate_id), "path": artifact.path})
+    regions = selected_region_records(selected, labels)
+    approved_hashes = {
+        item.get("id"): item.get("sha256") for item in approval.evidence.get("artifacts", [])
+    }
+    for candidate_id, region in zip(state.selected_pocket_ids, regions):
+        artifact_id = candidates[candidate_id]["box_artifact_id"]
+        if approved_hashes.get(artifact_id) != region["box_sha256"]:
+            raise ValueError(f"Approved evidence hash is missing or changed for {candidate_id}")
+
+    def artifact_path(kind: str) -> Path:
+        record = next((item for item in state.artifacts if item.kind == kind), None)
+        if record is None:
+            raise ValueError(f"Study has no registered {kind} artifact")
+        path = Path(record.path)
+        if not path.is_file() or (record.sha256 and sha256(path) != record.sha256):
+            raise ValueError(f"Registered {kind} artifact changed or is missing")
+        return path
+
+    preparation_root = state.workflow_data.get("preparation_root")
+    if not preparation_root:
+        raise ValueError("Study has no registered preparation root")
+    request = ProtocolFinalizationRequest(
+        study_id=state.study_id,
+        target=Path(artifact_path("prepared_receptor_structure")).stem,
+        preparation_root=Path(str(preparation_root)),
+        source_structure=artifact_path("source_receptor_structure"),
+        receptor_pdb=artifact_path("prepared_receptor_structure"),
+        receptor_pdbqt=artifact_path("prepared_receptor"),
+        regions=tuple(regions), settings=settings, approval_id=approval.id,
+        evidence_revision=int(approval.evidence.get("study_revision", 0)),
+        output_directory=Path(output_directory),
+        exploratory_use_approved=exploratory_use_approved,
+    )
+    request.validate()
+    return request

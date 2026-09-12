@@ -7,6 +7,7 @@ from pathlib import Path
 from docking_universal.application import StudyController
 from docking_universal.host import CommandDispatcher
 from docking_universal.models import JobStatus
+from docking_universal.protocol_finalization import FinalizationSettings, request_from_study
 from docking_universal.state import JsonStudyStore
 from docking_universal.viewer.messages import Command
 
@@ -85,6 +86,19 @@ class ProtocolWorkflowTests(unittest.TestCase):
         duplicate_stage = dispatcher.dispatch(self.start_command(dispatcher, "second-preparation"))
         self.assertEqual(duplicate_stage.status, "rejected")
         self.assertIn("already complete", duplicate_stage.error)
+
+        decision = state.pending_decisions[0]
+        self.controller.resolve_decision(
+            "workflow", decision.id, ("P1",), actor="scientist",
+            expected_revision=state.revision,
+        )
+        request = request_from_study(
+            self.store.load("workflow"), FinalizationSettings(), self.root / "final",
+            exploratory_use_approved=True,
+        )
+        self.assertEqual(request.approval_id, self.store.load("workflow").approvals[0].id)
+        self.assertEqual(request.regions[0]["box_label"], "P1")
+        self.assertEqual(request.source_structure.resolve(), self.input.resolve())
 
     def test_host_can_cancel_running_preparation(self):
         dispatcher = CommandDispatcher(self.controller, "session", self.executable(slow=True))
