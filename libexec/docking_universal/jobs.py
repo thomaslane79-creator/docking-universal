@@ -81,6 +81,13 @@ class JobService:
         state.jobs.append(job)
         state.current_stage = stage
         state.completion_status = CompletionStatus.RUNNING
+        log_directory = Path(request.log_directory)
+        log_directory.mkdir(parents=True, exist_ok=True)
+        stdout_log = log_directory / f"{request.log_name}.stdout.log"
+        stderr_log = log_directory / f"{request.log_name}.stderr.log"
+        stdout_log.touch()
+        stderr_log.touch()
+        self._add_log_artifacts(state, job, request, stdout_log, stderr_log)
         StudyController._event(
             state,
             EventType.STAGE_STARTED,
@@ -107,10 +114,6 @@ class JobService:
             # Spawn and process-tracking failures are structured stage
             # failures, not untracked exceptions in a GUI worker.
             result = None
-            stdout_log = Path(request.log_directory) / f"{request.log_name}.stdout.log"
-            stderr_log = Path(request.log_directory) / f"{request.log_name}.stderr.log"
-            stdout_log.parent.mkdir(parents=True, exist_ok=True)
-            stdout_log.touch()
             with stderr_log.open("a") as handle:
                 handle.write(str(exc) + "\n")
             self._finish_spawn_failure(study_id, job.id, request, exc, stdout_log, stderr_log)

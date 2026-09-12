@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from docking_universal.application import StudyController
 from docking_universal.gui.desktop import QT_IMPORT_ERROR, StudyWindow
-from docking_universal.models import JobStatus, PocketCandidate
+from docking_universal.models import ArtifactRecord, JobStatus, PocketCandidate
 from docking_universal.state import JsonStudyStore
 
 
@@ -63,6 +63,23 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.window.close()
         after = self.store.path_for("desktop").read_bytes()
         self.assertEqual(after, before)
+
+    def test_artifact_rows_retain_the_exact_openable_path(self):
+        state = self.store.load("desktop")
+        path = self.root / "scientific-record.json"
+        path.write_text("{}\n")
+        artifact = ArtifactRecord("record", "scientific_record", str(path))
+        state.artifacts.append(artifact)
+        self.store.save(state)
+        self.window.refresh()
+        matching = [
+            self.window.report_list.item(index)
+            for index in range(self.window.report_list.count())
+            if artifact.path in self.window.report_list.item(index).text()
+        ]
+        self.assertEqual(len(matching), 1)
+        from PyQt5 import QtCore
+        self.assertEqual(matching[0].data(QtCore.Qt.UserRole), artifact.path)
 
     def test_table_selection_is_only_a_proposal_until_approval_button(self):
         class FakeHost:

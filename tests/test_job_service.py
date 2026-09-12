@@ -72,6 +72,37 @@ class JobServiceTests(unittest.TestCase):
         self.assertEqual(state.jobs[0].status, JobStatus.CANCELLED)
         self.assertEqual(state.completion_status, CompletionStatus.CANCELLED)
 
+    def test_complete_logs_are_registered_while_stage_is_running(self):
+        cancel = threading.Event()
+        worker = threading.Thread(
+            target=JobService(self.controller).run,
+            args=(
+                "job-study", "visible_stage",
+                self.request("import time; print('live detail', flush=True); time.sleep(10)", "live"),
+            ),
+            kwargs={"cancel_event": cancel},
+        )
+        worker.start()
+        try:
+            deadline = time.monotonic() + 2
+            state = self.controller.get_study("job-study")
+            while time.monotonic() < deadline:
+                state = self.controller.get_study("job-study")
+                logs = [artifact for artifact in state.artifacts if "log" in artifact.kind]
+                if state.active_job and logs and any(
+                    "live detail" in Path(artifact.path).read_text(errors="replace")
+                    for artifact in logs if Path(artifact.path).is_file()
+                ):
+                    break
+                time.sleep(0.02)
+            self.assertIsNotNone(state.active_job)
+            self.assertEqual({artifact.kind for artifact in logs}, {"job_stdout_log", "job_stderr_log"})
+            self.assertTrue(any("live detail" in Path(artifact.path).read_text() for artifact in logs))
+        finally:
+            cancel.set()
+            worker.join(3)
+        self.assertFalse(worker.is_alive())
+
     def test_second_window_cannot_start_while_first_stage_runs(self):
         second = StudyController(JsonStudyStore(self.root / "runs"))
         cancel = threading.Event()

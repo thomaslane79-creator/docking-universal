@@ -8,9 +8,9 @@ from ..events import ScientificDetail
 from ..state import JsonStudyStore, StudyState
 
 try:
-    from PyQt5 import QtCore, QtWidgets
+    from PyQt5 import QtCore, QtGui, QtWidgets
 except ImportError as exc:  # pragma: no cover - diagnosed by runtime inventory
-    QtCore = QtWidgets = None
+    QtCore = QtGui = QtWidgets = None
     QT_IMPORT_ERROR = exc
 else:
     QT_IMPORT_ERROR = None
@@ -105,6 +105,7 @@ if QtWidgets is not None:
             self.log_view = QtWidgets.QPlainTextEdit()
             self.log_view.setReadOnly(True)
             self.report_list = QtWidgets.QListWidget()
+            self.report_list.itemDoubleClicked.connect(self.open_artifact)
             self.selection_view = QtWidgets.QTreeWidget()
             self.selection_view.setHeaderLabels(("Proposed selection", "Identity"))
             self._dock("Scientific Workflow Detail", self.event_view, QtCore.Qt.RightDockWidgetArea, "workflow_detail_dock")
@@ -351,11 +352,22 @@ if QtWidgets is not None:
             self.report_list.clear()
             logs = []
             for artifact in state.artifacts:
-                self.report_list.addItem(f"{artifact.kind}: {artifact.path}")
+                item = QtWidgets.QListWidgetItem(f"{artifact.kind}: {artifact.path}")
+                item.setData(QtCore.Qt.UserRole, artifact.path)
+                item.setToolTip("Double-click to open this retained artifact")
+                self.report_list.addItem(item)
                 if "log" in artifact.kind and Path(artifact.path).is_file():
                     logs.append(f"[{artifact.description or artifact.kind}]\n{Path(artifact.path).read_text(errors='replace')}")
             # The widget is bounded; full raw logs remain in their artifacts.
             self.log_view.setPlainText("\n\n".join(logs)[-200_000:])
+
+        def open_artifact(self, item) -> None:
+            path = Path(str(item.data(QtCore.Qt.UserRole) or ""))
+            if not path.is_file():
+                QtWidgets.QMessageBox.warning(self, "Artifact unavailable", f"Artifact does not exist: {path}")
+                return
+            if not QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(str(path.resolve()))):
+                QtWidgets.QMessageBox.warning(self, "Artifact could not be opened", str(path))
 
         def _render_events(self, *_args) -> None:
             if not hasattr(self, "state"):
