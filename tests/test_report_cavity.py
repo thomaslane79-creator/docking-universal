@@ -12,6 +12,21 @@ SPEC.loader.exec_module(REPORT)
 
 
 class CavityReportTests(unittest.TestCase):
+    def test_exploratory_protocol_discovery_rejects_study_manifest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            study = Path(temporary)
+            (study / "report").mkdir()
+            (study / "study_manifest.json").write_text(json.dumps({
+                "schema_name": "docking-universal-study", "schema_version": 1,
+            }))
+            self.assertIsNone(REPORT.discover_exploratory_protocol(study))
+
+            protocol = study / "site-guided.protocol.json"
+            protocol.write_text(json.dumps({
+                "schema_name": "docking-universal-protocol", "schema_version": 1,
+            }))
+            self.assertEqual(REPORT.discover_exploratory_protocol(study), protocol)
+
     def test_selectable_box_inventory_is_only_for_preselection_report(self):
         self.assertTrue(REPORT.includes_selectable_box_inventory({
             "report_purpose": "pocket-review",

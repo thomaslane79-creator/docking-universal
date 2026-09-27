@@ -1181,6 +1181,20 @@ def has_retained_docking_results(study):
         + list(Path(study).glob("compounds/*/site_*/pose_analysis/cluster_summary.csv"))
     )
 
+
+def discover_exploratory_protocol(study):
+    """Return a retained protocol, never an unrelated study JSON document."""
+    study = Path(study)
+    protocol_dir = study if (study / "report").is_dir() else study / "protocol"
+    for path in sorted(protocol_dir.glob("*.json")):
+        record = read_json(path)
+        if (
+            record.get("schema_name") == "docking-universal-protocol"
+            and record.get("schema_version") == 1
+        ):
+            return path
+    return None
+
 def main():
     """Assemble the scenario-specific scientific PDF from retained artifacts."""
     ap = argparse.ArgumentParser(description=__doc__)
@@ -1292,12 +1306,7 @@ def main():
         # Exploratory studies retain their approved protocol beside the report.
         # Load it here so source-format and deposited mmCIF evidence are not
         # silently omitted from the human-readable report.
-        protocol_dir = args.study if (args.study / "report").is_dir() else args.study / "protocol"
-        candidates = sorted(protocol_dir.glob("*.json"))
-        protocol_path = next(
-            (path for path in candidates if path.name != "study_summary.json"),
-            None,
-        )
+        protocol_path = discover_exploratory_protocol(args.study)
     protocol = read_json(protocol_path)
 
     # Build a human-readable report heading from run metadata. Directory-style
