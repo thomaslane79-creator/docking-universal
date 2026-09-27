@@ -166,6 +166,24 @@ def create_bundle(
                 receptor_pdb_copy = _copy(receptor_pdb_source, assets / receptor_pdb_source.name)
                 protocol["locked_inputs"]["receptor_pdb"] = f"assets/{receptor_pdb_copy.name}"
                 protocol["locked_inputs"]["receptor_pdb_sha256"] = sha256(receptor_pdb_copy)
+        sensitivity = protocol.get("receptor_state_sensitivity") or {}
+        variants = sensitivity.get("variants") or {}
+        for state_name, variant in variants.items():
+            if not isinstance(variant, dict):
+                continue
+            for key, suffix in (("receptor_pdb", "pdb"), ("receptor_pdbqt", "pdbqt")):
+                value = variant.get(key)
+                if not value:
+                    continue
+                source = Path(value).expanduser().resolve()
+                expected = variant.get(key + "_sha256")
+                if not source.is_file() or (expected and sha256(source) != expected):
+                    raise ValueError(
+                        f"Retained {state_name} receptor-state variant changed or is missing: {source}"
+                    )
+                copied = _copy(source, assets / f"receptor-state-{state_name}.{suffix}")
+                variant[key] = f"assets/{copied.name}"
+                variant[key + "_sha256"] = sha256(copied)
         if not protocol.get("coordinate_source") and receptor_pdb_value:
             source_dir = Path(receptor_pdb_value).expanduser().resolve().parent.parent / "source"
             if (source_dir / "structure.cif").is_file():

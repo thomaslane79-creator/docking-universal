@@ -292,6 +292,42 @@ class ProtocolFinalizationIntegrationTests(unittest.TestCase):
         self.assertIn("bundle_manifest.json", names)
         self.assertTrue(any(name.endswith("protocol.json") for name in names))
 
+    def test_bundle_retains_both_receptor_state_sensitivity_variants(self):
+        hie = self.receptor_dir / "target-HIE.pdbqt"
+        hid = self.receptor_dir / "target-HID.pdbqt"
+        hie.write_text("RECEPTOR HIE\n")
+        hid.write_text("RECEPTOR HID\n")
+        protocol = json.loads(json.dumps(self.protocol))
+        protocol["receptor_state_sensitivity"] = {
+            "status": "prepared_for_box_review",
+            "affected_boxes": ["P1"],
+            "variants": {
+                "HIE": {
+                    "receptor_pdbqt": str(hie),
+                    "receptor_pdbqt_sha256": sha256(hie),
+                },
+                "HID": {
+                    "receptor_pdbqt": str(hid),
+                    "receptor_pdbqt_sha256": sha256(hid),
+                },
+            },
+        }
+        report = self.report_dir / "sensitivity.pdf"
+        report.write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+        outputs = publish_final_outputs(
+            self.study / "sensitivity_protocol.json", protocol, report,
+            self.study / "sensitivity.duprotocol", self.study, create_bundle,
+        )
+        extracted = extract_bundle(outputs.bundle)
+        bundled = json.loads(extracted.read_text())
+        variants = bundled["receptor_state_sensitivity"]["variants"]
+        for state_name in ("HIE", "HID"):
+            relative = variants[state_name]["receptor_pdbqt"]
+            retained = extracted.parent / relative
+            self.assertTrue(retained.is_file())
+            self.assertEqual(sha256(retained), variants[state_name]["receptor_pdbqt_sha256"])
+
     def test_generated_bundle_passes_the_real_screening_checker(self):
         report = self.report_dir / "report.pdf"
         report.write_bytes(b"%PDF-1.4\n%%EOF\n")

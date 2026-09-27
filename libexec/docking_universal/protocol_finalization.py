@@ -48,6 +48,7 @@ class ProtocolRecordInputs:
     pocket_review_scene: str | None
     bundle_file_name: str
     pocket_detection: Mapping[str, Any] | None = None
+    receptor_state_sensitivity: Mapping[str, Any] | None = None
 
 
 def build_protocol_record(inputs: ProtocolRecordInputs) -> dict[str, Any]:
@@ -101,6 +102,8 @@ def build_protocol_record(inputs: ProtocolRecordInputs) -> dict[str, Any]:
     }
     if inputs.pocket_detection:
         record["pocket_detection"] = dict(inputs.pocket_detection)
+    if inputs.receptor_state_sensitivity:
+        record["receptor_state_sensitivity"] = dict(inputs.receptor_state_sensitivity)
     return record
 
 

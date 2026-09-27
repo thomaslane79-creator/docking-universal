@@ -23,7 +23,11 @@ class ScreeningPlan:
     conformers_per_compound: int
     independent_seed_count: int
     docking_site_count: int
+    receptor_state_variant_count: int
+    affected_docking_site_count: int
     jobs_per_compound: int
+    baseline_docking_jobs: int
+    additional_sensitivity_jobs: int
     total_docking_jobs: int
     exploratory_authorization_required: bool
     parameters: dict[str, Any]
@@ -101,13 +105,33 @@ def build_screening_plan(
     if conformers < 1 or not seeds or not regions:
         raise ValueError("Protocol lacks complete conformer, seed, or docking-site settings")
     compounds = count_ligands(ligand_source)
-    jobs_per_compound = conformers * len(seeds) * len(regions)
+    sensitivity = protocol.get("receptor_state_sensitivity") or {}
+    variants = sensitivity.get("variants") or {}
+    affected_labels = set(map(str, sensitivity.get("affected_boxes") or ()))
+    affected_regions = sum(
+        1 for region in regions
+        if str((region or {}).get("box_label") or "") in affected_labels
+    )
+    variant_count = len(variants) if affected_regions else 1
+    if affected_regions and variant_count < 2:
+        raise ValueError(
+            "Protocol requires receptor-state comparison docks but lacks both retained variants"
+        )
+    baseline_per_compound = conformers * len(seeds) * len(regions)
+    additional_per_compound = (
+        conformers * len(seeds) * affected_regions * (variant_count - 1)
+    )
+    jobs_per_compound = baseline_per_compound + additional_per_compound
     kind = protocol_type(protocol)
     return ScreeningPlan(
         protocol_type=str(kind), target=str(protocol.get("target") or "not recorded"),
         engine=str(protocol.get("engine") or "not recorded"), compound_count=compounds,
         conformers_per_compound=conformers, independent_seed_count=len(seeds),
-        docking_site_count=len(regions), jobs_per_compound=jobs_per_compound,
+        docking_site_count=len(regions), receptor_state_variant_count=variant_count,
+        affected_docking_site_count=affected_regions,
+        jobs_per_compound=jobs_per_compound,
+        baseline_docking_jobs=compounds * baseline_per_compound,
+        additional_sensitivity_jobs=compounds * additional_per_compound,
         total_docking_jobs=compounds * jobs_per_compound,
         exploratory_authorization_required=kind != CONTROL_VALIDATED,
         parameters=parameters,

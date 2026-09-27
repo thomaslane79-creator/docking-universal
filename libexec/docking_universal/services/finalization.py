@@ -210,6 +210,7 @@ def build_site_guided_protocol(
         pocket_review_scene=scene,
         bundle_file_name=paths.bundle.name,
         pocket_detection=pocket_detection,
+        receptor_state_sensitivity=state.workflow_data.get("receptor_state_sensitivity"),
     ))
 
 

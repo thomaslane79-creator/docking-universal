@@ -49,6 +49,31 @@ class ScreeningServiceTests(unittest.TestCase):
         self.assertEqual(plan.total_docking_jobs, 24)
         self.assertTrue(plan.exploratory_authorization_required)
 
+    def test_affected_box_adds_matched_jobs_for_the_second_receptor_state(self):
+        record = json.loads(self.protocol.read_text())
+        record["locked_inputs"]["boxes"] = [
+            {"box": "one.conf", "box_label": "P1"},
+            {"box": "two.conf", "box_label": "P2"},
+        ]
+        record["receptor_state_sensitivity"] = {
+            "affected_boxes": ["P1"],
+            "variants": {
+                "HIE": {"receptor_pdbqt": "HIE.pdbqt"},
+                "HID": {"receptor_pdbqt": "HID.pdbqt"},
+            },
+        }
+        self.protocol.write_text(json.dumps(record))
+        ligands = self.root / "ligands.sdf"
+        ligands.write_text("first\n$$$$\nsecond\n$$$$\n")
+
+        plan = build_screening_plan(self.protocol, ligands)
+
+        self.assertEqual(plan.baseline_docking_jobs, 24)
+        self.assertEqual(plan.additional_sensitivity_jobs, 12)
+        self.assertEqual(plan.total_docking_jobs, 36)
+        self.assertEqual(plan.affected_docking_site_count, 1)
+        self.assertEqual(plan.receptor_state_variant_count, 2)
+
     def test_changed_protocol_and_empty_ligand_sources_are_rejected(self):
         ligands = self.root / "empty.sdf"
         ligands.write_text("")
