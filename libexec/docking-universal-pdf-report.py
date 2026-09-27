@@ -414,6 +414,8 @@ SCIENTIFIC_VERSION_LABELS = {
     "MolScrub": "molscrub",
     "Meeko": "meeko",
     "PDBFixer": "pdbfixer",
+    "PDB2PQR": "pdb2pqr",
+    "PROPKA": "propka",
     "AutoDock Vina": "engine_version",
     "QuickVina-W": "engine_version",
 }
@@ -425,6 +427,8 @@ SCIENTIFIC_SOFTWARE_KEYS = {
     "MolScrub": "molscrub",
     "Meeko": "meeko",
     "PDBFixer": "pdbfixer",
+    "PDB2PQR": "pdb2pqr",
+    "PROPKA": "propka",
     "fpocket": "fpocket",
     "Open Babel": "openbabel",
     "PLIP": "plip",
@@ -649,7 +653,7 @@ def retained_scientific_versions(study, summary=None, docking_manifest=None):
         or "not recorded"
     )
     for key in (
-        "python", "rdkit", "molscrub", "meeko", "pdbfixer",
+        "python", "rdkit", "molscrub", "meeko", "pdbfixer", "pdb2pqr", "propka",
         "fpocket", "p2rank", "openbabel", "plip",
     ):
         retained[key] = str(retained.get(key) or "not recorded")
@@ -672,6 +676,8 @@ def receptor_preparation_record(study, control=None, protocol=None):
         return next((path for root in roots if (path := first(root, patterns))), None)
     audit_path = retained(["preparation/**/receptor/pdbfixer_audit.json", "**/receptor/pdbfixer_audit.json", "**/assets/pdbfixer_audit.json"])
     ccd_audit_path = retained(["preparation/**/receptor/ccd_modification_audit.json", "**/receptor/ccd_modification_audit.json", "**/assets/ccd_modification_audit.json"])
+    protonation_audit_path = retained(["preparation/**/receptor/pdb2pqr_audit.json", "**/receptor/pdb2pqr_audit.json", "**/assets/pdb2pqr_audit.json"])
+    protonation_log = retained(["preparation/**/receptor/pdb2pqr.log", "**/receptor/pdb2pqr.log", "**/assets/pdb2pqr.log"])
     post_fix_log = retained(["preparation/**/receptor/receptor_after_pdbfixer.log", "**/receptor/receptor_after_pdbfixer.log"])
     removal_log = retained(["preparation/**/receptor/receptor_user_approved_removal.log", "**/receptor/receptor_user_approved_removal.log", "**/assets/receptor_user_approved_removal.log"])
     removal_record = retained(["preparation/**/receptor/user_approved_component_removal.txt", "**/receptor/user_approved_component_removal.txt", "**/assets/user_approved_component_removal.txt"])
@@ -681,6 +687,7 @@ def receptor_preparation_record(study, control=None, protocol=None):
     receptor_dir = retained(["preparation/**/receptor", "**/receptor"])
     audit = read_json(audit_path)
     ccd_audit = read_json(ccd_audit_path)
+    protonation_audit = read_json(protonation_audit_path)
     recorded_preparation = (protocol or {}).get("receptor_preparation", {})
     recorded_removal = bool(recorded_preparation.get("user_approved_component_removal"))
     recorded_rows = recorded_preparation.get("user_approved_removed_components") or []
@@ -695,6 +702,9 @@ def receptor_preparation_record(study, control=None, protocol=None):
         used = False
     elif post_fix_log and post_fix_log.stat().st_size:
         path = "conservative PDBFixer repair followed by strict Meeko"
+        used = True
+    elif protonation_audit_path and protonation_audit.get("status") in {"compatible", "review_required"}:
+        path = "pH-aware PDB2PQR/PROPKA protonation assessment passed the heavy-atom preservation audit, followed by strict Meeko"
         used = True
     elif audit_path:
         path = "PDBFixer repair attempted; inspect the retained audit and preparation logs"
@@ -724,6 +734,9 @@ def receptor_preparation_record(study, control=None, protocol=None):
         "changes": audit,
         "ccd_modification_audit": str(ccd_audit_path) if ccd_audit_path else None,
         "ccd_modifications": ccd_audit,
+        "protonation_audit": str(protonation_audit_path) if protonation_audit_path else None,
+        "protonation_log": str(protonation_log) if protonation_log else None,
+        "protonation": protonation_audit,
     }
 
 def pdbfixer_report_note(record, out, styles):
@@ -754,6 +767,26 @@ def pdbfixer_report_note(record, out, styles):
         )
     change_text = "; ".join(changes) if changes else "no structural changes were recorded"
     text = f"<b>PDBFixer audit:</b> {change_text}. {disposition}"
+    return [Paragraph(text, styles["BodyText"]), Spacer(1, 8)]
+
+def protonation_report_note(record, out, styles):
+    """State the pH-aware protonation decision and preserve unsupported chemistry warnings."""
+    from reportlab.platypus import Paragraph, Spacer
+    audit = record.get("protonation") or {}
+    if not record.get("protonation_audit"):
+        return []
+    status = audit.get("status", "not recorded")
+    ph = audit.get("pH", "not recorded")
+    missing = len(audit.get("missing_input_heavy_atoms", []))
+    if status == "incompatible":
+        text = (f"<b>PDB2PQR/PROPKA audit:</b> pH {ph} assessment was not used because it did not preserve "
+                f"{missing} input heavy atom identities. The original receptor-preparation route was retained; "
+                "review the machine-readable audit before changing modified-residue chemistry.")
+    else:
+        qualifier = "with warnings requiring review" if status == "review_required" else ""
+        text = (f"<b>PDB2PQR/PROPKA audit:</b> pH {ph} hydrogen/protonation assessment passed the input heavy-atom "
+                f"preservation check {qualifier}; the checked model was supplied to Meeko. Detailed warnings and "
+                "the exact command are retained in the preparation audit.")
     return [Paragraph(text, styles["BodyText"]), Spacer(1, 8)]
 
 def adfr_fallback_report_note(record, out, styles):
@@ -921,6 +954,8 @@ def reproducibility_record(protocol, study, control):
         {"role": "Receptor and ligand parameterization", "software": "Meeko", "version": run_versions["meeko"]},
         {"role": "Linked-component receptor compatibility fallback", "software": "ADFRsuite", "version": adfrsuite_version(summary, receptor_preparation)},
         {"role": "Conditional conservative receptor repair", "software": "PDBFixer", "version": run_versions["pdbfixer"]},
+        {"role": "pH-aware receptor protonation", "software": "PDB2PQR", "version": run_versions["pdb2pqr"]},
+        {"role": "pH-aware titration-state assignment", "software": "PROPKA", "version": run_versions["propka"]},
         {"role": "Protonation/conformer preparation", "software": "MolScrub", "version": run_versions["molscrub"]},
         {"role": "Molecular graph, RMSD, clustering", "software": "RDKit", "version": run_versions["rdkit"]},
         {"role": "Molecular conversion/PLIP backend", "software": "Open Babel", "version": run_versions["openbabel"]},
@@ -944,6 +979,8 @@ def reproducibility_record(protocol, study, control):
         {"citation": "Santos-Martins D, He Y, Eberhardt J, et al. Meeko: molecule parameterization and software interoperability for docking and beyond. J Chem Inf Model. 2025;65:13045-13050.", "url": "https://doi.org/10.1021/acs.jcim.5c02271"},
         {"citation": "Ravindranath PA, Forli S, Goodsell DS, Olson AJ, Sanner MF. AutoDockFR: Advances in Protein-Ligand Docking with Explicitly Specified Binding Site Flexibility. PLoS Comput Biol. 2015;11:e1004586.", "url": "https://doi.org/10.1371/journal.pcbi.1004586"},
         {"citation": "PDBFixer: a tool for preparing PDB files for molecular simulation (version recorded above).", "url": "https://github.com/openmm/pdbfixer"},
+        {"citation": "PDB2PQR: pH-aware biomolecular structure preparation and titration-state assignment (version recorded above).", "url": "https://pdb2pqr.readthedocs.io/en/v3.6.2/using/algorithms.html"},
+        {"citation": "PROPKA: empirical pKa prediction used by the PDB2PQR titration-state workflow (version recorded above).", "url": "https://github.com/jensengroup/propka"},
         {"citation": "Eastman P, Swails J, Chodera JD, et al. OpenMM 7: Rapid development of high performance algorithms for molecular dynamics. PLoS Comput Biol. 2017;13:e1005659.", "url": "https://doi.org/10.1371/journal.pcbi.1005659"},
         {"citation": "Salentin S, Schreiber S, Haupt VJ, Adasme MF, Schroeder M. PLIP: fully automated protein-ligand interaction profiler. Nucleic Acids Res. 2015;43:W443-W447.", "url": "https://doi.org/10.1093/nar/gkv315"},
         {"citation": "Butina D. Unsupervised Data Base Clustering Based on Daylight's Fingerprint and Tanimoto Similarity: A Fast and Automated Way To Cluster Small and Large Data Sets. J Chem Inf Comput Sci. 1999;39:747-750.", "url": "https://doi.org/10.1021/ci9803381"},
@@ -1001,6 +1038,8 @@ def retain_used_report_methods(provenance, cavity, has_docking):
         used_software.update({provenance["methods"]["docking_scores_and_poses"], "MolScrub", "RDKit", "Open Babel", "PLIP"})
     if preparation.get("pdbfixer_used"):
         used_software.add("PDBFixer")
+    if preparation.get("protonation_audit") and (preparation.get("protonation") or {}).get("status") in {"compatible", "review_required"}:
+        used_software.update({"PDB2PQR", "PROPKA"})
     if preparation.get("adfr_fallback_log"):
         used_software.add("ADFRsuite")
     pocket_evidence_used = bool(first(Path(provenance["study"]), ["report/pocket_evidence_site_*_AB.png"]))
@@ -1049,6 +1088,8 @@ def retain_used_report_methods(provenance, cavity, has_docking):
             return bool(preparation.get("adfr_fallback_log"))
         if "PDBFixer:" in citation or "OpenMM 7:" in citation:
             return bool(preparation.get("pdbfixer_used"))
+        if "PDB2PQR:" in citation or "PROPKA:" in citation:
+            return bool(preparation.get("protonation_audit")) and (preparation.get("protonation") or {}).get("status") in {"compatible", "review_required"}
         if any(name in citation for name in ("PLIP:", "Butina D.", "Open Babel")):
             return has_docking
         if "RDKit:" in citation:
@@ -1870,6 +1911,7 @@ def main():
             Spacer(1,8),
         ]
         story += pdbfixer_report_note(provenance["receptor_preparation"], out, styles)
+        story += protonation_report_note(provenance["receptor_preparation"], out, styles)
         story += adfr_fallback_report_note(provenance["receptor_preparation"], out, styles)
         story += user_approved_removal_report_note(provenance["receptor_preparation"], out, styles)
         story += ccd_modification_report_note(provenance["receptor_preparation"], out, styles)
@@ -2040,6 +2082,7 @@ def main():
             Spacer(1, 8),
         ]
         story += pdbfixer_report_note(provenance["receptor_preparation"], out, styles)
+        story += protonation_report_note(provenance["receptor_preparation"], out, styles)
         story += adfr_fallback_report_note(provenance["receptor_preparation"], out, styles)
         story += user_approved_removal_report_note(provenance["receptor_preparation"], out, styles)
         story += ccd_modification_report_note(provenance["receptor_preparation"], out, styles)
@@ -2322,6 +2365,7 @@ def main():
         Spacer(1,8),
     ]
     story += pdbfixer_report_note(provenance["receptor_preparation"], out, styles)
+    story += protonation_report_note(provenance["receptor_preparation"], out, styles)
     story += adfr_fallback_report_note(provenance["receptor_preparation"], out, styles)
     story += user_approved_removal_report_note(provenance["receptor_preparation"], out, styles)
     story += ccd_modification_report_note(provenance["receptor_preparation"], out, styles)

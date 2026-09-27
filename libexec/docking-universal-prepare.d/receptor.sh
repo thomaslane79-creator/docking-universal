@@ -349,6 +349,10 @@ initialize_receptor_preparation() {
   PDBFIXER_LOG="$RECEPTOR_DIR/pdbfixer.log"
   PDBFIXER_AUDIT="$RECEPTOR_DIR/pdbfixer_audit.json"
   PDBFIXER_MEEKO_LOG="$RECEPTOR_DIR/receptor_after_pdbfixer.log"
+  PROTONATION_PDB="$RECEPTOR_DIR/${CANONICAL}_protonated.pdb"
+  PROTONATION_PQR="$RECEPTOR_DIR/${CANONICAL}.pqr"
+  PROTONATION_LOG="$RECEPTOR_DIR/pdb2pqr.log"
+  PROTONATION_AUDIT="$RECEPTOR_DIR/pdb2pqr_audit.json"
   RECEPTOR_RETRY_LOG="$RECEPTOR_DIR/receptor_retry.log"
   DISULFIDE_RETRY_LOG="$RECEPTOR_DIR/receptor_disulfide_retry.log"
   DISULFIDE_SELECTION_LOG="$RECEPTOR_DIR/disulfide_template_selection.tsv"
@@ -356,6 +360,7 @@ initialize_receptor_preparation() {
   CCD_AUDIT_JSON="$RECEPTOR_DIR/ccd_modification_audit.json"
   CCD_AUDIT_TSV="$RECEPTOR_DIR/ccd_modification_audit.tsv"
   PDBFIXER_USED=0
+  PROTONATION_USED=0
 
   DISULFIDE_TEMPLATE_ASSIGNMENTS=$(disulfide_template_assignments "$INPUT_PDB")
   filter_receptor_input "$INPUT_PDB" "$RECEPTOR_FILTERED_PDB"
@@ -366,6 +371,23 @@ initialize_receptor_preparation() {
     auto|required|off) ;;
     *) echo "ERROR: DOCKING_UNIVERSAL_PDBFIXER must be auto, required, or off" >&2; return 2 ;;
   esac
+  PROTONATION_MODE="${DOCKING_UNIVERSAL_PROTONATION:-auto}"
+  case "$PROTONATION_MODE" in
+    auto|required|off) ;;
+    *) echo "ERROR: DOCKING_UNIVERSAL_PROTONATION must be auto, required, or off" >&2; return 2 ;;
+  esac
+  PROTONATION_PH="${DOCKING_UNIVERSAL_RECEPTOR_PH:-7.4}"
+  PROTONATION_HELPER="$LIBEXEC_DIR/docking-universal-protonate-receptor.py"
+  if [ ! -f "$PROTONATION_HELPER" ] && [ -f "$(dirname "$0")/docking-universal-protonate-receptor.py" ]; then
+    PROTONATION_HELPER="$(dirname "$0")/docking-universal-protonate-receptor.py"
+  fi
+  PROTONATION_AVAILABLE=0
+  if [ -f "$PROTONATION_HELPER" ] && { command -v "${PDB2PQR_COMMAND:-pdb2pqr30}" >/dev/null 2>&1 || command -v pdb2pqr >/dev/null 2>&1; }; then
+    PROTONATION_AVAILABLE=1
+  elif [ "$PROTONATION_MODE" = required ]; then
+    echo "ERROR: PDB2PQR/PROPKA or the Docking Universal protonation helper is unavailable" >&2
+    return 1
+  fi
   PDBFIXER_HELPER="$LIBEXEC_DIR/docking-universal-pdbfixer.py"
   if [ ! -f "$PDBFIXER_HELPER" ] && [ -f "$(dirname "$0")/docking-universal-pdbfixer.py" ]; then
     PDBFIXER_HELPER="$(dirname "$0")/docking-universal-pdbfixer.py"
@@ -463,6 +485,34 @@ run_safe_receptor_preparation_attempts() {
       else
         log "ProDy unavailable: using the retained PDB compatibility input for Meeko"
       fi
+    fi
+    if [ "$PROTONATION_MODE" != off ] && [ "$PROTONATION_AVAILABLE" = "1" ]; then
+      log "Running pH-aware PDB2PQR/PROPKA receptor assessment at pH $PROTONATION_PH; audit -> $PROTONATION_AUDIT"
+      if run_logged_preparation_command "$PROTONATION_LOG" "$PYTHON_COMMAND" "$PROTONATION_HELPER" \
+        "$initial_input" "$PROTONATION_PDB" "$PROTONATION_PQR" "$PROTONATION_AUDIT" "$PROTONATION_LOG" --ph "$PROTONATION_PH"; then
+        protonation_status=$("$PYTHON_COMMAND" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status", "unknown"))' "$PROTONATION_AUDIT" 2>/dev/null || echo unknown)
+        if [ "$protonation_status" = compatible ]; then
+          PROTONATION_USED=1
+          cp "$PROTONATION_PDB" "$RECEPTOR_PDB"
+          initial_input="$RECEPTOR_PDB"
+          log "PDB2PQR/PROPKA produced a chemistry-checked receptor; Meeko will consume the retained protonated model"
+        elif [ "$PROTONATION_MODE" = required ]; then
+          echo "ERROR: PDB2PQR/PROPKA requires review before use (status: $protonation_status); inspect $PROTONATION_AUDIT" >&2
+          return 1
+        else
+          log "PDB2PQR/PROPKA requires review (status: $protonation_status); retaining the original filtered receptor"
+        fi
+      else
+        protonation_status="unknown"
+        [ ! -s "$PROTONATION_AUDIT" ] || protonation_status=$("$PYTHON_COMMAND" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status", "unknown"))' "$PROTONATION_AUDIT" 2>/dev/null || echo unknown)
+        if [ "$protonation_status" = incompatible ] || [ "$PROTONATION_MODE" = required ]; then
+          echo "ERROR: PDB2PQR/PROPKA could not produce a chemistry-preserving receptor (status: $protonation_status); inspect $PROTONATION_AUDIT" >&2
+          return 1
+        fi
+        log "PDB2PQR/PROPKA was not adopted (status: $protonation_status); retaining the original filtered receptor and audit"
+      fi
+    elif [ "$PROTONATION_MODE" != off ]; then
+      log "PDB2PQR/PROPKA unavailable; retaining the original filtered receptor (set DOCKING_UNIVERSAL_PROTONATION=required to stop)"
     fi
     build_meeko_receptor_command "$PREP_RECEPTOR_BIN" "$initial_input" \
       "$RECEPTOR_DIR/${CANONICAL}" "$RECEPTOR_PDBQT" "$MEEKO_ALLOW_BAD_RES" \

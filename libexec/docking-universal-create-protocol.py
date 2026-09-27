@@ -164,6 +164,8 @@ def scientific_software_record(engine):
         "molscrub": distribution_version("molscrub"),
         "meeko": distribution_version("meeko"),
         "pdbfixer": distribution_version("pdbfixer"),
+        "pdb2pqr": distribution_version("pdb2pqr"),
+        "propka": distribution_version("propka"),
         "fpocket": conda_package_version("fpocket"),
         "openbabel": openbabel,
         "plip": distribution_version("plip"),
@@ -634,6 +636,7 @@ def write_ligand_guided_pdf(out, protocol, figure):
         ["Result element", "Software", "Version used"],
         ["Workflow", "Docking Universal", package_version()], ["Docking parameterization", "Meeko", distribution_version("meeko")],
         ["Conditional receptor repair", "PDBFixer", pdbfixer_version],
+        ["pH-aware receptor protonation", "PDB2PQR / PROPKA", f"{distribution_version('pdb2pqr')} / {distribution_version('propka')}"],
         ["Docking engine specified", "AutoDock Vina" if protocol["engine"] == "vina" else "QuickVina-W", protocol.get("engine_version", "recorded when screening runs")],
         ["3D rendering", "PyMOL Open-Source", protocol.get("pymol_version", "not used")], ["PDF generation", "ReportLab", distribution_version("reportlab")],
     ]
@@ -1148,6 +1151,8 @@ def main():
     base = f"{subject}{kind}_{engine}_{date[:10]}"
     bundle_name = f"{base}.duprotocol"
     audit = next(iter(sorted(prep_root.glob("receptor/pdbfixer_audit.json"))), None)
+    protonation_audit = next(iter(sorted(prep_root.glob("receptor/pdb2pqr_audit.json"))), None)
+    protonation_log = next(iter(sorted(prep_root.glob("receptor/pdb2pqr.log"))), None)
     ccd_audit = next(iter(sorted(prep_root.glob("receptor/ccd_modification_audit.json"))), None)
     removal_log = next(iter(sorted(prep_root.glob("receptor/receptor_user_approved_removal.log"))), None)
     removal_record = next(iter(sorted(prep_root.glob("receptor/user_approved_component_removal.txt"))), None)
@@ -1176,6 +1181,8 @@ def main():
         ).protocol_parameters()
     receptor_preparation = {
             "pdbfixer_audit": str(audit) if audit else None,
+            "protonation_audit": str(protonation_audit) if protonation_audit else None,
+            "protonation_log": str(protonation_log) if protonation_log else None,
             "ccd_modification_audit": str(ccd_audit) if ccd_audit else None,
             "user_approved_component_removal": bool(removal_record),
             "user_approved_component_removal_log": str(removal_log) if removal_log else None,

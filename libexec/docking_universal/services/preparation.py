@@ -37,6 +37,8 @@ class ReceptorPreparationOptions:
     preparation_backend: str = "auto"
     pocket_engine: str = "auto"
     meeko_templates: str = ""
+    protonation: str = "auto"
+    receptor_ph: float = 7.4
 
     def validate(self) -> None:
         if (
@@ -64,6 +66,10 @@ class ReceptorPreparationOptions:
             raise ValueError("Preparation backend must be auto, meeko, or adfr")
         if self.pocket_engine not in {"auto", "p2rank", "fpocket"}:
             raise ValueError("Pocket engine must be auto, p2rank, or fpocket")
+        if self.protonation not in {"auto", "required", "off"}:
+            raise ValueError("Protonation policy must be auto, required, or off")
+        if not 0.0 <= self.receptor_ph <= 14.0:
+            raise ValueError("Receptor pH must be between 0 and 14")
 
 
 @dataclass(frozen=True)
@@ -119,6 +125,8 @@ def build_receptor_preparation_plan(
         "DOCKING_UNIVERSAL_PDBFIXER": options.pdbfixer,
         "DOCKING_UNIVERSAL_PREP_BACKEND": options.preparation_backend,
         "DOCKING_UNIVERSAL_POCKET_ENGINE": options.pocket_engine,
+        "DOCKING_UNIVERSAL_PROTONATION": options.protonation,
+        "DOCKING_UNIVERSAL_RECEPTOR_PH": str(options.receptor_ph),
         "DOCKING_UNIVERSAL_REMOVAL_PROMPT": "0",
         "DOCKING_UNIVERSAL_LOG_MODE": environment.get("DOCKING_UNIVERSAL_LOG_MODE", "tee"),
         "MEEKO_ALLOW_BAD_RES": "0",
@@ -217,6 +225,14 @@ class ReceptorPreparationService:
                 ("prepared-receptor-pdbqt", "prepared_receptor", plan.receptor_pdbqt),
                 ("receptor-preparation-run-log", "preparation_log", plan.run_log),
             ]
+            receptor_dir = plan.output_root / "receptor"
+            for name, kind in (("pdb2pqr_audit.json", "protonation_audit"),
+                               ("pdb2pqr.log", "protonation_log"),
+                               (f"{plan.receptor_pdb.stem}_protonated.pdb", "protonated_receptor"),
+                               (f"{plan.receptor_pdb.stem}.pqr", "protonated_receptor_pqr")):
+                candidate = receptor_dir / name
+                if candidate.is_file():
+                    discovered.append((f"protonation-{name}", kind, candidate))
             discovered.extend(
                 (_report_artifact_id(plan.output_root, path), "preliminary_report", path)
                 for path in sorted(plan.output_root.rglob("*.pdf"))

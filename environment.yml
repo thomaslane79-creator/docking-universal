@@ -32,4 +32,8 @@ dependencies:
   - pip
   - pip:
       - meeko==0.7.1
+      # Python 3.9-compatible pH-aware protonation and PROPKA integration.
+      # The preparation wrapper audits the resulting heavy-atom model before
+      # allowing Meeko to consume it.
+      - pdb2pqr==3.6.2
       - reportlab==4.2.5
