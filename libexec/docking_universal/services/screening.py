@@ -30,6 +30,7 @@ class ScreeningPlan:
     additional_sensitivity_jobs: int
     total_docking_jobs: int
     exploratory_authorization_required: bool
+    receptor_region_tasks: tuple[dict[str, Any], ...]
     parameters: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
@@ -84,6 +85,51 @@ def count_ligands(source: Path | str) -> int:
     return count
 
 
+def build_receptor_region_matrix(protocol: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    """Expand approved regions only where retained receptor-state comparison is required."""
+
+    locked = protocol.get("locked_inputs") or {}
+    regions = locked.get("boxes") or [locked.get("box")]
+    regions = [region for region in regions if region]
+    sensitivity = protocol.get("receptor_state_sensitivity") or {}
+    affected = set(map(str, sensitivity.get("affected_boxes") or ()))
+    variants = sensitivity.get("variants") or {}
+    primary_state = str(sensitivity.get("primary_review_state") or "primary")
+    tasks = []
+    for index, raw_region in enumerate(regions, 1):
+        region = raw_region if isinstance(raw_region, dict) else {"box": raw_region}
+        label = str(region.get("box_label") or f"site-{index}")
+        if label in affected:
+            if len(variants) < 2:
+                raise ValueError(
+                    f"Docking region {label} requires receptor-state comparison but lacks both variants"
+                )
+            order = sorted(variants, key=lambda value: (value != primary_state, value))
+            for state_name in order:
+                variant = variants[state_name]
+                receptor = variant.get("receptor_pdbqt") if isinstance(variant, dict) else None
+                if not receptor:
+                    raise ValueError(f"Receptor-state variant {state_name} lacks a prepared PDBQT")
+                tasks.append({
+                    "box_label": label,
+                    "box": region.get("box"),
+                    "receptor_state": state_name,
+                    "receptor": receptor,
+                    "receptor_sha256": variant.get("receptor_pdbqt_sha256"),
+                    "sensitivity_comparison": True,
+                })
+        else:
+            tasks.append({
+                "box_label": label,
+                "box": region.get("box"),
+                "receptor_state": primary_state,
+                "receptor": locked.get("receptor"),
+                "receptor_sha256": locked.get("receptor_sha256"),
+                "sensitivity_comparison": False,
+            })
+    return tuple(tasks)
+
+
 def build_screening_plan(
     protocol_path: Path | str,
     ligand_source: Path | str,
@@ -113,10 +159,7 @@ def build_screening_plan(
         if str((region or {}).get("box_label") or "") in affected_labels
     )
     variant_count = len(variants) if affected_regions else 1
-    if affected_regions and variant_count < 2:
-        raise ValueError(
-            "Protocol requires receptor-state comparison docks but lacks both retained variants"
-        )
+    receptor_region_tasks = build_receptor_region_matrix(protocol)
     baseline_per_compound = conformers * len(seeds) * len(regions)
     additional_per_compound = (
         conformers * len(seeds) * affected_regions * (variant_count - 1)
@@ -134,6 +177,7 @@ def build_screening_plan(
         additional_sensitivity_jobs=compounds * additional_per_compound,
         total_docking_jobs=compounds * jobs_per_compound,
         exploratory_authorization_required=kind != CONTROL_VALIDATED,
+        receptor_region_tasks=receptor_region_tasks,
         parameters=parameters,
     )
 

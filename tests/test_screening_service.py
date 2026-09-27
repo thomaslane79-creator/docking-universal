@@ -6,7 +6,9 @@ from pathlib import Path
 
 import numpy as np
 
-from docking_universal.services.screening import build_screening_plan, discover_screening_artifacts
+from docking_universal.services.screening import (
+    build_receptor_region_matrix, build_screening_plan, discover_screening_artifacts,
+)
 from docking_universal.services.pose_interactions import (
     build_pose_interaction_plan, materialize_pose_interaction_inputs, pose_cache_directory,
     read_pose_inventory, validate_pose_interaction_outputs,
@@ -57,6 +59,7 @@ class ScreeningServiceTests(unittest.TestCase):
         ]
         record["receptor_state_sensitivity"] = {
             "affected_boxes": ["P1"],
+            "primary_review_state": "HIE",
             "variants": {
                 "HIE": {"receptor_pdbqt": "HIE.pdbqt"},
                 "HID": {"receptor_pdbqt": "HID.pdbqt"},
@@ -73,6 +76,30 @@ class ScreeningServiceTests(unittest.TestCase):
         self.assertEqual(plan.total_docking_jobs, 36)
         self.assertEqual(plan.affected_docking_site_count, 1)
         self.assertEqual(plan.receptor_state_variant_count, 2)
+        self.assertEqual(
+            [(item["box_label"], item["receptor_state"]) for item in plan.receptor_region_tasks],
+            [("P1", "HIE"), ("P1", "HID"), ("P2", "HIE")],
+        )
+
+    def test_unaffected_boxes_are_not_duplicated_in_receptor_region_matrix(self):
+        record = json.loads(self.protocol.read_text())
+        record["locked_inputs"]["boxes"] = [
+            {"box": "one.conf", "box_label": "P1"},
+            {"box": "two.conf", "box_label": "P2"},
+        ]
+        record["receptor_state_sensitivity"] = {
+            "affected_boxes": ["P1"], "primary_review_state": "HIE",
+            "variants": {
+                "HIE": {"receptor_pdbqt": "HIE.pdbqt"},
+                "HID": {"receptor_pdbqt": "HID.pdbqt"},
+            },
+        }
+
+        matrix = build_receptor_region_matrix(record)
+
+        self.assertEqual(sum(item["box_label"] == "P1" for item in matrix), 2)
+        self.assertEqual(sum(item["box_label"] == "P2" for item in matrix), 1)
+        self.assertFalse(next(item for item in matrix if item["box_label"] == "P2")["sensitivity_comparison"])
 
     def test_changed_protocol_and_empty_ligand_sources_are_rejected(self):
         ligands = self.root / "empty.sdf"
