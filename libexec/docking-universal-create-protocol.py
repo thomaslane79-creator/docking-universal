@@ -166,6 +166,7 @@ def scientific_software_record(engine):
         "pdbfixer": distribution_version("pdbfixer"),
         "pdb2pqr": distribution_version("pdb2pqr"),
         "propka": distribution_version("propka"),
+        "cctbx_base": conda_package_version("cctbx-base"),
         "fpocket": conda_package_version("fpocket"),
         "openbabel": openbabel,
         "plip": distribution_version("plip"),
@@ -1153,6 +1154,8 @@ def main():
     audit = next(iter(sorted(prep_root.glob("receptor/pdbfixer_audit.json"))), None)
     protonation_audit = next(iter(sorted(prep_root.glob("receptor/pdb2pqr_audit.json"))), None)
     protonation_log = next(iter(sorted(prep_root.glob("receptor/pdb2pqr.log"))), None)
+    reduce2_audit = next(iter(sorted(prep_root.glob("receptor/reduce2_audit.json"))), None)
+    reduce2_log = next(iter(sorted(prep_root.glob("receptor/reduce2.log"))), None)
     ccd_audit = next(iter(sorted(prep_root.glob("receptor/ccd_modification_audit.json"))), None)
     removal_log = next(iter(sorted(prep_root.glob("receptor/receptor_user_approved_removal.log"))), None)
     removal_record = next(iter(sorted(prep_root.glob("receptor/user_approved_component_removal.txt"))), None)
@@ -1183,6 +1186,8 @@ def main():
             "pdbfixer_audit": str(audit) if audit else None,
             "protonation_audit": str(protonation_audit) if protonation_audit else None,
             "protonation_log": str(protonation_log) if protonation_log else None,
+            "reduce2_audit": str(reduce2_audit) if reduce2_audit else None,
+            "reduce2_log": str(reduce2_log) if reduce2_log else None,
             "ccd_modification_audit": str(ccd_audit) if ccd_audit else None,
             "user_approved_component_removal": bool(removal_record),
             "user_approved_component_removal_log": str(removal_log) if removal_log else None,

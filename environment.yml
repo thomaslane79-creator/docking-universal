@@ -23,6 +23,8 @@ dependencies:
   - scipy
   - molscrub=0.2.2
   - pdbfixer=1.11
+  # Vina/Meeko's documented receptor hydrogen-placement route.
+  - cctbx-base
   # Meeko 0.7.1 imports gemmi for receptor chemical templates but does not
   # declare it in its pip package metadata, so keep it explicit here.
   - gemmi

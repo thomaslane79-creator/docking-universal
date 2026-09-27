@@ -353,6 +353,9 @@ initialize_receptor_preparation() {
   PROTONATION_PQR="$RECEPTOR_DIR/${CANONICAL}.pqr"
   PROTONATION_LOG="$RECEPTOR_DIR/pdb2pqr.log"
   PROTONATION_AUDIT="$RECEPTOR_DIR/pdb2pqr_audit.json"
+  REDUCE2_PDB="$RECEPTOR_DIR/${CANONICAL}_reduce2H.pdb"
+  REDUCE2_LOG="$RECEPTOR_DIR/reduce2.log"
+  REDUCE2_AUDIT="$RECEPTOR_DIR/reduce2_audit.json"
   RECEPTOR_RETRY_LOG="$RECEPTOR_DIR/receptor_retry.log"
   DISULFIDE_RETRY_LOG="$RECEPTOR_DIR/receptor_disulfide_retry.log"
   DISULFIDE_SELECTION_LOG="$RECEPTOR_DIR/disulfide_template_selection.tsv"
@@ -361,6 +364,7 @@ initialize_receptor_preparation() {
   CCD_AUDIT_TSV="$RECEPTOR_DIR/ccd_modification_audit.tsv"
   PDBFIXER_USED=0
   PROTONATION_USED=0
+  REDUCE2_USED=0
 
   DISULFIDE_TEMPLATE_ASSIGNMENTS=$(disulfide_template_assignments "$INPUT_PDB")
   filter_receptor_input "$INPUT_PDB" "$RECEPTOR_FILTERED_PDB"
@@ -376,6 +380,22 @@ initialize_receptor_preparation() {
     auto|required|off) ;;
     *) echo "ERROR: DOCKING_UNIVERSAL_PROTONATION must be auto, required, or off" >&2; return 2 ;;
   esac
+  REDUCE2_MODE="${DOCKING_UNIVERSAL_REDUCE2:-auto}"
+  case "$REDUCE2_MODE" in
+    auto|required|off) ;;
+    *) echo "ERROR: DOCKING_UNIVERSAL_REDUCE2 must be auto, required, or off" >&2; return 2 ;;
+  esac
+  REDUCE2_HELPER="$LIBEXEC_DIR/docking-universal-reduce2-receptor.py"
+  if [ ! -f "$REDUCE2_HELPER" ] && [ -f "$(dirname "$0")/docking-universal-reduce2-receptor.py" ]; then
+    REDUCE2_HELPER="$(dirname "$0")/docking-universal-reduce2-receptor.py"
+  fi
+  REDUCE2_AVAILABLE=0
+  if [ -f "$REDUCE2_HELPER" ] && "$PYTHON_COMMAND" -c 'import site, pathlib; raise SystemExit(0 if any((pathlib.Path(p)/"mmtbx/command_line/reduce2.py").is_file() for p in site.getsitepackages()) else 1)' >/dev/null 2>&1; then
+    REDUCE2_AVAILABLE=1
+  elif [ "$REDUCE2_MODE" = required ]; then
+    echo "ERROR: CCTBX reduce2.py is unavailable in the active installation" >&2
+    return 1
+  fi
   PROTONATION_PH="${DOCKING_UNIVERSAL_RECEPTOR_PH:-7.4}"
   PROTONATION_HELPER="$LIBEXEC_DIR/docking-universal-protonate-receptor.py"
   if [ ! -f "$PROTONATION_HELPER" ] && [ -f "$(dirname "$0")/docking-universal-protonate-receptor.py" ]; then
@@ -486,7 +506,22 @@ run_safe_receptor_preparation_attempts() {
         log "ProDy unavailable: using the retained PDB compatibility input for Meeko"
       fi
     fi
-    if [ "$PROTONATION_MODE" != off ] && [ "$PROTONATION_AVAILABLE" = "1" ]; then
+    if [ "$REDUCE2_MODE" != off ] && [ "$REDUCE2_AVAILABLE" = "1" ]; then
+      log "Running CCTBX reduce2 for receptor hydrogen placement and flip optimization; audit -> $REDUCE2_AUDIT"
+      if run_logged_preparation_command "$REDUCE2_LOG" "$PYTHON_COMMAND" "$REDUCE2_HELPER" \
+        "$initial_input" "$REDUCE2_PDB" "$REDUCE2_AUDIT" "$REDUCE2_LOG"; then
+        REDUCE2_USED=1
+        cp "$REDUCE2_PDB" "$RECEPTOR_PDB"
+        initial_input="$RECEPTOR_PDB"
+        log "CCTBX reduce2 produced the chemistry-checked hydrogen-optimized receptor; Meeko will consume it"
+      elif [ "$REDUCE2_MODE" = required ]; then
+        echo "ERROR: CCTBX reduce2 could not produce a chemistry-preserving receptor; inspect $REDUCE2_AUDIT" >&2
+        return 1
+      else
+        log "CCTBX reduce2 was unavailable or failed; retaining its audit and continuing to the compatibility protonation route"
+      fi
+    fi
+    if [ "$REDUCE2_USED" = "0" ] && [ "$PROTONATION_MODE" != off ] && [ "$PROTONATION_AVAILABLE" = "1" ]; then
       log "Running pH-aware PDB2PQR/PROPKA receptor assessment at pH $PROTONATION_PH; audit -> $PROTONATION_AUDIT"
       if run_logged_preparation_command "$PROTONATION_LOG" "$PYTHON_COMMAND" "$PROTONATION_HELPER" \
         "$initial_input" "$PROTONATION_PDB" "$PROTONATION_PQR" "$PROTONATION_AUDIT" "$PROTONATION_LOG" --ph "$PROTONATION_PH"; then

@@ -86,7 +86,7 @@ docking-universal check-install --full
 
 `make install-conda` uses the active `CONDA_PREFIX`; it fails rather than guessing when no Conda environment is active. The installed command and its private helpers remain relocatable within that environment.
 
-`make install-conda` installs the Docking Universal files; it does not independently install or change scientific packages. A new environment created from `environment.yml` receives PDBFixer 1.11 and its OpenMM dependency automatically. To update an existing Docking Universal environment after pulling this release, run:
+`make install-conda` installs the Docking Universal files; it does not independently install or change scientific packages. A new environment created from `environment.yml` receives PDBFixer 1.11 and its OpenMM dependency automatically. It also receives CCTBX for the Vina/Meeko Reduce2 receptor-hydrogen route. Reduce2 additionally requires the open-source CCP4 monomer library from [phenix-project/geostd](https://github.com/phenix-project/geostd). Clone that repository once and point the environment at it with `export DOCKING_UNIVERSAL_GEOSTD=/path/to/geostd` before running receptor preparation. To update an existing Docking Universal environment after pulling this release, run:
 
 ```bash
 conda activate docking-universal

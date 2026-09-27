@@ -39,6 +39,7 @@ class ReceptorPreparationOptions:
     meeko_templates: str = ""
     protonation: str = "auto"
     receptor_ph: float = 7.4
+    reduce2: str = "auto"
 
     def validate(self) -> None:
         if (
@@ -70,6 +71,8 @@ class ReceptorPreparationOptions:
             raise ValueError("Protonation policy must be auto, required, or off")
         if not 0.0 <= self.receptor_ph <= 14.0:
             raise ValueError("Receptor pH must be between 0 and 14")
+        if self.reduce2 not in {"auto", "required", "off"}:
+            raise ValueError("Reduce2 policy must be auto, required, or off")
 
 
 @dataclass(frozen=True)
@@ -127,6 +130,7 @@ def build_receptor_preparation_plan(
         "DOCKING_UNIVERSAL_POCKET_ENGINE": options.pocket_engine,
         "DOCKING_UNIVERSAL_PROTONATION": options.protonation,
         "DOCKING_UNIVERSAL_RECEPTOR_PH": str(options.receptor_ph),
+        "DOCKING_UNIVERSAL_REDUCE2": options.reduce2,
         "DOCKING_UNIVERSAL_REMOVAL_PROMPT": "0",
         "DOCKING_UNIVERSAL_LOG_MODE": environment.get("DOCKING_UNIVERSAL_LOG_MODE", "tee"),
         "MEEKO_ALLOW_BAD_RES": "0",
@@ -228,6 +232,9 @@ class ReceptorPreparationService:
             receptor_dir = plan.output_root / "receptor"
             for name, kind in (("pdb2pqr_audit.json", "protonation_audit"),
                                ("pdb2pqr.log", "protonation_log"),
+                               ("reduce2_audit.json", "reduce2_audit"),
+                               ("reduce2.log", "reduce2_log"),
+                               (f"{plan.receptor_pdb.stem}_reduce2H.pdb", "reduce2_receptor"),
                                (f"{plan.receptor_pdb.stem}_protonated.pdb", "protonated_receptor"),
                                (f"{plan.receptor_pdb.stem}.pqr", "protonated_receptor_pqr")):
                 candidate = receptor_dir / name

@@ -184,6 +184,7 @@ run_route() {
     DOCKING_UNIVERSAL_PYTHON="$python_command"
     DOCKING_UNIVERSAL_PDBFIXER=off
     DOCKING_UNIVERSAL_PROTONATION=off
+    DOCKING_UNIVERSAL_REDUCE2=off
     "$root/libexec/docking-universal-prepare" "$input")
 
   if [ "$route_case" = pdbfixer ]; then
@@ -200,6 +201,7 @@ run_route() {
       DOCKING_UNIVERSAL_ADFR_FALLBACK=1 DOCKING_UNIVERSAL_PYTHON="$python_command"
       DOCKING_UNIVERSAL_PDBFIXER=required
       DOCKING_UNIVERSAL_PROTONATION=off
+      DOCKING_UNIVERSAL_REDUCE2=off
       "$root/libexec/docking-universal-prepare" "$input")
   fi
 
