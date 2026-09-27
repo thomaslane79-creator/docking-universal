@@ -7,7 +7,12 @@ trap 'rm -rf "$work_dir"' EXIT HUP INT TERM
 mock_bin="$work_dir/bin"
 state_file="$work_dir/environments"
 log_file="$work_dir/conda.log"
+mock_scientific_prefix="$work_dir/mock-scientific-prefix"
 mkdir -p "$mock_bin"
+mkdir -p "$mock_scientific_prefix/share/docking-universal/p2rank-2.5.1"
+: > "$mock_scientific_prefix/share/docking-universal/p2rank-2.5.1/prank"
+chmod +x "$mock_scientific_prefix/share/docking-universal/p2rank-2.5.1/prank"
+export BOOTSTRAP_TEST_SCIENTIFIC_PREFIX="$mock_scientific_prefix"
 
 fail() {
   printf 'FAIL: %s\n' "$1" >&2
@@ -52,6 +57,14 @@ case "${1:-} ${2:-}" in
   "env update")
     ;;
   "run --no-capture-output")
+    ;;
+  "run -n")
+    if [ "${4:-}" = "printenv" ] && [ "${5:-}" = "CONDA_PREFIX" ]; then
+      printf '%s\n' "$BOOTSTRAP_TEST_SCIENTIFIC_PREFIX"
+    else
+      printf 'Unexpected fake Conda run invocation: %s\n' "$*" >&2
+      exit 2
+    fi
     ;;
   *)
     printf 'Unexpected fake Conda invocation: %s\n' "$*" >&2

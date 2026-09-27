@@ -7,23 +7,23 @@ from pathlib import Path
 
 from ..runtime_inventory import discover_poseedit_runtime
 from ..state import JsonStudyStore, StudyState
-from .session import ActiveStudySession
-from .results_review import ResultsReviewPanel
-from .results_model import ResultsReviewModel
-from .results_controller import ResultsReviewController
-from .workflow_panels import (
-    PreparationProgressPanel, ProtocolFinalizationPanel, ScreeningSetupPanel,
-    StudySetupPanel,
-)
-from .workflow_navigation import WorkflowNavigationController
-from .scientific_detail import ScientificDetailPanel
-from .workspace_controller import WorkspaceWindowController
-from .application_host_controller import ApplicationHostController
-from .pocket_evidence import PocketEvidencePanel
-from .decision_dialog import DecisionDialog
 
 try:
     from .qt import QtCore, QtGui, QtWidgets
+    from .session import ActiveStudySession
+    from .results_review import ResultsReviewPanel
+    from .results_model import ResultsReviewModel
+    from .results_controller import ResultsReviewController
+    from .workflow_panels import (
+        PreparationProgressPanel, ProtocolFinalizationPanel, ScreeningSetupPanel,
+        StudySetupPanel,
+    )
+    from .workflow_navigation import WorkflowNavigationController
+    from .scientific_detail import ScientificDetailPanel
+    from .workspace_controller import WorkspaceWindowController
+    from .application_host_controller import ApplicationHostController
+    from .pocket_evidence import PocketEvidencePanel
+    from .decision_dialog import DecisionDialog
     from .linked_pose_review import LinkedPosePanel, pose_view, control_view, write_comparison_report
 except ImportError as exc:  # pragma: no cover - diagnosed by runtime inventory
     QtCore = QtGui = QtWidgets = None
