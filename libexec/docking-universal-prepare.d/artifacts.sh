@@ -128,7 +128,7 @@ write_pymol_review_scene() {
     echo "show spheres, ${canonical}_center${index}"
     echo "color yellow, ${canonical}_center${index}"
     echo "set sphere_scale, 0.7, ${canonical}_center${index}"
-    echo "label ${canonical}_center${index}, \"Pocket ${index} | ${POCKET_ENGINE} ${score}\""
+    echo "label ${canonical}_center${index}, \"Pocket ${index} | ${POCKET_ENGINE:-fpocket} ${score}\""
     echo "set label_size, 18, ${canonical}_center${index}"
     echo "set label_color, white, ${canonical}_center${index}"
     echo "set label_outline_color, black, ${canonical}_center${index}"
