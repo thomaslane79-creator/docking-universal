@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import os
+import subprocess
+import sys
 from typing import Any
 from uuid import uuid4
 
@@ -26,6 +29,9 @@ class RegisteredStructure:
 class PymolAdapter:
     """Own one viewer session and replay only validated registered state."""
 
+    backend_kind = "companion"
+    backend_name = "PyMOL companion"
+
     def __init__(self, pymol: Path | str, bridge_script: Path | str, log_directory: Path | str):
         self.controller = PymolSpikeController(pymol, bridge_script, log_directory)
         self.client: PymolSpikeClient | None = None
@@ -33,6 +39,9 @@ class PymolAdapter:
         self.structures: dict[str, RegisteredStructure] = {}
         self.pockets: dict[str, dict[str, Any]] = {}
         self.snapshot: dict[str, Any] = {"structures": [], "pockets": [], "selections": {}, "box": None, "view": None}
+        self.report_session: Path | None = None
+        self.review_pose: Path | None = None
+        self.evidence_ligand: Path | None = None
 
     def launch(self, *, headless: bool = False) -> str:
         self.client = self.controller.start(headless=headless)
@@ -109,10 +118,103 @@ class PymolAdapter:
         self.snapshot["selections"][selection.name] = selection
         return selection
 
-    def show_box(self, center, size) -> dict[str, Any]:
-        result = self._client().request("show_box", {"name": "du_box", "center": list(center), "size": list(size)})
+    def show_box(
+        self, center, size, color: str = "red", source_object_name: str | None = None,
+        redundant_object_names: tuple[str, ...] = (),
+        visible_associated_object_names: tuple[str, ...] = (),
+    ) -> dict[str, Any]:
+        result = self._client().request("show_box", {
+            "name": "du_box", "center": list(center), "size": list(size), "color": color,
+            "source_object_name": source_object_name,
+            "redundant_object_names": list(redundant_object_names),
+            "visible_associated_object_names": list(visible_associated_object_names),
+        })
         self.snapshot["box"] = result
         return result
+
+    def load_report_session(self, path: Path | str) -> dict[str, Any]:
+        """Load the retained PyMOL session used to render a report figure."""
+        session = Path(path).resolve()
+        if not session.is_file() or session.suffix.lower() != ".pse":
+            raise FileNotFoundError(f"Retained report-view session is missing: {session}")
+        result = self._client().request(
+            "load_report_session", {"path": str(session), "replace": True},
+        )
+        self.report_session = session
+        return result
+
+    def bring_to_front(self) -> None:
+        """Raise the exact companion process after a scene update on macOS."""
+        if sys.platform != "darwin":
+            return
+        # The host terminal is a separate macOS application and cannot be
+        # lowered through Qt; hide it while the interactive viewer is active.
+        for app_name in ("Terminal", "iTerm2"):
+            subprocess.run(
+                ["osascript", "-e", f'tell application "{app_name}" to hide'],
+                check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        process = getattr(self.controller, "process", None)
+        pid = getattr(process, "pid", None)
+        if not pid:
+            return
+        try:
+            result = subprocess.run(
+                [
+                    "osascript", "-e",
+                    "tell application \"System Events\" to set frontmost of "
+                    f"first process whose unix id is {int(pid)} to true",
+                ],
+                check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except OSError:
+            pass
+
+    def reset_report_view(self) -> dict[str, Any]:
+        """Restore the immutable session that generated the selected report view."""
+        if self.report_session is None:
+            raise PymolSpikeError("No retained report view is available to restore")
+        return self._client().request(
+            "load_report_session", {"path": str(self.report_session), "replace": True},
+        )
+
+    def show_review_pose(self, path: Path | str) -> dict[str, Any]:
+        pose = Path(path).resolve()
+        if not pose.is_file() or pose.suffix.lower() != ".sdf":
+            raise FileNotFoundError(f"Retained SDF review pose is missing: {pose}")
+        result = self._client().request(
+            "show_review_pose", {"path": str(pose), "object_name": "du_review_pose"},
+        )
+        self.review_pose = pose
+        return result
+
+    def show_evidence_ligand(self, path: Path | str, receptor_path: Path | str | None = None) -> dict[str, Any]:
+        ligand = Path(path).resolve()
+        if not ligand.is_file() or ligand.suffix.lower() != ".pdb":
+            raise FileNotFoundError(f"Aligned deposited ligand is missing: {ligand}")
+        payload = {"path": str(ligand), "object_name": "du_evidence_ligand"}
+        if receptor_path:
+            payload["receptor_path"] = str(receptor_path)
+        result = self._client().request("show_evidence_ligand", payload)
+        self.evidence_ligand = ligand
+        return result
+
+    def show_evidence_ligands(self, paths: list[Path | str], receptor_path: Path | str | None = None) -> dict[str, Any]:
+        ligands = [Path(path).resolve() for path in paths]
+        if not ligands or any(not path.is_file() or path.suffix.lower() != ".pdb" for path in ligands):
+            raise FileNotFoundError("Evidence comparison requires existing retained PDB ligands")
+        result = self._client().request(
+            "show_evidence_ligands", {"paths": [str(path) for path in ligands], "receptor_path": str(receptor_path) if receptor_path else ""},
+        )
+        self.evidence_ligand = ligands[-1]
+        self.bring_to_front()
+        return result
+
+    def sync_evidence_ligands(self, paths: list[Path | str]) -> dict[str, Any]:
+        ligands = [Path(path).resolve() for path in paths]
+        if any(not path.is_file() or path.suffix.lower() != ".pdb" for path in ligands):
+            raise FileNotFoundError("Evidence selection contains a missing PDB")
+        return self._client().request("sync_evidence_ligands", {"paths": [str(path) for path in ligands]})
 
     def capture_view(self) -> dict[str, Any]:
         result = self._client().request("get_view")
@@ -128,6 +230,9 @@ class PymolAdapter:
         pockets = list(self.snapshot["pockets"])
         box = self.snapshot["box"]
         view = self.snapshot["view"]
+        report_session = self.report_session
+        review_pose = self.review_pose
+        evidence_ligand = self.evidence_ligand
         self.structures.clear()
         self.pockets.clear()
         for structure in structures:
@@ -140,11 +245,21 @@ class PymolAdapter:
             self._client().request("show_box", box)
         if view:
             self._client().request("set_view", view)
+        if report_session:
+            self.load_report_session(report_session)
+        if review_pose:
+            self.show_review_pose(review_pose)
+        if evidence_ligand:
+            self.show_evidence_ligand(evidence_ligand)
         return self.session_id
 
     def close(self) -> None:
         self.controller.stop()
         self.client = None
+
+    def is_alive(self) -> bool:
+        """Cheap lifecycle check that does not mutate the viewer scene."""
+        return bool(self.client is not None and self.controller.running)
 
     def _client(self) -> PymolSpikeClient:
         if self.client is None:

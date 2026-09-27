@@ -34,6 +34,8 @@ class JobService:
         *,
         cancel_event: threading.Event | None = None,
         on_output: Callable[[ProcessOutput], None] | None = None,
+        progress_probe: Callable[[], tuple[str, str, int | None, int | None]] | None = None,
+        intervention_probe: Callable[[], object | None] | None = None,
         required_outputs: tuple[Path | str, ...] = (),
         request_id: str | None = None,
         expected_revision: int | None = None,
@@ -41,8 +43,31 @@ class JobService:
         with _ScientificJobLease(self.controller.store):
             return self._run_owned(
                 study_id, stage, request, cancel_event=cancel_event,
-                on_output=on_output, required_outputs=required_outputs,
-                request_id=request_id, expected_revision=expected_revision,
+                on_output=on_output, progress_probe=progress_probe, required_outputs=required_outputs,
+                intervention_probe=intervention_probe, request_id=request_id,
+                expected_revision=expected_revision, existing_job_id=None,
+            )
+
+    def resume(
+        self,
+        study_id: str,
+        job_id: str,
+        request: ProcessRequest,
+        *,
+        cancel_event: threading.Event | None = None,
+        on_output: Callable[[ProcessOutput], None] | None = None,
+        progress_probe: Callable[[], tuple[str, str, int | None, int | None]] | None = None,
+        intervention_probe: Callable[[], object | None] | None = None,
+        required_outputs: tuple[Path | str, ...] = (),
+    ) -> ProcessResult:
+        """Resume the exact queued stage after a persisted scientific decision."""
+
+        with _ScientificJobLease(self.controller.store, allowed_active=(study_id, job_id)):
+            return self._run_owned(
+                study_id, "", request, cancel_event=cancel_event,
+                on_output=on_output, progress_probe=progress_probe,
+                intervention_probe=intervention_probe, required_outputs=required_outputs,
+                request_id=None, expected_revision=None, existing_job_id=job_id,
             )
 
     def _run_owned(
@@ -53,12 +78,15 @@ class JobService:
         *,
         cancel_event: threading.Event | None,
         on_output: Callable[[ProcessOutput], None] | None,
+        progress_probe: Callable[[], tuple[str, str, int | None, int | None]] | None,
+        intervention_probe: Callable[[], object | None] | None,
         required_outputs: tuple[Path | str, ...],
         request_id: str | None,
         expected_revision: int | None,
+        existing_job_id: str | None,
     ) -> ProcessResult:
         state = self.controller.get_study(study_id)
-        if request_id:
+        if request_id and existing_job_id is None:
             prior = next((item for item in state.jobs if item.request_id == request_id), None)
             if prior is not None:
                 raise ActiveStageError(f"Scientific job request was already recorded: {request_id}")
@@ -67,20 +95,32 @@ class JobService:
             raise RevisionConflictError(
                 f"Study {study_id} changed from revision {expected_revision} to {state.revision}"
             )
-        if state.active_job:
+        if existing_job_id is not None:
+            job = self._job(state, existing_job_id)
+            if state.active_job is None or state.active_job.id != existing_job_id:
+                raise ActiveStageError("The queued scientific stage is no longer active")
+            if job.status is not JobStatus.QUEUED:
+                raise ActiveStageError("Only a queued decision continuation can be resumed")
+            job.status = JobStatus.RUNNING
+            job.process_id = None
+            job.error = None
+            state.current_stage = job.stage
+            state.completion_status = CompletionStatus.RUNNING
+        elif state.active_job:
             raise ActiveStageError(
                 f"Study {study_id} already has an active stage: {state.active_job.stage}"
             )
-        job = Job(
-            id=self.controller._id("job"),
-            stage=stage,
-            status=JobStatus.RUNNING,
-            started_at=utc_now(),
-            request_id=request_id,
-        )
-        state.jobs.append(job)
-        state.current_stage = stage
-        state.completion_status = CompletionStatus.RUNNING
+        else:
+            job = Job(
+                id=self.controller._id("job"),
+                stage=stage,
+                status=JobStatus.RUNNING,
+                started_at=utc_now(),
+                request_id=request_id,
+            )
+            state.jobs.append(job)
+            state.current_stage = stage
+            state.completion_status = CompletionStatus.RUNNING
         log_directory = Path(request.log_directory)
         log_directory.mkdir(parents=True, exist_ok=True)
         stdout_log = log_directory / f"{request.log_name}.stdout.log"
@@ -91,9 +131,16 @@ class JobService:
         StudyController._event(
             state,
             EventType.STAGE_STARTED,
-            f"{stage} started",
-            explanation="The scientific stage is running outside the application event loop.",
-            technical={"job_id": job.id, "command": list(map(str, request.command))},
+            f"{job.stage} {'resumed' if existing_job_id else 'started'}",
+            explanation=(
+                "The retained scientific stage resumed after the recorded decision."
+                if existing_job_id else
+                "The scientific stage is running outside the application event loop."
+            ),
+            technical={
+                "job_id": job.id, "command": list(map(str, request.command)),
+                "resumed": existing_job_id is not None,
+            },
         )
         self.controller.store.save(state, expected_revision=expected_revision)
 
@@ -102,10 +149,43 @@ class JobService:
                 self._job(latest, job.id).process_id = process_id
             self.controller.store.update(study_id, mutation)
 
+        last_feedback = None
+
+        def record_progress() -> None:
+            nonlocal last_feedback
+            if progress_probe is None:
+                return
+            try:
+                feedback = progress_probe()
+            except Exception:
+                # Feedback is advisory; it must never stop the scientific process.
+                return
+            if feedback == last_feedback:
+                return
+            phase, message, completed, total = feedback
+            if total is not None and (total <= 0 or completed is None or not 0 <= completed <= total):
+                return
+
+            def mutation(latest):
+                current = self._job(latest, job.id)
+                current.progress_phase = phase
+                current.progress_message = message
+                current.progress_completed = completed
+                current.progress_total = total
+                if total is not None:
+                    current.progress = completed / total
+
+            try:
+                self.controller.store.update(study_id, mutation)
+            except Exception:
+                # Progress persistence is advisory; terminal job recording is not.
+                return
+            last_feedback = feedback
+
         try:
             result = self.runner.run(
                 request, cancel_event=cancel_event, on_output=on_output,
-                on_started=record_process_id,
+                on_started=record_process_id, on_tick=record_progress,
             )
         except ProcessExecutionError as exc:
             self._finish(study_id, job.id, request, exc.result)
@@ -127,6 +207,11 @@ class JobService:
                 with stderr_log.open("a") as handle:
                     handle.write(message + "\n")
                 result = replace(result, status=ProcessStatus.FAILED, returncode=1, stderr_tail=message)
+        if result.status is ProcessStatus.FAILED and intervention_probe is not None:
+            decision = intervention_probe()
+            if decision is not None:
+                self.controller.pause_for_decision(study_id, decision)
+                return result
         self._finish(study_id, job.id, request, result)
         if request.check and result.status is not ProcessStatus.COMPLETED:
             raise ProcessExecutionError(result)
@@ -215,10 +300,22 @@ class JobService:
             ("stdout", "job_stdout_log", stdout_log),
             ("stderr", "job_stderr_log", stderr_log),
         ):
-            if not path.is_file() or f"{job.id}-{suffix}" in existing:
+            if not path.is_file():
                 continue
+            artifact_id = f"{job.id}-{suffix}"
+            if artifact_id in existing:
+                prior = next(item for item in state.artifacts if item.id == artifact_id)
+                if Path(prior.path) == path.resolve():
+                    continue
+                safe_name = "".join(
+                    character if character.isalnum() or character in {"-", "_"} else "-"
+                    for character in request.log_name
+                ).strip("-")
+                artifact_id = f"{job.id}-{suffix}-{safe_name}"
+                if artifact_id in existing:
+                    continue
             state.artifacts.append(ArtifactRecord(
-                id=f"{job.id}-{suffix}",
+                id=artifact_id,
                 kind=kind,
                 path=str(path.resolve()),
                 description=f"Complete {job.stage} {suffix} log",
@@ -232,10 +329,11 @@ class _ScientificJobLease:
     _registry_guard = threading.Lock()
     _locks: dict[str, threading.Lock] = {}
 
-    def __init__(self, store):
+    def __init__(self, store, allowed_active: tuple[str, str] | None = None):
         self.store = store
         self.path = store.root / ".scientific-job.lock"
         self.handle = None
+        self.allowed_active = allowed_active
         key = str(store.root.resolve())
         with self._registry_guard:
             self.thread_lock = self._locks.setdefault(key, threading.Lock())
@@ -254,6 +352,8 @@ class _ScientificJobLease:
             for path in self.store.root.glob("*/application_state.json"):
                 state = self.store.load(path.parent.name)
                 if state.active_job:
+                    if self.allowed_active == (state.study_id, state.active_job.id):
+                        continue
                     raise ActiveStageError(
                         f"Study {state.study_id} already has an active stage: {state.active_job.stage}"
                     )

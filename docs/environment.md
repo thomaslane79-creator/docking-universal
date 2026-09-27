@@ -39,6 +39,58 @@ The packaged commands use strict Meeko conversion first. Only after rejection do
 
 The PyMOL route uses conda-forge's `pymol-open-source`, together with the compatible Python 3.9, PyCairo 1.27, and RDKit 2023.09 matrix. Conda resolves the lower-level Qt, Cairo, and graphics libraries. Headless PNG rendering is included in real-tool validation.
 
+## Parallel modern GUI/PyMOL candidate
+
+`environments/gui-next.yml` defines the Python 3.12/PyQt6 application host.
+
+The desktop framework is PyQt6, the Python bindings for Qt 6 maintained by
+Riverbank Computing. PyQt6 is a GUI dependency and is deliberately not listed
+as scientific result-generating software in docking reports. See the
+[PyQt introduction](https://www.riverbankcomputing.com/software/pyqt) and
+[Qt 6 documentation](https://doc.qt.io/qt-6/).
+
+The approved 2D interaction-diagram path is a local Docking Universal renderer
+inspired by the visual conventions of
+[PoseEdit](https://www.zbh.uni-hamburg.de/en/forschung/amd/software/poseedit.html).
+It uses [Playwright](https://playwright.dev/docs/intro) and
+[Node.js](https://nodejs.org/docs/latest/api/) locally; docked structures are
+never submitted to PoseEdit or another web service. Reports record these three
+renderer components only when that rendering path was actually used.
+`environments/pymol-next.yml` defines the Python 3.12/PyMOL Open Source 3.1
+companion, including PLIP 2.3.1 so PLIP's native session writer imports that
+exact PyMOL runtime. They are intentionally separate because conda-forge's PyMOL 3.1
+build currently selects PyQt5/Qt5; importing it in the PyQt6 host loads both Qt
+generations and produces unsafe duplicate Objective-C runtime classes on macOS.
+Both candidate definitions use only conda-forge packages (`nodefaults`) so a
+workstation's configured default channels cannot silently change the solve.
+The pair becomes supported only after GUI startup, the supervised bridge,
+selection synchronization, retained-session loading, and headless report
+rendering pass on macOS, Linux, and Windows.
+
+The macOS arm64 candidate successfully generated native PLIP `.pse` sessions
+for three retained QuickVina poses, reopened a session in a fresh PyMOL 3.1
+process, and rendered it headlessly. A public experimental-complex panel then
+covered hydrophobic contacts, hydrogen bonds, water bridges, salt bridges,
+pi-stacking, pi-cation interactions, halogen bonds, and metal complexes. Every
+representative session reopened and rendered with PyMOL 3.1 when PLIP was run
+with `--maxthreads 1`. With PLIP's default parallelism, XML calculation
+succeeded across nine public structures but native session output appeared for
+only one; native visualization must therefore remain serialized.
+
+Native PLIP writes one `.pse` per binding site rather than the consolidated
+`.pml` scene used by Docking Universal. It is a viable retained-session path,
+but the custom scene remains necessary for stable GUI object identity,
+multi-site consolidation, report cameras, and selection synchronization.
+
+The installed launcher routes `docking-universal desktop` through the GUI host
+and resolves the PyMOL executable from the companion automatically. Advanced
+installations may override the environment names with
+`DOCKING_UNIVERSAL_GUI_ENV` and `DOCKING_UNIVERSAL_PYMOL_ENV`. The serialized
+application host is launched with the established scientific environment's
+Python (`DOCKING_UNIVERSAL_ENV`, default `docking-universal`), so receptor
+preparation and analysis dependencies never need to be duplicated into the
+PyQt6 process.
+
 PLIP calculates the interaction data and writes its reports and fixed coordinates. Docking Universal's custom interaction script then writes a consolidated PML scene from that output because PLIP's native visual path was not reliable in the original setup. PyMOL is the renderer for that scene; it is not the interaction calculator.
 
 The installed host launcher runs commands in the declared Conda environment without requiring users to activate it manually. It does not alter the parent shell's active environment. Advanced users may still supply an equivalent validated environment through Conda, containers, or a workstation module system.

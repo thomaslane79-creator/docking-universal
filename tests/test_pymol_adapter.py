@@ -31,6 +31,8 @@ class FakeClient:
 
 
 class FakeController:
+    running = True
+
     def stop(self):
         return None
 
@@ -86,6 +88,39 @@ class PymolAdapterTests(unittest.TestCase):
             replay = self.adapter.show_pocket(pocket, "du_pocket_1", "marine")
             self.assertTrue(replay["already_loaded"])
             self.assertEqual(len(self.adapter.client.requests), after_first)
+
+    def test_report_view_reset_reloads_the_exact_retained_session(self):
+        session = Path(self.temporary.name) / "cavity_selected_box.pse"
+        session.write_bytes(b"retained session")
+        self.adapter.load_report_session(session)
+        self.adapter.reset_report_view()
+        self.assertEqual(self.adapter.client.requests[-2:], [
+            ("load_report_session", {"path": str(session.resolve()), "replace": True}),
+            ("load_report_session", {"path": str(session.resolve()), "replace": True}),
+        ])
+
+    def test_exact_review_pose_replaces_only_the_dedicated_object(self):
+        pose = Path(self.temporary.name) / "pose.sdf"
+        pose.write_text("pose\n")
+        self.adapter.show_review_pose(pose)
+        self.assertEqual(self.adapter.client.requests[-1], (
+            "show_review_pose", {"path": str(pose.resolve()), "object_name": "du_review_pose"},
+        ))
+        self.assertEqual(self.adapter.review_pose, pose.resolve())
+
+    def test_aligned_experimental_ligand_uses_a_dedicated_object(self):
+        ligand = Path(self.temporary.name) / "aligned_ligand.pdb"
+        ligand.write_text("END\n")
+        self.adapter.show_evidence_ligand(ligand)
+        self.assertEqual(self.adapter.client.requests[-1], (
+            "show_evidence_ligand",
+            {"path": str(ligand.resolve()), "object_name": "du_evidence_ligand"},
+        ))
+
+    def test_lifecycle_check_requires_client_and_running_process(self):
+        self.assertTrue(self.adapter.is_alive())
+        self.adapter.controller.running = False
+        self.assertFalse(self.adapter.is_alive())
 
 
 if __name__ == "__main__":

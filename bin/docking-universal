@@ -5,7 +5,17 @@ set -eu
 # resolves the package-local implementation and forwards user arguments.
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-PYTHON_COMMAND="${DOCKING_UNIVERSAL_PYTHON:-python}"
+if [ -n "${DOCKING_UNIVERSAL_PYTHON:-}" ]; then
+  PYTHON_COMMAND=$DOCKING_UNIVERSAL_PYTHON
+elif [ -n "${CONDA_PREFIX:-}" ] && [ -x "$CONDA_PREFIX/bin/python" ]; then
+  PYTHON_COMMAND="$CONDA_PREFIX/bin/python"
+elif [ -n "${CONDA_PREFIX:-}" ] && [ -x "$CONDA_PREFIX/python.exe" ]; then
+  PYTHON_COMMAND="$CONDA_PREFIX/python.exe"
+elif command -v python3 >/dev/null 2>&1; then
+  PYTHON_COMMAND=$(command -v python3)
+else
+  PYTHON_COMMAND=python
+fi
 if [ -n "${DOCKING_UNIVERSAL_LIBEXEC:-}" ]; then
   LIBEXEC_DIR="$DOCKING_UNIVERSAL_LIBEXEC"
 elif [ -x "$SCRIPT_DIR/../libexec/docking-universal-prepare" ]; then
@@ -82,7 +92,7 @@ doctor() {
       ;;
   esac
   required="awk grep sort tee"
-  optional="fpocket prepare_receptor prepare_ligand mk_prepare_receptor.py mk_prepare_ligand.py obabel plip pymol $PYTHON_COMMAND"
+  optional="prank java fpocket prepare_receptor prepare_ligand mk_prepare_receptor.py mk_prepare_ligand.py obabel plip pymol $PYTHON_COMMAND"
   missing=0
   missing_full=0
 
@@ -129,8 +139,11 @@ doctor() {
     missing_full=1
   fi
 
-  if ! command -v fpocket >/dev/null 2>&1 || \
-     ! command -v obabel >/dev/null 2>&1 || \
+  if { ! command -v prank >/dev/null 2>&1 || ! command -v java >/dev/null 2>&1; } && \
+     ! command -v fpocket >/dev/null 2>&1; then
+    missing_full=1
+  fi
+  if ! command -v obabel >/dev/null 2>&1 || \
      ! command -v plip >/dev/null 2>&1 || \
      ! command -v pymol >/dev/null 2>&1 || \
      ! command -v "$PYTHON_COMMAND" >/dev/null 2>&1; then

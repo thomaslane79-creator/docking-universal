@@ -5,7 +5,7 @@ from pathlib import Path
 
 from docking_universal.application import ActiveStageError, ExplicitApprovalRequired, StudyController
 from docking_universal.automation import AutomationPolicy, AutomationRule
-from docking_universal.decisions import DecisionOption, DecisionRequired
+from docking_universal.decisions import DecisionOption, DecisionRequired, DecisionStatus
 from docking_universal.events import ScientificDetail
 from docking_universal.models import (
     CompletionStatus,
@@ -153,6 +153,96 @@ class ApplicationContractTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "has not declared"):
             unsupported.validate()
+
+    def test_mid_stage_decision_queues_its_persisted_continuation(self):
+        state = self.controller.get_study("study-1")
+        state.jobs.append(Job(
+            id="preparation-job", stage="receptor_preparation",
+            status=JobStatus.RUNNING,
+        ))
+        state.current_stage = "receptor_preparation"
+        state.completion_status = CompletionStatus.RUNNING
+        self.store.save(state)
+        decision = DecisionRequired(
+            id="histidine-state",
+            kind="select_histidine_state",
+            prompt="Choose the histidine state",
+            detected="HIS57 cannot be assigned unambiguously",
+            why_stopped="The selected protonation changes the receptor model.",
+            consequences=("Preparation will resume from the retained checkpoint.",),
+            options=(
+                DecisionOption("HID", "HID", "Proton on ND1"),
+                DecisionOption("HIE", "HIE", "Proton on NE2"),
+            ),
+            changes_molecular_model=True,
+            payload={"residue": {"chain": "A", "number": "57", "name": "HIS"}},
+            continuation={
+                "action": "continue_stage",
+                "checkpoint": "prepare_receptor_after_histidine_review",
+                "payload": {"attempt": 1},
+            },
+        )
+        self.controller.pause_for_decision("study-1", decision)
+        waiting = self.controller.get_study("study-1")
+        self.assertEqual(waiting.pending_decisions[0].payload["residue"]["number"], "57")
+        self.assertEqual(waiting.active_job.status, JobStatus.WAITING_FOR_DECISION)
+
+        restarted = StudyController(JsonStudyStore(Path(self.temporary.name)))
+        restarted.resolve_decision(
+            "study-1", "histidine-state", ("HIE",), actor="scientist",
+        )
+        resumed = restarted.get_study("study-1")
+        self.assertEqual(resumed.decisions[-1].status, DecisionStatus.RESOLVED)
+        self.assertEqual(resumed.active_job.status, JobStatus.QUEUED)
+        self.assertEqual(resumed.current_stage, "receptor_preparation")
+        self.assertNotIn("receptor_preparation", resumed.workflow_data.get("completed_stages", []))
+        continuation = resumed.workflow_data["continuation_queue"][-1]
+        self.assertEqual(continuation["checkpoint"], "prepare_receptor_after_histidine_review")
+        self.assertEqual(continuation["status"], "queued")
+
+    def test_invalid_continuation_is_rejected_before_pause(self):
+        decision = DecisionRequired(
+            id="invalid-continuation", kind="test", prompt="Test",
+            detected="Test", why_stopped="Test", consequences=("Test",),
+            options=(DecisionOption("yes", "Yes", "Continue"),),
+            continuation={"action": "continue_stage"},
+        )
+        with self.assertRaisesRegex(ValueError, "checkpoint"):
+            self.controller.pause_for_decision("study-1", decision)
+
+    def test_terminal_intervention_choice_stops_instead_of_completing_stage(self):
+        state = self.controller.get_study("study-1")
+        state.jobs.append(Job(
+            id="preparation-job", stage="receptor_preparation",
+            status=JobStatus.RUNNING,
+        ))
+        state.current_stage = "receptor_preparation"
+        state.completion_status = CompletionStatus.RUNNING
+        self.store.save(state)
+        decision = DecisionRequired(
+            id="histidine-state", kind="select_histidine_template",
+            prompt="Choose the histidine state", detected="HIS57 is ambiguous",
+            why_stopped="The choice changes the receptor model.",
+            consequences=("Stop retains the evidence without continuing.",),
+            options=(DecisionOption("STOP", "Stop", "Review receptor"),),
+            changes_molecular_model=True,
+            continuation={
+                "action": "continue_stage",
+                "checkpoint": "rerun_preparation_with_histidine_template",
+                "terminal_options": ["STOP"],
+            },
+        )
+        self.controller.pause_for_decision("study-1", decision)
+
+        self.controller.resolve_decision(
+            "study-1", decision.id, ("STOP",), actor="scientist",
+        )
+        stopped = self.controller.get_study("study-1")
+
+        self.assertEqual(stopped.jobs[0].status, JobStatus.CANCELLED)
+        self.assertEqual(stopped.completion_status, CompletionStatus.CANCELLED)
+        self.assertFalse(stopped.workflow_data.get("continuation_queue"))
+        self.assertNotIn("receptor_preparation", stopped.workflow_data.get("completed_stages", []))
 
 
 if __name__ == "__main__":

@@ -48,6 +48,52 @@ def retain_source_structure(root: Path | str, entry: str, pdb_text: str) -> dict
     }
 
 
+def retain_reference_observations(
+    root: Path | str, *, reference_file: Path | str, reference_chain: str,
+) -> dict[str, Any]:
+    """Retain the prepared receptor atoms used as the comparison baseline."""
+    root = Path(root)
+    reference_file = Path(reference_file)
+    retained = root / "reference" / reference_file.name
+    observations = root / "reference" / "atom_observations.jsonl"
+    retained.parent.mkdir(parents=True, exist_ok=True)
+    data = reference_file.read_bytes()
+    retained.write_bytes(data)
+    rows = []
+    for line in data.decode("utf-8", errors="replace").splitlines():
+        if not line.startswith("ATOM  "):
+            continue
+        chain = line[21:22].strip() or "_"
+        if chain != reference_chain:
+            continue
+        try:
+            xyz = [float(line[30:38]), float(line[38:46]), float(line[46:54])]
+        except ValueError:
+            continue
+        rows.append({
+            "record_type": "ATOM",
+            "atom_name": line[12:16].strip(),
+            "alternate_location": line[16:17].strip(),
+            "residue_name": line[17:20].strip(),
+            "chain": chain,
+            "residue_number": line[22:27].strip(),
+            "occupancy": _float_field(line, 54, 60),
+            "b_factor": _float_field(line, 60, 66),
+            "element": line[76:78].strip(),
+            "xyz": xyz,
+        })
+    with observations.open("w") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, sort_keys=True) + "\n")
+    return {
+        "coordinates": str(retained.relative_to(root)),
+        "atom_observations": str(observations.relative_to(root)),
+        "chain": reference_chain,
+        "sha256": _sha256_bytes(data),
+        "atom_observation_count": len(rows),
+    }
+
+
 def retain_accepted_alignment(
     root: Path | str,
     *,
@@ -173,6 +219,7 @@ def write_ensemble_manifest(
     sources: list[dict[str, Any]],
     alignments: list[dict[str, Any]],
     qualification: dict[str, Any],
+    reference: dict[str, Any] | None = None,
 ) -> Path:
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
@@ -181,6 +228,7 @@ def write_ensemble_manifest(
         "schema_version": SCHEMA_VERSION,
         "purpose": "shared retained evidence; no flexibility conclusion is implied",
         "reference_file": reference_file,
+        "reference": reference,
         "qualification": qualification,
         "sources": sources,
         "accepted_alignments": alignments,

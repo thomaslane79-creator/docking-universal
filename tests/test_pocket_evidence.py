@@ -65,7 +65,7 @@ class PocketEvidenceTests(unittest.TestCase):
                              "ligand_chain": "A", "aligned_ligand_pdb": path.name,
                              "evidence_class": "same_protein", "matched_cavity": None})
             groups = EVIDENCE.group_ligand_sites(
-                {"evidence": rows}, root,
+                {"evidence": rows, "pocket_engine": "p2rank"}, root,
                 atom_contact_cutoff=1.1, minimum_ligand_overlap=0.5,
             )
             self.assertEqual([group["member_count"] for group in groups], [3])
@@ -73,6 +73,8 @@ class PocketEvidenceTests(unittest.TestCase):
             self.assertEqual(groups[0]["box"]["center_x"], 8.5)
             self.assertEqual(groups[0]["representative_ligand"]["entry"], "E3")
             self.assertEqual(groups[0]["site_identity"]["canonical_label"], "L1")
+            self.assertTrue(groups[0]["site_identity"]["is_separate_from_predicted_pocket"])
+            self.assertEqual(groups[0]["pocket_recovery"]["status"], "not_recovered")
             self.assertEqual(groups[0]["minimum_box_overlap_fraction"], 0.35)
             self.assertEqual(groups[0]["maximum_combined_box_volume_angstrom3"], 64000.0)
 

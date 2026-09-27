@@ -314,9 +314,8 @@ def choose_structure(inputs):
         pdb_id = input("Four-character PDB ID: ").strip().upper()
         if not re.fullmatch(r"[0-9][A-Z0-9]{3}", pdb_id):
             raise SystemExit("A PDB ID must contain four characters and begin with a number")
-        destination = inputs / f"{pdb_id}.pdb"
-        urllib.request.urlretrieve(f"https://files.rcsb.org/download/{pdb_id}.pdb", destination)
-        return destination
+        from docking_universal.services.rcsb import download_pdb_entry
+        return download_pdb_entry(pdb_id, inputs)
     if choice == "2" and finder:
         return finder_file("Choose the structure PDB file")
     manual_choice = "3" if finder else "2"

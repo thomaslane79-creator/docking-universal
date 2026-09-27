@@ -25,6 +25,70 @@ SCHEMA_NAME = "docking-universal-runtime-inventory"
 SCHEMA_VERSION = 1
 
 
+def discover_poseedit_runtime(
+    *, which: Callable[[str], str | None] = shutil.which,
+    environment: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Observe the complete local browser renderer without changing it."""
+    values = dict(os.environ if environment is None else environment)
+    renderer_root = Path(__file__).resolve().parent / "poseedit_renderer"
+    explicit_node = values.get("DOCKING_UNIVERSAL_NODE")
+    node = (
+        str(Path(explicit_node).resolve()) if explicit_node and Path(explicit_node).is_file()
+        else which("node")
+    )
+    node = str(Path(node).resolve()) if node else None
+    explicit_chrome = values.get("DOCKING_UNIVERSAL_CHROME")
+    candidates = [explicit_chrome, which("google-chrome"), which("chromium"), which("chromium-browser")]
+    if platform.system() == "Darwin":
+        candidates.extend((
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        ))
+    chrome = next((str(Path(item).resolve()) for item in candidates if item and Path(item).is_file()), None)
+    playwright = None
+    playwright_detail = None
+    if node:
+        try:
+            result = subprocess.run(
+                [node, "-e", "process.stdout.write(require.resolve('playwright'))"],
+                capture_output=True, text=True, timeout=5, env=values, cwd=renderer_root,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                playwright = str(Path(result.stdout.strip()).resolve())
+            else:
+                playwright_detail = (result.stderr or result.stdout).strip() or "module not resolved"
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            playwright_detail = str(exc)
+    assets = renderer_root / "assets"
+    required_assets = (
+        "interaction-drawer.js", "d3.min.js", "fraction.min.js",
+        "smiles-drawer.min.js", "pack-scene.js",
+    )
+    missing_assets = [name for name in required_assets if not (assets / name).is_file()]
+    components = {
+        "node": {"status": "available" if node else "absent", "path": node},
+        "playwright": {
+            "status": "available" if playwright else ("unobserved" if not node else "absent"),
+            "path": playwright, "detail": playwright_detail,
+        },
+        "chrome": {"status": "available" if chrome else "absent", "path": chrome},
+        "bundled_assets": {
+            "status": "available" if not missing_assets else "absent",
+            "path": str(assets), "missing": missing_assets,
+        },
+    }
+    ready = all(item["status"] == "available" for item in components.values())
+    missing = [name for name, item in components.items() if item["status"] != "available"]
+    return {
+        "status": "available" if ready else "unavailable",
+        "required_for": ["pose_interaction_rendering"],
+        "components": components,
+        "missing": missing,
+        "detail": None if ready else "Missing local renderer components: " + ", ".join(missing),
+    }
+
+
 @dataclass(frozen=True)
 class DependencySpec:
     id: str
@@ -90,6 +154,8 @@ PACKAGE_SPECS = (
 
 COMMAND_SPECS = (
     DependencySpec("fpocket", "fpocket", "cavity detection", command_names=("fpocket",), required_for=("site_guided_protocol",)),
+    DependencySpec("p2rank", "P2Rank", "maintained machine-learning pocket detection", command_names=("prank", "p2rank"), required_for=("site_guided_protocol",)),
+    DependencySpec("java", "Java runtime", "P2Rank runtime", command_names=("java",), required_for=("p2rank",)),
     DependencySpec("openbabel", "Open Babel", "molecular conversion and PLIP backend", command_names=("obabel",), required_for=("preparation", "analysis")),
     DependencySpec("plip", "PLIP", "interaction analysis", command_names=("plip",), required_for=("interactions",)),
     DependencySpec("pymol_command", "PyMOL executable", "required structural viewer", command_names=("pymol",), required_for=("visual_review", "render3d")),
@@ -367,6 +433,7 @@ def collect_runtime_inventory(
         "environments": [asdict(item) for item in environments],
         "packages": [asdict(item) for item in package_observations],
         "commands": [asdict(item) for item in command_observations],
+        "poseedit_renderer": discover_poseedit_runtime(which=which),
         "declarations": declarations,
     }
 
@@ -388,5 +455,11 @@ def render_runtime_inventory(inventory: Mapping[str, Any]) -> str:
         for item in inventory[key]:
             value = item.get("version") or item.get("path") or ""
             lines.append(f"  {item['status']:10} {item['label']}{(': ' + value) if value else ''}")
+    renderer = inventory.get("poseedit_renderer", {})
+    lines.extend(("", "PoseEdit-style local renderer"))
+    lines.append(f"  {renderer.get('status', 'unobserved'):10} complete rendering capability")
+    for name, item in renderer.get("components", {}).items():
+        value = item.get("path") or item.get("detail") or ""
+        lines.append(f"  {item['status']:10} {name}{(': ' + value) if value else ''}")
     lines.extend(("", "No compatibility conclusion is inferred from an absent or unobserved item."))
     return "\n".join(lines) + "\n"

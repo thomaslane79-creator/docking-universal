@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import sys
 from pathlib import Path
 
 from docking_universal.application import StudyController
@@ -27,6 +28,10 @@ class HostClientTests(unittest.TestCase):
 
     def test_client_starts_host_reads_snapshot_and_applies_approval(self):
         self.client.start()
+        self.assertEqual(
+            Path(self.client.runtime["python_executable"]), Path(sys.executable).resolve()
+        )
+        self.assertTrue(self.client.runtime["python_version"])
         snapshot = self.client.request("client-study", "snapshot")
         study = snapshot["result"]["study"]
         decision = study["decisions"][0]
@@ -41,6 +46,26 @@ class HostClientTests(unittest.TestCase):
     def test_client_rejects_requests_before_connection(self):
         with self.assertRaisesRegex(ApplicationHostError, "not connected"):
             self.client.request("client-study", "snapshot")
+
+    def test_client_retains_explicit_scientific_host_interpreter(self):
+        client = ApplicationHostClient(
+            self.root / "runs", self.client.host_script,
+            python_executable=sys.executable,
+        )
+        self.assertEqual(client.python_executable, Path(sys.executable).resolve())
+        self.assertEqual(
+            client._environment()["DOCKING_UNIVERSAL_PYTHON"], str(Path(sys.executable).resolve())
+        )
+
+    def test_failed_host_can_restart_against_the_same_persisted_study(self):
+        first_session = self.client.start()
+        self.client.process.terminate()
+        self.client.process.wait(timeout=5)
+        self.assertFalse(self.client.connected)
+        second_session = self.client.restart()
+        self.assertNotEqual(first_session, second_session)
+        snapshot = self.client.request("client-study", "snapshot")
+        self.assertEqual(snapshot["result"]["study"]["study_id"], "client-study")
 
 
 if __name__ == "__main__":

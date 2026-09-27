@@ -1,0 +1,9 @@
+{
+  "name": "docking-universal-poseedit-renderer",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Local-only browser runtime for approved interaction diagrams",
+  "dependencies": {
+    "playwright": "1.63.0"
+  }
+}

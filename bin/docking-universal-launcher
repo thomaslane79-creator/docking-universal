@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -eu
 
+# ADFRsuite and similar legacy tools may export these globally, which can make
+# a Conda Python load another interpreter's standard library. Each scientific
+# subprocess resolves its own packages, so inherited Python paths are unsafe.
+unset PYTHONHOME PYTHONPATH
+
 # Installed beside the user's Conda executable by install.sh. This keeps every
 # public subcommand available without requiring an activated environment.
 launcher_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -13,6 +18,41 @@ fi
 if ! command -v "$conda_command" >/dev/null 2>&1; then
   printf 'Error: Conda was not found. Reinstall Docking Universal with bash install.sh.\n' >&2
   exit 1
+fi
+
+# The modern desktop and PyMOL deliberately use different Qt generations.
+# Resolve PyMOL in its companion environment and pass the executable to the
+# PyQt6 desktop instead of exposing either environment to the user's shell.
+if [ "${1:-}" = "desktop" ]; then
+  gui_environment=${DOCKING_UNIVERSAL_GUI_ENV:-docking-universal-gui-next}
+  pymol_environment=${DOCKING_UNIVERSAL_PYMOL_ENV:-docking-universal-pymol-next}
+  scientific_environment=${DOCKING_UNIVERSAL_ENV:-docking-universal}
+  gui_prefix=$("$conda_command" run -n "$gui_environment" printenv CONDA_PREFIX) || {
+    printf 'Error: GUI environment is unavailable: %s\n' "$gui_environment" >&2
+    exit 1
+  }
+  pymol_prefix=$("$conda_command" run -n "$pymol_environment" printenv CONDA_PREFIX) || {
+    printf 'Error: PyMOL companion environment is unavailable: %s\n' "$pymol_environment" >&2
+    exit 1
+  }
+  scientific_prefix=$("$conda_command" run -n "$scientific_environment" printenv CONDA_PREFIX) || {
+    printf 'Error: scientific environment is unavailable: %s\n' "$scientific_environment" >&2
+    exit 1
+  }
+  gui_python="$gui_prefix/bin/python"
+  pymol_command="$pymol_prefix/bin/pymol"
+  host_python="$scientific_prefix/bin/python"
+  if [ ! -x "$gui_python" ]; then gui_python="$gui_prefix/python.exe"; fi
+  if [ ! -x "$pymol_command" ]; then pymol_command="$pymol_prefix/Scripts/pymol.exe"; fi
+  if [ ! -x "$host_python" ]; then host_python="$scientific_prefix/python.exe"; fi
+  [ -x "$gui_python" ] || { printf 'Error: Python was not found in %s\n' "$gui_environment" >&2; exit 1; }
+  [ -x "$pymol_command" ] || { printf 'Error: PyMOL was not found in %s\n' "$pymol_environment" >&2; exit 1; }
+  [ -x "$host_python" ] || { printf 'Error: Python was not found in %s\n' "$scientific_environment" >&2; exit 1; }
+  shift
+  exec "$conda_command" run --no-capture-output -n "$gui_environment" \
+    env DOCKING_UNIVERSAL_PYTHON="$gui_python" \
+    "$launcher_dir/docking-universal" desktop --pymol "$pymol_command" \
+    --host-python "$host_python" "$@"
 fi
 
 # `conda run` manages its descendant process group.  If the in-environment

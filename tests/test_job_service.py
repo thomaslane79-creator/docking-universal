@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from docking_universal.application import ActiveStageError, StudyController
+from docking_universal.decisions import DecisionOption, DecisionRequired
 from docking_universal.jobs import JobService
 from docking_universal.models import CompletionStatus, JobStatus
 from docking_universal.processes import ProcessExecutionError, ProcessRequest, ProcessStatus
@@ -44,6 +45,42 @@ class JobServiceTests(unittest.TestCase):
         self.assertEqual({artifact.kind for artifact in state.artifacts}, {"job_stdout_log", "job_stderr_log"})
         self.assertTrue(any(event.message == "fpocket completed" for event in state.events))
 
+    def test_structured_progress_is_visible_during_job_and_retained_after_completion(self):
+        marker = self.root / "first-output.txt"
+        code = (
+            "import pathlib,time; "
+            f"pathlib.Path({str(marker)!r}).write_text('ready'); "
+            "time.sleep(0.8)"
+        )
+        worker = threading.Thread(
+            target=JobService(self.controller).run,
+            args=("job-study", "screening", self.request(code, "progress")),
+            kwargs={"progress_probe": lambda: (
+                "docking", "Docking outputs ready: 1/2", 1, 2,
+            ) if marker.is_file() else (
+                "ligands", "Preparing ligand conformers…", 0, 2,
+            )},
+        )
+        worker.start()
+        try:
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                # A second store instance models another GUI window reopening.
+                observed = JsonStudyStore(self.root / "runs").load("job-study")
+                if observed.active_job and observed.active_job.progress_completed == 1:
+                    break
+                time.sleep(0.02)
+            self.assertIsNotNone(observed.active_job)
+            self.assertEqual(observed.active_job.progress_phase, "docking")
+            self.assertEqual(observed.active_job.progress_message, "Docking outputs ready: 1/2")
+            self.assertEqual(observed.active_job.progress_total, 2)
+        finally:
+            worker.join(3)
+        self.assertFalse(worker.is_alive())
+        retained = self.controller.get_study("job-study").jobs[0]
+        self.assertEqual(retained.status, JobStatus.COMPLETED)
+        self.assertEqual(retained.progress_phase, "docking")
+
     def test_failed_stage_is_retained_as_failure_with_diagnostic_log(self):
         result = JobService(self.controller).run(
             "job-study", "receptor_preparation",
@@ -55,6 +92,77 @@ class JobServiceTests(unittest.TestCase):
         self.assertEqual(state.completion_status, CompletionStatus.FAILED)
         self.assertIn("bad input", state.jobs[0].error)
         self.assertTrue(any(event.type.value == "stage_failed" and event.mandatory for event in state.events))
+
+    def test_structured_intervention_pauses_failed_process_without_marking_stage_failed(self):
+        decision = DecisionRequired(
+            id="histidine-review", kind="select_histidine_template",
+            prompt="Choose histidine state", detected="HIS A:57 is ambiguous",
+            why_stopped="The choice changes the receptor model.",
+            consequences=("Preparation will rerun with the explicit assignment.",),
+            options=(DecisionOption("HIE_CURRENT", "HIE", "Proton on NE2"),),
+            changes_molecular_model=True,
+            continuation={
+                "action": "continue_stage",
+                "checkpoint": "rerun_preparation_with_histidine_template",
+            },
+        )
+        result = JobService(self.controller).run(
+            "job-study", "receptor_preparation",
+            self.request("raise SystemExit(1)", "intervention"),
+            intervention_probe=lambda: decision,
+        )
+        state = self.controller.get_study("job-study")
+
+        self.assertEqual(result.status, ProcessStatus.FAILED)
+        self.assertEqual(state.jobs[0].status, JobStatus.WAITING_FOR_DECISION)
+        self.assertEqual(state.completion_status, CompletionStatus.WAITING_FOR_DECISION)
+        self.assertEqual(state.pending_decisions[0].id, "histidine-review")
+        self.assertFalse(any(event.type.value == "stage_failed" for event in state.events))
+
+    def test_resolved_intervention_resumes_the_same_job(self):
+        decision = DecisionRequired(
+            id="histidine-review", kind="select_histidine_template",
+            prompt="Choose histidine state", detected="HIS A:57 is ambiguous",
+            why_stopped="The choice changes the receptor model.",
+            consequences=("Preparation will rerun with the explicit assignment.",),
+            options=(DecisionOption("HIE_CURRENT", "HIE", "Proton on NE2"),),
+            changes_molecular_model=True,
+            continuation={
+                "action": "continue_stage",
+                "checkpoint": "rerun_preparation_with_histidine_template",
+            },
+        )
+        jobs = JobService(self.controller)
+        jobs.run(
+            "job-study", "receptor_preparation",
+            self.request("raise SystemExit(1)", "intervention-first"),
+            intervention_probe=lambda: decision,
+        )
+        waiting = self.controller.get_study("job-study")
+        job_id = waiting.jobs[0].id
+        self.controller.resolve_decision(
+            "job-study", decision.id, ("HIE_CURRENT",), actor="test-user",
+        )
+
+        result = jobs.resume(
+            "job-study", job_id,
+            self.request("print('resumed preparation')", "intervention-resumed"),
+        )
+        state = self.controller.get_study("job-study")
+
+        self.assertEqual(result.status, ProcessStatus.COMPLETED)
+        self.assertEqual(len(state.jobs), 1)
+        self.assertEqual(state.jobs[0].id, job_id)
+        self.assertEqual(state.jobs[0].status, JobStatus.COMPLETED)
+        self.assertEqual(
+            len([artifact for artifact in state.artifacts if artifact.kind in {
+                "job_stdout_log", "job_stderr_log",
+            }]),
+            4,
+        )
+        self.assertTrue(any(
+            event.message == "receptor_preparation resumed" for event in state.events
+        ))
 
     def test_cancelled_stage_is_not_reported_as_success(self):
         cancel = threading.Event()

@@ -77,6 +77,33 @@ class RuntimeInventoryTests(unittest.TestCase):
             self.assertEqual(declaration["dependencies"], {"example": "1.2.3"})
             self.assertEqual(len(declaration["sha256"]), 64)
 
+    def test_poseedit_runtime_reports_components_without_installing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            node = Path(directory) / "node"
+            chrome = Path(directory) / "chrome"
+            node.write_text("node\n")
+            chrome.write_text("chrome\n")
+            with patch.object(runtime_inventory.subprocess, "run") as called:
+                called.return_value.returncode = 0
+                called.return_value.stdout = str(Path(directory) / "playwright/index.js")
+                called.return_value.stderr = ""
+                result = runtime_inventory.discover_poseedit_runtime(
+                    which=lambda name: str(node) if name == "node" else None,
+                    environment={"DOCKING_UNIVERSAL_CHROME": str(chrome)},
+                )
+            self.assertEqual(result["status"], "available")
+            self.assertEqual(result["components"]["node"]["path"], str(node.resolve()))
+            self.assertEqual(result["components"]["chrome"]["path"], str(chrome.resolve()))
+            called.assert_called_once()
+
+    def test_poseedit_runtime_names_every_missing_component(self):
+        with patch.object(runtime_inventory.platform, "system", return_value="TestOS"):
+            result = runtime_inventory.discover_poseedit_runtime(
+                which=lambda _name: None, environment={},
+            )
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(result["missing"], ["node", "playwright", "chrome"])
+
 
 if __name__ == "__main__":
     unittest.main()

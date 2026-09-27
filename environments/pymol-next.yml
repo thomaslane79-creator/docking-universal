@@ -1,0 +1,16 @@
+name: docking-universal-pymol-next
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  # PyMOL remains a supervised companion process.  Conda-forge's PyMOL 3.1
+  # build currently selects PyQt5/Qt5; keeping it outside the PyQt6 GUI host
+  # prevents both Qt generations from loading into one macOS process.
+  - python=3.12
+  - pymol-open-source=3.1.0
+  # PLIP's native --pymol route must import the same PyMOL version that writes
+  # its retained session, so interaction analysis belongs in this companion.
+  - plip=2.3.1
+  - numpy
+  - pillow
+  - pycairo

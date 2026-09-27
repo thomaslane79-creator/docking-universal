@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from uuid import uuid4
 
 from .automation import AutomationPolicy
@@ -148,6 +149,21 @@ class StudyController:
             )),
             maximum_selections=len(candidates),
             automation_eligible=True,
+            payload={
+                "candidate_ids": [candidate.id for candidate in candidates],
+                "source": source or {},
+            },
+            presentation={
+                "background": (
+                    "Docking searches only the approved box. Review pocket geometry, "
+                    "experimental ligand correspondence, receptor conformation, and alternatives."
+                ),
+                "technical": (
+                    "Approval records the selected candidate IDs and hashes of the retained "
+                    "box and review artifacts. Pocket rank is evidence, not binding affinity."
+                ),
+            },
+            continuation={"action": "complete_stage"},
         )
         state.decisions.append(decision)
         if request_id:
@@ -212,6 +228,7 @@ class StudyController:
         if decision is None:
             raise KeyError(f"Unknown decision: {decision_id}")
         decision.validate_response(selections)
+        decision.validate_continuation()
         method = "automated_policy" if policy_id else "explicit_user"
         if policy_id and decision.requires_explicit_user:
             raise ExplicitApprovalRequired(f"Decision {decision.id} cannot be resolved by automation")
@@ -253,13 +270,56 @@ class StudyController:
         if decision.kind == "select_pockets":
             state.selected_pocket_ids = list(selections)
             state.scientific_authority = ScientificAuthority.EXPLORATORY_NO_CONTROL
+            sensitivity = state.workflow_data.get("receptor_state_sensitivity")
+            if isinstance(sensitivity, dict) and sensitivity.get("status") == "prepared_for_box_review":
+                from .services.preparation_interventions import classify_histidine_affected_boxes
+
+                primary = str(sensitivity.get("primary_review_state") or "HIE")
+                variant = (sensitivity.get("variants") or {}).get(primary) or {}
+                residues = sensitivity.get("residues") or []
+                if residues:
+                    classification = classify_histidine_affected_boxes(
+                        Path(str(variant.get("receptor_pdb") or "")),
+                        str(residues[0]), selections, state.artifacts,
+                    )
+                    sensitivity["box_influence"] = classification
+                    sensitivity["affected_boxes"] = classification["affected_boxes"]
+                    sensitivity["unaffected_boxes"] = classification["unaffected_boxes"]
+                    sensitivity["comparison_stage"] = (
+                        "required" if classification["affected_boxes"] else "not_required"
+                    )
         job = state.active_job
         if job is None or job.status is not JobStatus.WAITING_FOR_DECISION:
             raise RuntimeError("No waiting workflow stage is available to resume")
-        job.status = JobStatus.COMPLETED
-        job.finished_at = utc_now()
-        state.current_stage = None
-        record_stage_completion(state, job.stage)
+        continuation_action = decision.continuation.get("action", "complete_stage")
+        terminal_options = set(map(str, decision.continuation.get("terminal_options", ())))
+        if terminal_options.intersection(selections):
+            continuation_action = "none"
+        if continuation_action == "complete_stage":
+            job.status = JobStatus.COMPLETED
+            job.finished_at = utc_now()
+            state.current_stage = None
+            record_stage_completion(state, job.stage)
+        elif continuation_action == "continue_stage":
+            queued = {
+                "decision_id": decision.id,
+                "job_id": job.id,
+                "stage": job.stage,
+                "checkpoint": decision.continuation["checkpoint"],
+                "payload": dict(decision.continuation.get("payload", {})),
+                "status": "queued",
+                "created_at": utc_now(),
+            }
+            state.workflow_data.setdefault("continuation_queue", []).append(queued)
+            job.status = JobStatus.QUEUED
+            state.current_stage = job.stage
+            state.completion_status = CompletionStatus.RUNNING
+        else:
+            job.status = JobStatus.CANCELLED
+            job.error = "Scientist stopped the workflow for structural review"
+            job.finished_at = utc_now()
+            state.current_stage = None
+            state.completion_status = CompletionStatus.CANCELLED
         self._event(
             state,
             EventType.DECISION_RESOLVED,
@@ -269,15 +329,57 @@ class StudyController:
             data={"approval": record_to_dict(approval)},
             mandatory=method == "automated_policy",
         )
-        self._event(
-            state,
-            EventType.STAGE_COMPLETED,
-            "Pocket evidence review completed",
-            explanation="The study remains exploratory until target-specific control evidence establishes greater authority.",
-            technical={"job_id": job.id},
-        )
+        if continuation_action == "complete_stage":
+            self._event(
+                state,
+                EventType.STAGE_COMPLETED,
+                "Pocket evidence review completed",
+                explanation="The study remains exploratory until target-specific control evidence establishes greater authority.",
+                technical={"job_id": job.id},
+            )
         self.store.save(state)
         return approval
+
+    def pause_for_decision(
+        self,
+        study_id: str,
+        decision: DecisionRequired,
+        *,
+        expected_revision: int | None = None,
+    ) -> DecisionRequired:
+        """Persist an engine-requested stop without completing its active stage."""
+        decision.validate_continuation()
+        if decision.status is not DecisionStatus.PENDING:
+            raise ValueError("A newly paused decision must be pending")
+
+        def pause(state: StudyState) -> DecisionRequired:
+            job = state.active_job
+            if job is None or job.status not in {JobStatus.RUNNING, JobStatus.QUEUED}:
+                raise RuntimeError("A running or queued workflow stage is required")
+            if any(item.id == decision.id for item in state.decisions):
+                raise ValueError(f"Decision already exists: {decision.id}")
+            state.decisions.append(decision)
+            job.status = JobStatus.WAITING_FOR_DECISION
+            state.current_stage = job.stage
+            state.completion_status = CompletionStatus.WAITING_FOR_DECISION
+            self._event(
+                state,
+                EventType.DECISION_REQUIRED,
+                decision.prompt,
+                explanation=" ".join((decision.why_stopped, *decision.consequences)),
+                technical={
+                    "decision_id": decision.id,
+                    "continuation": decision.continuation,
+                },
+                data={"decision": record_to_dict(decision)},
+                mandatory=True,
+            )
+            return decision
+
+        _state, persisted = self.store.update(
+            study_id, pause, expected_revision=expected_revision,
+        )
+        return persisted
 
     @staticmethod
     def _id(prefix: str) -> str:

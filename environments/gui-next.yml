@@ -1,0 +1,18 @@
+name: docking-universal-gui-next
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  # Parallel modernization candidate.  Keep the validated Python 3.9
+  # environment intact until the real GUI/PyMOL compatibility matrix passes.
+  - python=3.12
+  - pyqt6
+  - gemmi
+  - rdkit
+  - numpy
+  - scipy
+  - pillow
+  - reportlab
+  - pycairo
+  - nodejs=22
+  - pip

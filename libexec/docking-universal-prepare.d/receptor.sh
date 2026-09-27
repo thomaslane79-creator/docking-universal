@@ -188,7 +188,9 @@ write_receptor_failure_diagnosis() {
 build_meeko_receptor_command() {
   local executable="$1" receptor_pdb="$2" output_prefix="$3" receptor_pdbqt="$4"
   local allow_bad="$5" altloc="$6" templates="$7"
-  PREPARATION_COMMAND=("$executable" --read_pdb "$receptor_pdb" -o "$output_prefix" -p "$receptor_pdbqt")
+  local reader=--read_pdb
+  case "$receptor_pdb" in *.cif|*.mmcif) reader=--read_with_prody ;; esac
+  PREPARATION_COMMAND=("$executable" "$reader" "$receptor_pdb" -o "$output_prefix" -p "$receptor_pdbqt")
   [ "$allow_bad" = 1 ] && PREPARATION_COMMAND+=(--allow_bad_res)
   [ -z "$altloc" ] || PREPARATION_COMMAND+=(--default_altloc "$altloc")
   [ -z "$templates" ] || PREPARATION_COMMAND+=(--set_template "$templates")
@@ -364,7 +366,7 @@ initialize_receptor_preparation() {
     auto|required|off) ;;
     *) echo "ERROR: DOCKING_UNIVERSAL_PDBFIXER must be auto, required, or off" >&2; return 2 ;;
   esac
-  PDBFIXER_HELPER="$PACKAGE_ROOT/libexec/docking-universal-pdbfixer.py"
+  PDBFIXER_HELPER="$LIBEXEC_DIR/docking-universal-pdbfixer.py"
   if [ ! -f "$PDBFIXER_HELPER" ] && [ -f "$(dirname "$0")/docking-universal-pdbfixer.py" ]; then
     PDBFIXER_HELPER="$(dirname "$0")/docking-universal-pdbfixer.py"
   fi
@@ -376,6 +378,18 @@ initialize_receptor_preparation() {
     return 1
   fi
   cp "$RECEPTOR_FILTERED_PDB" "$RECEPTOR_PDB"
+  NATIVE_RECEPTOR_INPUT="$RECEPTOR_FILTERED_PDB"
+  if [ -n "${DOCKING_UNIVERSAL_SOURCE_MMCIF:-}" ]; then
+    mkdir -p "$ROOT/source"
+    cp "$DOCKING_UNIVERSAL_SOURCE_MMCIF" "$ROOT/source/structure.cif"
+    if [ -n "${DOCKING_UNIVERSAL_STRUCTURE_METADATA:-}" ]; then
+      cp "$DOCKING_UNIVERSAL_STRUCTURE_METADATA" "$ROOT/source/structure-input.json"
+    fi
+    NATIVE_RECEPTOR_INPUT="$RECEPTOR_DIR/${CANONICAL}_filtered.cif"
+    "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-native-receptor.py" \
+      "$DOCKING_UNIVERSAL_SOURCE_MMCIF" "$RECEPTOR_FILTERED_PDB" "$NATIVE_RECEPTOR_INPUT" || return $?
+    log "Retained mmCIF source and metadata; native receptor input uses the existing component filter and author identifiers"
+  fi
 }
 
 # Validate and publish the successful receptor-preparation evidence.
@@ -396,7 +410,7 @@ finalize_receptor_preparation_audit() {
   [ -s "$RECEPTOR_PDBQT" ] || { echo "ERROR: receptor backend did not create PDBQT: $RECEPTOR_PDBQT"; return 1; }
   log "Prepared receptor PDBQT written to $RECEPTOR_PDBQT"
 
-  ccd_helper="$PACKAGE_ROOT/libexec/docking-universal-ccd-audit.py"
+  ccd_helper="$LIBEXEC_DIR/docking-universal-ccd-audit.py"
   if [ ! -f "$ccd_helper" ] && [ -f "$(dirname "$0")/docking-universal-ccd-audit.py" ]; then
     ccd_helper="$(dirname "$0")/docking-universal-ccd-audit.py"
   fi
@@ -442,7 +456,15 @@ run_safe_receptor_preparation_attempts() {
     MEEKO_SET_TEMPLATE="${MEEKO_SET_TEMPLATE:-}"
     MEEKO_TEMPLATE_ARGS=()
     [ -z "$MEEKO_SET_TEMPLATE" ] || MEEKO_TEMPLATE_ARGS=(--set_template "$MEEKO_SET_TEMPLATE")
-    build_meeko_receptor_command "$PREP_RECEPTOR_BIN" "$RECEPTOR_PDB" \
+    local initial_input="$RECEPTOR_PDB"
+    if [ -n "${DOCKING_UNIVERSAL_SOURCE_MMCIF:-}" ]; then
+      if "$PYTHON_COMMAND" -c 'import prody' >/dev/null 2>&1; then
+        initial_input="$NATIVE_RECEPTOR_INPUT"
+      else
+        log "ProDy unavailable: using the retained PDB compatibility input for Meeko"
+      fi
+    fi
+    build_meeko_receptor_command "$PREP_RECEPTOR_BIN" "$initial_input" \
       "$RECEPTOR_DIR/${CANONICAL}" "$RECEPTOR_PDBQT" "$MEEKO_ALLOW_BAD_RES" \
       "$MEEKO_DEFAULT_ALTLOC" "$MEEKO_SET_TEMPLATE"
     PREP_COMMAND=("${PREPARATION_COMMAND[@]}")
@@ -463,7 +485,7 @@ run_safe_receptor_preparation_attempts() {
     if [ "$PDBFIXER_MODE" != "off" ] && [ "$PDBFIXER_AVAILABLE" = "1" ]; then
       log "Repairing receptor with PDBFixer; audit -> $PDBFIXER_AUDIT"
       if run_logged_preparation_command "$PDBFIXER_LOG" "$PYTHON_COMMAND" "$PDBFIXER_HELPER" \
-        "$RECEPTOR_FILTERED_PDB" "$PDBFIXER_PDB" "$PDBFIXER_AUDIT"; then
+        "${NATIVE_RECEPTOR_INPUT:-$RECEPTOR_FILTERED_PDB}" "$PDBFIXER_PDB" "$PDBFIXER_AUDIT"; then
         PDBFIXER_USED=1
         cp "$PDBFIXER_PDB" "$RECEPTOR_PDB"
         build_meeko_receptor_command "$PREP_RECEPTOR_BIN" "$RECEPTOR_PDB" \
@@ -589,8 +611,28 @@ EOF
 handle_receptor_failure_and_removal_approval() {
 if [ "$PREP_SUCCESS" = "0" ]; then
   FAILURE_DIAGNOSIS="$RECEPTOR_DIR/receptor_failure_diagnosis.txt"
+  PREPARATION_INTERVENTION="$RECEPTOR_DIR/preparation_intervention.json"
   FAILURE_LOGS=("$ADFR_FALLBACK_LOG" "$DISULFIDE_RETRY_LOG" "$RECEPTOR_RETRY_LOG" "$PDBFIXER_MEEKO_LOG" "$RECEPTOR_BACKEND_LOG")
   write_receptor_failure_diagnosis "$INPUT_PDB" "$RECEPTOR_FILTERED_PDB" "$FAILURE_DIAGNOSIS" "${FAILURE_LOGS[@]}"
+  INTERVENTION_HELPER="$LIBEXEC_DIR/docking-universal-preparation-intervention.py"
+  if [ -f "$INTERVENTION_HELPER" ]; then
+    HISTIDINE_RESIDUE=$(ambiguous_histidine_residue "${FAILURE_LOGS[@]}")
+    INTERVENTION_ARGS=(
+      --diagnosis "$FAILURE_DIAGNOSIS"
+      --filtered-receptor "$RECEPTOR_FILTERED_PDB"
+      --output "$PREPARATION_INTERVENTION"
+      --ambiguous-histidine "$HISTIDINE_RESIDUE"
+    )
+    for INTERVENTION_LOG in "${FAILURE_LOGS[@]}"; do
+      [ ! -s "$INTERVENTION_LOG" ] || INTERVENTION_ARGS+=(--diagnostic-log "$INTERVENTION_LOG")
+    done
+    if [ -n "${DOCKING_UNIVERSAL_SOURCE_MMCIF:-}" ] && [ -f "$DOCKING_UNIVERSAL_SOURCE_MMCIF" ]; then
+      INTERVENTION_ARGS+=(--source-mmcif "$DOCKING_UNIVERSAL_SOURCE_MMCIF")
+    fi
+    "$PYTHON_COMMAND" "$INTERVENTION_HELPER" "${INTERVENTION_ARGS[@]}" || {
+      echo "WARNING: structured preparation intervention could not be written" >&2
+    }
+  fi
 
   # Omitting unmatched components changes the receptor model. It is a final,
   # explicit user choice, never an automatic preparation retry.

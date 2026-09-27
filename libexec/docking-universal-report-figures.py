@@ -18,6 +18,29 @@ from docking_universal_box_candidates import config_geometry, grouped_fpocket_bo
 TOP_COLORS = ("#d62728", "#1f77b4", "#d9a400")
 
 
+def pocket_engine_name(rows):
+    """Return the detector label recorded by a normalized pocket table."""
+    engines = {
+        str(row.get("pocket_engine", "")).strip().lower()
+        for row in rows if str(row.get("pocket_engine", "")).strip()
+    }
+    if engines == {"p2rank"}:
+        return "P2Rank"
+    if engines == {"fpocket"} or not engines:
+        return "fpocket"
+    return "/".join(sorted(engines))
+
+
+def pocket_score(row):
+    """Read the normalized detector score while supporting legacy fpocket tables."""
+    return row.get("rank_score", row.get("score"))
+
+
+def pocket_recovery(group):
+    """Read detector-neutral recovery evidence, including legacy studies."""
+    return group.get("pocket_recovery") or group.get("fpocket_recovery") or {}
+
+
 def read_json(path):
     try:
         return json.loads(Path(path).read_text()) if path and Path(path).is_file() else {}
@@ -364,7 +387,7 @@ def plot_cavity_selection(
 
     with Path(diagnostics).open(newline="") as handle:
         selected_rows = list(csv.DictReader(handle, delimiter="\t"))
-    rows = [row for row in selected_rows if row.get("rank_score") not in {None, "", "NA"}]
+    rows = [row for row in selected_rows if pocket_score(row) not in {None, "", "NA"}]
     if not rows:
         return False
     if selected_configs is None:
@@ -381,11 +404,18 @@ def plot_cavity_selection(
     shared_box_groups = displayed_fpocket_box_groups(
         Path(diagnostics), retained_rows, displayed_colors,
     )
+    shared_box_numbers = {
+        int(number)
+        for group in shared_box_groups if len(group["numbers"]) > 1
+        for number in group["numbers"]
+    }
     pocket_numbers = {
-        row.get("pocket_file"): index + 1 for index, row in enumerate(retained_rows)
+        row.get("pocket_file"): int(row.get("rank_order", index + 1) or index + 1)
+        for index, row in enumerate(retained_rows)
     }
     ranks = [int(row["rank_order"]) for row in rows]
-    scores = [float(row["rank_score"]) for row in rows]
+    scores = [float(pocket_score(row)) for row in rows]
+    engine = pocket_engine_name(selected_rows)
     colors = [displayed_colors.get(row.get("pocket_file"), "#b8c0c8") for row in rows]
     # A taller plot better matches the structural companion panel and keeps
     # labels legible when the A/B/legend composite is placed on a PDF page.
@@ -408,16 +438,38 @@ def plot_cavity_selection(
                 fontsize=11, fontweight="bold",
                 color=displayed_colors[row.get("pocket_file")],
             )
-        matching = [(config, pocket) for config, pocket in selected_pairs if pocket == row.get("pocket_file")]
-        if matching:
-            config, pocket = matching[0]
-            color = displayed_colors.get(pocket, "#333333")
+        if pocket_number and pocket_number not in shared_box_numbers and row.get("pocket_file") in displayed_colors:
+            color = displayed_colors.get(row.get("pocket_file"), "#333333")
             ax.annotate(
-                f"Box P{pocket_number}", (rank, score), xytext=(18, -32),
-                textcoords="offset points", fontsize=11,
-                bbox=dict(fc="white", ec=color, alpha=.96),
-                arrowprops=dict(arrowstyle="->", color=color),
+                f"Box P{pocket_number}", (rank, score), xytext=(0, -18),
+                textcoords="offset points", ha="center", va="top",
+                fontsize=10, color=color,
             )
+    row_by_display_number = {
+        pocket_numbers.get(row.get("pocket_file")): row for row in retained_rows
+    }
+    for group in shared_box_groups:
+        numbers = [int(number) for number in group["numbers"]]
+        if len(numbers) < 2:
+            continue
+        points = [
+            (int(row_by_display_number[number]["rank_order"]),
+             float(pocket_score(row_by_display_number[number])))
+            for number in numbers
+            if number in row_by_display_number
+            and pocket_score(row_by_display_number[number]) not in {None, "", "NA"}
+        ]
+        if not points:
+            continue
+        anchor = (sum(point[0] for point in points) / len(points),
+                  sum(point[1] for point in points) / len(points))
+        label = "/".join(f"P{number}" for number in numbers)
+        ax.annotate(
+            f"Shared box {label}", anchor, xytext=(0, -34),
+            textcoords="offset points", ha="center", va="top", fontsize=10,
+            color=group["color"], bbox=dict(fc="white", ec=group["color"], alpha=.96),
+            arrowprops=dict(arrowstyle="->", color=group["color"]),
+        )
     tick_positions = list(ranks)
     tick_labels = [str(rank) for rank in ranks]
     unmatched_x = None
@@ -449,13 +501,13 @@ def plot_cavity_selection(
         margin = max(0.01, span * 0.12)
         ax.set_ylim(min(scores) - margin, max(scores) + margin)
     ax.set_xlabel(
-        "candidate identifier (P# = fpocket rank; L# = ligand-defined box without fpocket score)",
+        f"candidate rank (P# = {engine}; L# = ligand-defined, unscored)",
         fontsize=13,
     )
-    ax.set_ylabel("fpocket score", fontsize=14)
+    ax.set_ylabel(f"{engine} score", fontsize=14)
     ax.set_title(
-        "Fpocket ranking and structural evidence"
-        if selected_pairs else "Fpocket ranking with structural-evidence overlay",
+        f"{engine} ranking and structural evidence"
+        if selected_pairs else f"{engine} ranking with structural-evidence overlay",
         fontsize=16,
     )
     ax.grid(alpha=.25)
@@ -469,11 +521,11 @@ def plot_cavity_selection(
         for group in shared_box_groups if len(group["numbers"]) > 1
     ]
     legend_text = (
-        "P# = raw fpocket rank; colors match Panel B\n"
-        "Gray = other retained fpocket candidates\n"
+        f"P# = {engine} rank; colors match Panel B\n"
+        f"Gray = other retained {engine} candidates\n"
         + (f"Green ring = ligand correspondence ({ligand_evidence_labels})\n" if ligand_evidence_labels else "")
         + (f"Shared proposed box = {', '.join(shared_box_labels)}\n" if shared_box_labels else "")
-        + ("L# X at 0 = ligand-defined box; no fpocket score" if unmatched_ligand_region_labels else "")
+        + ("L# X at 0 = ligand-defined box; no detector score" if unmatched_ligand_region_labels else "")
     )
     ax.text(
         .98, .97, legend_text,
@@ -531,9 +583,14 @@ def render_cavity_scene(scene, output, session, pymol, overview=False):
 def render_all_cavity_candidates(
     diagnostics, selected_config, output, session, pymol, selected_configs=None,
     evidence_site_numbers=(), selected_only=False, ligand_site_group=None,
-    ligand_site_groups=(), show_labels=True,
+    ligand_site_groups=(), show_labels=False,
 ):
-    """Show retained pockets and boxes with stable colors across report panels."""
+    """Show retained pockets and boxes with stable colors across report panels.
+
+    Report images identify pockets through the shared color key, keeping text
+    labels out of the molecular view.  Labels remain available only when a
+    caller explicitly requests them for a specialized review artifact.
+    """
     if not pymol:
         return False
     receptor = first(diagnostics.parent.parent, ["receptor/*.pdb"])
@@ -637,13 +694,13 @@ def render_all_cavity_candidates(
                 f"set stick_radius, 0.13, {box_object}", f"set stick_transparency, 0.18, {box_object}",
                 f"color {site_color}, {box_object}",
             ]
-    # With one ligand-defined site, integrate its single representative and
-    # complete proposed box into the main fpocket structural panel.  A separate
-    # site figure would repeat the same spatial information.  Multi-site cases
-    # retain their dedicated overview because the separation among sites is
-    # itself scientifically informative.
+    # With one ligand-defined site, integrate its representative into the main
+    # pocket panel.  When it corresponds to a predicted pocket, that pocket's
+    # candidate box is the only box: drawing the evidence-derived bounds as a
+    # second same-colored box is visually ambiguous and creates an unlisted
+    # pseudo-candidate.  Only an unmatched ligand-defined site gets its own box.
     if ligand_site_group:
-        matched_number = (ligand_site_group.get("fpocket_recovery") or {}).get("best_matching_pocket")
+        matched_number = pocket_recovery(ligand_site_group).get("best_matching_pocket")
         direct_members = [
             member for member in ligand_site_group.get("members", [])
             if str(member.get("matched_cavity")) == str(matched_number)
@@ -681,7 +738,13 @@ def render_all_cavity_candidates(
                 "set sphere_scale, 0.18, ligand_site_representative",
                 "set stick_transparency, 0.0, ligand_site_representative",
             ]
-            if not selected_only:
+            if matched_number:
+                # Remove the coordinate artifact emitted by older versions.
+                # The matched pocket's candidate box is authoritative.
+                stale_ligand_box = output.with_name(output.stem + "_ligand_site_box.pdb")
+                if stale_ligand_box.is_file():
+                    stale_ligand_box.unlink()
+            if not selected_only and not matched_number:
                 ligand_box = output.with_name(output.stem + "_ligand_site_box.pdb")
                 write_box_coordinate_file(ligand_box, geometry)
                 lines += [
@@ -783,11 +846,12 @@ def build_pocket_evidence_figure(diagnostics, selected_config, output, pymol, po
     panel_3d = output.with_name(output.stem + "_3D.png")
     panel_2d = output.with_name(output.stem + "_2D.png")
     pml = output.with_suffix(".pml")
+    session = output.with_suffix(".pse")
     lines = [
         "reinitialize", f'load "{receptor.resolve()}", receptor',
         f'load "{pocket.resolve()}", selected_pocket',
         f'load "{ligand.resolve()}", supporting_ligand',
-        "hide everything, all", "show cartoon, receptor", "color gray80, receptor",
+        "hide everything, all", "show cartoon, receptor", "color gray70, receptor",
         "set cartoon_transparency, 0.72, receptor",
         "show surface, selected_pocket",
         f"color {pocket_color}, selected_pocket", "set transparency, 0.72, selected_pocket",
@@ -801,7 +865,8 @@ def build_pocket_evidence_figure(diagnostics, selected_config, output, pymol, po
         "bg_color white", "set ray_opaque_background, off", "set depth_cue, 0",
         "orient (selected_pocket or supporting_ligand or docking_box)" if box.is_file() else "orient (selected_pocket or supporting_ligand)",
         "zoom (selected_pocket or supporting_ligand or docking_box), 14" if box.is_file() else "zoom (selected_pocket or supporting_ligand), 5",
-        f"png {panel_3d.resolve()}, 2800, 2200, dpi=480, ray=1", "quit",
+        f"png {panel_3d.resolve()}, 2800, 2200, dpi=480, ray=1",
+        f"save {session.resolve()}", "quit",
     ]
     pml.write_text("\n".join(lines) + "\n")
     result = subprocess.run([str(pymol), "-cq", str(pml)], text=True, capture_output=True)
@@ -863,7 +928,7 @@ def build_ligand_site_overview(diagnostics, groups, output, pymol):
         members = group.get("members") or []
         if not members or not group.get("box"):
             continue
-        matching_pocket = (group.get("fpocket_recovery") or {}).get("best_matching_pocket")
+        matching_pocket = pocket_recovery(group).get("best_matching_pocket")
         directly_matched = [
             member for member in members
             if str(member.get("matched_cavity")) == str(matching_pocket)
@@ -1056,7 +1121,7 @@ def build_ligand_site_group_figure(diagnostics, group, output, pymol):
     write_box_coordinate_file(box, group["box"])
     pml = output.with_suffix(".pml")
     lines = ["reinitialize", f'load "{receptor.resolve()}", receptor',
-             "hide everything, all", "show cartoon, receptor", "color gray80, receptor",
+             "hide everything, all", "show cartoon, receptor", "color gray70, receptor",
              "set cartoon_transparency, 0.72, receptor",
              # Make ray-traced cavity surfaces visibly translucent rather than
              # merely assigning an object transparency value that can still
@@ -1150,7 +1215,7 @@ def build_cavity_figures(study, pymol):
     retained_for_display.sort(key=lambda row: int(row.get("rank_order", 999999)))
     recovered_pocket_numbers = []
     for group in ligand_site_groups:
-        recovery = group.get("fpocket_recovery") or {}
+        recovery = pocket_recovery(group)
         # Any explicit cavity correspondence makes this one combined site.
         # The supporting-pose fraction communicates strength; it must not be
         # drawn again as an independent L# region merely because fewer than
@@ -1168,7 +1233,9 @@ def build_cavity_figures(study, pymol):
         source_name = f"pocket{int(match.group(1))}_atm.pdb"
         for display_index, row in enumerate(retained_for_display, start=1):
             if Path(str(row.get("pocket_file", ""))).name == source_name:
-                recovered_pocket_numbers.append(display_index)
+                recovered_pocket_numbers.append(
+                    int(row.get("rank_order", display_index) or display_index)
+                )
                 break
     evidence_site_numbers = sorted(set(evidence_site_numbers + recovered_pocket_numbers))
     display_site_numbers = sorted(set(evidence_site_numbers + selected_site_numbers))
@@ -1186,8 +1253,8 @@ def build_cavity_figures(study, pymol):
         )
         for index, group in enumerate(ligand_site_groups)
         if (group.get("site_identity") or {}).get(
-            "is_separate_from_fpocket",
-            (group.get("fpocket_recovery") or {}).get("status") == "not_recovered",
+            "is_separate_from_predicted_pocket",
+            group.get("site_identity", {}).get("is_separate_from_fpocket", pocket_recovery(group).get("status") == "not_recovered"),
         )
     ]
     if plot_cavity_selection(
@@ -1206,8 +1273,8 @@ def build_cavity_figures(study, pymol):
     unmatched_ligand_site_groups = [
         group for group in ligand_site_groups
         if (group.get("site_identity") or {}).get(
-            "is_separate_from_fpocket",
-            (group.get("fpocket_recovery") or {}).get("status") == "not_recovered",
+            "is_separate_from_predicted_pocket",
+            group.get("site_identity", {}).get("is_separate_from_fpocket", pocket_recovery(group).get("status") == "not_recovered"),
         )
     ]
     if render_all_cavity_candidates(
@@ -1234,7 +1301,7 @@ def build_cavity_figures(study, pymol):
             selected_number = selected_match.group(1)
             selected_evidence_group = next((
                 group for group in ligand_site_groups
-                if str((group.get("fpocket_recovery") or {}).get("best_matching_pocket"))
+                if str(pocket_recovery(group).get("best_matching_pocket"))
                 == selected_number
             ), None)
     if fpocket_selected_configs and render_all_cavity_candidates(
@@ -1254,8 +1321,9 @@ def build_cavity_figures(study, pymol):
         for display_index, row in enumerate(retained_for_display, start=1):
             pocket_file = row.get("pocket_file")
             if pocket_file in displayed_colors:
+                pocket_number = int(row.get("rank_order", display_index) or display_index)
                 panel_b_legend.append((
-                    f"Cavity P{display_index}", displayed_colors[pocket_file], "surface",
+                    f"Cavity P{pocket_number}", displayed_colors[pocket_file], "surface",
                 ))
         for group in displayed_fpocket_box_groups(
                 diagnostics, retained_rows, displayed_colors):
@@ -1646,9 +1714,13 @@ def render_sdf_plip2d(interactions, ligand_sdf, output, ligand_id=None):
     """
     import xml.etree.ElementTree as ET
     from PIL import Image, ImageDraw, ImageFont
+    import numpy as np
     from rdkit import Chem
     from rdkit.Chem import rdDepictor
     from rdkit.Chem.Draw import rdMolDraw2D
+    from docking_universal.services.interaction_projection import (
+        InteractionAnchor, project_and_optimize,
+    )
 
     report_xml = interactions / "report.xml"
     if not report_xml.is_file() or not ligand_sdf.is_file():
@@ -1731,6 +1803,16 @@ def render_sdf_plip2d(interactions, ligand_sdf, output, ligand_id=None):
                 residue = f"{restype}{resnr}" + (f":{chain}" if chain else "")
                 record = residue_calls.setdefault(residue, {})
                 record.setdefault(display_name, {"color": color, "atoms": []})["atoms"].append(atom_index)
+                protein_coordinate = call.find("protcoo")
+                if protein_coordinate is None:
+                    protein_coordinate = call.find("targetcoo")
+                if protein_coordinate is not None:
+                    try:
+                        protein_xyz = tuple(float(protein_coordinate.findtext(axis)) for axis in ("x", "y", "z"))
+                    except (TypeError, ValueError):
+                        protein_xyz = None
+                    if protein_xyz and all(math.isfinite(value) for value in protein_xyz):
+                        record.setdefault("_protein_xyz", []).append(protein_xyz)
 
     draw_molecule = Chem.Mol(molecule)
     rdDepictor.Compute2DCoords(draw_molecule, canonOrient=True, clearConfs=True)
@@ -1758,12 +1840,57 @@ def render_sdf_plip2d(interactions, ligand_sdf, output, ligand_id=None):
     molecule_max_y = max(point.y for point in draw_coordinates.values())
     positioned = []
     for residue, calls in residue_calls.items():
-        atom_set = sorted({atom for record in calls.values() for atom in record["atoms"]})
+        atom_set = sorted({
+            atom for name, record in calls.items()
+            if not name.startswith("_") for atom in record["atoms"]
+        })
         anchor_x = sum(draw_coordinates[atom].x for atom in atom_set) / len(atom_set)
         anchor_y = sum(draw_coordinates[atom].y for atom in atom_set) / len(atom_set)
-        positioned.append({"residue": residue, "calls": calls, "anchor": (anchor_x, anchor_y), "side": "left" if anchor_x < center_x else "right"})
+        protein_points = list(calls.get("_protein_xyz", []))
+        positioned.append({
+            "residue": residue, "calls": calls, "anchor": (anchor_x, anchor_y),
+            "source_xyz": tuple(np.mean(protein_points, axis=0)) if protein_points else None,
+            "side": "left" if anchor_x < center_x else "right",
+        })
+
+    # Use PLIP's protein-side coordinates to retain the pose's local spatial
+    # ordering. The existing ligand-2D layout remains the fallback when a
+    # PLIP family has no protein contact coordinate (for example a malformed
+    # or incomplete retained XML record).
+    projection_used = False
+    projected_by_residue = {}
+    source_points = [point for entry in positioned if entry["source_xyz"] for point in [entry["source_xyz"]]]
+    if source_points:
+        try:
+            anchors = [
+                InteractionAnchor(entry["residue"], entry["residue"], point)
+                for entry, point in ((entry, entry["source_xyz"]) for entry in positioned if entry["source_xyz"])
+            ]
+            ligand_xyz = [
+                (
+                    conf3d.GetAtomPosition(index).x,
+                    conf3d.GetAtomPosition(index).y,
+                    conf3d.GetAtomPosition(index).z,
+                )
+                for index in heavy_indices
+            ]
+            projected = project_and_optimize(ligand_xyz, anchors, min_separation=2.4)
+            projected_by_residue = {item.identifier: item.xy for item in projected}
+            projection_used = len(projected_by_residue) == len(source_points)
+        except (ValueError, RuntimeError, TypeError):
+            projected_by_residue = {}
+    for entry in positioned:
+        if entry["residue"] in projected_by_residue:
+            x, y = projected_by_residue[entry["residue"]]
+            entry["projection_xy"] = (x, y)
+            entry["side"] = "left" if x < 0 else "right"
+        else:
+            entry["projection_xy"] = None
     for side in ("left", "right"):
-        entries = sorted((entry for entry in positioned if entry["side"] == side), key=lambda item: item["anchor"][1])
+        entries = sorted(
+            (entry for entry in positioned if entry["side"] == side),
+            key=lambda item: item["projection_xy"][1] if item["projection_xy"] else item["anchor"][1],
+        )
         if not entries:
             continue
         top = max(85, molecule_min_y - 190)
@@ -1772,7 +1899,10 @@ def render_sdf_plip2d(interactions, ligand_sdf, output, ligand_id=None):
         for entry, label_y in zip(entries, slots):
             label_x = max(55, molecule_min_x - 240) if side == "left" else min(width - 55, molecule_max_x + 240)
             anchor_mode = "lm" if side == "left" else "rm"
-            call_items = sorted(entry["calls"].items())
+            call_items = sorted(
+                (name, record) for name, record in entry["calls"].items()
+                if not name.startswith("_")
+            )
             for call_index, (_, record) in enumerate(call_items):
                 atoms = record["atoms"]
                 start = (
@@ -1789,6 +1919,8 @@ def render_sdf_plip2d(interactions, ligand_sdf, output, ligand_id=None):
     present = []
     for entry in positioned:
         for name, record in entry["calls"].items():
+            if name.startswith("_"):
+                continue
             if name not in [item[0] for item in present]:
                 present.append((name, record["color"]))
     if present:
@@ -1813,7 +1945,14 @@ def render_sdf_plip2d(interactions, ligand_sdf, output, ligand_id=None):
         "interaction_source": str(report_xml.resolve()),
         "chemistry_policy": "bond orders, aromaticity, formal charges, and stereochemistry from retained SDF",
         "interaction_policy": "residue calls and ligand contact coordinates from retained PLIP XML",
-        "mapped_interactions": sum(len(record["atoms"]) for calls in residue_calls.values() for record in calls.values()),
+        "layout_policy": "PLIP protein-side coordinates projected with a ligand-centered PCA frame and SciPy overlap optimization",
+        "layout_projection_used": projection_used,
+        "mapped_interactions": sum(
+            len(record["atoms"])
+            for calls in residue_calls.values()
+            for name, record in calls.items()
+            if not name.startswith("_")
+        ),
         "maximum_coordinate_mapping_distance_angstrom": max(mapping_distances) if mapping_distances else None,
     }
     output.with_suffix(".manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
@@ -1826,6 +1965,8 @@ def render_sdf_plip2d(interactions, ligand_sdf, output, ligand_id=None):
 
 def render_plip2d(interactions, ligand_sdf, output, runner, ligand_id=None):
     """Draw a compact 2D diagram using retained PLIP calls as authority."""
+    if render_poseedit_plip2d(interactions, ligand_sdf, output, ligand_id=ligand_id):
+        return True
     if render_sdf_plip2d(interactions, ligand_sdf, output, ligand_id=ligand_id):
         return True
     if not runner:
@@ -1857,6 +1998,47 @@ def render_plip2d(interactions, ligand_sdf, output, runner, ligand_id=None):
     return True
 
 
+def render_poseedit_plip2d(interactions, ligand_sdf, output, ligand_id=None):
+    """Prefer the approved local renderer without changing report composition."""
+    from docking_universal.runtime_inventory import discover_poseedit_runtime
+
+    report_xml = interactions / "report.xml"
+    receptor = first(interactions, ["complex_protonated.pdb", "plipfixed*.pdb", "*.pdb"])
+    renderer = Path(__file__).with_name("docking-universal-render-poseedit.py")
+    if not report_xml.is_file() or not ligand_sdf.is_file() or not receptor or not renderer.is_file():
+        return False
+    runtime = discover_poseedit_runtime()
+    if runtime["status"] != "available":
+        (interactions / "plip2d.log").write_text(
+            "Approved PoseEdit-style renderer unavailable: " + runtime["detail"] + "\n"
+        )
+        return False
+    existing = read_json(output.with_suffix(".manifest.json"))
+    dependencies = (report_xml, ligand_sdf, receptor, renderer)
+    if (output.is_file() and existing.get("renderer_policy") == "approved-poseedit-local-v1"
+            and output.stat().st_mtime >= max(path.stat().st_mtime for path in dependencies)):
+        return True
+    components = runtime["components"]
+    command = [
+        sys.executable, str(renderer), "--ligand", str(ligand_sdf),
+        "--receptor", str(receptor), "--plip-xml", str(report_xml),
+        "--output", str(output), "--scale", "3",
+        "--renderer-policy", "approved-poseedit-local-v1",
+        "--node", components["node"]["path"], "--chrome", components["chrome"]["path"],
+    ]
+    if ligand_id:
+        command.extend(("--ligand-id", str(ligand_id)))
+    result = subprocess.run(command, text=True, capture_output=True)
+    (interactions / "plip2d.log").write_text(
+        f"RENDERER: approved-poseedit-local-v1\nCOMMAND: {' '.join(command)}\n"
+        f"RETURN CODE: {result.returncode}\n\nSTDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}\n"
+    )
+    if result.returncode != 0 or not output.is_file():
+        print(f"Report figure warning: approved local interaction renderer failed for {interactions}", file=sys.stderr)
+        return False
+    return read_json(output.with_suffix(".manifest.json")).get("renderer_policy") == "approved-poseedit-local-v1"
+
+
 def combine_panels(panel_a, panel_b, output, control=False, panel_b_legend=()):
     """Compose labeled report panels without changing scientific content."""
     from PIL import Image, ImageChops, ImageDraw, ImageFont
@@ -1884,16 +2066,9 @@ def combine_panels(panel_a, panel_b, output, control=False, panel_b_legend=()):
         return image.resize((int(image.width * ratio), int(image.height * ratio)), Image.Resampling.LANCZOS)
 
     a = fit(a, left_w, canvas_h - 2 * margin - label_h)
-    # Keep the two control panels vertically centered on the same frame; the
-    # previous downward offset made panel B visibly lower than panel A in the
-    # combined Figure 1 image.
-    # Panel B is tightly cropped around the molecular overlay, whereas Panel A
-    # contains unavoidable plot margins.  A small upward visual correction
-    # centers the displayed content, not merely the underlying image boxes.
-    b_offset = -80 if control else 0
     b = fit(
         b, right_w - 80,
-        max(300, a.height - b_offset) if control else 1600,
+        a.height if control else 1600,
     )
     canvas = Image.new("RGB", (canvas_w, canvas_h), "white")
     group_height = max(a.height, b.height)
@@ -1907,12 +2082,19 @@ def combine_panels(panel_a, panel_b, output, control=False, panel_b_legend=()):
         if control else
         margin + left_w + gap + (right_w - b.width) // 2
     )
-    # A and B now share the same frame height and top baseline.  Keep the
-    # legend attached to this same B group below the aligned frame.
-    # The receptor's visible extrema sit a little inside its frame after the
-    # tight crop; place that frame slightly lower so the extrema align with
-    # the plotted data region in A while the legend remains bottom-aligned.
-    b_y = margin + label_h + (group_height - b.height) // 2 + b_offset
+    b_y = margin + label_h + (group_height - b.height) // 2
+    if control:
+        # Align the visible panel contents, not their raster frames. Plot A
+        # retains Matplotlib margins while molecular panel B is tightly
+        # cropped, so a fixed pixel offset cannot remain correct across runs.
+        white_a = Image.new("RGB", a.size, "white")
+        white_b = Image.new("RGB", b.size, "white")
+        a_bounds = ImageChops.difference(a, white_a).getbbox()
+        b_bounds = ImageChops.difference(b, white_b).getbbox()
+        if a_bounds and b_bounds:
+            a_center = a_y + (a_bounds[1] + a_bounds[3]) / 2
+            b_center = b_y + (b_bounds[1] + b_bounds[3]) / 2
+            b_y += round(a_center - b_center)
     canvas.paste(a, (a_x, a_y))
     canvas.paste(b, (b_x, b_y))
     draw = ImageDraw.Draw(canvas)
@@ -1933,7 +2115,10 @@ def combine_panels(panel_a, panel_b, output, control=False, panel_b_legend=()):
         legend_h = heading_h + rows * row_h + 2 * legend_pad
         legend_x = (
             b_x + b.width - legend_w - 18 if control
-            else margin + left_w + gap + right_w + gap + (legend_col_w - legend_w) // 2
+            # Anchor the legend to the visible molecular panel.  Positioning it
+            # after the full reserved panel slot created a large meaningless
+            # white band whenever the tightly cropped structure was narrow.
+            else b_x + b.width + 35
         )
         legend_y = 18 if control else margin + label_h + (group_height - legend_h) // 2
         draw.rounded_rectangle(
@@ -1942,7 +2127,7 @@ def combine_panels(panel_a, panel_b, output, control=False, panel_b_legend=()):
         )
         legend_heading = (
             "Filled P = fpocket surface   |   outline = proposed search box"
-            if control else "Filled: fpocket surface\nOutline: proposed box"
+            if control else "Filled: predicted-pocket surface\nOutline: proposed box"
         )
         draw.multiline_text(
             (legend_x + legend_pad, legend_y + legend_pad), legend_heading,
@@ -2107,7 +2292,7 @@ def build_control_figures(control, protocol_path, pymol, plip2d, plip):
     best = Path(str(protocol.get("global_best_sampled_pose", {}).get("summary", ""))).parent / "best_rmsd_pose.sdf"
     receptor = analysis / "receptor.pdb"
     panel_b = report / "control_panel_B_overlay.png"
-    render_overlay(receptor, [reference, top, best], ["magenta", "red", "blue"], panel_b, report / "control_panel_B_overlay.pse", pymol)
+    render_overlay(receptor, [reference, top, best], ["magenta", "red", "marine"], panel_b, report / "control_panel_B_overlay.pse", pymol)
     combined = report / "control_panels_AB.png"
     if panel_b.is_file():
         combine_panels(panel_a, panel_b, combined, control=True)
@@ -2152,7 +2337,7 @@ def build_compound_figures(study, pymol, plip2d):
             panel_b = report / f"{asset_id}_panel_B_representatives.png"
             # Docked compounds are shown as molecular sticks; only exploratory
             # fpocket hypotheses are rendered as surfaces in their separate figure.
-            render_overlay(receptor, ligands, ["red", "blue", "yellow"], panel_b, report / f"{asset_id}_panel_B_representatives.pse", pymol)
+            render_overlay(receptor, ligands, ["red", "marine", "gold"], panel_b, report / f"{asset_id}_panel_B_representatives.pse", pymol)
             combined = report / f"{asset_id}_panels_AB.png"
             if panel_b.is_file():
                 combine_panels(panel_a, panel_b, combined, control=False)
@@ -2192,12 +2377,23 @@ def main():
     protocol = choose_protocol(control) if control else None
     if control and protocol:
         outputs.extend(build_control_figures(control, protocol, pymol, plip2d, plip))
+    interaction_manifests = [
+        read_json(path) for path in study.glob(
+            "compounds/*/pose_analysis/cluster_*/interactions/representative_plip2d.manifest.json"
+        )
+    ]
+    renderer_policies = sorted({
+        item.get("renderer_policy") or item.get("schema_name", "unknown")
+        for item in interaction_manifests if item
+    })
     manifest = {
         "schema_name": "docking-universal-report-figures", "schema_version": 2,
         "study": str(study), "control": str(control) if control else None,
         "pymol": str(pymol) if pymol else None,
         "plip": str(plip) if plip else None,
-        "interaction_diagram_renderer": "native_sdf_plip_xml",
+        "interaction_diagram_renderer": (
+            renderer_policies[0] if len(renderer_policies) == 1 else renderer_policies
+        ) if renderer_policies else None,
         "plip_to_2d_fallback": str(plip2d) if plip2d else None, "outputs": outputs,
     }
     report = study / "report"

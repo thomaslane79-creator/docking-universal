@@ -1,0 +1,14 @@
+{
+  "name": "P2Rank",
+  "version": "2.5.1",
+  "release_channel": "stable",
+  "archive": "p2rank_2.5.1.tar.gz",
+  "archive_sha256": "d243f2d9036ac053fefb9407b5fe1c85f4fe077c519fd975ac585e995feab274",
+  "source": "https://github.com/rdk/p2rank/releases/tag/2.5.1",
+  "java_major_minimum": 17,
+  "platforms": {
+    "linux": "prank",
+    "macos": "prank",
+    "windows": "prank.bat"
+  }
+}

@@ -50,6 +50,101 @@ def _pocket_coordinate_paths(cavity: Path, label: str) -> list[Path]:
     return paths
 
 
+def _conformational_site_evidence(
+    groups: list[dict[str, Any]], conformational: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Return box-review evidence tied to the groups' deposited ligands."""
+    source_ids = {
+        member.get("source_ligand_id")
+        for group in groups for member in group.get("members", [])
+        if member.get("source_ligand_id")
+    }
+    observations = []
+    for observation in (conformational or {}).get("observations", []):
+        matched = [
+            item for item in observation.get("known_ligand_accessibility", [])
+            if item.get("source_ligand_id") in source_ids
+        ]
+        if matched:
+            observations.append({
+                "residue": observation.get("residue"),
+                "entry": observation.get("entry"),
+                "alignment_id": observation.get("alignment_id"),
+                "maximum_chi_difference_degrees": observation.get("maximum_chi_difference_degrees"),
+                "side_chain_rmsd_angstrom": observation.get("side_chain_rmsd_angstrom"),
+                "backbone_rmsd_angstrom": observation.get("backbone_rmsd_angstrom"),
+                "ligands": matched,
+            })
+    occluding = [
+        item for observation in observations for item in observation["ligands"]
+        if item.get("consistent_with_side_chain_occlusion")
+    ]
+    residues = []
+    for observation in observations:
+        if any(item.get("consistent_with_side_chain_occlusion") for item in observation["ligands"]):
+            residue = observation.get("residue")
+            if residue and residue not in residues:
+                residues.append(residue)
+    return {
+        "status": (
+            "conformationally_incompatible" if occluding
+            else "reviewed_no_geometric_incompatibility" if observations
+            else "not_evaluated"
+        ),
+        "box_decision_warning": (
+            "A deposited ligand placement conflicts with the current receptor conformation. "
+            "An alternate side-chain conformation may restrict site accessibility or help explain "
+            "a missing/reduced predicted cavity; this is supporting evidence, not proof of flexibility. "
+            "Rigid docking in this box may not be a legitimate test."
+            if occluding else None
+        ),
+        "occluding_residues": residues,
+        "observation_count": len(observations),
+        "observations": observations,
+        "decision_role": "evidence_for_box_review_only",
+    }
+
+
+def _experimental_site_evidence(
+    groups: list[dict[str, Any]], pocket_evidence: dict[str, Any] | None, evidence_root: Path,
+) -> dict[str, Any]:
+    """Compact, auditable deposited-ligand observations for one candidate."""
+    source_ids = {
+        member.get("source_ligand_id")
+        for group in groups for member in group.get("members", [])
+        if member.get("source_ligand_id")
+    }
+    records = []
+    for item in (pocket_evidence or {}).get("evidence", []):
+        if item.get("source_ligand_id") not in source_ids:
+            continue
+        aligned = evidence_root / str(item.get("aligned_ligand_pdb", ""))
+        records.append({
+            "source_ligand_id": item.get("source_ligand_id"),
+            "entry": item.get("entry"), "ligand": item.get("ligand"),
+            "evidence_class": item.get("evidence_class"),
+            "sequence_identity": item.get("sequence_identity"),
+            "query_coverage": item.get("query_coverage"),
+            "ca_rmsd_angstrom": item.get("ca_rmsd_angstrom"),
+            "aligned_ligand_pdb": str(aligned.resolve()) if aligned.is_file() else None,
+        })
+    classes: dict[str, int] = {}
+    for item in records:
+        key = str(item.get("evidence_class") or "unclassified")
+        classes[key] = classes.get(key, 0) + 1
+    rmsds = [item["ca_rmsd_angstrom"] for item in records if isinstance(item.get("ca_rmsd_angstrom"), (int, float))]
+    return {
+        "observation_count": len(records),
+        "pdb_entry_count": len({item["entry"] for item in records if item.get("entry")}),
+        "ligand_count": len({item["ligand"] for item in records if item.get("ligand")}),
+        "evidence_class_counts": classes,
+        "minimum_ca_rmsd_angstrom": min(rmsds) if rmsds else None,
+        "maximum_ca_rmsd_angstrom": max(rmsds) if rmsds else None,
+        "observations": records,
+        "decision_role": "evidence_for_box_review_only",
+    }
+
+
 def build_labeled_candidate_mappings(
     target: str,
     boxes: list[Path],
@@ -59,10 +154,19 @@ def build_labeled_candidate_mappings(
     """Create the same selectable P#, consolidated P#/P#, and L# boxes."""
     cavity = Path(cavity)
     candidates: list[dict[str, Any]] = []
+    provenance_path = cavity / "pocket_detection_provenance.json"
+    provenance = json.loads(provenance_path.read_text()) if provenance_path.is_file() else {}
+    detector = provenance.get("engine", "fpocket")
+    equivalence_by_pocket: dict[int, list[dict[str, Any]]] = {}
+    for equivalence in provenance.get("pocket_equivalences", []):
+        for number in equivalence.get("pockets", []):
+            equivalence_by_pocket.setdefault(int(number), []).append(equivalence)
     ligand_groups = (pocket_evidence or {}).get("ligand_site_groups") or []
+    evidence_root = cavity / "pdb_site_evidence"
+    conformational = (pocket_evidence or {}).get("_conformational_evidence")
     groups_by_pocket: dict[str, list[dict[str, Any]]] = {}
     for group in ligand_groups:
-        pocket = (group.get("fpocket_recovery") or {}).get("best_matching_pocket")
+        pocket = (group.get("pocket_recovery") or group.get("fpocket_recovery") or {}).get("best_matching_pocket")
         if pocket:
             groups_by_pocket.setdefault(str(pocket), []).append(group)
     available = {path.resolve() for path in boxes}
@@ -72,16 +176,39 @@ def build_labeled_candidate_mappings(
         match = re.search(r"_pocket(\d+)\.conf$", path.name)
         number = int(match.group(1)) if match else fallback_index
         supporting = groups_by_pocket.get(str(number), [])
-        description = "individual fpocket cavity box"
+        description = f"individual {detector} pocket box"
         if supporting:
             description += "; direct deposited-ligand correspondence recorded"
+        equivalences = equivalence_by_pocket.get(number, [])
+        if equivalences:
+            equivalence_phrases = []
+            for item in equivalences:
+                peers = [int(peer) for peer in item.get("pockets", []) if int(peer) != number]
+                rmsd = item.get("fitted_pocket_atom_rmsd_angstrom")
+                chain_text = "/".join(str(chain) for chain in item.get("chains", []) if chain)
+                for peer in peers:
+                    detail = f"fitted pocket RMSD {rmsd:g} Å" if isinstance(rmsd, (int, float)) else "low fitted pocket RMSD"
+                    if chain_text:
+                        detail += f"; chains {chain_text}"
+                    equivalence_phrases.append(
+                        f"probable symmetry-related pocket copy of P{peer} ({detail}); "
+                        "both sites may be relevant in the physiological assembly"
+                    )
+            description += "; " + "; ".join(equivalence_phrases)
         candidates.append({
             "label": f"P{number}",
             "path": path,
             "description": description,
             "evidence": {
-                "kind": "fpocket",
+                "kind": detector,
+                "detector": detector,
                 "direct_ligand_site_groups": len(supporting),
+                "pocket_equivalences": equivalences,
+                "symmetry_equivalence_shown_in_box_selection": bool(equivalences),
+                "conformational_site_evidence": _conformational_site_evidence(supporting, conformational),
+                "experimental_ligand_evidence": _experimental_site_evidence(
+                    supporting, pocket_evidence, evidence_root,
+                ),
                 "automation_eligible": True,
             },
         })
@@ -106,13 +233,13 @@ def build_labeled_candidate_mappings(
             candidates.append({
                 "label": label,
                 "path": path,
-                "description": "consolidated box spanning the named overlapping fpocket cavities",
-                "evidence": {"kind": "consolidated_fpocket", "automation_eligible": True},
+                "description": f"consolidated box spanning the named overlapping {detector} pockets",
+                "evidence": {"kind": f"consolidated_{detector}", "detector": detector, "automation_eligible": True},
             })
 
     for group in ligand_groups:
         identity = group.get("site_identity") or {}
-        matching_pocket = (group.get("fpocket_recovery") or {}).get("best_matching_pocket")
+        matching_pocket = (group.get("pocket_recovery") or group.get("fpocket_recovery") or {}).get("best_matching_pocket")
         if matching_pocket:
             continue
         label = identity.get("canonical_label", f"L{group.get('site_number', '?')}")
@@ -125,12 +252,16 @@ def build_labeled_candidate_mappings(
         candidates.append({
             "label": label,
             "path": path,
-            "description": "ligand-defined box without a corresponding fpocket cavity",
+            "description": f"ligand-defined box without a corresponding {detector} cavity",
             "requires_homolog_approval": requires_homolog_approval,
             "evidence": {
                 "kind": "ligand_defined",
                 "evidence_class_counts": classes,
                 "automation_eligible": not requires_homolog_approval,
+                "conformational_site_evidence": _conformational_site_evidence([group], conformational),
+                "experimental_ligand_evidence": _experimental_site_evidence(
+                    [group], pocket_evidence, evidence_root,
+                ),
             },
         })
     return candidates
@@ -170,6 +301,13 @@ class PocketReviewService:
             if not evidence_path.is_file():
                 raise FileNotFoundError(f"Pocket evidence record does not exist: {evidence_path}")
             evidence = json.loads(evidence_path.read_text())
+            conformational_value = (
+                evidence.get("structural_ensemble") or {}
+            ).get("conformational_evidence")
+            if conformational_value:
+                conformational_path = evidence_path.parent / conformational_value
+                if conformational_path.is_file():
+                    evidence["_conformational_evidence"] = json.loads(conformational_path.read_text())
 
         mappings = build_labeled_candidate_mappings(
             inputs.target,
@@ -232,7 +370,10 @@ class PocketReviewService:
                 if inputs.pocket_evidence_record else None
             ),
             "candidate_count": len(candidates),
-            "related_structure_evidence": bool(evidence),
+            "related_structure_evidence": (
+                evidence.get("status") in {"completed", "available"}
+                and bool(evidence.get("evidence") or evidence.get("ligand_site_groups"))
+            ),
         }
         return self.controller.start_pocket_review(
             study_id,
@@ -259,6 +400,12 @@ class PocketReviewService:
                     "structural_ensemble",
                     Path(inputs.pocket_evidence_record).parent / ensemble_value,
                 ))
+            conformational_value = (evidence.get("structural_ensemble") or {}).get("conformational_evidence")
+            if conformational_value:
+                paths.append((
+                    "conformational-evidence", "conformational_evidence",
+                    Path(inputs.pocket_evidence_record).parent / conformational_value,
+                ))
         if inputs.review_scene:
             paths.append(("pocket-review-scene", "pymol_scene", Path(inputs.review_scene)))
         for artifact_id, kind, path in paths:
@@ -271,6 +418,7 @@ class PocketReviewService:
                     description={
                         "pocket_evidence": "Related-PDB ligand and pocket evidence",
                         "structural_ensemble": "Shared related-structure ensemble evidence",
+                        "conformational_evidence": "Rotamer and site-accessibility evidence for docking-box review",
                         "pymol_scene": "Interactive pocket-review scene",
                     }[kind],
                 ))

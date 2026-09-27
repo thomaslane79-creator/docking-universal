@@ -109,10 +109,15 @@ def _copy(source, destination):
     return destination
 
 
-def create_bundle(protocol_path, control_root, output, control_compound=None):
+def create_bundle(
+    protocol_path, control_root, output, control_compound=None, *, additional_roots=(),
+):
     """Package a reusable protocol and its retained evidence as one file."""
     protocol_path = Path(protocol_path).resolve()
     control_root = Path(control_root).resolve()
+    search_roots = tuple(dict.fromkeys([
+        control_root, *(Path(value).resolve() for value in additional_roots),
+    ]))
     output = Path(output).resolve()
     protocol = json.loads(protocol_path.read_text())
     kind = protocol_type(protocol)
@@ -161,6 +166,23 @@ def create_bundle(protocol_path, control_root, output, control_compound=None):
                 receptor_pdb_copy = _copy(receptor_pdb_source, assets / receptor_pdb_source.name)
                 protocol["locked_inputs"]["receptor_pdb"] = f"assets/{receptor_pdb_copy.name}"
                 protocol["locked_inputs"]["receptor_pdb_sha256"] = sha256(receptor_pdb_copy)
+        if not protocol.get("coordinate_source") and receptor_pdb_value:
+            source_dir = Path(receptor_pdb_value).expanduser().resolve().parent.parent / "source"
+            if (source_dir / "structure.cif").is_file():
+                protocol["coordinate_source"] = {
+                    "format": "mmcif", "structure": str(source_dir / "structure.cif"),
+                    "metadata": str(source_dir / "structure-input.json"),
+                }
+        coordinate_source = protocol.get("coordinate_source", {})
+        for key in ("structure", "metadata"):
+            value = coordinate_source.get(key)
+            if value:
+                source = Path(value).expanduser().resolve()
+                if not source.is_file():
+                    raise ValueError(f"Retained coordinate {key} is missing: {source}")
+                copied = _copy(source, assets / ("source-" + source.name))
+                coordinate_source[key] = f"assets/{copied.name}"
+                coordinate_source[key + "_sha256"] = sha256(copied)
         audit_value = protocol.get("receptor_preparation", {}).get("pdbfixer_audit")
         if audit_value:
             audit_source = Path(audit_value).expanduser().resolve()
@@ -210,24 +232,25 @@ def create_bundle(protocol_path, control_root, output, control_compound=None):
             "**/experimental_interactions.png", "**/comparison_summary.json",
         )
         seen = set()
-        for pattern in patterns:
-            for source in sorted(control_root.glob(pattern)):
-                if not source.is_file() or source.resolve() in seen:
-                    continue
-                seen.add(source.resolve())
-                structural_root = next(
-                    (parent for parent in source.parents if parent.name == "structural_ensemble"),
-                    None,
-                )
-                destination = _copy(
-                    source,
-                    evidence / "structural_ensemble" / source.relative_to(structural_root)
-                    if structural_root else evidence / source.name,
-                )
-                evidence_files.append({
-                    "path": str(destination.relative_to(packaged_control)),
-                    "sha256": sha256(destination),
-                })
+        for search_root in search_roots:
+            for pattern in patterns:
+                for source in sorted(search_root.glob(pattern)):
+                    if not source.is_file() or source.resolve() in seen:
+                        continue
+                    seen.add(source.resolve())
+                    structural_root = next(
+                        (parent for parent in source.parents if parent.name == "structural_ensemble"),
+                        None,
+                    )
+                    destination = _copy(
+                        source,
+                        evidence / "structural_ensemble" / source.relative_to(structural_root)
+                        if structural_root else evidence / source.name,
+                    )
+                    evidence_files.append({
+                        "path": str(destination.relative_to(packaged_control)),
+                        "sha256": sha256(destination),
+                    })
 
         pocket_evidence = protocol.get("pdb_pocket_evidence", {})
         for artifact in evidence_files:
@@ -253,11 +276,20 @@ def create_bundle(protocol_path, control_root, output, control_compound=None):
                 if source_value and Path(source_value).name in bundled_by_name:
                     item[key] = bundled_by_name[Path(source_value).name]
 
-        source_ligand = next(iter(sorted(control_root.glob("**/*_experimental.sdf"))), None)
+        source_ligand = next((
+            path for root in search_roots
+            for path in sorted(root.glob("**/*_experimental.sdf"))
+        ), None)
         if source_ligand is None:
-            source_ligand = next(iter(sorted(control_root.glob("**/crystal_ligand.sdf"))), None)
+            source_ligand = next((
+                path for root in search_roots
+                for path in sorted(root.glob("**/crystal_ligand.sdf"))
+            ), None)
         if source_ligand is None and kind == LIGAND_GUIDED_EXPLORATORY:
-            source_ligand = next(iter(sorted(control_root.glob("**/ligand/*.pdb"))), None)
+            source_ligand = next((
+                path for root in search_roots
+                for path in sorted(root.glob("**/ligand/*.pdb"))
+            ), None)
         if source_ligand:
             retained = _copy(source_ligand, packaged_control / "00_inputs" / source_ligand.name)
             evidence_files.append({

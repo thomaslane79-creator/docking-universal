@@ -128,7 +128,7 @@ write_pymol_review_scene() {
     echo "show spheres, ${canonical}_center${index}"
     echo "color yellow, ${canonical}_center${index}"
     echo "set sphere_scale, 0.7, ${canonical}_center${index}"
-    echo "label ${canonical}_center${index}, \"Pocket ${index} | fpocket ${score}\""
+    echo "label ${canonical}_center${index}, \"Pocket ${index} | ${POCKET_ENGINE} ${score}\""
     echo "set label_size, 18, ${canonical}_center${index}"
     echo "set label_color, white, ${canonical}_center${index}"
     echo "set label_outline_color, black, ${canonical}_center${index}"
@@ -459,7 +459,8 @@ materialize_selected_site_artifacts() {
 report_preparation_completion() {
   echo
   log "Diagnostics summary:"
-  log "  Selected fpocket run: ${SELECTED_FP_RUN_LABEL}"
+  log "  Pocket detector: ${POCKET_ENGINE}"
+  log "  Selected detector run: ${SELECTED_FP_RUN_LABEL}"
   if [ -f "$FPOCKET_COMPARISON" ]; then
     log "  fpocket mode comparison: $FPOCKET_COMPARISON"
   else

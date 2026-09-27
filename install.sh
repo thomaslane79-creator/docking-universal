@@ -6,7 +6,7 @@ conda_command=${DOCKING_UNIVERSAL_CONDA:-conda}
 
 usage() {
   cat <<'EOF'
-Install Docking Universal and its three Conda environments.
+Install Docking Universal and its five Conda environments.
 
 Usage:
   ./install.sh
@@ -37,7 +37,11 @@ EOF
   exit 1
 fi
 
-if [ ! -f "$project_dir/environment.yml" ] || [ ! -f "$project_dir/environments/vina.yml" ] || [ ! -f "$project_dir/environments/qvinaw.yml" ]; then
+if [ ! -f "$project_dir/environment.yml" ] || \
+   [ ! -f "$project_dir/environments/vina.yml" ] || \
+   [ ! -f "$project_dir/environments/qvinaw.yml" ] || \
+   [ ! -f "$project_dir/environments/gui-next.yml" ] || \
+   [ ! -f "$project_dir/environments/pymol-next.yml" ]; then
   printf 'Error: installation environment files were not found beside install.sh.\n' >&2
   exit 1
 fi
@@ -103,10 +107,41 @@ printf 'Repository: %s\n' "$project_dir"
 install_environment docking-universal "$project_dir/environment.yml"
 install_environment docking-universal-vina "$project_dir/environments/vina.yml"
 install_environment docking-universal-qvinaw "$project_dir/environments/qvinaw.yml"
+install_environment docking-universal-gui-next "$project_dir/environments/gui-next.yml"
+install_environment docking-universal-pymol-next "$project_dir/environments/pymol-next.yml"
+
+printf '\nInstalling checksum-verified P2Rank 2.5.1\n'
+scientific_prefix=$("$conda_command" run -n docking-universal printenv CONDA_PREFIX)
+p2rank_parent="$scientific_prefix/share/docking-universal"
+p2rank_target="$p2rank_parent/p2rank-2.5.1"
+if [ ! -x "$p2rank_target/prank" ] && [ ! -f "$p2rank_target/prank.bat" ]; then
+  p2rank_archive=$(mktemp "${TMPDIR:-/tmp}/p2rank_2.5.1.XXXXXX.tar.gz")
+  trap 'rm -f "$p2rank_archive"' EXIT HUP INT TERM
+  run_with_retry "P2Rank 2.5.1 download" \
+    curl -L --fail --show-error --output "$p2rank_archive" \
+    https://github.com/rdk/p2rank/releases/download/2.5.1/p2rank_2.5.1.tar.gz
+  actual_sha=$(shasum -a 256 "$p2rank_archive" | awk '{print $1}')
+  expected_sha=d243f2d9036ac053fefb9407b5fe1c85f4fe077c519fd975ac585e995feab274
+  [ "$actual_sha" = "$expected_sha" ] || {
+    printf 'Error: P2Rank archive checksum mismatch.\n' >&2
+    exit 1
+  }
+  mkdir -p "$p2rank_parent"
+  tar -xzf "$p2rank_archive" -C "$p2rank_parent"
+  chmod +x "$p2rank_target/prank" 2>/dev/null || true
+  rm -f "$p2rank_archive"
+  trap - EXIT HUP INT TERM
+fi
 
 printf '\nInstalling the Docking Universal command into the main environment\n'
 "$conda_command" run --no-capture-output -n docking-universal \
   make -C "$project_dir" install-conda
+
+printf '\nInstalling the local PoseEdit-style renderer runtime\n'
+poseedit_root="$scientific_prefix/libexec/docking-universal/docking_universal/poseedit_renderer"
+run_with_retry "PoseEdit renderer dependency installation" \
+  "$conda_command" run --no-capture-output -n docking-universal \
+  npm install --prefix "$poseedit_root" --omit=dev --ignore-scripts
 
 printf '\nVerifying the complete pipeline installation\n'
 "$conda_command" run --no-capture-output -n docking-universal \
@@ -131,7 +166,6 @@ If you are comfortable activating Conda environments, that remains supported:
   conda activate docking-universal
   docking-universal run
 
-The main environment remains active during normal use. Docking Universal runs
-Vina or QuickVina-W from its isolated engine environment automatically when a
-docking stage starts.
+The launcher selects the scientific, PyQt6 GUI, PyMOL, Vina, and QuickVina-W
+environments automatically. No environment needs to remain manually active.
 EOF

@@ -74,6 +74,7 @@ class ProcessRunner:
         cancel_event: threading.Event | None = None,
         on_output: Callable[[ProcessOutput], None] | None = None,
         on_started: Callable[[int], None] | None = None,
+        on_tick: Callable[[], None] | None = None,
     ) -> ProcessResult:
         command = tuple(str(value) for value in request.command)
         if not command:
@@ -124,7 +125,12 @@ class ProcessRunner:
             thread.start()
 
         status = ProcessStatus.COMPLETED
+        next_tick = 0.0
         while process.poll() is None:
+            now = time.monotonic()
+            if on_tick is not None and now >= next_tick:
+                on_tick()
+                next_tick = now + 0.5
             if cancel_event and cancel_event.is_set():
                 status = ProcessStatus.CANCELLED
                 self._terminate(process, request.termination_grace_seconds)
@@ -134,6 +140,8 @@ class ProcessRunner:
                 self._terminate(process, request.termination_grace_seconds)
                 break
             time.sleep(0.02)
+        if on_tick is not None:
+            on_tick()
         returncode = process.wait()
         for thread in threads:
             thread.join()

@@ -68,7 +68,10 @@ class CommandDispatcher:
 
     MUTATIONS = {
         "create_study", "start_pocket_review", "resolve_decision",
-        "start_receptor_preparation", "cancel_active_job",
+        "start_receptor_preparation", "start_protocol_finalization", "start_screening",
+        "start_control_validation",
+        "start_pose_interaction",
+        "cancel_active_job",
     }
 
     def __init__(
@@ -124,6 +127,14 @@ class CommandDispatcher:
         if command.operation == "snapshot":
             state = self.controller.get_study(command.study_id)
             return Response(command.request_id, "applied", state.revision, {"study": state.to_dict()})
+        if command.operation == "screening_plan":
+            if self.workflow_runner is None:
+                raise RuntimeError("Screening is not configured in this application host")
+            result = self.workflow_runner.screening_plan(
+                command.study_id, Path(str(command.payload.get("ligand_source", ""))),
+            )
+            state = self.controller.get_study(command.study_id)
+            return Response(command.request_id, "applied", state.revision, {"plan": result})
         if command.operation == "events_after":
             state = self.controller.get_study(command.study_id)
             cursor = int(command.payload.get("sequence", 0))
@@ -140,11 +151,58 @@ class CommandDispatcher:
             )
             state = self.controller.get_study(command.study_id)
             return Response(command.request_id, "applied", state.revision, result)
+        if command.operation == "start_control_validation":
+            if command.expected_revision is None:
+                raise RevisionConflictError("A state revision is required for scientific mutations")
+            if self.workflow_runner is None:
+                raise RuntimeError("Known-ligand control is not configured in this application host")
+            result = self.workflow_runner.start_control_validation(
+                command.study_id, command.payload,
+                request_id=command.request_id, expected_revision=command.expected_revision,
+            )
+            state = self.controller.get_study(command.study_id)
+            return Response(command.request_id, "applied", state.revision, result)
+        if command.operation == "start_protocol_finalization":
+            if command.expected_revision is None:
+                raise RevisionConflictError("A state revision is required for scientific mutations")
+            if self.workflow_runner is None:
+                raise RuntimeError("Protocol finalization is not configured in this application host")
+            result = self.workflow_runner.start_finalization(
+                command.study_id, command.payload,
+                request_id=command.request_id, expected_revision=command.expected_revision,
+            )
+            state = self.controller.get_study(command.study_id)
+            return Response(command.request_id, "applied", state.revision, result)
+        if command.operation == "start_screening":
+            if command.expected_revision is None:
+                raise RevisionConflictError("A state revision is required for scientific mutations")
+            if self.workflow_runner is None:
+                raise RuntimeError("Screening is not configured in this application host")
+            result = self.workflow_runner.start_screening(
+                command.study_id, command.payload,
+                request_id=command.request_id, expected_revision=command.expected_revision,
+            )
+            state = self.controller.get_study(command.study_id)
+            return Response(command.request_id, "applied", state.revision, result)
+        if command.operation == "start_pose_interaction":
+            if command.expected_revision is None:
+                raise RevisionConflictError("A state revision is required for scientific mutations")
+            if self.workflow_runner is None:
+                raise RuntimeError("Pose interaction analysis is not configured in this application host")
+            result = self.workflow_runner.start_pose_interaction(
+                command.study_id, command.payload, request_id=command.request_id,
+                expected_revision=command.expected_revision,
+            )
+            state = self.controller.get_study(command.study_id)
+            return Response(command.request_id, "applied", state.revision, result)
         if command.operation == "cancel_active_job":
             if command.expected_revision is None:
                 raise RevisionConflictError("A state revision is required to cancel scientific work")
             state = self.controller.get_study(command.study_id)
-            if state.revision != command.expected_revision:
+            job_id = str(command.payload.get("job_id") or "")
+            if job_id and (state.active_job is None or state.active_job.id != job_id):
+                raise ValueError("The scientific job changed before cancellation; refresh the study")
+            if not job_id and state.revision != command.expected_revision:
                 raise RevisionConflictError(
                     f"Study {command.study_id} changed from revision {command.expected_revision} to {state.revision}"
                 )
@@ -173,9 +231,11 @@ class CommandDispatcher:
             selections = command.payload.get("selections")
             if not isinstance(selections, list):
                 raise ValueError("Decision selections must be a list")
+            decision_id = str(command.payload.get("decision_id", ""))
+            decision = self.controller.get_decision(command.study_id, decision_id)
             approval = self.controller.resolve_decision(
                 command.study_id,
-                str(command.payload.get("decision_id", "")),
+                decision_id,
                 tuple(map(str, selections)),
                 actor=str(command.payload.get("actor") or "desktop-user"),
                 rationale=command.payload.get("rationale"),
@@ -183,8 +243,16 @@ class CommandDispatcher:
                 request_id=command.request_id,
                 expected_revision=command.expected_revision,
             )
+            continuation = None
+            if self.workflow_runner is not None:
+                continuation = self.workflow_runner.resume_after_decision(
+                    command.study_id, decision, approval,
+                )
             state = self.controller.get_study(command.study_id)
-            return Response(command.request_id, "applied", state.revision, {"approval": record_to_dict(approval)})
+            result = {"approval": record_to_dict(approval)}
+            if continuation is not None:
+                result["continuation"] = continuation
+            return Response(command.request_id, "applied", state.revision, result)
         raise ValueError(f"Unsupported application-host operation: {command.operation}")
 
     def _assert_no_other_active_study(self, requested_study_id: str) -> None:

@@ -52,9 +52,16 @@ write_detected_ligand_files() {
 # scoring, or changing the ligand. Output is X Y Z to six decimal places.
 # Protected by: tests/test_ligand_detection_helpers.sh.
 ligand_coordinate_centroid() {
-  local input_pdb="$1" ligand="$2"
-  awk -v wanted="$ligand" '
-    /^HETATM/ { r=substr($0,18,3);gsub(/ /,"",r);if(r==wanted){x+=substr($0,31,8);y+=substr($0,39,8);z+=substr($0,47,8);n++} }
+  local input_pdb="$1" ligand="$2" chain="${3:-}" resseq="${4:-}" icode="${5:-}" altloc="${6:-}"
+  awk -v wanted="$ligand" -v wanted_chain="$chain" -v wanted_resseq="$resseq" -v wanted_icode="$icode" -v wanted_altloc="$altloc" '
+    /^HETATM/ {
+      r=substr($0,18,3);gsub(/ /,"",r); c=substr($0,22,1);gsub(/ /,"",c); if(c=="")c="_"
+      q=substr($0,23,4);gsub(/ /,"",q); i=substr($0,27,1);gsub(/ /,"",i); a=substr($0,17,1);gsub(/ /,"",a)
+      exact=(wanted_chain!="" || wanted_resseq!="")
+      if(r==wanted && (!exact || c==wanted_chain) && (!exact || q==wanted_resseq) && (!exact || i==wanted_icode) && (wanted_altloc=="" || a=="" || a==wanted_altloc)){
+        x+=substr($0,31,8);y+=substr($0,39,8);z+=substr($0,47,8);n++
+      }
+    }
     END { if(n==0) exit 2; printf "%.6f %.6f %.6f",x/n,y/n,z/n }
   ' "$input_pdb"
 }
@@ -92,6 +99,10 @@ protein_ranking_centroid() {
 resolve_site_ligand_strategy() {
   LIGANDS=()
   local candidate i answer selected_index ligand_atoms ligand_file
+  REQUESTED_LIGAND_CHAIN="${REQUESTED_LIGAND_CHAIN:-}"
+  REQUESTED_LIGAND_RESSEQ="${REQUESTED_LIGAND_RESSEQ:-}"
+  REQUESTED_LIGAND_ICODE="${REQUESTED_LIGAND_ICODE:-}"
+  REQUESTED_LIGAND_ALTLOC="${REQUESTED_LIGAND_ALTLOC:-}"
 
   while IFS= read -r candidate; do
     [ -n "$candidate" ] && LIGANDS+=("$candidate")
@@ -139,7 +150,17 @@ resolve_site_ligand_strategy() {
         return 1
       fi
       LIG_PRESENT=1
-      log "Configured ligand-centered mode using $LIG"
+      if [ -n "$REQUESTED_LIGAND_CHAIN" ] || [ -n "$REQUESTED_LIGAND_RESSEQ" ]; then
+        [ -n "$REQUESTED_LIGAND_CHAIN" ] && [ -n "$REQUESTED_LIGAND_RESSEQ" ] || {
+          echo "ERROR: exact bound-ligand selection requires both chain and residue number" >&2; return 1;
+        }
+        ligand_coordinate_centroid "$INPUT_PDB" "$LIG" "$REQUESTED_LIGAND_CHAIN" "$REQUESTED_LIGAND_RESSEQ" "$REQUESTED_LIGAND_ICODE" "$REQUESTED_LIGAND_ALTLOC" >/dev/null || {
+          echo "ERROR: requested exact bound ligand was not detected" >&2; return 1;
+        }
+        log "Configured ligand-centered mode using $LIG at ${REQUESTED_LIGAND_CHAIN}:${REQUESTED_LIGAND_RESSEQ}${REQUESTED_LIGAND_ICODE}"
+      else
+        log "Configured ligand-centered mode using every deposited $LIG instance (legacy residue-name selection)"
+      fi
     else
       read -r -p "Use ligand-centered docking? (y/n): " answer
       if [[ "$answer" =~ ^[Yy]$ ]]; then
@@ -158,6 +179,6 @@ resolve_site_ligand_strategy() {
   fi
 
   if [ "$LIG_PRESENT" -eq 1 ]; then
-    read -r LIGX LIGY LIGZ <<< "$(ligand_coordinate_centroid "$INPUT_PDB" "$LIG")"
+    read -r LIGX LIGY LIGZ <<< "$(ligand_coordinate_centroid "$INPUT_PDB" "$LIG" "$REQUESTED_LIGAND_CHAIN" "$REQUESTED_LIGAND_RESSEQ" "$REQUESTED_LIGAND_ICODE" "$REQUESTED_LIGAND_ALTLOC")"
   fi
 }

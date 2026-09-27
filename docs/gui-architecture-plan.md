@@ -1,11 +1,13 @@
 # Docking Universal GUI architecture plan
 
-> Implementation update (2026-09-12): follow the
+> Implementation update (2026-09-20): follow the
 > [GUI implementation roadmap](gui-implementation-roadmap.md) for execution.
-> The desktop toolkit remains undecided. References below to PySide6 and an
-> embedded PyMOL panel are earlier proposals, subject to the roadmap's Mac
-> interaction and packaging gates. The baseline under evaluation uses required
-> PyMOL visual review in a separate compatible process with a two-way bridge.
+> The selected desktop target is Python 3.12/PyQt6. References below to PySide6
+> are historical proposals. An isolated source-built embedded PyMOL prototype
+> has passed local macOS checks; production integration and platform packaging
+> remain gated, with the existing companion viewer preserved as fallback.
+> The [visual identity supplement](gui-report-visual-identity-plan.md) records
+> the navy/teal GUI direction, supplied PNGs, and attribution-only report changes.
 
 ## Purpose
 
@@ -19,11 +21,37 @@ Dockey's workflow or data model.
 The architectural goal is one tested Python workflow core with two clients:
 
 - the existing command-line interface; and
-- a new PySide6 desktop interface.
+- a PyQt6 desktop interface.
 
 Both clients must create the same protocols, invoke the same scientific tools,
 apply the same validation rules, retain the same audit evidence, and generate
 the same reports.
+
+### Coordinate-input policy
+
+PDBx/mmCIF is the preferred retained receptor input and source of record. Legacy
+PDB remains accepted when it is the only available input and may be generated as
+an explicitly identified compatibility derivative for scientific engines that
+require fixed-column PDB. Conversion must never replace or overwrite the source.
+The study records the source hash and format, the derived engine input, and the
+available biological-assembly definitions.
+
+For mmCIF input, the preparation engine projects its established receptor filter
+onto the original coordinates and writes a native mmCIF receptor derivative.
+Meeko uses ProDy when available; PDBFixer uses native mmCIF when repair is needed.
+The existing PDB retry products and PDB-only scientific tools retain their formats.
+Author identifiers are used consistently across derivatives; original label/entity
+relationships and assembly operations remain in retained metadata. Multiple models
+and identifiers that exceed the legacy representation require explicit resolution.
+The source and evidence travel with portable bundles. The 2R8N filtered native and
+legacy Meeko routes produced byte-identical PDBQT in the local integration check;
+this does not establish equivalence for all structures or platforms.
+
+Assembly annotations, asymmetric-unit copies, ligand placement, occupancies and
+atomic displacement parameters are evidence presented for review. They do not
+authorize automatic chain deletion or prove why a ligand is absent from an
+apparently equivalent copy. Ambiguous assembly/site interpretation remains a
+scientific decision for the user.
 
 ### Product definition
 
@@ -331,6 +359,53 @@ portable structural-ensemble manifest identifies these artifacts as inputs for
 both the current pocket/ligand-context review and later B-factor and rotamer
 analysis. Derived flexibility summaries may be regenerated from this retained
 record; they must not trigger a second search whose evidence set could differ.
+
+The implemented first derivation is `structural_ensemble/conformational_evidence.json`.
+It compares the prepared receptor with every accepted mapped structure, records
+per-observation chi-angle differences, locally backbone-aligned side-chain RMSD,
+and backbone displacement separately, and counts repeated changes across the
+ensemble. For ligand-bound observations it also tests whether the prepared
+receptor side chain geometrically clashes with the aligned deposited ligand
+while the bound-state side chain provides greater clearance. Such a result is
+reported only as being *consistent with side-chain occlusion*; it is not proof
+of flexibility, induced fit, or causation. Threshold-crossing residues enter a
+review list and are never added automatically to a flexible-receptor protocol.
+When a prepared side chain clashes with an aligned experimentally observed
+ligand placement and the bound-state side chain provides greater clearance,
+the primary workflow message is that the site is conformationally incompatible
+with the current receptor: rigid docking there may not be a legitimate test.
+Flexible docking is one possible response, but an alternate receptor
+conformation may be required and backbone-dominant changes cannot be repaired
+by Vina's flexible-side-chain mode.
+
+#### Complementary pocket engines
+
+P2Rank is a first-class maintained pocket detector alongside fpocket. fpocket's
+geometric cavity evidence and P2Rank's machine-learning surface evidence remain
+independent fields in the normalized pocket-candidate model; their raw scores
+must not be merged or ranked as though they share a scale. Engine availability
+is discovered from local capabilities (P2Rank launcher plus Java, or fpocket),
+not inferred from the operating system. The user may choose either method or
+review agreement and disagreement between both. A detector miss never overrides
+aligned experimental ligand evidence or the conformational-compatibility
+warning described above.
+P2Rank's supported rescoring workflow is also retained as a distinct combined
+mode: fpocket generates the cavity geometry, then P2Rank re-ranks those same
+candidates. Every candidate retains its original fpocket rank and score beside
+its P2Rank rescoring rank, score, model/profile, and raw output provenance.
+Rescoring does not silently replace fpocket evidence or authorize automatic
+selection.
+P2Rank-only is an equal first-class mode and requires no fpocket executable.
+This is the default portable option when P2Rank and Java are available but
+fpocket is not, including native Windows installations. The UI derives all
+three mode choices from runtime capabilities rather than maintaining an
+operating-system exception list.
+P2Rank is the product's primary pocket detector. fpocket remains a supported
+fallback for existing protocols, geometric comparison, and installations where
+P2Rank is unavailable. The combined rescoring mode is an advanced evidence
+option rather than the default. Existing fpocket-derived protocols remain
+reproducible and retain their original method identity; they are not silently
+migrated to P2Rank.
 
 The detachable **Flexible Residue Evidence** view is the primary selection
 surface. Each residue row exposes, without requiring Technical detail:
@@ -664,6 +739,27 @@ source files. Conceptual inspiration alone does not require code attribution,
 although acknowledging Dockey as interface inspiration may still be useful.
 
 ## Acceptance criteria for the GUI foundation
+
+## Linked comparative interaction review
+
+The pose review surface should keep the 2D interaction map and embedded PyMOL
+scene visible together. They represent one selected pose, rather than two
+independent report views:
+
+- the PyMOL viewport occupies the primary area and the interaction map sits
+  beside it, with an optional interaction-detail table below;
+- selecting a ligand, residue, or interaction in the 2D map highlights the
+  corresponding object in PyMOL, while PyMOL selection updates the map;
+- changing pose or cluster updates both views without resetting the protein
+  orientation or zoom;
+- when a known ligand control is available, the review can show a paired
+  control/query comparison using the same receptor orientation, residue
+  coloring, pocket definition, and zoom;
+- comparative summaries identify shared contacts, contacts unique to the
+  control, contacts unique to the docked ligand, and optional ligand RMSD;
+- the paired view is explicitly labeled as experimental control versus
+  docking prediction, so detected contacts are not presented as equivalent
+  evidence.
 
 - CLI behavior remains supported.
 - GUI and CLI use the same workflow services and scientific rules.

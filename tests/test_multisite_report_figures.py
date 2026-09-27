@@ -15,6 +15,27 @@ SPEC.loader.exec_module(FIGURES)
 
 
 class MultiSiteReportFigureTests(unittest.TestCase):
+    def test_p2rank_score_contract_drives_the_same_ranking_panel(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cavity = Path(temporary)
+            diagnostics = cavity / "pocket_selection_diagnostics.tsv"
+            diagnostics.write_text(
+                "rank_order\tpocket_file\tscore\tprobability\tdecision\tpocket_engine\n"
+                "1\tpocket1_atm.pdb\t12.12\t0.639\tselected\tp2rank\n"
+                "2\tpocket2_atm.pdb\t10.17\t0.547\tselected\tp2rank\n"
+                "3\tpocket3_atm.pdb\t6.04\t0.298\tselected\tp2rank\n"
+            )
+            output = cavity / "panel_a.png"
+            self.assertTrue(FIGURES.plot_cavity_selection(
+                diagnostics, "target_pocket1.conf", output,
+                ["target_pocket1.conf", "target_pocket2.conf", "target_pocket3.conf"],
+            ))
+            self.assertTrue(output.is_file())
+            with diagnostics.open() as handle:
+                rows = list(__import__("csv").DictReader(handle, delimiter="\t"))
+            self.assertEqual(FIGURES.pocket_engine_name(rows), "P2Rank")
+            self.assertEqual(FIGURES.pocket_score(rows[0]), "12.12")
+
     def test_overlapping_fpocket_candidates_share_one_bounded_display_box(self):
         with tempfile.TemporaryDirectory() as temporary:
             cavity = Path(temporary)
@@ -94,7 +115,15 @@ class MultiSiteReportFigureTests(unittest.TestCase):
             )
             output = study / "report/cavity_panel_B_structure.png"
             output.parent.mkdir()
+            stale_ligand_box = output.with_name(output.stem + "_ligand_site_box.pdb")
+            stale_ligand_box.write_text("legacy redundant box\n")
             group = {
+                "pocket_recovery": {"best_matching_pocket": 1},
+                "members": [{
+                    "entry": "1ABC", "ligand": "LIG", "matched_cavity": 1,
+                    "ligand_heavy_atom_count": 1,
+                    "aligned_ligand_pdb": "aligned_ligands/1ABC_LIG_A_1.pdb",
+                }],
                 "representative_ligand": {
                     "entry": "1ABC", "ligand": "LIG",
                     "aligned_ligand_pdb": "aligned_ligands/1ABC_LIG_A_1.pdb",
@@ -112,11 +141,12 @@ class MultiSiteReportFigureTests(unittest.TestCase):
                 self.assertTrue(FIGURES.render_all_cavity_candidates(
                     diagnostics, "target_pocket1.conf", output,
                     output.with_suffix(".pse"), "pymol",
-                    ligand_site_group=group,
+                    ligand_site_group=group, show_labels=True,
                 ))
             pml = output.with_suffix(".pml").read_text()
             self.assertIn("show sticks, ligand_site_representative", pml)
-            self.assertIn("show sticks, ligand_site_box", pml)
+            self.assertNotIn("ligand_site_box", pml)
+            self.assertFalse(stale_ligand_box.exists())
             self.assertIn("show sticks, candidate_box_P1", pml)
             self.assertIn('label pocket_label_1, "Pocket 1"', pml)
             self.assertIn("set label_color, red, pocket_label_1", pml)
@@ -311,7 +341,10 @@ class MultiSiteReportFigureTests(unittest.TestCase):
                 )
                 return True
 
+            overlay_colors = []
+
             def overlay(_receptor, _ligands, _colors, output, _session, _pymol):
+                overlay_colors.append(tuple(_colors))
                 output.write_bytes(b"overlay")
                 return True
 
@@ -333,6 +366,10 @@ class MultiSiteReportFigureTests(unittest.TestCase):
             ]
             self.assertTrue(all(path.is_file() for path in expected))
             self.assertTrue(all(str(path) in outputs for path in expected))
+            self.assertTrue(overlay_colors)
+            self.assertTrue(all(
+                colors == ("red", "marine", "gold") for colors in overlay_colors
+            ))
 
 
 if __name__ == "__main__":

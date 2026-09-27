@@ -53,7 +53,7 @@ class StateTransactionTests(unittest.TestCase):
         self.assertEqual(state.revision, 0)
         self.store.save(state)
         migrated = json.loads(path.read_text())
-        self.assertEqual(migrated["schema_version"], 2)
+        self.assertEqual(migrated["schema_version"], 3)
         self.assertEqual(migrated["revision"], 1)
 
 

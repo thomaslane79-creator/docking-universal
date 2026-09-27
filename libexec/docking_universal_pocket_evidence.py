@@ -23,6 +23,7 @@ import numpy as np
 
 from docking_universal.structural_evidence import (
     retain_accepted_alignment,
+    retain_reference_observations,
     retain_source_structure,
     write_ensemble_manifest,
 )
@@ -756,7 +757,7 @@ def group_ligand_sites(record, evidence_root, atom_contact_cutoff=4.0,
                                   for index, axis in enumerate("xyz")})
         top_count = max(cavity_counts.values(), default=0)
         recovered_fraction = top_count / max(1, len(members))
-        groups[-1]["fpocket_recovery"] = {
+        recovery = {
             "status": (
                 "recovered" if recovered_fraction >= 0.5
                 else "partial_correspondence" if recovered_fraction > 0
@@ -768,6 +769,10 @@ def group_ligand_sites(record, evidence_root, atom_contact_cutoff=4.0,
             ),
             "supporting_pose_fraction": round(recovered_fraction, 4),
         }
+        # `pocket_recovery` is detector-neutral.  Retain the legacy key so
+        # existing studies and protocol bundles remain readable.
+        groups[-1]["pocket_recovery"] = recovery
+        groups[-1]["fpocket_recovery"] = recovery
     groups.sort(key=lambda group: (
         -(group["evidence_class_counts"].get("same_protein", 0)
           + group["evidence_class_counts"].get("exact_sequence_match", 0)),
@@ -776,7 +781,7 @@ def group_ligand_sites(record, evidence_root, atom_contact_cutoff=4.0,
     ligand_only_number = 0
     for number, group in enumerate(groups, 1):
         group["site_number"] = number
-        matching_pocket = (group.get("fpocket_recovery") or {}).get("best_matching_pocket")
+        matching_pocket = (group.get("pocket_recovery") or group.get("fpocket_recovery") or {}).get("best_matching_pocket")
         if not matching_pocket:
             ligand_only_number += 1
         group["site_identity"] = {
@@ -784,9 +789,10 @@ def group_ligand_sites(record, evidence_root, atom_contact_cutoff=4.0,
                 f"P{matching_pocket}" if matching_pocket else f"L{ligand_only_number}"
             ),
             "evidence_sources": (
-                ["aligned deposited ligands", "fpocket cavity"]
+                ["aligned deposited ligands", f"{record.get('pocket_engine', 'fpocket')} cavity"]
                 if matching_pocket else ["aligned deposited ligands"]
             ),
+            "is_separate_from_predicted_pocket": not bool(matching_pocket),
             "is_separate_from_fpocket": not bool(matching_pocket),
         }
     return groups
@@ -861,6 +867,9 @@ def collect_pocket_evidence(
     receptor_pdb = Path(receptor_pdb)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    provenance_path = (Path(boxes[0]).parent / "pocket_detection_provenance.json") if boxes else None
+    provenance = json.loads(provenance_path.read_text()) if provenance_path and provenance_path.is_file() else {}
+    pocket_engine = str(provenance.get("engine", "fpocket") or "fpocket").lower()
     reference_chains = protein_chains(receptor_pdb.read_text(errors="replace"))
     reference_identifiers_by_chain = protein_database_identifiers(
         receptor_pdb.read_text(errors="replace")
@@ -893,6 +902,9 @@ def collect_pocket_evidence(
     ensemble_root = output_dir / "structural_ensemble"
     ensemble_sources = []
     ensemble_alignments = []
+    ensemble_reference = retain_reference_observations(
+        ensemble_root, reference_file=receptor_pdb, reference_chain=reference_id,
+    )
     downloaded_components = {}
     for index, entry in enumerate(entries, 1):
         print(f"  Checking related structure {index}/{len(entries)}: {entry}", flush=True)
@@ -1094,6 +1106,7 @@ def collect_pocket_evidence(
     record = {
         "schema_name": "docking-universal-pocket-evidence", "schema_version": 1,
         "status": "completed", "selection_policy": "evidence_only_user_decides",
+        "pocket_engine": pocket_engine,
         "query": {
             "reference_file": receptor_pdb.name,
             "reference_chain": reference_id,
@@ -1128,6 +1141,14 @@ def collect_pocket_evidence(
             source_ligand_id(row) for row in ambiguous_rows if source_ligand_id(row)
         ],
     }
+    for alignment in ensemble_alignments:
+        alignment["ligand_context"] = (
+            "ligand_bound" if any(
+                row.get("entry") == alignment.get("entry")
+                and row.get("aligned_chain") == alignment.get("source_chain")
+                for row in evidence
+            ) else "ligand_free"
+        )
     ensemble_manifest = write_ensemble_manifest(
         ensemble_root,
         reference_file=receptor_pdb.name,
@@ -1138,12 +1159,19 @@ def collect_pocket_evidence(
             "minimum_query_coverage": minimum_query_coverage,
             "maximum_ca_rmsd_angstrom": maximum_ca_rmsd_angstrom,
         },
+        reference=ensemble_reference,
+    )
+    from docking_universal.conformational_evidence import derive_conformational_evidence
+    conformational_record = derive_conformational_evidence(
+        ensemble_manifest, ligand_evidence=evidence, ligand_evidence_root=output_dir,
     )
     record["structural_ensemble"] = {
         "manifest": str(ensemble_manifest.relative_to(output_dir)),
         "downloaded_source_count": len(ensemble_sources),
         "accepted_alignment_count": len(ensemble_alignments),
         "reuse_policy": "authoritative shared input for pocket, B-factor, and rotamer evidence",
+        "conformational_evidence": "structural_ensemble/conformational_evidence.json",
+        "conformational_residue_count": len(conformational_record["residue_aggregates"]),
     }
     json_path = output_dir / "pdb_ligand_site_evidence.json"
     json_path.write_text(json.dumps(record, indent=2) + "\n")

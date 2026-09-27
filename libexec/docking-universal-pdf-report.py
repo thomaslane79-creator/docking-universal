@@ -272,6 +272,8 @@ def discover_cavity_record(study):
     output_index = int(match.group(1)) if match else 1
     selected = next((row for row in rows if int(row.get("rank_order", 0) or 0) == output_index), {})
     selected_file = selected.get("pocket_file")
+    engine_key = str(selected.get("pocket_engine", "fpocket") or "fpocket").lower()
+    engine_name = "P2Rank" if engine_key == "p2rank" else "fpocket" if engine_key == "fpocket" else engine_key
     diagnostics = selection.parent / "pocket_diagnostics.tsv"
     diagnostic_rows = read_tsv_rows(diagnostics)
     detail = next((row for row in diagnostic_rows if row.get("pocket_file") == selected_file), {})
@@ -283,7 +285,43 @@ def discover_cavity_record(study):
         "selection": selection, "rows": rows, "selected": selected,
         "detail": detail, "descriptors": descriptors, "config": config,
         "selected_file": selected_file, "box_dimensions": dimensions, "box_center": center,
+        "pocket_engine": engine_key, "pocket_engine_name": engine_name,
     }
+
+def inherited_protocol_cavity_record(protocol):
+    """Build the report view of a pocket already locked into a protocol."""
+    detection = protocol.get("pocket_detection") or {}
+    regions = protocol.get("docking_regions") or []
+    if not detection or not regions:
+        return None
+    selected_region = regions[0]
+    geometry = selected_region.get("geometry") or {}
+    engine_key = str(detection.get("engine", "predicted-pocket") or "predicted-pocket").lower()
+    engine_name = "P2Rank" if engine_key == "p2rank" else "fpocket" if engine_key == "fpocket" else engine_key
+    return {
+        "selection": Path("protocol"), "rows": [],
+        "selected": {"rank_score": "recorded in the protocol-selection report"},
+        "detail": {}, "descriptors": {}, "config": selected_region.get("box_name", ""),
+        "selected_file": selected_region.get("box_label", "P1"),
+        "box_dimensions": [geometry.get(f"size_{axis}") for axis in "xyz"],
+        "box_center": [geometry.get(f"center_{axis}") for axis in "xyz"],
+        "pocket_engine": engine_key, "pocket_engine_name": engine_name,
+    }
+
+def protocol_conformational_evidence(protocol, protocol_path):
+    """Load retained rotamer/accessibility evidence from source or bundle."""
+    pocket_evidence = protocol.get("pdb_pocket_evidence") or {}
+    relative = (pocket_evidence.get("structural_ensemble") or {}).get("conformational_evidence")
+    if not relative:
+        return {}
+    record = Path(str(pocket_evidence.get("record", ""))).expanduser()
+    candidates = []
+    if record.is_absolute():
+        candidates.append(record.parent / relative)
+    if protocol_path:
+        base = Path(protocol_path).resolve().parent
+        candidates.extend((base / relative, base / "evidence" / relative))
+    return next((read_json(path) for path in candidates if path.is_file()), {})
 
 def choose_protocol(root):
     candidates = list(root.glob("**/protocol.json")) if root else []
@@ -345,6 +383,28 @@ def installed_version(*distribution_names):
         except metadata.PackageNotFoundError:
             continue
     return "not detected"
+
+def poseedit_runtime_versions():
+    """Report the local renderer components without contacting any service."""
+    renderer_root = Path(__file__).resolve().parent / "docking_universal" / "poseedit_renderer"
+    package = read_json(renderer_root / "package.json")
+    playwright = str(package.get("dependencies", {}).get("playwright", "not detected"))
+    node = "not detected"
+    try:
+        local_node = Path(sys.executable).resolve().parent / "node"
+        node_command = str(local_node) if local_node.is_file() else "node"
+        completed = subprocess.run(
+            [node_command, "--version"], capture_output=True, text=True, timeout=5, check=False,
+        )
+        if completed.returncode == 0 and completed.stdout.strip():
+            node = completed.stdout.strip().lstrip("v")
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return {
+        "renderer": str(package.get("version", "not detected")),
+        "playwright": playwright,
+        "node": node,
+    }
 
 
 SCIENTIFIC_VERSION_LABELS = {
@@ -468,12 +528,12 @@ def selectable_box_inventory(summary, cavity):
         if match:
             pocket_paths.append((int(match.group(1)), path))
     for number, path in sorted(pocket_paths):
-        add(f"P{number}", path, "individual fpocket cavity box")
+        add(f"P{number}", path, "individual predicted-pocket box")
     for path in sorted(box_dir.glob("*_consolidated_P*.conf")):
         match = re.search(r"_consolidated_(P.+)\.conf$", path.name, re.I)
         if match:
             add(match.group(1).replace("-P", "/P"), path,
-                "consolidated box spanning the named overlapping fpocket cavities")
+                "consolidated box spanning the named overlapping predicted pockets")
     for path in sorted(box_dir.glob("*_evidence_*.conf")):
         match = re.search(r"_evidence_(.+)\.conf$", path.name, re.I)
         if not match:
@@ -488,7 +548,7 @@ def selectable_box_inventory(summary, cavity):
         description = (
             "adjusted to cover deposited-ligand evidence associated with " + label.split()[0]
             if label.endswith(" expanded")
-            else "ligand-defined box without a corresponding fpocket cavity"
+            else "ligand-defined box without a corresponding predicted pocket"
         )
         add(label, path, description)
     return candidates
@@ -590,7 +650,7 @@ def retained_scientific_versions(study, summary=None, docking_manifest=None):
     )
     for key in (
         "python", "rdkit", "molscrub", "meeko", "pdbfixer",
-        "fpocket", "openbabel", "plip",
+        "fpocket", "p2rank", "openbabel", "plip",
     ):
         retained[key] = str(retained.get(key) or "not recorded")
     return retained
@@ -839,6 +899,7 @@ def reproducibility_record(protocol, study, control):
         "matplotlib": installed_version("matplotlib"),
         "reportlab": installed_version("reportlab"),
     }
+    poseedit_runtime = poseedit_runtime_versions()
     engine_version = run_versions["engine_version"]
     engine = (
         docking_manifest.get("engine")
@@ -850,9 +911,12 @@ def reproducibility_record(protocol, study, control):
     engine_source = docking_manifest.get("engine_source")
     if engine_source:
         engine_version += f" ({engine_source})"
+    cavity_record = discover_cavity_record(study)
+    detector_key = str((cavity_record or {}).get("pocket_engine", "fpocket")).lower()
+    detector_name = "P2Rank" if detector_key == "p2rank" else "fpocket"
     software = [
         {"role": "Scientific workflow", "software": "Docking Universal", "version": run_versions["docking_universal"]},
-        {"role": "Ligand-free cavity detection", "software": "fpocket", "version": run_versions["fpocket"]},
+        {"role": "Ligand-free cavity detection", "software": detector_name, "version": run_versions[detector_key]},
         {"role": "Docking scores and poses", "software": docking_engine_name, "version": engine_version},
         {"role": "Receptor and ligand parameterization", "software": "Meeko", "version": run_versions["meeko"]},
         {"role": "Linked-component receptor compatibility fallback", "software": "ADFRsuite", "version": adfrsuite_version(summary, receptor_preparation)},
@@ -866,9 +930,17 @@ def reproducibility_record(protocol, study, control):
         {"role": "PDF generation", "software": "ReportLab", "version": report_runtime["reportlab"]},
         {"role": "Scientific workflow runtime", "software": "Python", "version": run_versions["python"]},
     ]
+    poseedit_used = figure_manifest.get("interaction_diagram_renderer") == "approved-poseedit-local-v1"
+    if poseedit_used:
+        software.extend([
+            {"role": "Local 2D protein-ligand interaction diagram rendering", "software": "Docking Universal PoseEdit-style renderer", "version": poseedit_runtime["renderer"]},
+            {"role": "Local browser automation for interaction-diagram rendering", "software": "Playwright", "version": poseedit_runtime["playwright"]},
+            {"role": "Interaction-diagram JavaScript runtime", "software": "Node.js", "version": poseedit_runtime["node"]},
+        ])
     references = [
         {"citation": "Eberhardt J, Santos-Martins D, Tillack AF, Forli S. AutoDock Vina 1.2.0: New Docking Methods, Expanded Force Field, and Python Bindings. J Chem Inf Model. 2021;61:3891-3898.", "url": "https://doi.org/10.1021/acs.jcim.1c00203"},
         {"citation": "Le Guilloux V, Schmidtke P, Tuffery P. Fpocket: an open source platform for ligand pocket detection. BMC Bioinformatics. 2009;10:168.", "url": "https://doi.org/10.1186/1471-2105-10-168"},
+        {"citation": "Krivak R, Hoksza D. P2Rank: machine learning based tool for rapid and accurate prediction of ligand binding sites from protein structure. J Cheminform. 2018;10:39.", "url": "https://doi.org/10.1186/s13321-018-0285-8"},
         {"citation": "Santos-Martins D, He Y, Eberhardt J, et al. Meeko: molecule parameterization and software interoperability for docking and beyond. J Chem Inf Model. 2025;65:13045-13050.", "url": "https://doi.org/10.1021/acs.jcim.5c02271"},
         {"citation": "Ravindranath PA, Forli S, Goodsell DS, Olson AJ, Sanner MF. AutoDockFR: Advances in Protein-Ligand Docking with Explicitly Specified Binding Site Flexibility. PLoS Comput Biol. 2015;11:e1004586.", "url": "https://doi.org/10.1371/journal.pcbi.1004586"},
         {"citation": "PDBFixer: a tool for preparing PDB files for molecular simulation (version recorded above).", "url": "https://github.com/openmm/pdbfixer"},
@@ -882,6 +954,12 @@ def reproducibility_record(protocol, study, control):
         {"citation": "ReportLab: PDF generation toolkit and user guide.", "url": "https://docs.reportlab.com/"},
         {"citation": "Python Software Foundation. Python Language Reference.", "url": "https://www.python.org/"},
     ]
+    if poseedit_used:
+        references.extend([
+            {"citation": "PoseEdit. Center for Bioinformatics, University of Hamburg. Visual design reference for protein-ligand interaction diagrams; Docking Universal uses its own local renderer and does not upload structures.", "url": "https://www.zbh.uni-hamburg.de/en/forschung/amd/software/poseedit.html"},
+            {"citation": "Microsoft. Playwright documentation.", "url": "https://playwright.dev/docs/intro"},
+            {"citation": "OpenJS Foundation. Node.js documentation.", "url": "https://nodejs.org/docs/latest/api/"},
+        ])
     if engine == "qvinaw":
         references.insert(1, {
             "citation": "Hassan NM, Alhossary AA, Mu Y, Kwoh CK. Protein-Ligand Blind Docking Using QuickVina-W With Inter-Process Spatio-Temporal Integration. Sci Rep. 2017;7:15451.",
@@ -895,7 +973,7 @@ def reproducibility_record(protocol, study, control):
         "control_to_new_run_version_check": compare_scientific_versions(recorded, run_versions, docking_engine_name) if protocol else None,
         "report_generation": report_runtime,
         "methods": {
-            "cavity_detection": "fpocket geometric cavity detection, descriptor calculation, and recorded geometry/overlap filtering" if discover_cavity_record(study) else "not used in the retained report study",
+            "cavity_detection": f"{detector_name} pocket detection with recorded geometry/overlap filtering" if cavity_record else "not used in the retained report study",
             "docking_scores_and_poses": docking_engine_name,
             "interaction_detection": "PLIP rule-based calls; retained PLIP XML is authoritative",
             "interaction_diagram": figure_manifest.get("interaction_diagram_renderer", "native SDF plus PLIP XML"),
@@ -914,8 +992,11 @@ def retain_used_report_methods(provenance, cavity, has_docking):
     used_software = {
         "Docking Universal", "Meeko", "PyMOL", "Matplotlib", "ReportLab", "Python",
     }
+    poseedit_used = provenance.get("methods", {}).get("interaction_diagram") == "approved-poseedit-local-v1"
+    if poseedit_used:
+        used_software.update({"Docking Universal PoseEdit-style renderer", "Playwright", "Node.js"})
     if cavity:
-        used_software.add("fpocket")
+        used_software.add(cavity.get("pocket_engine_name", "fpocket"))
     if has_docking:
         used_software.update({provenance["methods"]["docking_scores_and_poses"], "MolScrub", "RDKit", "Open Babel", "PLIP"})
     if preparation.get("pdbfixer_used"):
@@ -959,7 +1040,9 @@ def retain_used_report_methods(provenance, cavity, has_docking):
         if "AutoDock Vina" in citation or "QuickVina-W" in citation:
             return has_docking
         if "Fpocket" in citation:
-            return bool(cavity)
+            return bool(cavity) and cavity.get("pocket_engine") == "fpocket"
+        if "P2Rank:" in citation:
+            return bool(cavity) and cavity.get("pocket_engine") == "p2rank"
         if "Meeko:" in citation:
             return True
         if "AutoDockFR:" in citation:
@@ -974,6 +1057,8 @@ def retain_used_report_methods(provenance, cavity, has_docking):
             return True
         if any(name in citation for name in ("Matplotlib:", "ReportLab:", "Python Software Foundation")):
             return True
+        if any(name in citation for name in ("PoseEdit.", "Playwright documentation", "Node.js documentation")):
+            return poseedit_used
         return False
 
     provenance["references"] = [
@@ -1018,7 +1103,7 @@ def reproducibility_summary(provenance, cavity, has_docking):
     sentences = []
     if cavity:
         sentences.append(
-            "fpocket generated the cavity candidates and descriptors."
+            f"{cavity.get('pocket_engine_name', 'fpocket')} generated the cavity candidates and recorded ranking evidence."
         )
     sentences.append(f"Receptor preparation: {preparation['path']}.")
     if has_docking:
@@ -1203,6 +1288,16 @@ def main():
     if not protocol_path and not workflow_is_exploratory:
         recorded_protocol = Path(str(summary.get("approved_protocol", ""))).expanduser()
         protocol_path = recorded_protocol.resolve() if recorded_protocol.is_file() else None
+    if not protocol_path and workflow_is_exploratory:
+        # Exploratory studies retain their approved protocol beside the report.
+        # Load it here so source-format and deposited mmCIF evidence are not
+        # silently omitted from the human-readable report.
+        protocol_dir = args.study if (args.study / "report").is_dir() else args.study / "protocol"
+        candidates = sorted(protocol_dir.glob("*.json"))
+        protocol_path = next(
+            (path for path in candidates if path.name != "study_summary.json"),
+            None,
+        )
     protocol = read_json(protocol_path)
 
     # Build a human-readable report heading from run metadata. Directory-style
@@ -1224,7 +1319,7 @@ def main():
     if not receptor_source:
         receptor_source = read_key_value_tsv(title_manifest_path).get("receptor", "")
     if not receptor_source:
-        input_receptor = first(args.study, ["inputs/*.pdb"])
+        input_receptor = first(args.study, ["inputs/*.cif", "inputs/*.mmcif", "inputs/*.pdb"])
         receptor_source = str(input_receptor or "")
     if not receptor_source:
         prepared_receptor = first(args.study, ["preparation/*_receptor_prep/receptor/*.pdb", "**/*_receptor_prep/receptor/*.pdb"])
@@ -1255,7 +1350,13 @@ def main():
     else:
         study_descriptor = f"Target: {target_name}"
 
-    cavity = discover_cavity_record(args.study) if workflow_is_exploratory or not protocol else None
+    cavity = (
+        discover_cavity_record(args.study)
+        if workflow_is_exploratory or not protocol
+        else inherited_protocol_cavity_record(protocol)
+        if (protocol.get("pdb_pocket_evidence") or {}).get("status") == "completed"
+        else None
+    )
     # Inventories and study manifests describe intended inputs, not completed
     # docking.  Require retained pose-cluster results before adding docking
     # sections to a preparation-only report.
@@ -1270,6 +1371,13 @@ def main():
         else "Docking Universal - Docking Study Report"
     )
     story = [Paragraph(f"{report_title}<br/><font size=\"12\">Report generator version {package_version()}</font>", styles["Title"])]
+    coordinate_evidence = (protocol or {}).get("coordinate_source", {}).get("evidence", {})
+    if coordinate_evidence:
+        from xml.sax.saxutils import escape as escape_coordinate_text
+        from docking_universal.services.coordinate_evidence import evidence_lines
+        story.append(Paragraph("Deposited structure evidence", styles["Heading2"]))
+        for line in evidence_lines(coordinate_evidence):
+            story.append(Paragraph(escape_coordinate_text(line), styles["BodyText"]))
     if study_descriptor:
         story += [Paragraph(study_descriptor, styles["Heading2"]), Spacer(1,8)]
     if cavity:
@@ -1333,9 +1441,10 @@ def main():
 
     if cavity:
         selected = cavity["selected"]
+        pocket_engine = cavity.get("pocket_engine_name", "fpocket")
         detail = cavity["detail"]
         descriptor = cavity["descriptors"].get(cavity["selected_file"], {})
-        selected_regions = summary.get("selected_docking_regions", [])
+        selected_regions = summary.get("selected_docking_regions", []) or protocol.get("docking_regions", [])
         selected_region = selected_regions[0] if selected_regions else {}
         selected_geometry = selected_region.get("geometry") or {}
         definition_origin = str(selected_region.get("definition_origin", ""))
@@ -1359,11 +1468,11 @@ def main():
                                    " x ".join(f"{value:g}" for value in box_dimensions) if box_dimensions else "NA")
         cavity_heading = "Candidate pocket review" if review_only else "Exploratory pocket configuration"
         cavity_explanation = (
-            ("This preliminary report presents fpocket candidates and any qualifying related-structure ligand evidence. "
-             + ("Automatic selection will use the top-ranked fpocket box. " if summary.get("fpocket_selection") == "automatic" else "Choose one or more boxes after review. ")
+            (f"This preliminary report presents {pocket_engine} candidates and any qualifying related-structure ligand evidence. "
+             + (f"Automatic selection will use the top-ranked {pocket_engine} box. " if summary.get("fpocket_selection") == "automatic" else "Choose one or more boxes after review. ")
              + "This report does not authorize screening.")
             if review_only else
-            "No bound-ligand pose-recovery control was available. In its place, this section records how fpocket-generated cavity hypotheses were filtered and which docking box was selected. The fpocket cavities shown in Figure 1 are reference evidence for review, not automatic proof of a binding site. This documents site selection, but it does not validate the biological site or the accuracy of docked poses."
+            f"No bound-ligand pose-recovery control was available. In its place, this section records how {pocket_engine}-generated cavity hypotheses were filtered and which docking box was selected. The {pocket_engine} cavities shown in Figure 1 are reference evidence for review, not automatic proof of a binding site. This documents site selection, but it does not validate the biological site or the accuracy of docked poses."
         )
         cavity_threshold = summary.get("cavity_score_threshold_used", "not recorded")
         try:
@@ -1379,11 +1488,22 @@ def main():
         configuration_rows = [
             ["Pocket configuration", "Recorded value"],
             ["Interpretive status", "Pocket review only; not a protocol" if review_only else "Exploratory; not evaluated by a bound-ligand pose-recovery control"],
-            ["fpocket eligibility threshold used", threshold_text],
-            ["Top fpocket score", selected.get("rank_score", "NA")],
-            ["Top-pocket druggability descriptor", descriptor.get("druggability_score", "NA")],
-            ["Selected docking region", "Not yet selected; choose one or more boxes after reviewing this report" if review_only else selected_region_text],
+            [f"Top {pocket_engine} score", selected.get("rank_score", selected.get("score", "NA"))],
         ]
+        if cavity.get("pocket_engine") == "p2rank":
+            configuration_rows.append([
+                "Top P2Rank probability", selected.get("probability", "NA"),
+            ])
+        else:
+            configuration_rows.extend([
+                ["fpocket eligibility threshold used", threshold_text],
+                ["Top-pocket druggability descriptor", descriptor.get("druggability_score", "NA")],
+            ])
+        configuration_rows.append([
+            "Selected docking region",
+            "Not yet selected; choose one or more boxes after reviewing this report"
+            if review_only else selected_region_text,
+        ])
         if not review_only:
             configuration_rows.extend([
                 ["Docking-box center (A)", selected_center],
@@ -1398,6 +1518,9 @@ def main():
             table(configuration_rows, [2.55*inch, 4.15*inch], compact=True), Spacer(1,8),
         ]
         pdb_evidence = summary.get("pdb_pocket_evidence") or {}
+        protocol_evidence = protocol.get("pdb_pocket_evidence") or {}
+        if pdb_evidence.get("status") in {None, "not_requested"} and protocol_evidence.get("status") == "completed":
+            pdb_evidence = protocol_evidence
         evidence_summary = pdb_evidence.get("summary") or {}
         repeated_site_sources = set()
         if pdb_evidence.get("status") == "completed":
@@ -1408,7 +1531,7 @@ def main():
             if site_groups:
                 grouping_audit = pdb_evidence.get("site_grouping_audit") or {}
                 excluded_chain_ids = grouping_audit.get("ambiguous_chain_assignments_excluded") or []
-                group_rows = [["Region", "Evidence-based box recommendation"]]
+                group_rows = [["Candidate region", "What the deposited structures show"]]
                 selectable_by_label = {
                     str(item.get("box_label")): item
                     for item in selectable_box_inventory(summary, cavity)
@@ -1445,30 +1568,27 @@ def main():
                             if str(member.get("matched_cavity")) != str(matching_pocket)
                         ]
                         recovery_text = (
-                            f"Direct support (fully contained by {site_label}): "
+                            f"Aligned ligands located within {site_label}: "
                             f"{format_pdb_ligand_evidence(direct_members, repeated_site_sources)}"
                         )
                         if other_members:
                             recovery_text += (
-                                f". Additional ligand evidence at the same aligned site "
-                                f"(supports the site location; not used to set Box {site_label} dimensions): "
+                                f". Other ligands aligned to the same site but extending beyond this box: "
                                 f"{format_pdb_ligand_evidence(other_members, repeated_site_sources)}"
                             )
                     else:
-                        recovery_text = "ligand-defined candidate without a corresponding fpocket cavity"
+                        recovery_text = f"ligand-defined candidate without a corresponding {pocket_engine} pocket"
                     members = group.get("members", [])
                     pose_count = group.get("member_count", len(members))
                     source_count = unique_pdb_ligand_source_count(members)
                     group_rows.append([
                         site_label,
                         Paragraph(
-                            f"Box: {geometry.get('size_x', 'NA')} × "
-                            f"{geometry.get('size_y', 'NA')} × {geometry.get('size_z', 'NA')} A; "
-                            + (
+                            (
                                 f"{recovery_text}."
                                 if matching_pocket else
-                                f"{pose_count} aligned ligand poses from {source_count} unique PDB/ligand sources; "
-                                f"{recovery_text}. Sources: {source_pairs}."
+                                f"{pose_count} aligned ligand observations from {source_count} unique PDB/ligand sources. "
+                                f"Sources: {source_pairs}."
                             ),
                             styles["SmallDU"],
                         ),
@@ -1476,13 +1596,37 @@ def main():
                 story += [
                     Paragraph("Related-structure ligand evidence", styles["Heading2"]),
                     Paragraph(
-                        "Deposited ligands from the same protein, exact-sequence structures, and explicitly approved close structural homologs are treated as supporting ligand-location evidence. In the source lists, exact match means the same protein identifier or 100% sequence identity; partial match means an approved close structural homolog meeting the recorded thresholds. These sources do not independently validate a binding site or protocol, and orthology is not inferred. Ligands were aligned by their contacting protein chain and grouped by spatial overlap. Direct fpocket correspondence requires unique cavity contact and full ligand containment. Boxes start at 26 A and expand within the recorded 36 A dimension and 64,000 A^3 volume limits. P# denotes an fpocket-derived box; L# denotes ligand evidence without a matching cavity. Accepted alignments require identity 0.9, coverage 0.7, and C-alpha RMSD at most 2.0 A. Ambiguous chain assignments were excluded."
+                        "Ligand-bound structures provide experimental evidence about where this protein family has accommodated ligands. "
+                        "The structures were aligned to the current receptor so their ligand locations could be compared with the predicted pockets. "
+                        "Exact protein matches and close structural homologs are identified separately in the source lists. "
+                        "Agreement supports the location of a candidate site, but does not by itself prove that the site is biologically relevant or that a docking pose is correct. "
+                        "Detailed alignment thresholds, excluded ambiguous matches, and complete source records remain available in the retained evidence JSON."
                         + (f" Excluded ambiguous chain assignments: {', '.join(excluded_chain_ids)}."
                            if excluded_chain_ids else ""),
                         styles["BodyText"],
                     ), Spacer(1, 4),
                     table(group_rows, [1.35*inch, 5.35*inch], compact=True), Spacer(1, 6),
                 ]
+                conformational = protocol_conformational_evidence(protocol, protocol_path)
+                accessibility = conformational.get("rigid_docking_site_assessment") or {}
+                if str(accessibility.get("status", "")).startswith("conformationally_incompatible"):
+                    occluding = accessibility.get("occluding_residues") or []
+                    residue_text = ", ".join(
+                        f"{item.get('name', 'UNK')}{item.get('number', '?')}{item.get('chain', '')}"
+                        for item in occluding
+                    ) or "the retained pocket-lining residues"
+                    story += [Paragraph(
+                        f"<b>Conformational-accessibility warning.</b> In the current receptor, {escape(residue_text)} "
+                        "occupies space used by at least one aligned deposited ligand. This is consistent with a "
+                        "side-chain conformational difference that may restrict access to the site and, when a "
+                        "predicted cavity is absent or smaller than expected, may help explain that observation. "
+                        "It does not prove flexibility or induced fit. Rigid docking may therefore be misleading; "
+                        "review the aligned structures and consider another receptor conformation or future flexible-docking analysis."
+                        + (" The retained comparison also shows substantial backbone displacement, so changing only side-chain rotamers may be insufficient."
+                           if any(item.get("warning") for item in conformational.get("residue_aggregates", [])
+                                  if item.get("residue") in occluding) else ""),
+                        styles["BodyText"],
+                    ), Spacer(1, 6)]
                 site_colors = ["green", "cyan", "orange", "violet", "salmon", "teal", "wheat"]
                 site_overview = args.study / "report" / "ligand_site_overview.png"
                 if len(site_groups) > 1 and site_overview.is_file():
@@ -1515,21 +1659,19 @@ def main():
                         story += [KeepTogether([
                             image(overview_page, 6.6, 6.0),
                             Paragraph(
-                                f"<b>Figure {figure_number}{' (continued)' if page_index else ''}. Ligand-site evidence and fpocket cavities.</b> "
-                                f"{page_text}. Each panel shows one aligned representative ligand, its proposed box, and retained fpocket surfaces. Colors match Figure 2. These are candidates for review, not validated biological sites.",
+                                f"<b>Figure {figure_number}{' (continued)' if page_index else ''}. Ligand-site evidence and predicted pockets.</b> "
+                                f"{page_text}. Each panel shows one aligned representative ligand, its proposed box, and retained {pocket_engine} surfaces. Colors match Figure 2. These are candidates for review, not validated biological sites.",
                                 styles["SmallDU"],
                             ),
                         ]), Spacer(1, 8)]
                     figure_number += 1
             if evidence_decision:
+                recovery_value = str(evidence_decision.get("recovery", ""))
                 recovery_text = {
-                    "standard fpocket pass": "The standard fpocket sensitivity pass supplied the retained candidates.",
-                    "relaxed fpocket sensitivity pass": "The standard fpocket threshold did not provide sufficient correspondence, so candidates from a relaxed-sensitivity pass were retained.",
-                    "fpocket pass": "The fpocket pass supplied the retained candidates.",
-                }.get(
-                    str(evidence_decision.get("recovery", "")),
-                    "The fpocket search status was not recorded.",
-                )
+                    "standard fpocket pass": "The standard pocket-detection pass supplied the retained candidates.",
+                    "relaxed fpocket sensitivity pass": "The standard threshold did not provide sufficient correspondence, so candidates from a relaxed-sensitivity pass were retained.",
+                    "fpocket pass": "The pocket-detection pass supplied the retained candidates.",
+                }.get(recovery_value, f"{pocket_engine} candidates and deposited-ligand evidence were retained for user review.")
                 selected_labels = [
                     f"Box {label}" for label in evidence_decision.get("selected_box_labels", [])
                 ]
@@ -1540,7 +1682,7 @@ def main():
                 else:
                     selection_text = f"Selected for the protocol: {selected_region_text}."
                 if not review_only and evidence_decision.get("choice") == "automatic-fpocket-selection":
-                    selection_text += " Selected automatically by fpocket rank."
+                    selection_text += f" Selected automatically by {pocket_engine} rank."
                     supported = {f"P{(group.get('fpocket_recovery') or {}).get('best_matching_pocket')}" for group in site_groups}
                     chosen = set(evidence_decision.get("selected_box_labels") or [])
                     if site_groups and not chosen.intersection(supported):
@@ -1551,7 +1693,7 @@ def main():
                     "No close structural-homolog evidence was used."
                 )
                 evidence_intro = (
-                    "Related-structure ligand locations were compared with fpocket candidates."
+                    f"Related-structure ligand locations were compared with {pocket_engine} candidates."
                     if site_groups else
                     "The related-structure search found no qualifying deposited-ligand site evidence under the recorded identity, coverage, and C-alpha RMSD criteria."
                 )
@@ -1562,7 +1704,7 @@ def main():
                 ), Spacer(1, 6)]
         elif pdb_evidence.get("status") == "failed":
             story += [Paragraph(
-                "Related-structure evidence search was requested but unavailable; fpocket ranking and explicit user review remained the basis of selection.",
+                f"Related-structure evidence search was requested but unavailable; {pocket_engine} ranking and explicit user review remained the basis of selection.",
                 styles["BodyText"],
             ), Spacer(1, 6)]
         cavity_ab = args.study / "report" / "cavity_panels_AB.png"
@@ -1570,49 +1712,21 @@ def main():
         cavity_b = args.study / "report" / "cavity_panel_B_structure.png"
         cavity_overview = args.study / "report" / "cavity_selected_box.png"
         if cavity_ab.is_file():
-            selection_sentence = (
-                "No region has been selected."
-                if review_only else "The selected region is identified by its color-matched surface and box."
+            decision_sentence = (
+                "No docking region has been selected."
+                if review_only else f"The selected docking region is {selected_region_text}."
             )
-            box_sentence = (
-                "Surfaces and proposed boxes use the labels shown in the legend; combined labels identify a shared box."
-                if review_only else "The same color-matched pocket surfaces and selected docking regions are shown on the receptor."
-            )
-            evidence_key = (
-                "Green rings mark direct correspondence with deposited ligand evidence; L# marks a ligand-defined box without a corresponding fpocket cavity. "
+            evidence_sentence = (
+                "Markers outlined in green identify candidates supported by aligned deposited-ligand observations. "
                 if pdb_evidence.get("ligand_site_groups") else ""
             )
-            single_site_sentence = ""
-            if len((pdb_evidence.get("ligand_site_groups") or [])) == 1:
-                single_group = (
-                    (pdb_evidence.get("user_evidence_decision") or {}).get("selected_ligand_site_group")
-                    or pdb_evidence["ligand_site_groups"][0]
-                )
-                representative = single_group.get("representative_ligand") or {}
-                recovery = single_group.get("fpocket_recovery") or {}
-                cavity_counts = single_group.get("matched_cavity_counts") or {}
-                best_pocket = str(recovery.get("best_matching_pocket") or "not recorded")
-                best_count = int(cavity_counts.get(best_pocket, cavity_counts.get(recovery.get("best_matching_pocket"), 0)) or 0)
-                total_count = int(single_group.get("member_count", 0) or 0)
-                recovery_status = str(recovery.get("status", "not evaluated")).replace("_", " ")
-                recovery_interpretation = (
-                    "This meets the current fpocket correspondence rule."
-                    if recovery.get("status") == "recovered"
-                    else "This is partial correspondence rather than absence of a cavity."
-                    if recovery.get("status") == "partial_correspondence"
-                    else "No unique fpocket correspondence was established for this selected evidence subset."
-                )
-                single_site_sentence = (
-                    f" The green sticks show the single evidence-prioritized representative ligand, "
-                    f"{representative.get('ligand', 'not recorded')} from PDB {representative.get('entry', 'not recorded')}; "
-                    "the color-matched wireframe is the complete selected docking box; its color matches the supporting fpocket surface. Other aligned ligand poses are described in the tables and retained evidence rather than superimposed. "
-                    f"For the selected evidence subset, fpocket pocket {best_pocket} uniquely corresponded to "
-                    f"{best_count} of {total_count} aligned poses ({recovery_status}). {recovery_interpretation}"
-                )
             story += [KeepTogether([
                 image(cavity_ab, 7.0, 3.2 if not pdb_evidence.get("ligand_site_groups") else 4.1),
                 Paragraph(
-                    f"<b>Figure {figure_number}. Exploratory pocket analysis.</b> (A) Up to ten highest-ranked fpocket candidates; the top three are color matched to Panel B. {evidence_key}(B) Surfaces represent cavities; wireframes represent boxes. {box_sentence} {selection_sentence} Scores and surfaces do not establish biological relevance or affinity.",
+                    f"<b>Figure {figure_number}. Candidate pocket evidence and docking-region selection.</b> "
+                    f"(A) {pocket_engine} candidates ordered by prediction score. Colored markers correspond to the pocket surfaces in Panel B. "
+                    f"{evidence_sentence}(B) Predicted pocket surfaces and their proposed docking boxes on the receptor. "
+                    f"{decision_sentence} {pocket_engine} scores rank pocket predictions; they do not estimate ligand-binding affinity.",
                     styles["SmallDU"],
                 ),
             ]), Spacer(1,8)]
@@ -2127,16 +2241,31 @@ def main():
             composite = args.study / "report" / f"{asset_id}_selected_interactions_ABC.png"
             if combine_horizontal_diagrams(interaction_diagrams, composite):
                 interaction_count = len(interaction_diagrams)
+                panel_colors = ("red", "blue", "gold")
+                panel_scores = []
+                for panel_index, (diagram_row, _) in enumerate(interaction_diagrams):
+                    score = str(diagram_row.get("best_energy_kcal_per_mol", "")).strip()
+                    score_text = f"{score} kcal/mol" if score else "score unavailable"
+                    panel_scores.append(
+                        f"{'ABC'[panel_index]} ({panel_colors[panel_index]}, {score_text})"
+                    )
                 if interaction_count == 1:
-                    interaction_panel_description = "A is the red energy-ranked cluster representative shown above."
+                    interaction_panel_description = f"Panel {panel_scores[0]} is the energy-ranked cluster representative shown above."
+                    interaction_rank_description = "highest-ranked distinct pose cluster"
                 elif interaction_count == 2:
-                    interaction_panel_description = "A and B are the red and blue energy-ranked cluster representatives shown above."
+                    interaction_panel_description = f"Panels {panel_scores[0]} and {panel_scores[1]} are the energy-ranked cluster representatives shown above."
+                    interaction_rank_description = "two highest-ranked distinct pose clusters"
                 else:
-                    interaction_panel_description = "A, B, and C are the red, blue, and gold energy-ranked cluster representatives shown above."
+                    interaction_panel_description = f"Panels {panel_scores[0]}, {panel_scores[1]}, and {panel_scores[2]} are the energy-ranked cluster representatives shown above."
+                    interaction_rank_description = "three highest-ranked distinct pose clusters"
                 story += [KeepTogether([
                     Paragraph("Selected 2D pose interaction diagrams",styles["Heading2"]),
                     image(composite,6.8,2.45),
-                    Paragraph(f"<b>Figure {figure_number}. SDF-aware PLIP interaction diagrams for {caption_subject}.</b> {interaction_panel_description} Ligand chemistry comes from each retained SDF; interaction calls come from the retained PLIP report.xml.",styles["SmallDU"]),Spacer(1,6),
+                    Paragraph(
+                        f"<b>Figure {figure_number}. Predicted protein-ligand interactions for the {interaction_rank_description} of {caption_subject}.</b> "
+                        f"{interaction_panel_description} Interaction types are identified in the diagram legend. Docking rank and predicted contacts support pose comparison but do not establish binding-mode correctness.",
+                        styles["SmallDU"],
+                    ), Spacer(1,6),
                 ])]
                 figure_number += 1
         if not panel and cluster_path.is_file():

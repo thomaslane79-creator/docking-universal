@@ -47,6 +47,7 @@ class ProtocolRecordInputs:
     cavity_score_threshold_used: float | None
     pocket_review_scene: str | None
     bundle_file_name: str
+    pocket_detection: Mapping[str, Any] | None = None
 
 
 def build_protocol_record(inputs: ProtocolRecordInputs) -> dict[str, Any]:
@@ -54,7 +55,7 @@ def build_protocol_record(inputs: ProtocolRecordInputs) -> dict[str, Any]:
     if not inputs.regions:
         raise ValueError("A protocol record requires at least one approved docking region")
     first = inputs.regions[0]
-    return {
+    record = {
         "schema_name": "docking-universal-protocol",
         "schema_version": 1,
         "schema_status": "stable_v1",
@@ -98,6 +99,9 @@ def build_protocol_record(inputs: ProtocolRecordInputs) -> dict[str, Any]:
             ],
         },
     }
+    if inputs.pocket_detection:
+        record["pocket_detection"] = dict(inputs.pocket_detection)
+    return record
 
 
 def build_site_guided_report_manifest(
@@ -302,6 +306,9 @@ class ProtocolFinalizationRequest:
     evidence_revision: int
     output_directory: Path
     exploratory_use_approved: bool
+    source_structure_sha256: str | None = None
+    receptor_pdb_sha256: str | None = None
+    receptor_pdbqt_sha256: str | None = None
 
     def validate(self) -> None:
         self.settings.validate()
@@ -311,9 +318,16 @@ class ProtocolFinalizationRequest:
             raise ValueError("Reusable exploratory protocol creation requires explicit approval")
         if not self.preparation_root.is_dir():
             raise FileNotFoundError(f"Preparation root does not exist: {self.preparation_root}")
-        for path in (self.source_structure, self.receptor_pdb, self.receptor_pdbqt):
+        retained_inputs = (
+            (self.source_structure, self.source_structure_sha256),
+            (self.receptor_pdb, self.receptor_pdb_sha256),
+            (self.receptor_pdbqt, self.receptor_pdbqt_sha256),
+        )
+        for path, expected_sha256 in retained_inputs:
             if not path.is_file():
                 raise FileNotFoundError(f"Required finalization input does not exist: {path}")
+            if expected_sha256 and sha256(path) != expected_sha256:
+                raise ValueError(f"Approved finalization input changed or is missing: {path}")
         if not self.regions:
             raise ValueError("Finalization requires at least one approved region")
         for region in self.regions:
@@ -365,29 +379,36 @@ def request_from_study(
         if approved_hashes.get(artifact_id) != region["box_sha256"]:
             raise ValueError(f"Approved evidence hash is missing or changed for {candidate_id}")
 
-    def artifact_path(kind: str) -> Path:
+    def artifact_record(kind: str):
         record = next((item for item in state.artifacts if item.kind == kind), None)
         if record is None:
             raise ValueError(f"Study has no registered {kind} artifact")
         path = Path(record.path)
         if not path.is_file() or (record.sha256 and sha256(path) != record.sha256):
             raise ValueError(f"Registered {kind} artifact changed or is missing")
-        return path
+        return record
+
+    source_record = artifact_record("source_receptor_structure")
+    receptor_pdb_record = artifact_record("prepared_receptor_structure")
+    receptor_pdbqt_record = artifact_record("prepared_receptor")
 
     preparation_root = state.workflow_data.get("preparation_root")
     if not preparation_root:
         raise ValueError("Study has no registered preparation root")
     request = ProtocolFinalizationRequest(
         study_id=state.study_id,
-        target=Path(artifact_path("prepared_receptor_structure")).stem,
+        target=Path(receptor_pdb_record.path).stem,
         preparation_root=Path(str(preparation_root)),
-        source_structure=artifact_path("source_receptor_structure"),
-        receptor_pdb=artifact_path("prepared_receptor_structure"),
-        receptor_pdbqt=artifact_path("prepared_receptor"),
+        source_structure=Path(source_record.path),
+        receptor_pdb=Path(receptor_pdb_record.path),
+        receptor_pdbqt=Path(receptor_pdbqt_record.path),
         regions=tuple(regions), settings=settings, approval_id=approval.id,
         evidence_revision=int(approval.evidence.get("study_revision", 0)),
         output_directory=Path(output_directory),
         exploratory_use_approved=exploratory_use_approved,
+        source_structure_sha256=source_record.sha256,
+        receptor_pdb_sha256=receptor_pdb_record.sha256,
+        receptor_pdbqt_sha256=receptor_pdbqt_record.sha256,
     )
     request.validate()
     return request

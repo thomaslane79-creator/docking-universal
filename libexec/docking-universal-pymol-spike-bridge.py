@@ -92,6 +92,129 @@ class BridgeCore:
                 raise ValueError("Structure path does not name a supported existing file")
             self.cmd.load(str(path), name)
             return {"object_name": name, "path": str(path), "atoms": int(self.cmd.count_atoms(name))}
+        if operation == "load_report_session":
+            path = Path(str(payload.get("path", ""))).expanduser().resolve()
+            if not path.is_file() or path.suffix.lower() != ".pse":
+                raise ValueError("Report view must name an existing PyMOL session")
+            if payload.get("replace") is True:
+                self.cmd.delete("all")
+            self.cmd.load(str(path))
+            return {"path": str(path), "report_view_restored": True}
+        if operation == "show_review_pose":
+            path = Path(str(payload.get("path", ""))).expanduser().resolve()
+            name = self._name(payload.get("object_name", "du_review_pose"))
+            if not path.is_file() or path.suffix.lower() != ".sdf":
+                raise ValueError("Review pose must name an existing retained SDF")
+            self.cmd.delete(name)
+            self.cmd.load(str(path), name)
+            self.cmd.hide("everything", name)
+            self.cmd.show("sticks", name)
+            self.cmd.color("gray70", f"{name} and elem C")
+            self.cmd.zoom(name, buffer=5)
+            return {"object_name": name, "path": str(path), "atoms": int(self.cmd.count_atoms(name))}
+        if operation == "show_evidence_ligand":
+            path = Path(str(payload.get("path", ""))).expanduser().resolve()
+            name = self._name(payload.get("object_name", "du_evidence_ligand"))
+            if not path.is_file() or path.suffix.lower() != ".pdb":
+                raise ValueError("Evidence ligand must name an existing retained PDB")
+            receptor_path = Path(str(payload.get("receptor_path", ""))).expanduser().resolve()
+            if receptor_path.is_file() and receptor_path.suffix.lower() in SAFE_SUFFIXES:
+                # Rebuild from coordinates, rather than trying to identify every
+                # generated surface/box object in an arbitrary report session.
+                if hasattr(self.cmd, "reinitialize"):
+                    self.cmd.reinitialize()
+                else:
+                    self.cmd.delete("all")
+                self.cmd.load(str(receptor_path), "receptor")
+            self.cmd.hide("everything", "all")
+            # Report sessions may use generated names for cavity surfaces and
+            # boxes, so pattern deletion alone is insufficient. Preserve the
+            # receptor object and remove every other object before loading the
+            # one evidence ligand requested by the user.
+            if hasattr(self.cmd, "get_names"):
+                for object_name in list(self.cmd.get_names("objects") or []):
+                    if object_name != "receptor":
+                        self.cmd.delete(object_name)
+            self.cmd.show("cartoon", "receptor")
+            self.cmd.color("gray70", "receptor")
+            # Replace, rather than accumulate, experimental observations when
+            # the user double-clicks different evidence rows.  The wildcard
+            # also clears suffixed variants left by repeated scene loads.
+            for stale_name in (
+                f"{name}*", "supporting_ligand*", "representative_ligand*",
+                "evidence_ligand*", "du_pocket*", "du_box*", "docking_box*",
+                "selected_pocket*", "cavity_core*", "pocket_surface*",
+            ):
+                self.cmd.delete(stale_name)
+            self.cmd.load(str(path), name)
+            self.cmd.hide("everything", name)
+            self.cmd.show("sticks", name)
+            self.cmd.color("green", f"{name} and elem C")
+            self.cmd.set("stick_radius", 0.32, name)
+            # Recenter on the complete receptor so repeated evidence choices
+            # never leave a ligand-only, tightly magnified camera.
+            self.cmd.orient("receptor")
+            self.cmd.zoom("receptor", buffer=12)
+            self.cmd.set("clip_mode", 0)
+            self.cmd.clip("near", 0)
+            self.cmd.clip("far", 0)
+            return {"object_name": name, "path": str(path), "atoms": int(self.cmd.count_atoms(name))}
+        if operation == "show_evidence_ligands":
+            paths = [Path(str(value)).expanduser().resolve() for value in (payload.get("paths") or [])]
+            if not paths or any(not path.is_file() or path.suffix.lower() != ".pdb" for path in paths):
+                raise ValueError("Evidence comparison requires existing retained PDB ligands")
+            receptor_path = Path(str(payload.get("receptor_path", ""))).expanduser().resolve()
+            if receptor_path.is_file() and receptor_path.suffix.lower() in SAFE_SUFFIXES:
+                if hasattr(self.cmd, "reinitialize"):
+                    self.cmd.reinitialize()
+                else:
+                    self.cmd.delete("all")
+                self.cmd.load(str(receptor_path), "receptor")
+            # Start from a clean evidence presentation.  Hiding everything
+            # first guarantees stale surfaces/boxes cannot remain visible even
+            # if a scene used an unexpected generated object name.
+            self.cmd.hide("everything", "all")
+            if hasattr(self.cmd, "get_names"):
+                for object_name in list(self.cmd.get_names("objects") or []):
+                    if object_name != "receptor":
+                        self.cmd.delete(object_name)
+            self.cmd.show("cartoon", "receptor")
+            self.cmd.color("gray70", "receptor")
+            for index, path in enumerate(paths, 1):
+                name = f"du_evidence_ligand_{index}"
+                self.cmd.load(str(path), name)
+                self.cmd.hide("everything", name)
+                self.cmd.show("sticks", name)
+                self.cmd.color("green", f"{name} and elem C")
+                self.cmd.set("stick_radius", 0.32, name)
+            self.cmd.orient("receptor")
+            self.cmd.zoom("receptor", buffer=12)
+            self.cmd.set("clip_mode", 0)
+            self.cmd.clip("near", 0)
+            self.cmd.clip("far", 0)
+            return {"object_names": [f"du_evidence_ligand_{index}" for index in range(1, len(paths) + 1)]}
+        if operation == "sync_evidence_ligands":
+            paths = [Path(str(value)).expanduser().resolve() for value in (payload.get("paths") or [])]
+            if any(not path.is_file() or path.suffix.lower() != ".pdb" for path in paths):
+                raise ValueError("Evidence selection contains a missing PDB")
+            # Keep the report scene loaded, but visually push all prior content
+            # into the background while the evidence browser has focus.
+            self.cmd.hide("everything", "all")
+            self.cmd.show("cartoon", "receptor")
+            self.cmd.color("gray70", "receptor")
+            # Keep the report receptor/pockets/boxes intact; only replace the
+            # evidence objects managed by this interaction panel.
+            for object_name in list(self.cmd.get_names("objects") or []):
+                if object_name.startswith("du_evidence_ligand"):
+                    self.cmd.delete(object_name)
+            for index, path in enumerate(paths, 1):
+                name = f"du_evidence_ligand_{index}"
+                self.cmd.load(str(path), name)
+                self.cmd.hide("everything", name)
+                self.cmd.show("sticks", name)
+                self.cmd.color("green", f"{name} and elem C")
+                self.cmd.set("stick_radius", 0.32, name)
+            return {"object_names": [f"du_evidence_ligand_{i}" for i in range(1, len(paths) + 1)]}
         if operation == "load_pocket":
             path = Path(str(payload.get("path", ""))).expanduser().resolve()
             name = self._name(payload.get("object_name", ""))
@@ -145,17 +268,62 @@ class BridgeCore:
             name = self._name(payload.get("name", ""))
             center = self._vector(payload.get("center"), "center")
             size = self._vector(payload.get("size"), "size", positive=True)
+            color_name = str(payload.get("color", "red"))
+            colors = {
+                "red": (1.0, 0.0, 0.0), "marine": (0.0, 0.5, 1.0),
+                "gold": (1.0, 0.65, 0.0), "magenta": (1.0, 0.0, 1.0),
+                "cyan": (0.0, 1.0, 1.0), "orange": (1.0, 0.5, 0.0),
+                "violet": (0.56, 0.37, 0.6),
+            }
+            if color_name not in colors:
+                raise ValueError(f"Unsupported docking-box color: {color_name}")
+            source_object_name = payload.get("source_object_name")
+            if source_object_name is not None:
+                source_object_name = self._name(str(source_object_name))
+            redundant_object_names = [
+                self._name(str(item)) for item in payload.get("redundant_object_names", [])
+            ]
+            visible_associated = {
+                self._name(str(item))
+                for item in payload.get("visible_associated_object_names", [])
+            }
+            associated_objects = [
+                object_name for object_name in self.cmd.get_names("objects")
+                if object_name == "ligand_site_representative"
+                or object_name.startswith("ligand_site_representative_")
+            ]
+            for object_name in associated_objects:
+                if object_name in visible_associated:
+                    self.cmd.enable(object_name)
+                else:
+                    self.cmd.disable(object_name)
+            previous_source = self.boxes.get(name, {}).get("replaces")
+            if previous_source and previous_source in self.cmd.get_names("objects"):
+                self.cmd.enable(previous_source)
+            if source_object_name and source_object_name in self.cmd.get_names("objects"):
+                self.cmd.disable(source_object_name)
+            hidden_redundant = list(self.boxes.get(name, {}).get("hides_redundant", []))
+            for object_name in redundant_object_names:
+                if object_name in self.cmd.get_names("objects"):
+                    self.cmd.disable(object_name)
+                    if object_name not in hidden_redundant:
+                        hidden_redundant.append(object_name)
             low = [center[index] - size[index] / 2.0 for index in range(3)]
             high = [center[index] + size[index] / 2.0 for index in range(3)]
             corners = [(x, y, z) for x in (low[0], high[0]) for y in (low[1], high[1]) for z in (low[2], high[2])]
             edges = [(a, b) for a in range(8) for b in range(a + 1, 8) if sum(corners[a][i] != corners[b][i] for i in range(3)) == 1]
-            graphic = [cgo.BEGIN, cgo.LINES, cgo.COLOR, 0.2, 0.8, 1.0]
+            graphic = [cgo.BEGIN, cgo.LINES, cgo.COLOR, *colors[color_name]]
             for first, second in edges:
                 graphic.extend((cgo.VERTEX, *corners[first], cgo.VERTEX, *corners[second]))
             graphic.append(cgo.END)
             self.cmd.delete(name)
             self.cmd.load_cgo(graphic, name)
-            self.boxes[name] = {"center": center, "size": size}
+            self.boxes[name] = {
+                "center": center, "size": size, "color": color_name,
+                "replaces": source_object_name,
+                "hides_redundant": hidden_redundant,
+                "visible_associated": sorted(visible_associated),
+            }
             return {"name": name, **self.boxes[name]}
         if operation == "get_view":
             return {"view": list(self.cmd.get_view())}

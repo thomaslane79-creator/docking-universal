@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -29,6 +30,11 @@ def main() -> int:
             print(json.dumps({
                 "type": "ready", "version": 1, "session_id": dispatcher.session_id,
                 "interrupted_jobs": interrupted,
+                "runtime": {
+                    "python_executable": str(Path(sys.executable).resolve()),
+                    "python_version": ".".join(str(value) for value in sys.version_info[:3]),
+                    "conda_environment": os.environ.get("CONDA_DEFAULT_ENV"),
+                },
             }), flush=True)
             serve_json_lines(dispatcher, sys.stdin, sys.stdout)
     except HostAlreadyRunning as exc:

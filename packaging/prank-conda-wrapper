@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -e
+prefix=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+export JAVA_HOME="${JAVA_HOME:-$prefix/lib/jvm}"
+exec "$prefix/share/p2rank/prank" "$@"

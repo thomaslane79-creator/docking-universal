@@ -22,18 +22,41 @@ load_prepare_runtime_defaults() {
   STRICT_LOCAL_POCKETS="${STRICT_LOCAL_POCKETS:-1}"
   HYBRID_COMPARE_FP_MODE="${HYBRID_COMPARE_FP_MODE:-1}"
   SITE_MODE="${DOCKING_UNIVERSAL_SITE_MODE:-ask}"
+  POCKET_ENGINE="${DOCKING_UNIVERSAL_POCKET_ENGINE:-auto}"
   REQUESTED_LIGAND="${DOCKING_UNIVERSAL_LIGAND_RESNAME:-}"
+  REQUESTED_LIGAND_CHAIN="${DOCKING_UNIVERSAL_LIGAND_CHAIN:-}"
+  REQUESTED_LIGAND_RESSEQ="${DOCKING_UNIVERSAL_LIGAND_RESSEQ:-}"
+  REQUESTED_LIGAND_ICODE="${DOCKING_UNIVERSAL_LIGAND_ICODE:-}"
+  REQUESTED_LIGAND_ALTLOC="${DOCKING_UNIVERSAL_LIGAND_ALTLOC:-}"
   case "$SITE_MODE" in
     ask|ligand|pockets) ;;
     *) echo "ERROR: DOCKING_UNIVERSAL_SITE_MODE must be ask, ligand, or pockets" >&2; return 2 ;;
   esac
+  case "$POCKET_ENGINE" in auto|p2rank|fpocket) ;; *) echo "ERROR: DOCKING_UNIVERSAL_POCKET_ENGINE must be auto, p2rank, or fpocket" >&2; return 2 ;; esac
 }
 
 # Resolve the executable backends once and publish the selected preparation
 # route. Explicit environment paths remain authoritative; automatic discovery
 # only fills missing values. This checks availability, not scientific fitness.
 resolve_prepare_runtime_tools() {
+  if [ -n "${CONDA_PREFIX:-}" ]; then
+    [ ! -d "$CONDA_PREFIX/bin" ] || PATH="$CONDA_PREFIX/bin:$PATH"
+    [ ! -d "$CONDA_PREFIX/lib/jvm/bin" ] || PATH="$CONDA_PREFIX/lib/jvm/bin:$PATH"
+    export PATH
+  fi
   FPOCKET_BIN="${DOCKING_UNIVERSAL_FPOCKET:-$(command -v fpocket 2>/dev/null || true)}"
+  local installed_p2rank=""
+  if [ -n "${CONDA_PREFIX:-}" ]; then
+    if [ -x "$CONDA_PREFIX/share/docking-universal/p2rank-2.5.1/prank" ]; then
+      installed_p2rank="$CONDA_PREFIX/share/docking-universal/p2rank-2.5.1/prank"
+    elif [ -f "$CONDA_PREFIX/share/docking-universal/p2rank-2.5.1/prank.bat" ]; then
+      installed_p2rank="$CONDA_PREFIX/share/docking-universal/p2rank-2.5.1/prank.bat"
+    fi
+  fi
+  P2RANK_BIN="${DOCKING_UNIVERSAL_P2RANK:-$(command -v prank 2>/dev/null || command -v prank.bat 2>/dev/null || printf '%s' "$installed_p2rank")}"
+  if [ "$POCKET_ENGINE" = auto ]; then
+    if [ -n "$P2RANK_BIN" ] && "$P2RANK_BIN" -v >/dev/null 2>&1; then POCKET_ENGINE=p2rank; else POCKET_ENGINE=fpocket; fi
+  fi
   PREP_BACKEND="${DOCKING_UNIVERSAL_PREP_BACKEND:-auto}"
   PREP_RECEPTOR_BIN="${DOCKING_UNIVERSAL_PREP_RECEPTOR:-}"
   ADFR_FALLBACK_BIN="${DOCKING_UNIVERSAL_ADFR_FALLBACK_BIN:-$(command -v prepare_receptor 2>/dev/null || true)}"
@@ -61,7 +84,12 @@ resolve_prepare_runtime_tools() {
     adfr) [ -n "$PREP_RECEPTOR_BIN" ] || PREP_RECEPTOR_BIN=$(command -v prepare_receptor 2>/dev/null || true) ;;
     *) echo "ERROR: DOCKING_UNIVERSAL_PREP_BACKEND must be auto, meeko, or adfr" >&2; return 2 ;;
   esac
-  [ -n "$FPOCKET_BIN" ] && [ -x "$FPOCKET_BIN" ] || { echo "ERROR: fpocket not found (run 'docking-universal doctor')" >&2; return 1; }
+  if [ "$POCKET_ENGINE" = p2rank ]; then
+    [ -n "$P2RANK_BIN" ] && [ -x "$P2RANK_BIN" ] || { echo "ERROR: P2Rank launcher not found" >&2; return 1; }
+    "$P2RANK_BIN" -v >/dev/null 2>&1 || { echo "ERROR: P2Rank could not start; verify its Java 17+ runtime" >&2; return 1; }
+  else
+    [ -n "$FPOCKET_BIN" ] && [ -x "$FPOCKET_BIN" ] || { echo "ERROR: fpocket not found (run 'docking-universal doctor')" >&2; return 1; }
+  fi
   [ -n "$PREP_RECEPTOR_BIN" ] && [ -x "$PREP_RECEPTOR_BIN" ] || { echo "ERROR: receptor preparation backend not found (install Meeko or configure ADFRsuite)" >&2; return 1; }
   case "$ADFR_FALLBACK" in
     0|1) ;;

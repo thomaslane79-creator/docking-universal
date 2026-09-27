@@ -9,6 +9,12 @@ state for reproducibility, and report problems without exposing research data.
 
 Docking Universal uses external scientific programs as composable stages. The repository's `environment.yml` contains the direct dependency set exercised on current Ubuntu and macOS GitHub runners. The 0.7.0 validation interface uses this declared environment; run integration or release validation on the intended workstation before production use because compiled scientific packages can differ across platforms.
 
+P2Rank 2.5.1 is the pinned primary pocket detector on macOS, Linux, and
+Windows. The same upstream archive and prediction models are used on every
+platform; Unix launches `prank`, Windows launches `prank.bat`, and Java 17 or
+newer is required. The archive identity and SHA-256 are recorded in
+`dependencies/p2rank.json`. fpocket remains the supported fallback detector.
+
 ### Beginner route: no Git required
 
 To try the software without learning Git first:
@@ -24,13 +30,18 @@ bash install.sh
 docking-universal run
 ```
 
+To use the graphical workflow, run `docking-universal desktop` without
+arguments. The study launcher can create a study or reopen an existing one;
+command-line `--state-root` and `--study` remain available for controlled and
+automated launches.
+
 On macOS, Finder can open a terminal at a folder through **Services → New
 Terminal at Folder** when that service is enabled. On common Linux desktops,
 right-click the extracted folder and choose **Open in Terminal**.
 
 ### Git route
 
-The recommended setup creates both required environments, installs the public
+The recommended setup creates the required isolated environments, installs the public
 command, and verifies the complete pipeline:
 
 ```bash
@@ -50,20 +61,24 @@ user-added packages. Experts who want strict declared-only environments can use
 The installed `docking-universal` launcher works for every subcommand without
 manual activation, including `run`, `prepare-ligand`, `prepare-receptor`,
 `check-install`, and `validate`. It routes the command through the main
-environment and the software invokes the selected isolated engine environment when needed.
+environment for command-line science. The desktop is routed through the PyQt6
+GUI environment, PyMOL through its companion environment, and docking through
+the selected isolated engine environment.
 The interactive runner asks for a parent folder before creating its named study
 folder. Graphical Ubuntu sessions prefer the desktop-native Zenity/GTK chooser,
 with Tk as a fallback; macOS opens Finder initially at the front Finder folder.
 Headless Linux falls back to a path prompt. Supplying `--out` bypasses all
 automatic folder selection.
 
-For manual installation, create all three environments and install the public
+For manual installation, create all five environments and install the public
 command into the active main environment:
 
 ```bash
 conda env create -f environment.yml
 conda env create -f environments/vina.yml
 conda env create -f environments/qvinaw.yml
+conda env create -f environments/gui-next.yml
+conda env create -f environments/pymol-next.yml
 conda activate docking-universal
 make install-conda
 docking-universal check-install --full

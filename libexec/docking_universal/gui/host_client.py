@@ -20,24 +20,48 @@ class ApplicationHostError(RuntimeError):
 
 
 class ApplicationHostClient:
-    def __init__(self, state_root: Path | str, host_script: Path | str, *, timeout_seconds: float = 5.0):
+    def __init__(
+        self,
+        state_root: Path | str,
+        host_script: Path | str,
+        *,
+        python_executable: Path | str | None = None,
+        timeout_seconds: float = 5.0,
+    ):
         self.state_root = Path(state_root).resolve()
         self.host_script = Path(host_script).resolve()
+        self.python_executable = Path(python_executable or sys.executable).resolve()
         self.timeout_seconds = timeout_seconds
         self.process: subprocess.Popen | None = None
         self.session_id: str | None = None
+        self.runtime: dict[str, Any] = {}
         self._lock = threading.Lock()
         self._log = None
+
+    @property
+    def connected(self) -> bool:
+        return bool(
+            self.process is not None
+            and self.process.poll() is None
+            and self.session_id
+        )
+
+    def restart(self) -> str:
+        """Replace a failed host without changing persisted study state."""
+        self.close()
+        return self.start()
 
     def start(self) -> str:
         if self.process and self.process.poll() is None:
             raise ApplicationHostError("Application host is already connected")
         if not self.host_script.is_file():
             raise FileNotFoundError(f"Application host script is missing: {self.host_script}")
+        if not self.python_executable.is_file():
+            raise FileNotFoundError(f"Application host Python is missing: {self.python_executable}")
         self.state_root.mkdir(parents=True, exist_ok=True)
         self._log = (self.state_root / "application-host.stderr.log").open("a")
         self.process = subprocess.Popen(
-            [sys.executable, str(self.host_script), "--state-root", str(self.state_root)],
+            [str(self.python_executable), str(self.host_script), "--state-root", str(self.state_root)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self._log, text=True, bufsize=1,
             env=self._environment(), start_new_session=os.name != "nt",
         )
@@ -45,6 +69,17 @@ class ApplicationHostClient:
         if ready.get("type") != "ready" or not ready.get("session_id"):
             self.close()
             raise ApplicationHostError(f"Application host did not become ready: {ready}")
+        runtime = ready.get("runtime")
+        if not isinstance(runtime, dict) or not runtime.get("python_executable"):
+            self.close()
+            raise ApplicationHostError("Application host omitted its runtime identity")
+        observed_python = Path(str(runtime["python_executable"])).resolve()
+        if observed_python != self.python_executable:
+            self.close()
+            raise ApplicationHostError(
+                f"Application host used unexpected Python: {observed_python}"
+            )
+        self.runtime = dict(runtime)
         self.session_id = str(ready["session_id"])
         return self.session_id
 
@@ -77,6 +112,7 @@ class ApplicationHostClient:
         process = self.process
         self.process = None
         self.session_id = None
+        self.runtime = {}
         if process:
             if process.stdin and not process.stdin.closed:
                 process.stdin.close()
@@ -121,6 +157,25 @@ class ApplicationHostClient:
         package_root = str(self.host_script.parent)
         current = environment.get("PYTHONPATH")
         environment["PYTHONPATH"] = package_root + (os.pathsep + current if current else "")
+        # The GUI may itself have been launched with an explicit PyQt Python.
+        # Scientific Bash workers must instead inherit the supervised host's
+        # exact interpreter so `python3` resolution cannot escape to the OS or
+        # back into the GUI environment.
+        environment["DOCKING_UNIVERSAL_PYTHON"] = str(self.python_executable)
+        prefix = self.python_executable.parent.parent
+        scientific_cli = prefix / "bin" / ("docking-universal.exe" if os.name == "nt" else "docking-universal")
+        if scientific_cli.is_file():
+            environment["DOCKING_UNIVERSAL_CLI"] = str(scientific_cli)
+        runtime_paths = [self.python_executable.parent, prefix / "lib" / "jvm" / "bin"]
+        environment["PATH"] = os.pathsep.join(
+            [str(path) for path in runtime_paths if path.is_dir()]
+            + [environment.get("PATH", "")]
+        )
+        p2rank = prefix / "share" / "docking-universal" / "p2rank-2.5.1" / (
+            "prank.bat" if os.name == "nt" else "prank"
+        )
+        if p2rank.is_file():
+            environment["DOCKING_UNIVERSAL_P2RANK"] = str(p2rank)
         return environment
 
     def __enter__(self) -> "ApplicationHostClient":

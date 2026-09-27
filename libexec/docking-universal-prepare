@@ -14,8 +14,9 @@ set -e
 #   - hide all PyMOL objects before rendering each scene to avoid ghost pockets
 #   - add timestamped logging and a run log
 ###############################################################################
-PACKAGE_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-PACKAGE_VERSION=$(sed -n '1p' "$PACKAGE_ROOT/VERSION" 2>/dev/null || printf 'unknown')
+LIBEXEC_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PACKAGE_ROOT=$(CDPATH= cd -- "$LIBEXEC_DIR/.." && pwd)
+PACKAGE_VERSION=$(sed -n '1p' "$LIBEXEC_DIR/VERSION" 2>/dev/null || sed -n '1p' "$PACKAGE_ROOT/VERSION" 2>/dev/null || printf 'unknown')
 PYTHON_COMMAND="${DOCKING_UNIVERSAL_PYTHON:-python3}"
 SCRIPT_VERSION="1.35.13_surface_local_pockets_patch1"
 
@@ -24,11 +25,11 @@ print_help() {
 Docking Universal - auditable receptor and docking-box preparation
 
 Usage:
-  docking-universal prepare-receptor <complex.pdb>
+  docking-universal prepare-receptor <complex.pdb|complex.cif>
   docking-universal prepare-receptor --help
 
 Docking Universal prepares a receptor, detects bound ligands, discovers pockets with
-fpocket, and writes AutoDock Vina configuration plus PyMOL review files.
+P2Rank (primary) or fpocket (fallback), and writes AutoDock Vina configuration plus PyMOL review files.
 The main workflow is guided interactively.
 
 Required tools:
@@ -46,11 +47,17 @@ Common environment settings:
   STRICT_LOCAL_POCKETS=1        Reject unusually broad pockets
   SHOW_POCKET_SURFACE=1         Render pocket surfaces in PyMOL scenes
   DOCKING_UNIVERSAL_FPOCKET     fpocket executable path
+  DOCKING_UNIVERSAL_P2RANK      P2Rank prank launcher path
+  DOCKING_UNIVERSAL_POCKET_ENGINE auto, p2rank, or fpocket
   DOCKING_UNIVERSAL_PREP_BACKEND   auto, meeko, or adfr
   DOCKING_UNIVERSAL_PREP_RECEPTOR  receptor backend executable path
   DOCKING_UNIVERSAL_LOG_MODE       tee (default) or file (restricted/headless)
   DOCKING_UNIVERSAL_SITE_MODE      ask (default), ligand, or pockets
   DOCKING_UNIVERSAL_LIGAND_RESNAME Bound ligand residue name for ligand mode
+  DOCKING_UNIVERSAL_LIGAND_CHAIN   Exact deposited-ligand chain identifier
+  DOCKING_UNIVERSAL_LIGAND_RESSEQ  Exact deposited-ligand residue number
+  DOCKING_UNIVERSAL_LIGAND_ICODE   Optional deposited-ligand insertion code
+  DOCKING_UNIVERSAL_LIGAND_ALTLOC  Optional deposited-ligand alternate location
   DOCKING_UNIVERSAL_CAVITY_MODE    1, 2, or 3 for unattended cavity mode
   DOCKING_UNIVERSAL_MAX_POCKETS    number of ligand-free cavities to retain
   DOCKING_UNIVERSAL_CENTER_MODE    deepest or centroid for ligand-free review
@@ -139,6 +146,16 @@ SUPPORT_LIBRARY="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/docking-universal-
 [ "$#" -eq 1 ] || { print_help >&2; exit 2; }
 INPUT_PDB="$1"
 [ -f "$INPUT_PDB" ] || { echo "ERROR: input PDB not found: $INPUT_PDB" >&2; exit 2; }
+case "$INPUT_PDB" in
+  *.cif|*.mmcif|*.CIF|*.MMCIF)
+    normalized=$("$PYTHON_COMMAND" "$LIBEXEC_DIR/docking_universal/services/structure_input.py" \
+      "$INPUT_PDB" "$PWD/.docking-universal-inputs") || exit $?
+    DOCKING_UNIVERSAL_SOURCE_MMCIF=$(printf '%s\n' "$normalized" | sed -n '1p')
+    DOCKING_UNIVERSAL_STRUCTURE_METADATA=$(printf '%s\n' "$normalized" | sed -n '2p')
+    INPUT_PDB=$(printf '%s\n' "$normalized" | sed -n '3p')
+    export DOCKING_UNIVERSAL_SOURCE_MMCIF DOCKING_UNIVERSAL_STRUCTURE_METADATA
+    ;;
+esac
 REGION_CHECK="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/docking-universal-region-check.py"
 [ -f "$REGION_CHECK" ] || { echo "ERROR: receptor input-validation helper is missing: $REGION_CHECK" >&2; exit 2; }
 "$PYTHON_COMMAND" "$REGION_CHECK" --validate-protein-pdb "$INPUT_PDB"
@@ -186,16 +203,20 @@ log "=== STEP 1b: Detecting ligand ==="
 
 resolve_site_ligand_strategy || exit 1
 ###############################################################################
-# STEP 2: FPOCKET
+# STEP 2: POCKET DETECTION
 ###############################################################################
 resolve_pocket_search_policy || exit $?
-
-execute_fpocket_strategy
-normalize_fpocket_outputs
-###############################################################################
-# STEP 3: FILTER POCKETS BY SCORE + WRITE DIAGNOSTICS
-###############################################################################
-classify_and_select_fpocket_sites
+if [ "$POCKET_ENGINE" = p2rank ] && [ "$LIG_PRESENT" -eq 0 ]; then
+  execute_p2rank_strategy
+else
+  if [ "$POCKET_ENGINE" = p2rank ]; then
+    echo "Bound-ligand mode uses ligand-centered fpocket cavity context; P2Rank remains primary for predicted-site workflows."
+    [ -n "$FPOCKET_BIN" ] && [ -x "$FPOCKET_BIN" ] || { echo "ERROR: bound-ligand cavity context currently requires fpocket" >&2; exit 1; }
+  fi
+  execute_fpocket_strategy
+  normalize_fpocket_outputs
+  classify_and_select_fpocket_sites
+fi
 
 ###############################################################################
 # STEP 5: BUILD OUTPUTS

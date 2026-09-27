@@ -7,16 +7,27 @@ dependencies:
   # Used by install.sh to install and validate the public command. Declaring it
   # here avoids requiring developer command-line tools on a new workstation.
   - make
+  # P2Rank 2.5.1 is installed from its platform-neutral upstream archive;
+  # Java is the only compiled runtime requirement shared across platforms.
+  - openjdk=17
+  # The approved PoseEdit-style renderer is local and uses the user's Chrome;
+  # Node runs the bundled page without sending structures to a web service.
+  - nodejs=22
   - fpocket=4.2.2
   - openbabel=3.1.1
   - plip=2.3.1
   - pymol-open-source=3.0.0
   - rdkit=2023.09.6
+  # Structural equivalence, RMSD, and local pocket geometry calculations.
+  - numpy
+  - scipy
   - molscrub=0.2.2
   - pdbfixer=1.11
   # Meeko 0.7.1 imports gemmi for receptor chemical templates but does not
   # declare it in its pip package metadata, so keep it explicit here.
   - gemmi
+  # Enables Meeko's native mmCIF reader for filtered mmCIF receptor inputs.
+  - prody
   - pycairo=1.27.0
   - pip
   - pip:

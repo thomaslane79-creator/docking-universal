@@ -740,38 +740,19 @@ def choose_complex_source():
 
 
 def download_pdb_entry(pdb_id, destination):
-    """Download one legacy-format coordinate entry and record its provenance."""
-    pdb_id = pdb_id.upper()
-    url = f"https://files.rcsb.org/download/{pdb_id}.pdb"
-    destination.mkdir(parents=True, exist_ok=True)
-    output = destination / f"{pdb_id}.pdb"
-    try:
-        request = urllib.request.Request(url, headers={"User-Agent": f"Docking-Universal/{package_version()}"})
-        with urllib.request.urlopen(request, timeout=30) as response:
-            payload = response.read()
-    except (urllib.error.URLError, TimeoutError) as exc:
-        raise SystemExit(f"Could not download {pdb_id} from RCSB PDB: {exc}") from None
-    if not payload or (b"ATOM  " not in payload and b"HETATM" not in payload):
-        raise SystemExit(
-            f"RCSB did not return a usable legacy PDB coordinate file for {pdb_id}. "
-            "Download and convert the PDBx/mmCIF entry manually."
-        )
-    output.write_bytes(payload)
-    provenance = {
-        "pdb_id": pdb_id,
-        "source": "RCSB Protein Data Bank",
-        "url": url,
-        "retrieved_utc": datetime.now(timezone.utc).isoformat(),
-        "sha256": hashlib.sha256(payload).hexdigest(),
-        "file": str(output),
-    }
-    (destination / f"{pdb_id}_provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
-    print(f"Downloaded {pdb_id} from RCSB PDB: {output}")
-    return output
+    """Retain deposited mmCIF through the shared acquisition boundary."""
+    from docking_universal.services.rcsb import download_pdb_entry as acquire
+    return acquire(pdb_id, destination)
 
 
 def validate_complex_pdb(path):
     """Reject a mislabeled or coordinate-free local selection early."""
+    if path.suffix.lower() in {".cif", ".mmcif"}:
+        from docking_universal.services.structure_input import normalize_structure_input
+        normalized = normalize_structure_input(path, path.parent / ".docking-universal-inputs")
+        os.environ["DOCKING_UNIVERSAL_SOURCE_MMCIF"] = str(normalized.source_path)
+        os.environ["DOCKING_UNIVERSAL_STRUCTURE_METADATA"] = str(normalized.metadata_path)
+        return normalized.engine_pdb_path
     if path.suffix.lower() != ".pdb":
         raise SystemExit(f"Selected structure must be a .pdb file: {path}")
     with path.open("rb") as handle:
@@ -888,7 +869,9 @@ def require_complex_path(value, project, destination, non_interactive=False, all
     bare_id_match = re.fullmatch(r"(?i)([0-9][A-Za-z0-9]{3})", requested_name)
     if bare_id_match:
         pdb_id = bare_id_match.group(1).upper()
-        cached = destination / f"{pdb_id}.pdb"
+        cached = destination / f"{pdb_id}.cif"
+        if not cached.is_file():
+            cached = destination / f"{pdb_id}.pdb"
         if cached.is_file():
             print(f"Using study-cached RCSB entry: {cached}")
             return cached
@@ -1821,7 +1804,24 @@ def main():
                 if selected_protocol_type == CONTROL_VALIDATED
                 else "Exploratory protocol selected by the user; locked inputs verified"
             ),
+            # Pocket choice is part of the locked scientific protocol. Carry
+            # its evidence into every downstream screening report instead of
+            # resetting it to an unrelated, unrequested search state.
+            "pdb_pocket_evidence": approved_record.get("pdb_pocket_evidence", {}),
+            "selected_docking_regions": approved_record.get("docking_regions", []),
+            "selectable_docking_boxes": approved_record.get("selectable_docking_boxes", []),
+            "pocket_detection": approved_record.get("pocket_detection", {}),
         })
+        protocol_evidence_dir = Path(args.protocol).resolve().parent / "evidence"
+        retained_report_dir = study / "report"
+        retained_report_dir.mkdir(parents=True, exist_ok=True)
+        for name in (
+            "cavity_panel_A_selection.png", "cavity_panel_B_structure.png",
+            "cavity_panels_AB.png", "cavity_selected_box.png",
+        ):
+            source = protocol_evidence_dir / name
+            if source.is_file():
+                shutil.copy2(source, retained_report_dir / name)
     elif mode == "exploratory":
         manifest.update({
             "configured_engine": args.engine,

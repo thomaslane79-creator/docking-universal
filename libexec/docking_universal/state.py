@@ -22,7 +22,7 @@ from .models import ArtifactRecord, CompletionStatus, Job, JobStatus, Scientific
 
 
 SCHEMA_NAME = "docking-universal-application-state"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 T = TypeVar("T")
 
 
@@ -55,7 +55,7 @@ class StudyState:
 
     @property
     def active_job(self) -> Job | None:
-        active = {JobStatus.RUNNING, JobStatus.WAITING_FOR_DECISION}
+        active = {JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.WAITING_FOR_DECISION}
         return next((job for job in self.jobs if job.status in active), None)
 
     def to_dict(self) -> dict[str, Any]:
@@ -67,7 +67,7 @@ class StudyState:
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "StudyState":
-        if value.get("schema_name") != SCHEMA_NAME or value.get("schema_version") not in {1, SCHEMA_VERSION}:
+        if value.get("schema_name") != SCHEMA_NAME or value.get("schema_version") not in {1, 2, SCHEMA_VERSION}:
             raise ValueError("Unsupported Docking Universal application-state schema")
         decisions = []
         for item in value.get("decisions", []):
@@ -134,6 +134,18 @@ class JsonStudyStore:
 
     def load(self, study_id: str) -> StudyState:
         return StudyState.from_dict(json.loads(self.path_for(study_id).read_text()))
+
+    def list_studies(self) -> list[StudyState]:
+        """Return valid studies newest-first, ignoring unrelated directories."""
+        studies = []
+        if not self.root.is_dir():
+            return studies
+        for path in self.root.glob("*/application_state.json"):
+            try:
+                studies.append(StudyState.from_dict(json.loads(path.read_text())))
+            except (OSError, ValueError, KeyError, json.JSONDecodeError):
+                continue
+        return sorted(studies, key=lambda item: item.updated_at, reverse=True)
 
     def save(self, state: StudyState, *, expected_revision: int | None = None) -> None:
         """Save one loaded state using optimistic revision validation."""

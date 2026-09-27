@@ -44,7 +44,31 @@ resolve_site_ligand_strategy
 [ "$LIGX $LIGY $LIGZ" = '4.500000 0.000000 0.000000' ] || fail "strategy ligand center changed"
 [ "$(awk 'END{print NR}' "$LIGAND_MANIFEST")" -eq 3 ] || fail "strategy did not retain every ligand reference"
 
+# An exact identity must center only the chosen copy when repeated residue names
+# occur in different chains.
+cp "$tmp/complex.pdb" "$tmp/exact-complex.pdb"
+"$python" - "$tmp/exact-complex.pdb" <<'PY'
+import sys
+with open(sys.argv[1], "a") as handle:
+    for index in range(10):
+        handle.write(
+            f"HETATM{900+index:5d} C{index%9:<3} LIG B 200    "
+            f"{100.0+index:8.3f}{0.0:8.3f}{0.0:8.3f}{1.0:6.2f}{20.0:6.2f}           C\n"
+        )
+PY
+INPUT_PDB="$tmp/exact-complex.pdb"
+ROOT="$tmp/exact-ligand-strategy"
+SITE_MODE=ligand
+REQUESTED_LIGAND=LIG
+REQUESTED_LIGAND_CHAIN=B
+REQUESTED_LIGAND_RESSEQ=200
+resolve_site_ligand_strategy
+[ "$LIGX $LIGY $LIGZ" = '104.500000 0.000000 0.000000' ] || fail "exact ligand instance was merged with another chain"
+REQUESTED_LIGAND_CHAIN=""
+REQUESTED_LIGAND_RESSEQ=""
+
 ROOT="$tmp/pocket-strategy"
+INPUT_PDB="$tmp/complex.pdb"
 SITE_MODE=pockets
 REQUESTED_LIGAND=""
 resolve_site_ligand_strategy

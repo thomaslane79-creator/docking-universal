@@ -30,6 +30,7 @@ class PreparationServiceTests(unittest.TestCase):
         self.assertEqual(plan.request.environment["DOCKING_UNIVERSAL_REMOVAL_PROMPT"], "0")
         self.assertEqual(plan.request.environment["MEEKO_ALLOW_BAD_RES"], "0")
         self.assertEqual(plan.request.environment["DOCKING_UNIVERSAL_SITE_MODE"], "pockets")
+        self.assertEqual(plan.request.environment["DOCKING_UNIVERSAL_POCKET_ENGINE"], "auto")
         self.assertEqual(plan.request.environment["FEEDBACK_LEVEL"], "guided")
         self.assertIn("Target_with_spaces_receptor_prep", str(plan.receptor_pdbqt))
         self.assertEqual(plan.receptor_pdb.suffix, ".pdb")
@@ -48,6 +49,21 @@ class PreparationServiceTests(unittest.TestCase):
         )
         self.assertEqual(plan.request.environment["MEEKO_ALLOW_BAD_RES"], "0")
         self.assertEqual(plan.request.environment["DOCKING_UNIVERSAL_REMOVAL_PROMPT"], "0")
+
+    def test_mmcif_source_is_retained_while_engine_receives_derived_pdb(self):
+        from tests.test_structure_input import MMCIF
+
+        source = self.root / "modern-source.cif"
+        source.write_text(MMCIF)
+        plan = build_receptor_preparation_plan(
+            self.executable,
+            ReceptorPreparationOptions(source, self.root / "mmcif-output", "pockets"),
+        )
+        self.assertEqual(plan.structure_input.source_path.read_bytes(), source.read_bytes())
+        self.assertEqual(plan.output_root.name, "modern_source_receptor_prep")
+        self.assertTrue(plan.structure_input.derived_for_legacy_engine)
+        self.assertEqual(Path(plan.request.command[1]).suffix, ".pdb")
+        self.assertTrue(Path(plan.request.command[1]).is_file())
 
 
 if __name__ == "__main__":

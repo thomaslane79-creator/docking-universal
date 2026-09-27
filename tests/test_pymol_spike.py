@@ -31,9 +31,11 @@ class FakeCmd:
         self.box = None
         self.selection_names = set()
         self.loaded = []
+        self.deleted = []
         self.wizard = None
+        self.colors = []
 
-    def load(self, path, name):
+    def load(self, path, name=None):
         self.loaded.append((path, name))
 
     def count_atoms(self, _name):
@@ -57,13 +59,15 @@ class FakeCmd:
         self.selection_names.add(name)
         return None
 
-    def delete(self, _name):
+    def delete(self, name):
+        self.deleted.append(name)
         return None
 
     def show(self, _representation, _name):
         return None
 
     def color(self, _color, _name):
+        self.colors.append((_color, _name))
         return None
 
     def hide(self, _representation, _name):
@@ -142,6 +146,25 @@ class PymolSpikeTests(unittest.TestCase):
             self.assertEqual(result["color"], "marine")
             with self.assertRaisesRegex(ValueError, "color"):
                 core.dispatch("load_pocket", {"path": str(pocket), "object_name": "du_pocket_2", "color": "user_expression"})
+
+    def test_report_session_load_is_restricted_and_replaces_the_scene(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = Path(directory) / "retained report view.pse"
+            session.write_bytes(b"pymol session")
+            fake = FakeCmd()
+            result = self.bridge.BridgeCore(fake).dispatch(
+                "load_report_session", {"path": str(session), "replace": True},
+            )
+            self.assertTrue(result["report_view_restored"])
+            self.assertEqual(fake.deleted, ["all"])
+            self.assertEqual(fake.loaded, [(str(session.resolve()), None)])
+
+            unsafe = Path(directory) / "not-a-session.pdb"
+            unsafe.write_text("END\n")
+            with self.assertRaisesRegex(ValueError, "PyMOL session"):
+                self.bridge.BridgeCore(fake).dispatch(
+                    "load_report_session", {"path": str(unsafe), "replace": True},
+                )
 
     def test_bridge_rejects_arbitrary_operations_and_unsafe_names(self):
         core = self.bridge.BridgeCore(FakeCmd())

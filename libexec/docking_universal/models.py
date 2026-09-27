@@ -132,6 +132,10 @@ class Job:
     error: str | None = None
     request_id: str | None = None
     process_id: int | None = None
+    progress_phase: str | None = None
+    progress_message: str | None = None
+    progress_completed: int | None = None
+    progress_total: int | None = None
 
 
 def record_to_dict(record: Any) -> dict[str, Any]:

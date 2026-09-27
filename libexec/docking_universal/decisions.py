@@ -12,6 +12,8 @@ from .models import utc_now
 class DecisionStatus(str, Enum):
     PENDING = "pending"
     RESOLVED = "resolved"
+    DECLINED = "declined"
+    SUPERSEDED = "superseded"
 
 
 @dataclass(frozen=True)
@@ -38,6 +40,11 @@ class DecisionRequired:
     changes_molecular_model: bool = False
     grants_scientific_authority: bool = False
     automation_eligible: bool = False
+    payload: dict[str, Any] = field(default_factory=dict)
+    presentation: dict[str, Any] = field(default_factory=dict)
+    continuation: dict[str, Any] = field(
+        default_factory=lambda: {"action": "complete_stage"}
+    )
     status: DecisionStatus = DecisionStatus.PENDING
     created_at: str = field(default_factory=utc_now)
     resolved_at: str | None = None
@@ -59,6 +66,15 @@ class DecisionRequired:
             raise ValueError(f"Unknown decision option(s): {', '.join(sorted(unknown))}")
         if len(set(selections)) != len(selections):
             raise ValueError("A decision response cannot repeat an option")
+
+    def validate_continuation(self) -> None:
+        action = self.continuation.get("action", "complete_stage")
+        if action not in {"complete_stage", "continue_stage", "none"}:
+            raise ValueError(f"Unsupported decision continuation action: {action}")
+        if action == "continue_stage" and not str(
+            self.continuation.get("checkpoint", "")
+        ).strip():
+            raise ValueError("A continuing decision requires a checkpoint")
 
 
 @dataclass(frozen=True)

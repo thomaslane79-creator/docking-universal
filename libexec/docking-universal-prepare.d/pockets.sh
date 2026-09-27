@@ -10,6 +10,28 @@ count_total_pockets() {
   echo "${count:-0}"
 }
 
+execute_p2rank_strategy() {
+  local output predictions normalizer p2rank_version
+  output="$CAVITY_DIR/p2rank_output"
+  mkdir -p "$output"
+  log "Running P2Rank primary pocket prediction..."
+  "$P2RANK_BIN" predict -f "$RECEPTOR_PDB" -c "${DOCKING_UNIVERSAL_P2RANK_PROFILE:-default}" \
+    -visualizations 0 -o "$output"
+  predictions=$(find "$output" -maxdepth 1 -name '*_predictions.csv' -type f | head -1)
+  [ -n "$predictions" ] && [ -s "$predictions" ] || { echo "ERROR: P2Rank predictions CSV was not produced" >&2; return 1; }
+  p2rank_version=$("$P2RANK_BIN" -v 2>/dev/null | awk 'NR == 1 { print $2; exit }')
+  normalizer="$LIBEXEC_DIR/docking-universal-normalize-p2rank.py"
+  "$PYTHON_COMMAND" "$normalizer" --predictions "$predictions" --receptor "$RECEPTOR_PDB" \
+    --cavity "$CAVITY_DIR" --target "$CANONICAL" --maximum-pockets "$MAX_POCKETS" \
+    --p2rank-version "$p2rank_version"
+  SORTED=()
+  while IFS= read -r REC; do [ -n "$REC" ] && SORTED+=("$REC"); done < "$CAVITY_DIR/selected_pocket_records.txt"
+  SELECTED_FP_RUN_LABEL="p2rank_primary"
+  POCKET_DIAG="$CAVITY_DIR/pocket_detection_provenance.json"
+  SELECTION_DIAG="$CAVITY_DIR/pocket_selection_diagnostics.tsv"
+  log "P2Rank produced ${#SORTED[@]} retained pocket candidates"
+}
+
 count_reasonable_pockets() {
   local outdir="$1"
   local count=0
@@ -69,6 +91,17 @@ resolve_pocket_search_policy() {
     CENTER_MODE=centroid
     CENTROID_SEL=1
     log "Ligand mode -> using centroid center"
+    return 0
+  fi
+
+  if [ "$POCKET_ENGINE" = p2rank ]; then
+    MODE=1
+    MAX_POCKETS="${DOCKING_UNIVERSAL_MAX_POCKETS:-3}"
+    UNATTENDED_CAVITY=1
+    CENTER_MODE=centroid
+    CENTROID_SEL="${DOCKING_UNIVERSAL_CENTROID_MODE:-1}"
+    read -r PROT_CX PROT_CY PROT_CZ <<< "$(protein_ranking_centroid "$RECEPTOR_PDB" "$CENTROID_SEL")"
+    log "P2Rank mode: retaining up to $MAX_POCKETS ranked ML pocket hypotheses"
     return 0
   fi
 

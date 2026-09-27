@@ -6,6 +6,7 @@ import json
 import os
 import secrets
 import socket
+import signal
 import subprocess
 import time
 import urllib.error
@@ -78,6 +79,10 @@ class PymolSpikeController:
         self._stdout = None
         self._stderr = None
 
+    @property
+    def running(self) -> bool:
+        return bool(self.process is not None and self.process.poll() is None)
+
     def start(self, *, headless: bool = False, timeout_seconds: float = 15.0) -> PymolSpikeClient:
         if self.process and self.process.poll() is None:
             raise PymolSpikeError("PyMOL spike is already running")
@@ -134,12 +139,25 @@ class PymolSpikeController:
             try:
                 self.process.wait(timeout=3)
             except subprocess.TimeoutExpired:
-                self.process.terminate()
+                # PyMOL can fork a GUI child; terminate the whole session group
+                # created by start_new_session so no orphan window survives.
+                try:
+                    os.killpg(self.process.pid, signal.SIGTERM)
+                except (OSError, AttributeError):
+                    self.process.terminate()
                 try:
                     self.process.wait(timeout=2)
                 except subprocess.TimeoutExpired:
-                    self.process.kill()
+                    try:
+                        os.killpg(self.process.pid, signal.SIGKILL)
+                    except (OSError, AttributeError):
+                        self.process.kill()
                     self.process.wait()
+            # Reap any GUI child left behind after the bridge closes cleanly.
+            try:
+                os.killpg(self.process.pid, signal.SIGTERM)
+            except (OSError, AttributeError):
+                pass
         self._close_logs()
 
     def _close_logs(self) -> None:

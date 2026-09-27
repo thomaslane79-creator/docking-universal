@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Conservatively repair a receptor PDB before Meeko parameterization."""
+"""Conservatively repair a receptor PDB or mmCIF before Meeko parameterization."""
 
 import argparse
 import json
@@ -16,12 +16,19 @@ def atom_count(residues):
 def main():
     """Apply conservative PDBFixer repair and retain an exact change audit."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("input_pdb")
+    parser.add_argument("input_structure")
     parser.add_argument("output_pdb")
     parser.add_argument("audit_json")
     args = parser.parse_args()
 
-    fixer = PDBFixer(filename=args.input_pdb)
+    source = Path(args.input_structure)
+    if source.suffix.lower() in {".cif", ".mmcif"}:
+        with source.open() as handle:
+            fixer = PDBFixer(pdbxfile=handle)
+        input_format = "mmcif"
+    else:
+        fixer = PDBFixer(filename=str(source))
+        input_format = "pdb"
     fixer.findMissingResidues()
     missing_residues = [
         {"chain_index": chain, "insertion_index": index,
@@ -56,7 +63,9 @@ def main():
         PDBFile.writeFile(fixer.topology, fixer.positions, handle, keepIds=True)
 
     audit = {
-        "input_pdb": str(Path(args.input_pdb).resolve()),
+        "input_pdb": str(source.resolve()),
+        "input_structure": str(source.resolve()),
+        "input_format": input_format,
         "output_pdb": str(output.resolve()),
         "missing_residue_segments_detected_not_built": missing_residues,
         "nonstandard_residue_replacements": replacements,
