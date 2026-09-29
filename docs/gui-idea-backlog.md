@@ -163,3 +163,20 @@ rigid-receptor milestone:
 - reliable stage feedback, cancellation, recovery, and clean shutdown;
 - linked retained 2D/3D pose review and report generation;
 - bounded branding, packaging, accessibility, and supported-platform acceptance.
+
+### Minimal and offline Reduce2 component libraries
+
+- Date accepted: 2026-09-28.
+- Status: minimal core and consent-gated acquisition foundation implemented;
+  complete offline package pending.
+- User/scientific problem: a full GeoStd development clone occupies roughly
+  2.4 GB, while Reduce2 must not silently lack restraints or disclose private
+  structural information to obtain them.
+- Implemented boundary: ship a small standard-protein restraint core; identify
+  unusual retained components; disclose exact pinned component requests; require
+  explicit approval; cache validated responses with checksums and provenance.
+- Acceptance evidence: the 2R8N filtered receptor completes Reduce2 with the
+  minimal core and preserves all 754 heavy atoms; tests verify refusal without
+  approval and exact disclosure/audit behavior.
+- Remaining acceptance: GUI decision/continuation for a real unusual component,
+  Windows/Linux/macOS cache paths, and a versioned complete offline bundle.

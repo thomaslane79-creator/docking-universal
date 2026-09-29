@@ -50,6 +50,19 @@ class PreparationServiceTests(unittest.TestCase):
         self.assertEqual(plan.request.environment["MEEKO_ALLOW_BAD_RES"], "0")
         self.assertEqual(plan.request.environment["DOCKING_UNIVERSAL_REMOVAL_PROMPT"], "0")
 
+    def test_approved_component_library_is_passed_to_reduce2(self):
+        library = self.root / "managed geostd"
+        library.mkdir()
+        plan = build_receptor_preparation_plan(
+            self.executable,
+            ReceptorPreparationOptions(
+                self.input, self.root / "output", "pockets", geostd_library=library,
+            ),
+        )
+        self.assertEqual(
+            plan.request.environment["DOCKING_UNIVERSAL_GEOSTD"], str(library.resolve()),
+        )
+
     def test_mmcif_source_is_retained_while_engine_receives_derived_pdb(self):
         from tests.test_structure_input import MMCIF
 

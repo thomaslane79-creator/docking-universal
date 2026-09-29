@@ -2531,6 +2531,78 @@ if QtWidgets is not None:
             if path:
                 self.screen_output.setText(path)
 
+        def prepare_geostd_library(self, input_path: str, output_directory: str) -> str | None:
+            """Resolve standard restraints or obtain explicit consent for exact requests."""
+            from ..services.geostd_components import (
+                available_library, bundled_minimal_library, default_component_cache,
+                download_components, missing_components, network_disclosure,
+                retained_component_ids,
+            )
+
+            try:
+                components = retained_component_ids(Path(input_path))
+                available = available_library(components)
+            except Exception as exc:
+                QtWidgets.QMessageBox.critical(
+                    self, "Component review failed",
+                    f"The retained receptor components could not be reviewed safely: {exc}",
+                )
+                return None
+            if available is not None:
+                return str(available)
+            cache = default_component_cache()
+            reference = cache if cache.is_dir() else bundled_minimal_library()
+            requested = missing_components(reference, components)
+            disclosure = network_disclosure(requested)
+            if not requested:
+                return str(reference)
+            identifiers = ", ".join(requested)
+            dialog = QtWidgets.QMessageBox(self)
+            dialog.setIcon(QtWidgets.QMessageBox.Icon.Question)
+            dialog.setWindowTitle("Missing public chemical definitions")
+            dialog.setText(
+                "Reduce2 needs additional GeoStd restraints for: " + identifiers
+            )
+            dialog.setInformativeText(
+                "If approved, Docking Universal will request only the listed public component "
+                "identifiers from the pinned phenix-project/geostd repository on GitHub. "
+                "GitHub also receives ordinary connection metadata such as your IP address "
+                "and request time. Receptor coordinates, ligand files, docking boxes, poses, "
+                "scores, results, study names, and reports are not transmitted."
+            )
+            dialog.setDetailedText(json.dumps(disclosure, indent=2))
+            download = dialog.addButton(
+                "Download listed definitions", QtWidgets.QMessageBox.ButtonRole.AcceptRole,
+            )
+            cancel = dialog.addButton(
+                "Cancel preparation", QtWidgets.QMessageBox.ButtonRole.RejectRole,
+            )
+            dialog.setDefaultButton(cancel)
+            dialog.exec()
+            if dialog.clickedButton() is not download:
+                self.statusBar().showMessage(
+                    "Preparation cancelled; no component identifier or structure data was shared."
+                )
+                return None
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+            try:
+                record = download_components(requested, cache, approved=True)
+                provenance = Path(output_directory) / "inputs" / "geostd-component-provenance.json"
+                provenance.parent.mkdir(parents=True, exist_ok=True)
+                provenance.write_text(json.dumps(record, indent=2) + "\n")
+            except Exception as exc:
+                QtWidgets.QMessageBox.critical(
+                    self, "Component download failed",
+                    f"No receptor coordinates were sent. The public restraint download failed: {exc}",
+                )
+                return None
+            finally:
+                QtWidgets.QApplication.restoreOverrideCursor()
+            self.statusBar().showMessage(
+                f"Cached {len(requested)} approved GeoStd component definition(s) with provenance."
+            )
+            return str(cache)
+
         def start_preparation(self) -> None:
             if not self.host_controller.available:
                 return
@@ -2559,6 +2631,9 @@ if QtWidgets is not None:
                 return
             ligand_resname = self.study_setup_panel.ligand_value()
             ligand_identity = self.study_setup_panel.ligand_identity()
+            geostd_library = self.prepare_geostd_library(input_text, output_text)
+            if not geostd_library:
+                return
             if self.study_pathway.currentData() == "control":
                 if not all((ligand_resname, ligand_identity.get("chain_id"),
                             ligand_identity.get("residue_number"))):
@@ -2576,6 +2651,7 @@ if QtWidgets is not None:
                     "ligand_insertion_code": ligand_identity.get("insertion_code", ""),
                     "engine": self.control_engine.currentData(),
                     "control_tier": self.control_tier.currentData(),
+                    "geostd_library": geostd_library,
                 }
                 try:
                     self.host_controller.start_control_validation(control_payload, self.state.revision)
@@ -2604,6 +2680,7 @@ if QtWidgets is not None:
                 "center_mode": "deepest",
                 "centroid_mode": 1,
                 "pocket_engine": self.pocket_engine.currentData(),
+                "geostd_library": geostd_library,
                 "pdb_pocket_evidence": (
                     "related-structures" if self.study_setup_panel.pdb_evidence.isChecked() else "off"
                 ),

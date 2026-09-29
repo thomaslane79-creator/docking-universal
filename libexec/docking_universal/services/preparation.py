@@ -40,6 +40,7 @@ class ReceptorPreparationOptions:
     protonation: str = "auto"
     receptor_ph: float = 7.4
     reduce2: str = "auto"
+    geostd_library: Path | None = None
 
     def validate(self) -> None:
         if (
@@ -73,6 +74,8 @@ class ReceptorPreparationOptions:
             raise ValueError("Receptor pH must be between 0 and 14")
         if self.reduce2 not in {"auto", "required", "off"}:
             raise ValueError("Reduce2 policy must be auto, required, or off")
+        if self.geostd_library is not None and not self.geostd_library.is_dir():
+            raise FileNotFoundError(f"GeoStd component library is unavailable: {self.geostd_library}")
 
 
 @dataclass(frozen=True)
@@ -136,6 +139,8 @@ def build_receptor_preparation_plan(
         "MEEKO_ALLOW_BAD_RES": "0",
         "MEEKO_SET_TEMPLATE": options.meeko_templates,
     })
+    if options.geostd_library is not None:
+        environment["DOCKING_UNIVERSAL_GEOSTD"] = str(options.geostd_library.resolve())
     if options.ligand_resname:
         environment["DOCKING_UNIVERSAL_LIGAND_RESNAME"] = options.ligand_resname
     else:

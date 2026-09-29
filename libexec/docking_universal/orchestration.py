@@ -7,6 +7,7 @@ import time
 import sys
 import json
 import shutil
+import os
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,7 @@ from .services.preparation_interventions import (
 )
 from .services.structure_input import normalize_structure_input
 from .services.bound_ligands import detect_bound_ligands
+from .services.geostd_components import available_library, retained_component_ids
 
 
 class ProtocolWorkflowRunner:
@@ -65,7 +67,8 @@ class ProtocolWorkflowRunner:
         if state.jobs or state.workflow_data.get("study_setup"):
             raise ActiveStageError("A known-ligand control requires a new study")
         allowed = {"input_structure", "output_directory", "ligand_resname", "ligand_chain_id",
-                   "ligand_residue_number", "ligand_insertion_code", "engine", "control_tier"}
+                   "ligand_residue_number", "ligand_insertion_code", "engine", "control_tier",
+                   "geostd_library"}
         unknown = set(payload) - allowed
         if unknown:
             raise ValueError(f"Unknown control options: {', '.join(sorted(unknown))}")
@@ -77,6 +80,15 @@ class ProtocolWorkflowRunner:
             raise FileNotFoundError("A deposited PDB or mmCIF complex is required for control redocking")
         if output.exists():
             raise ValueError("Control output directory must not already exist")
+        if payload.get("geostd_library"):
+            geostd_library = Path(str(payload["geostd_library"])).resolve()
+        else:
+            geostd_library = available_library(retained_component_ids(source))
+        if geostd_library is None or not geostd_library.is_dir():
+            raise FileNotFoundError(
+                "Required GeoStd components are unavailable locally; approve the exact "
+                "component request in the GUI or install the offline library"
+            )
         if payload.get("ligand_insertion_code"):
             raise ValueError("The control runner cannot identify insertion-coded ligands exactly")
         ligand_id = ":".join(str(payload.get(key) or "").strip() for key in (
@@ -114,6 +126,7 @@ class ProtocolWorkflowRunner:
             "ligand_chain_id": payload["ligand_chain_id"],
             "ligand_residue_number": payload["ligand_residue_number"],
             "engine": engine, "control_tier": tier,
+            "geostd_library": str(geostd_library),
         }
         retained, _ = self.controller.store.update(
             study_id, lambda current: current.workflow_data.setdefault("study_setup", setup),
@@ -125,6 +138,7 @@ class ProtocolWorkflowRunner:
                      "--out", str(output), "--engine", engine, "--control-tier", tier,
                      "--non-interactive"),
             cwd=output.parent,
+            environment={**os.environ, "DOCKING_UNIVERSAL_GEOSTD": str(geostd_library)},
             log_directory=output.parent / f".{output.name}.docking-universal-application-logs",
             log_name="known-ligand-control", check=False,
         )
@@ -238,6 +252,7 @@ class ProtocolWorkflowRunner:
             "feedback_level", "cavity_mode", "max_pockets", "center_mode",
             "centroid_mode", "pdbfixer", "preparation_backend", "pocket_engine",
             "meeko_templates",
+            "geostd_library",
             "pdb_pocket_evidence",
         }
         unknown = set(payload) - allowed
@@ -248,6 +263,8 @@ class ProtocolWorkflowRunner:
             if name not in values:
                 raise ValueError(f"Preparation option is required: {name}")
             values[name] = Path(values[name])
+        if values.get("geostd_library"):
+            values["geostd_library"] = Path(values["geostd_library"])
         evidence_mode = values.pop("pdb_pocket_evidence", "related-structures")
         if evidence_mode not in {"related-structures", "off"}:
             raise ValueError("PDB pocket evidence must be related-structures or off")
@@ -277,6 +294,7 @@ class ProtocolWorkflowRunner:
             "preparation_backend": options.preparation_backend,
             "pocket_engine": options.pocket_engine,
             "meeko_templates": options.meeko_templates,
+            "geostd_library": str(options.geostd_library.resolve()) if options.geostd_library else None,
             "pdb_pocket_evidence": evidence_mode,
             "accepted_at_revision": state.revision,
         }
@@ -377,6 +395,8 @@ class ProtocolWorkflowRunner:
             preparation_backend=str(setup.get("preparation_backend") or "auto"),
             pocket_engine=str(setup.get("pocket_engine") or "auto"),
             meeko_templates=assignments,
+            geostd_library=(Path(setup["geostd_library"])
+                            if setup.get("geostd_library") else None),
         )
         plan = build_receptor_preparation_plan(self.preparation_executable, options)
         attempts_root = working / ".docking-universal-preparation-attempts" / plan.output_root.name
@@ -499,6 +519,8 @@ class ProtocolWorkflowRunner:
                 preparation_backend=str(setup.get("preparation_backend") or "auto"),
                 pocket_engine=str(setup.get("pocket_engine") or "auto"),
                 meeko_templates=assignment,
+                geostd_library=(Path(setup["geostd_library"])
+                                if setup.get("geostd_library") else None),
             )
 
         original = build_receptor_preparation_plan(

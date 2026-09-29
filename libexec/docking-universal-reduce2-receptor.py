@@ -12,6 +12,14 @@ import tempfile
 from collections import Counter
 from pathlib import Path
 
+try:
+    from docking_universal.services.geostd_components import (
+        GEOSTD_REVISION, bundled_minimal_library,
+    )
+except ImportError:  # installed/script diagnostics remain usable without package import
+    GEOSTD_REVISION = ""
+    bundled_minimal_library = None
+
 
 def atom_key(line: str):
     return (line[21:22].strip(), line[22:26].strip(), line[26:27].strip(),
@@ -42,19 +50,48 @@ def locate_reduce2() -> Path | None:
 def locate_geostd() -> Path | None:
     explicit = os.environ.get("DOCKING_UNIVERSAL_GEOSTD") or os.environ.get("MMTBX_CCP4_MONOMER_LIB")
     candidates = [explicit] if explicit else []
+    here = Path(__file__).resolve()
     # Source-tree installs keep the open-source monomer library beside the
     # python-conversion checkout. This avoids requiring a shell export for the
     # normal repository layout while still allowing packaged installations to
     # provide an explicit path.
-    here = Path(__file__).resolve()
     candidates.append(str(here.parents[2] / "third_party" / "geostd"))
     prefix = os.environ.get("CONDA_PREFIX")
     if prefix:
         candidates.extend([str(Path(prefix) / "share" / "geostd"), str(Path(prefix) / "geostd")])
+    # The installed application carries a small standard-protein restraint
+    # core. Additional public components can be placed in a writable copy of
+    # this layout after the GUI's explicit network disclosure and approval.
+    candidates.append(str(here.parent / "docking_universal" / "data" / "geostd"))
     for candidate in candidates:
         if candidate and Path(candidate).is_dir():
             return Path(candidate)
     return None
+
+
+def geostd_provenance(path: Path) -> dict:
+    manifest = path / "docking-universal-component-provenance.json"
+    if manifest.is_file():
+        try:
+            record = json.loads(manifest.read_text())
+            disclosure = record.get("disclosure") or {}
+            return {
+                "component_library_mode": "minimal_core_with_approved_components",
+                "geostd_revision": disclosure.get("revision"),
+                "component_provenance": str(manifest.resolve()),
+            }
+        except (OSError, ValueError):
+            pass
+    if bundled_minimal_library is not None:
+        try:
+            if path.resolve() == bundled_minimal_library().resolve():
+                return {
+                    "component_library_mode": "bundled_minimal_core",
+                    "geostd_revision": GEOSTD_REVISION,
+                }
+        except OSError:
+            pass
+    return {"component_library_mode": "external_library", "geostd_revision": None}
 
 
 def main(argv=None) -> int:
@@ -94,7 +131,20 @@ def main(argv=None) -> int:
         args.log.write_text(completed.stdout or "")
         candidates = sorted(Path(directory).glob(f"{work.stem}*H.pdb"))
         if completed.returncode != 0 or not candidates:
-            args.audit_json.write_text(json.dumps({"tool": "CCTBX reduce2", "status": "failed", "command": " ".join(cmd)}, indent=2) + "\n")
+            missing = []
+            match = __import__("re").search(
+                r"Restraints were not found for the following residues:\s*([^\n]+)",
+                completed.stdout or "",
+            )
+            if match:
+                missing = sorted(set(match.group(1).split()))
+            status = "component_definitions_required" if missing else "failed"
+            args.audit_json.write_text(json.dumps({
+                "tool": "CCTBX reduce2", "status": status,
+                "command": " ".join(cmd), "component_library": str(geostd.resolve()),
+                "missing_components": missing,
+                **geostd_provenance(geostd),
+            }, indent=2) + "\n")
             return completed.returncode or 1
         reduced = candidates[0]
         after = Counter(atoms(reduced))
@@ -102,6 +152,8 @@ def main(argv=None) -> int:
         record = {
             "tool": "CCTBX reduce2", "status": "incompatible" if missing else "compatible",
             "command": " ".join(cmd), "input": str(args.input_pdb.resolve()),
+            "component_library": str(geostd.resolve()),
+            **geostd_provenance(geostd),
             "output": str(args.output_pdb.resolve()), "input_heavy_atom_count": sum(before.values()),
             "output_heavy_atom_count": sum(after.values()), "missing_input_heavy_atoms": [list(x) for x in missing],
             "added_hydrogen_count": sum(1 for line in reduced.read_text(errors="replace").splitlines() if line.startswith(("ATOM  ", "HETATM")) and (line[76:78].strip().upper() == "H" or line[12:16].strip().upper().startswith("H"))),

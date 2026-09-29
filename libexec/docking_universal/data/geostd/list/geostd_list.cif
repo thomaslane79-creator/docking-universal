@@ -1,0 +1,1492 @@
+
+# Blocks to supercede mon_lib_list
+# ALPHA2-6 adjust naively (not really tested)
+# NH3, 3*END adjust by J.J.Headd with neutron distances
+# Other glycosidic links adjust from Monomer Library with removal of torsions
+# moved ACID-ASP, ACID-GLU and adjust neutron_value
+# moved ACE_C-N
+data_comp_synonym_atom_list
+loop_
+_chem_comp_synonym_atom.comp_id
+_chem_comp_synonym_atom.comp_alternative_id
+_chem_comp_synonym_atom.atom_id
+_chem_comp_synonym_atom.atom_alternative_id
+ NDG  .  O1   O1L
+ NDG  .  O5   O
+ NDG  .  H61  H6C1
+ NDG  .  H62  H6C2
+ NDG  .  H81  H8C1
+ NDG  .  H82  H8C2
+ NDG  .  H83  H8C3
+ NDG  .  HN2  HA
+ NDG  .  HO1  H1L
+ NDG  .  HO3  HB
+ NDG  .  HO4  HC
+ NDG  .  HO6  H6
+ TYR  .  HB3  HB1
+# new hydrogen names in HEM
+ HEM  .  HMA1 HMA
+ HEM  .  HMA2 HMAA
+ HEM  .  HMA3 HMAB
+ HEM  .  HMB1 HMB
+ HEM  .  HMB2 HMBA
+ HEM  .  HMB3 HMBB
+ HEM  .  HMC1 HMC
+ HEM  .  HMC2 HMCA
+ HEM  .  HMC3 HMCB
+ HEM  .  HMD1 HMD
+ HEM  .  HMD2 HMDA
+ HEM  .  HMD3 HMDB
+ HEM  .  HAA1 HAA
+ HEM  .  HAA2 HAAA
+ HEM  .  HBA1 HBA
+ HEM  .  HBA2 HBAA
+ HEM  .  HAD1 HAD
+ HEM  .  HAD2 HADA
+ HEM  .  HBD1 HBD
+ HEM  .  HBD2 HBDA
+ HEM  .  HBB1 HBB
+ HEM  .  HBB2 HBBA
+ HEM  .  HBC1 HBC
+ HEM  .  HBC2 HBCA
+#
+data_link_NAG-ASN
+#
+loop_
+_chem_link_bond.link_id
+_chem_link_bond.atom_1_comp_id
+_chem_link_bond.atom_id_1
+_chem_link_bond.atom_2_comp_id
+_chem_link_bond.atom_id_2
+_chem_link_bond.type
+_chem_link_bond.value_dist
+_chem_link_bond.value_dist_esd
+ NAG-ASN  1 C1      2 ND2       single      1.439     .020
+loop_
+_chem_link_angle.link_id
+_chem_link_angle.atom_1_comp_id
+_chem_link_angle.atom_id_1
+_chem_link_angle.atom_2_comp_id
+_chem_link_angle.atom_id_2
+_chem_link_angle.atom_3_comp_id
+_chem_link_angle.atom_id_3
+_chem_link_angle.value_angle
+_chem_link_angle.value_angle_esd
+ NAG-ASN  1 C1      2 ND2     2 CG      121.000    3.000
+ NAG-ASN  1 C1      2 ND2     2 HD21    119.000    3.000
+ NAG-ASN  1 O5      1 C1      2 ND2     112.300    3.000
+ NAG-ASN  1 C2      1 C1      2 ND2     112.300    3.000
+loop_
+_chem_link_plane.link_id
+_chem_link_plane.plane_id
+_chem_link_plane.atom_comp_id
+_chem_link_plane.atom_id
+_chem_link_plane.dist_esd
+ NAG-ASN    plane1    1 C1         .020
+ NAG-ASN    plane1    2 ND2        .020
+ NAG-ASN    plane1    2 CG         .020
+ NAG-ASN    plane1    2 OD1        .020
+ NAG-ASN    plane1    2 CB         .020
+ NAG-ASN    plane1    2 HD21       .020
+loop_
+_chem_link_chir.link_id
+_chem_link_chir.atom_centre_comp_id
+_chem_link_chir.atom_id_centre
+_chem_link_chir.atom_1_comp_id
+_chem_link_chir.atom_id_1
+_chem_link_chir.atom_2_comp_id
+_chem_link_chir.atom_id_2
+_chem_link_chir.atom_3_comp_id
+_chem_link_chir.atom_id_3
+_chem_link_chir.volume_sign
+ NAG-ASN    1 C1      2 ND2      1 O5      1 C2      positiv
+#
+data_link_list
+loop_
+_chem_link.id
+_chem_link.comp_id_1
+_chem_link.mod_id_1
+_chem_link.group_comp_1
+_chem_link.comp_id_2
+_chem_link.mod_id_2
+_chem_link.group_comp_2
+_chem_link.name
+ ALPHA2-6         .    DEL-HO6  pyranose  .    DEL-O2  pyranose  glycosidic_bond_alpha2-6
+ PRE-BETA-TRANS   .    .        peptide   BAL  .       .         CA-C-N-CB-CA
+ POST-BETA-TRANS  BAL  .        .         .    .       peptide   CB-CA-C-N-CA
+# ASP_CG-ANY_N     ASP  .        .         .    .       peptide   test
+
+data_link_ALPHA2-6
+loop_
+_chem_link_bond.link_id
+_chem_link_bond.atom_1_comp_id
+_chem_link_bond.atom_id_1
+_chem_link_bond.atom_2_comp_id
+_chem_link_bond.atom_id_2
+_chem_link_bond.type
+_chem_link_bond.value_dist
+_chem_link_bond.value_dist_esd
+ ALPHA2-6  1  O6  2  C2  single  1.439  0.020
+
+loop_
+_chem_link_angle.link_id
+_chem_link_angle.atom_1_comp_id
+_chem_link_angle.atom_id_1
+_chem_link_angle.atom_2_comp_id
+_chem_link_angle.atom_id_2
+_chem_link_angle.atom_3_comp_id
+_chem_link_angle.atom_id_3
+_chem_link_angle.value_angle
+_chem_link_angle.value_angle_esd
+ ALPHA2-6  1  C6  1  O6  2  C2  108.700  3.000
+ ALPHA2-6  1  O6  2  C2  2  C1  112.300  3.000
+ ALPHA2-6  1  O6  2  C2  2  C3  109.470  3.000
+ ALPHA2-6  1  O6  2  C2  2  H1  109.470  3.000
+
+data_mod_5*END
+loop_
+_chem_mod_atom.mod_id
+_chem_mod_atom.function
+_chem_mod_atom.atom_id
+_chem_mod_atom.new_atom_id
+_chem_mod_atom.new_type_symbol
+_chem_mod_atom.new_type_energy
+_chem_mod_atom.new_partial_charge
+ 5*END  delete  P    .     .  .      0.000
+ 5*END  delete  OP1  .     .  .      0.000
+ 5*END  delete  OP2  .     .  .      0.000
+ 5*END  change  O5'  O5'   .  OH1   -0.212
+ 5*END  add     .    HO5'  H  HOH1   0.142
+
+loop_
+_chem_mod_tree.mod_id
+_chem_mod_tree.function
+_chem_mod_tree.atom_id
+_chem_mod_tree.atom_back
+_chem_mod_tree.back_type
+_chem_mod_tree.atom_forward
+_chem_mod_tree.connect_type
+ 5*END  delete  P     n/a  .  .    .
+ 5*END  delete  OP1   n/a  .  .    .
+ 5*END  delete  OP2   n/a  .  .    .
+ 5*END  change  O5'   n/a  .  C5'  START
+ 5*END  add     HO5'  O5'  .  .    .
+
+loop_
+_chem_mod_bond.mod_id
+_chem_mod_bond.function
+_chem_mod_bond.atom_id_1
+_chem_mod_bond.atom_id_2
+_chem_mod_bond.new_type
+_chem_mod_bond.new_value_dist
+_chem_mod_bond.new_value_dist_esd
+_chem_mod_bond.new_value_dist_neutron
+ 5*END  add  O5'  HO5'  single  0.840  0.020 1.020
+
+loop_
+_chem_mod_angle.mod_id
+_chem_mod_angle.function
+_chem_mod_angle.atom_id_1
+_chem_mod_angle.atom_id_2
+_chem_mod_angle.atom_id_3
+_chem_mod_angle.new_value_angle
+_chem_mod_angle.new_value_angle_esd
+ 5*END  add  C5'  O5'  HO5'  120.000  3.000
+
+data_mod_3*END
+loop_
+_chem_mod_atom.mod_id
+_chem_mod_atom.function
+_chem_mod_atom.atom_id
+_chem_mod_atom.new_atom_id
+_chem_mod_atom.new_type_symbol
+_chem_mod_atom.new_type_energy
+_chem_mod_atom.new_partial_charge
+ 3*END  change  O3'  O3'   .  OH1   -0.257
+ 3*END  add     .    HO3'  H  HOH1   0.156
+
+loop_
+_chem_mod_tree.mod_id
+_chem_mod_tree.function
+_chem_mod_tree.atom_id
+_chem_mod_tree.atom_back
+_chem_mod_tree.back_type
+_chem_mod_tree.atom_forward
+_chem_mod_tree.connect_type
+ 3*END  change  O3'   C3'  .  .  END
+ 3*END  add     HO3'  O3'  .  .  .
+
+loop_
+_chem_mod_bond.mod_id
+_chem_mod_bond.function
+_chem_mod_bond.atom_id_1
+_chem_mod_bond.atom_id_2
+_chem_mod_bond.new_type
+_chem_mod_bond.new_value_dist
+_chem_mod_bond.new_value_dist_esd
+_chem_mod_bond.new_value_dist_neutron
+ 3*END  add  O3'  HO3'  single  0.840  0.020 1.020
+
+loop_
+_chem_mod_angle.mod_id
+_chem_mod_angle.function
+_chem_mod_angle.atom_id_1
+_chem_mod_angle.atom_id_2
+_chem_mod_angle.atom_id_3
+_chem_mod_angle.new_value_angle
+_chem_mod_angle.new_value_angle_esd
+ 3*END  add  C3'  O3'  HO3'  120.000  3.000
+
+loop_
+_chem_mod_tor.mod_id
+_chem_mod_tor.function
+_chem_mod_tor.id
+_chem_mod_tor.atom_id_1
+_chem_mod_tor.atom_id_2
+_chem_mod_tor.atom_id_3
+_chem_mod_tor.atom_id_4
+_chem_mod_tor.new_value_angle
+_chem_mod_tor.new_value_angle_esd
+_chem_mod_tor.new_period
+ 3*END  add  hh  C4'  C3'  O3'  HO3'  0.00  30.0  3
+
+data_link_ALPHA1-2
+loop_
+_chem_link_bond.link_id
+_chem_link_bond.atom_1_comp_id
+_chem_link_bond.atom_id_1
+_chem_link_bond.atom_2_comp_id
+_chem_link_bond.atom_id_2
+_chem_link_bond.type
+_chem_link_bond.value_dist
+_chem_link_bond.value_dist_esd
+ ALPHA1-2  1  O2  2  C1  single  1.439  0.020
+
+loop_
+_chem_link_angle.link_id
+_chem_link_angle.atom_1_comp_id
+_chem_link_angle.atom_id_1
+_chem_link_angle.atom_2_comp_id
+_chem_link_angle.atom_id_2
+_chem_link_angle.atom_3_comp_id
+_chem_link_angle.atom_id_3
+_chem_link_angle.value_angle
+_chem_link_angle.value_angle_esd
+ ALPHA1-2  1  C2  1  O2  2  C1  108.700  3.000
+ ALPHA1-2  1  O2  2  C1  2  O5  112.300  3.000
+ ALPHA1-2  1  O2  2  C1  2  C2  109.470  3.000
+ ALPHA1-2  1  O2  2  C1  2  H1  109.470  3.000
+
+loop_
+_chem_link_chir.link_id
+_chem_link_chir.atom_centre_comp_id
+_chem_link_chir.atom_id_centre
+_chem_link_chir.atom_1_comp_id
+_chem_link_chir.atom_id_1
+_chem_link_chir.atom_2_comp_id
+_chem_link_chir.atom_id_2
+_chem_link_chir.atom_3_comp_id
+_chem_link_chir.atom_id_3
+_chem_link_chir.volume_sign
+ ALPHA1-2  2  C1  1  O2  2  O5  2  C2  negativ
+
+data_link_ALPHA1-3
+loop_
+_chem_link_bond.link_id
+_chem_link_bond.atom_1_comp_id
+_chem_link_bond.atom_id_1
+_chem_link_bond.atom_2_comp_id
+_chem_link_bond.atom_id_2
+_chem_link_bond.type
+_chem_link_bond.value_dist
+_chem_link_bond.value_dist_esd
+ ALPHA1-3  1  O3  2  C1  single  1.439  0.020
+
+loop_
+_chem_link_angle.link_id
+_chem_link_angle.atom_1_comp_id
+_chem_link_angle.atom_id_1
+_chem_link_angle.atom_2_comp_id
+_chem_link_angle.atom_id_2
+_chem_link_angle.atom_3_comp_id
+_chem_link_angle.atom_id_3
+_chem_link_angle.value_angle
+_chem_link_angle.value_angle_esd
+ ALPHA1-3  1  C3  1  O3  2  C1  108.700  3.000
+ ALPHA1-3  1  O3  2  C1  2  O5  112.300  3.000
+ ALPHA1-3  1  O3  2  C1  2  C2  109.470  3.000
+ ALPHA1-3  1  O3  2  C1  2  H1  109.470  3.000
+
+loop_
+_chem_link_chir.link_id
+_chem_link_chir.atom_centre_comp_id
+_chem_link_chir.atom_id_centre
+_chem_link_chir.atom_1_comp_id
+_chem_link_chir.atom_id_1
+_chem_link_chir.atom_2_comp_id
+_chem_link_chir.atom_id_2
+_chem_link_chir.atom_3_comp_id
+_chem_link_chir.atom_id_3
+_chem_link_chir.volume_sign
+ ALPHA1-3  2  C1  1  O3  2  O5  2  C2  negativ
+
+data_link_ALPHA1-4
+loop_
+_chem_link_bond.link_id
+_chem_link_bond.atom_1_comp_id
+_chem_link_bond.atom_id_1
+_chem_link_bond.atom_2_comp_id
+_chem_link_bond.atom_id_2
+_chem_link_bond.type
+_chem_link_bond.value_dist
+_chem_link_bond.value_dist_esd
+ ALPHA1-4  1  O4  2  C1  single  1.439  0.020
+
+loop_
+_chem_link_angle.link_id
+_chem_link_angle.atom_1_comp_id
+_chem_link_angle.atom_id_1
+_chem_link_angle.atom_2_comp_id
+_chem_link_angle.atom_id_2
+_chem_link_angle.atom_3_comp_id
+_chem_link_angle.atom_id_3
+_chem_link_angle.value_angle
+_chem_link_angle.value_angle_esd
+ ALPHA1-4  1  C4  1  O4  2  C1  108.700  3.000
+ ALPHA1-4  1  O4  2  C1  2  O5  112.300  3.000
+ ALPHA1-4  1  O4  2  C1  2  C2  109.470  3.000
+ ALPHA1-4  1  O4  2  C1  2  H1  109.470  3.000
+
+loop_
+_chem_link_chir.link_id
+_chem_link_chir.atom_centre_comp_id
+_chem_link_chir.atom_id_centre
+_chem_link_chir.atom_1_comp_id
+_chem_link_chir.atom_id_1
+_chem_link_chir.atom_2_comp_id
+_chem_link_chir.atom_id_2
+_chem_link_chir.atom_3_comp_id
+_chem_link_chir.atom_id_3
+_chem_link_chir.volume_sign
+ ALPHA1-4  2  C1  1  O4  2  O5  2  C2  negativ
+
+data_link_ALPHA1-6
+loop_
+_chem_link_bond.link_id
+_chem_link_bond.atom_1_comp_id
+_chem_link_bond.atom_id_1
+_chem_link_bond.atom_2_comp_id
+_chem_link_bond.atom_id_2
+_chem_link_bond.type
+_chem_link_bond.value_dist
+_chem_link_bond.value_dist_esd
+ ALPHA1-6  1  O6  2  C1  single  1.439  0.020
+
+loop_
+_chem_link_angle.link_id
+_chem_link_angle.atom_1_comp_id
+_chem_link_angle.atom_id_1
+_chem_link_angle.atom_2_comp_id
+_chem_link_angle.atom_id_2
+_chem_link_angle.atom_3_comp_id
+_chem_link_angle.atom_id_3
+_chem_link_angle.value_angle
+_chem_link_angle.value_angle_esd
+ ALPHA1-6  1  C6  1  O6  2  C1  108.700  3.000
+ ALPHA1-6  1  O6  2  C1  2  O5  112.300  3.000
+ ALPHA1-6  1  O6  2  C1  2  C2  109.470  3.000
+ ALPHA1-6  1  O6  2  C1  2  H1  109.470  3.000
+
+loop_
+_chem_link_chir.link_id
+_chem_link_chir.atom_centre_comp_id
+_chem_link_chir.atom_id_centre
+_chem_link_chir.atom_1_comp_id
+_chem_link_chir.atom_id_1
+_chem_link_chir.atom_2_comp_id
+_chem_link_chir.atom_id_2
+_chem_link_chir.atom_3_comp_id
+_chem_link_chir.atom_id_3
+_chem_link_chir.volume_sign
+ ALPHA1-6  2  C1  1  O6  2  O5  2  C2  negativ
+
+data_link_ALPHA2-3
+loop_
+_chem_link_bond.link_id
+_chem_link_bond.atom_1_comp_id
+_chem_link_bond.atom_id_1
+_chem_link_bond.atom_2_comp_id
+_chem_link_bond.atom_id_2
+_chem_link_bond.type
+_chem_link_bond.value_dist
+_chem_link_bond.value_dist_esd
+ ALPHA2-3  2  C2  1 O3  single  1.439  0.020
+
+loop_
+_chem_link_angle.link_id
+_chem_link_angle.atom_1_comp_id
+_chem_link_angle.atom_id_1
+_chem_link_angle.atom_2_comp_id
+_chem_link_angle.atom_id_2
+_chem_link_angle.atom_3_comp_id
+_chem_link_angle.atom_id_3
+_chem_link_angle.value_angle
+_chem_link_angle.value_angle_esd
+ ALPHA2-3  2  C2  1  O3  1  C1  108.700  3.000
+ ALPHA2-3  2  C1  2  C2  1  O3  112.300  3.000
+
+data_link_BETA1-2
+loop_
+_chem_link_bond.link_id
+_chem_link_bond.atom_1_comp_id
+_chem_link_bond.atom_id_1
+_chem_link_bond.atom_2_comp_id
+_chem_link_bond.atom_id_2
+_chem_link_bond.type
+_chem_link_bond.value_dist
+_chem_link_bond.value_dist_esd
+ BETA1-2  1  O2  2  C1  single  1.439  0.020
+
+loop_
+_chem_link_angle.link_id
+_chem_link_angle.atom_1_comp_id
+_chem_link_angle.atom_id_1
+_chem_link_angle.atom_2_comp_id
+_chem_link_angle.atom_id_2
+_chem_link_angle.atom_3_comp_id
+_chem_link_angle.atom_id_3
+_chem_link_angle.value_angle
+_chem_link_angle.value_angle_esd
+ BETA1-2  1  C2  1  O2  2  C1  108.700  3.000
+ BETA1-2  1  O2  2  C1  2  O5  112.300  3.000
+ BETA1-2  1  O2  2  C1  2  C2  109.470  3.000
+ BETA1-2  1  O2  2  C1  2  H1  109.470  3.000
+
+loop_
+_chem_link_chir.link_id
+_chem_link_chir.atom_centre_comp_id
+_chem_link_chir.atom_id_centre
+_chem_link_chir.atom_1_comp_id
+_chem_link_chir.atom_id_1
+_chem_link_chir.atom_2_comp_id
+_chem_link_chir.atom_id_2
+_chem_link_chir.atom_3_comp_id
+_chem_link_chir.atom_id_3
+_chem_link_chir.volume_sign
+ BETA1-2  2  C1  1  O2  2  O5  2  C2  positiv
+
+data_link_BETA1-3
+loop_
+_chem_link_bond.link_id
+_chem_link_bond.atom_1_comp_id
+_chem_link_bond.atom_id_1
+_chem_link_bond.atom_2_comp_id
+_chem_link_bond.atom_id_2
+_chem_link_bond.type
+_chem_link_bond.value_dist
+_chem_link_bond.value_dist_esd
+ BETA1-3  1  O3  2  C1  single  1.439  0.020
+
+loop_
+_chem_link_angle.link_id
+_chem_link_angle.atom_1_comp_id
+_chem_link_angle.atom_id_1
+_chem_link_angle.atom_2_comp_id
+_chem_link_angle.atom_id_2
+_chem_link_angle.atom_3_comp_id
+_chem_link_angle.atom_id_3
+_chem_link_angle.value_angle
+_chem_link_angle.value_angle_esd
+ BETA1-3  1  C3  1  O3  2  C1  108.700  3.000
+ BETA1-3  1  O3  2  C1  2  O5  112.300  3.000
+ BETA1-3  1  O3  2  C1  2  C2  109.470  3.000
+ BETA1-3  1  O3  2  C1  2  H1  109.470  3.000
+
+loop_
+_chem_link_chir.link_id
+_chem_link_chir.atom_centre_comp_id
+_chem_link_chir.atom_id_centre
+_chem_link_chir.atom_1_comp_id
+_chem_link_chir.atom_id_1
+_chem_link_chir.atom_2_comp_id
+_chem_link_chir.atom_id_2
+_chem_link_chir.atom_3_comp_id
+_chem_link_chir.atom_id_3
+_chem_link_chir.volume_sign
+ BETA1-3  2  C1  1  O3  2  O5  2  C2  positiv
+
+data_link_BETA1-4
+loop_
+_chem_link_bond.link_id
+_chem_link_bond.atom_1_comp_id
+_chem_link_bond.atom_id_1
+_chem_link_bond.atom_2_comp_id
+_chem_link_bond.atom_id_2
+_chem_link_bond.type
+_chem_link_bond.value_dist
+_chem_link_bond.value_dist_esd
+ BETA1-4  1  O4  2  C1  single  1.439  0.020
+
+loop_
+_chem_link_angle.link_id
+_chem_link_angle.atom_1_comp_id
+_chem_link_angle.atom_id_1
+_chem_link_angle.atom_2_comp_id
+_chem_link_angle.atom_id_2
+_chem_link_angle.atom_3_comp_id
+_chem_link_angle.atom_id_3
+_chem_link_angle.value_angle
+_chem_link_angle.value_angle_esd
+ BETA1-4  1  C4  1  O4  2  C1  108.700  3.000
+ BETA1-4  1  O4  2  C1  2  O5  112.300  3.000
+ BETA1-4  1  O4  2  C1  2  C2  109.470  3.000
+ BETA1-4  1  O4  2  C1  2  H1  109.470  3.000
+
+loop_
+_chem_link_chir.link_id
+_chem_link_chir.atom_centre_comp_id
+_chem_link_chir.atom_id_centre
+_chem_link_chir.atom_1_comp_id
+_chem_link_chir.atom_id_1
+_chem_link_chir.atom_2_comp_id
+_chem_link_chir.atom_id_2
+_chem_link_chir.atom_3_comp_id
+_chem_link_chir.atom_id_3
+_chem_link_chir.volume_sign
+ BETA1-4  2  C1  1  O4  2  O5  2  C2  positiv
+
+data_link_BETA1-6
+loop_
+_chem_link_bond.link_id
+_chem_link_bond.atom_1_comp_id
+_chem_link_bond.atom_id_1
+_chem_link_bond.atom_2_comp_id
+_chem_link_bond.atom_id_2
+_chem_link_bond.type
+_chem_link_bond.value_dist
+_chem_link_bond.value_dist_esd
+ BETA1-6  1  O6  2  C1  single  1.439  0.020
+
+loop_
+_chem_link_angle.link_id
+_chem_link_angle.atom_1_comp_id
+_chem_link_angle.atom_id_1
+_chem_link_angle.atom_2_comp_id
+_chem_link_angle.atom_id_2
+_chem_link_angle.atom_3_comp_id
+_chem_link_angle.atom_id_3
+_chem_link_angle.value_angle
+_chem_link_angle.value_angle_esd
+ BETA1-6  1  C6  1  O6  2  C1  108.700  3.000
+ BETA1-6  1  O6  2  C1  2  O5  112.300  3.000
+ BETA1-6  1  O6  2  C1  2  C2  109.470  3.000
+ BETA1-6  1  O6  2  C1  2  H1  109.470  3.000
+
+loop_
+_chem_link_chir.link_id
+_chem_link_chir.atom_centre_comp_id
+_chem_link_chir.atom_id_centre
+_chem_link_chir.atom_1_comp_id
+_chem_link_chir.atom_id_1
+_chem_link_chir.atom_2_comp_id
+_chem_link_chir.atom_id_2
+_chem_link_chir.atom_3_comp_id
+_chem_link_chir.atom_id_3
+_chem_link_chir.volume_sign
+ BETA1-6  2  C1  1  O6  2  O5  2  C2  positiv
+
+data_link_BETA2-3
+loop_
+_chem_link_bond.link_id
+_chem_link_bond.atom_1_comp_id
+_chem_link_bond.atom_id_1
+_chem_link_bond.atom_2_comp_id
+_chem_link_bond.atom_id_2
+_chem_link_bond.type
+_chem_link_bond.value_dist
+_chem_link_bond.value_dist_esd
+ BETA2-3  1  C2  2  O3  single  1.439  0.020
+
+loop_
+_chem_link_angle.link_id
+_chem_link_angle.atom_1_comp_id
+_chem_link_angle.atom_id_1
+_chem_link_angle.atom_2_comp_id
+_chem_link_angle.atom_id_2
+_chem_link_angle.atom_3_comp_id
+_chem_link_angle.atom_id_3
+_chem_link_angle.value_angle
+_chem_link_angle.value_angle_esd
+ BETA2-3  1  C2  2  O3  2  C1  108.700  3.000
+ BETA2-3  1  C1  1  C2  2  O3  112.300  3.000
+#
+data_mod_COOH
+#
+loop_
+_chem_mod_atom.mod_id
+_chem_mod_atom.function
+_chem_mod_atom.atom_id
+_chem_mod_atom.new_atom_id
+_chem_mod_atom.new_type_symbol
+_chem_mod_atom.new_type_energy
+_chem_mod_atom.new_partial_charge
+ COOH      change   C      C      .    C       0.340
+ COOH      change   O      O      .    OC     -0.350
+ COOH      add      .      OXT    O    OC     -0.350
+ COOH      add      .      HXT    H    HOH1    0.250
+loop_
+_chem_mod_tree.mod_id
+_chem_mod_tree.function
+_chem_mod_tree.atom_id
+_chem_mod_tree.atom_back
+_chem_mod_tree.back_type
+_chem_mod_tree.atom_forward
+_chem_mod_tree.connect_type
+ COOH      add      OXT    C      .        .      END
+ COOH      change   C      n/a    .        OXT    .
+loop_
+_chem_mod_bond.mod_id
+_chem_mod_bond.function
+_chem_mod_bond.atom_id_1
+_chem_mod_bond.atom_id_2
+_chem_mod_bond.new_type
+_chem_mod_bond.new_value_dist
+_chem_mod_bond.new_value_dist_esd
+_chem_mod_bond.new_value_dist_neutron
+ COOH      change   C       O         double       1.185    0.020 1.185
+ COOH      add      C       OXT       single       1.330    0.020 1.330
+ COOH      add      OXT     HXT       single       0.948    0.020 1.020
+loop_
+_chem_mod_angle.mod_id
+_chem_mod_angle.function
+_chem_mod_angle.atom_id_1
+_chem_mod_angle.atom_id_2
+_chem_mod_angle.atom_id_3
+_chem_mod_angle.new_value_angle
+_chem_mod_angle.new_value_angle_esd
+ COOH      change   CA      C       O       118.600    3.000
+ COOH      add      CA      C       OXT     118.600    3.000
+ COOH      add      O       C       OXT     122.800    3.000
+ COOH      add      C       OXT     HXT     108.000    3.000
+loop_
+_chem_mod_tor.mod_id
+_chem_mod_tor.function
+_chem_mod_tor.id
+_chem_mod_tor.atom_id_1
+_chem_mod_tor.atom_id_2
+_chem_mod_tor.atom_id_3
+_chem_mod_tor.atom_id_4
+_chem_mod_tor.new_value_angle
+_chem_mod_tor.new_value_angle_esd
+_chem_mod_tor.new_period
+ COOH      add      psi      N      CA     C      OXT     160.00  30.0 2
+ COOH      add      psi      O      C      OXT    HXT       0.00  30.0 0
+loop_
+_chem_mod_plane_atom.mod_id
+_chem_mod_plane_atom.function
+_chem_mod_plane_atom.plane_id
+_chem_mod_plane_atom.atom_id
+_chem_mod_plane_atom.new_dist_esd
+ COOH        add       oxt      C         0.020
+ COOH        add       oxt      CA        0.020
+ COOH        add       oxt      O         0.020
+ COOH        add       oxt      OXT       0.020
+ COOH        add       oxt      HXT       0.020
+#
+data_mod_ACID-ASP
+#
+loop_
+_chem_mod_atom.mod_id
+_chem_mod_atom.function
+_chem_mod_atom.atom_id
+_chem_mod_atom.new_atom_id
+_chem_mod_atom.new_type_symbol
+_chem_mod_atom.new_type_energy
+_chem_mod_atom.new_partial_charge
+ ACID-ASP      change   CG     CG     .    C       0.340
+ ACID-ASP      change   OD1    OD1    .    OC     -0.350
+ ACID-ASP      change   OD2    OD2    .    OC     -0.350
+ ACID-ASP      add      .      HD2    H    HOH1    0.250
+loop_
+_chem_mod_bond.mod_id
+_chem_mod_bond.function
+_chem_mod_bond.atom_id_1
+_chem_mod_bond.atom_id_2
+_chem_mod_bond.new_type
+_chem_mod_bond.new_value_dist
+_chem_mod_bond.new_value_dist_esd
+_chem_mod_bond.new_value_dist_neutron
+ ACID-ASP      change   CG      OD1       double       1.185    0.020 1.185
+ ACID-ASP      change   CG      OD2       single       1.330    0.020 1.330
+ ACID-ASP      add      OD2     HD2       single       0.948    0.020 1.020
+loop_
+_chem_mod_angle.mod_id
+_chem_mod_angle.function
+_chem_mod_angle.atom_id_1
+_chem_mod_angle.atom_id_2
+_chem_mod_angle.atom_id_3
+_chem_mod_angle.new_value_angle
+_chem_mod_angle.new_value_angle_esd
+ ACID-ASP      add      CG      OD2     HD2     108.320    3.000
+loop_
+_chem_mod_tor.mod_id
+_chem_mod_tor.function
+_chem_mod_tor.id
+_chem_mod_tor.atom_id_1
+_chem_mod_tor.atom_id_2
+_chem_mod_tor.atom_id_3
+_chem_mod_tor.atom_id_4
+_chem_mod_tor.new_value_angle
+_chem_mod_tor.new_value_angle_esd
+_chem_mod_tor.new_period
+ ACID-ASP      add      psi      CB     CG     OD2    HD2     180.00  30.0 0
+loop_
+_chem_mod_plane_atom.mod_id
+_chem_mod_plane_atom.function
+_chem_mod_plane_atom.plane_id
+_chem_mod_plane_atom.atom_id
+_chem_mod_plane_atom.new_dist_esd
+ ACID-ASP        add       cooh      CB        0.020
+ ACID-ASP        add       cooh      CG        0.020
+ ACID-ASP        add       cooh      OD1       0.020
+ ACID-ASP        add       cooh      OD2       0.020
+ ACID-ASP        add       cooh      HD2       0.020
+#
+data_mod_ACID-GLU
+#
+loop_
+_chem_mod_atom.mod_id
+_chem_mod_atom.function
+_chem_mod_atom.atom_id
+_chem_mod_atom.new_atom_id
+_chem_mod_atom.new_type_symbol
+_chem_mod_atom.new_type_energy
+_chem_mod_atom.new_partial_charge
+ ACID-GLU      change   CD     CD     .    C       0.340
+ ACID-GLU      change   OE1    OE1    .    OC     -0.350
+ ACID-GLU      change   OE2    OE2    .    OC     -0.350
+ ACID-GLU      add      .      HE2    H    HOH1    0.250
+loop_
+_chem_mod_bond.mod_id
+_chem_mod_bond.function
+_chem_mod_bond.atom_id_1
+_chem_mod_bond.atom_id_2
+_chem_mod_bond.new_type
+_chem_mod_bond.new_value_dist
+_chem_mod_bond.new_value_dist_esd
+_chem_mod_bond.new_value_dist_neutron
+ ACID-GLU      change   CD      OE1       double       1.185    0.020 1.185
+ ACID-GLU      change   CD      OE2       single       1.330    0.020 1.330
+ ACID-GLU      add      OE2     HE2       single       0.948    0.020 1.020
+loop_
+_chem_mod_angle.mod_id
+_chem_mod_angle.function
+_chem_mod_angle.atom_id_1
+_chem_mod_angle.atom_id_2
+_chem_mod_angle.atom_id_3
+_chem_mod_angle.new_value_angle
+_chem_mod_angle.new_value_angle_esd
+ ACID-GLU      add      CD      OE2     HE2     108.320    3.000
+loop_
+_chem_mod_tor.mod_id
+_chem_mod_tor.function
+_chem_mod_tor.id
+_chem_mod_tor.atom_id_1
+_chem_mod_tor.atom_id_2
+_chem_mod_tor.atom_id_3
+_chem_mod_tor.atom_id_4
+_chem_mod_tor.new_value_angle
+_chem_mod_tor.new_value_angle_esd
+_chem_mod_tor.new_period
+ ACID-GLU      add      psi      CG     CD     OE2    HE2     180.00  30.0 0
+loop_
+_chem_mod_plane_atom.mod_id
+_chem_mod_plane_atom.function
+_chem_mod_plane_atom.plane_id
+_chem_mod_plane_atom.atom_id
+_chem_mod_plane_atom.new_dist_esd
+ ACID-GLU        add       cooh      CG        0.020
+ ACID-GLU        add       cooh      CD        0.020
+ ACID-GLU        add       cooh      OE1       0.020
+ ACID-GLU        add       cooh      OE2       0.020
+ ACID-GLU        add       cooh      HE2       0.020
+
+#
+data_link_ACE_C-N
+#
+loop_
+_chem_link_bond.link_id
+_chem_link_bond.atom_1_comp_id
+_chem_link_bond.atom_id_1
+_chem_link_bond.atom_2_comp_id
+_chem_link_bond.atom_id_2
+_chem_link_bond.type
+_chem_link_bond.value_dist
+_chem_link_bond.value_dist_esd
+ ACE_C-N  1 C       2 N         single       1.329    0.020
+loop_
+_chem_link_angle.link_id
+_chem_link_angle.atom_1_comp_id
+_chem_link_angle.atom_id_1
+_chem_link_angle.atom_2_comp_id
+_chem_link_angle.atom_id_2
+_chem_link_angle.atom_3_comp_id
+_chem_link_angle.atom_id_3
+_chem_link_angle.value_angle
+_chem_link_angle.value_angle_esd
+ ACE_C-N  1 C       2 N       2 CA      121.700    3.000
+ ACE_C-N  1 O       1 C       2 N       123.000    3.000
+ ACE_C-N  1 CH3     1 C       2 N       116.200    3.000
+ ACE_C-N  1 C       2 N       2 H       124.300    3.000
+loop_
+_chem_link_tor.link_id
+_chem_link_tor.id
+_chem_link_tor.atom_1_comp_id
+_chem_link_tor.atom_id_1
+_chem_link_tor.atom_2_comp_id
+_chem_link_tor.atom_id_2
+_chem_link_tor.atom_3_comp_id
+_chem_link_tor.atom_id_3
+_chem_link_tor.atom_4_comp_id
+_chem_link_tor.atom_id_4
+_chem_link_tor.value_angle
+_chem_link_tor.value_angle_esd
+_chem_link_tor.period
+ ACE_C-N  omega    1 CH3    1 C      2 N      2 CA      180.00   5.0 1
+ ACE_C-N  phi      1 C      2 N      2 CA     2 C        60.00  20.0 3
+loop_
+_chem_link_plane.link_id
+_chem_link_plane.plane_id
+_chem_link_plane.atom_comp_id
+_chem_link_plane.atom_id
+_chem_link_plane.dist_esd
+ ACE_C-N    plane1    1 CH3        .020
+ ACE_C-N    plane1    1 C          .020
+ ACE_C-N    plane1    1 O          .020
+ ACE_C-N    plane1    2 N          .020
+ ACE_C-N    plane1    2 CA         .020
+ ACE_C-N    plane1    2 H          .020
+#
+data_link_SS
+#
+loop_
+_chem_link_bond.link_id
+_chem_link_bond.atom_1_comp_id
+_chem_link_bond.atom_id_1
+_chem_link_bond.atom_2_comp_id
+_chem_link_bond.atom_id_2
+_chem_link_bond.type
+_chem_link_bond.value_dist
+_chem_link_bond.value_dist_esd
+ SS       1 SG      2 SG        single      2.031    0.020
+loop_
+_chem_link_angle.link_id
+_chem_link_angle.atom_1_comp_id
+_chem_link_angle.atom_id_1
+_chem_link_angle.atom_2_comp_id
+_chem_link_angle.atom_id_2
+_chem_link_angle.atom_3_comp_id
+_chem_link_angle.atom_id_3
+_chem_link_angle.value_angle
+_chem_link_angle.value_angle_esd
+ SS       1 CB      1 SG      2 SG      104.200    2.100
+ SS       1 SG      2 SG      2 CB      104.200    2.100
+loop_
+_chem_link_tor.link_id
+_chem_link_tor.id
+_chem_link_tor.atom_1_comp_id
+_chem_link_tor.atom_id_1
+_chem_link_tor.atom_2_comp_id
+_chem_link_tor.atom_id_2
+_chem_link_tor.atom_3_comp_id
+_chem_link_tor.atom_id_3
+_chem_link_tor.atom_4_comp_id
+_chem_link_tor.atom_id_4
+_chem_link_tor.value_angle
+_chem_link_tor.alt_value_angle
+_chem_link_tor.value_angle_esd
+_chem_link_tor.period
+ SS       ss       1 CB     1 SG  2 SG  2 CB   93.0  -86.0        10.0 1
+ SS       chi2_1   1 CA     1 CB  1 SG  2 SG   79.0  183.0,-73.0  20.0 1
+ SS       chi2_2   1 SG     2 SG  2 CB  2 CA  -79.0 -183.0,73.0   20.0 1
+#
+data_link_SSRAD
+#
+loop_
+_chem_link_bond.link_id
+_chem_link_bond.atom_1_comp_id
+_chem_link_bond.atom_id_1
+_chem_link_bond.atom_2_comp_id
+_chem_link_bond.atom_id_2
+_chem_link_bond.type
+_chem_link_bond.value_dist
+_chem_link_bond.value_dist_esd
+ SSRAD       1 SG      2 SG        single      2.85    0.020
+ loop_
+_chem_link_angle.link_id
+_chem_link_angle.atom_1_comp_id
+_chem_link_angle.atom_id_1
+_chem_link_angle.atom_2_comp_id
+_chem_link_angle.atom_id_2
+_chem_link_angle.atom_3_comp_id
+_chem_link_angle.atom_id_3
+_chem_link_angle.value_angle
+_chem_link_angle.value_angle_esd
+ SSRAD       1 CB      1 SG      2 SG      104.200    2.100
+ SSRAD       1 SG      2 SG      2 CB      104.200    2.100
+#
+data_mod_NH3
+#
+loop_
+_chem_mod_atom.mod_id
+_chem_mod_atom.function
+_chem_mod_atom.atom_id
+_chem_mod_atom.new_atom_id
+_chem_mod_atom.new_type_symbol
+_chem_mod_atom.new_type_energy
+_chem_mod_atom.new_partial_charge
+ NH3      change   N      N      .    NT3    -0.200
+ NH3      add      .      H1     H    HNT3    0.100
+ NH3      add      .      H2     H    HNT3    0.100
+ NH3      add      .      H3     H    HNT3    0.100
+ NH3      delete   H      .      .    .        .
+loop_
+_chem_mod_tree.mod_id
+_chem_mod_tree.function
+_chem_mod_tree.atom_id
+_chem_mod_tree.atom_back
+_chem_mod_tree.back_type
+_chem_mod_tree.atom_forward
+_chem_mod_tree.connect_type
+ NH3      change   N      n/a    .        CA     START
+ NH3      add      H1     N      .        .      .
+ NH3      add      H2     N      .        .      .
+ NH3      add      H3     N      .        .      .
+loop_
+_chem_mod_bond.mod_id
+_chem_mod_bond.function
+_chem_mod_bond.atom_id_1
+_chem_mod_bond.atom_id_2
+_chem_mod_bond.new_type
+_chem_mod_bond.new_value_dist
+_chem_mod_bond.new_value_dist_esd
+_chem_mod_bond.new_value_dist_neutron
+ NH3      add      N       H1        single       0.890    0.020 1.040
+ NH3      add      N       H2        single       0.890    0.020 1.040
+ NH3      add      N       H3        single       0.890    0.020 1.040
+ NH3      change   N       CA        single       1.491    0.021 1.491
+loop_
+_chem_mod_angle.mod_id
+_chem_mod_angle.function
+_chem_mod_angle.atom_id_1
+_chem_mod_angle.atom_id_2
+_chem_mod_angle.atom_id_3
+_chem_mod_angle.new_value_angle
+_chem_mod_angle.new_value_angle_esd
+ NH3      add      H2      N       H3      109.470    3.000
+ NH3      add      H3      N       CA      109.470    3.000
+ NH3      add      H2      N       CA      109.470    3.000
+ NH3      add      H1      N       H2      109.470    3.000
+ NH3      add      H1      N       H3      109.470    3.000
+ NH3      add      H1      N       CA      109.470    3.000
+#
+data_mod_NH1
+#
+loop_
+_chem_mod_atom.mod_id
+_chem_mod_atom.function
+_chem_mod_atom.atom_id
+_chem_mod_atom.new_atom_id
+_chem_mod_atom.new_type_symbol
+_chem_mod_atom.new_type_energy
+_chem_mod_atom.new_partial_charge
+ NH1      change   N      N      .    NH1     0.000
+ NH1      add      .      HN     H    HNH1    0.000
+ loop_
+_chem_mod_tree.mod_id
+_chem_mod_tree.function
+_chem_mod_tree.atom_id
+_chem_mod_tree.atom_back
+_chem_mod_tree.back_type
+_chem_mod_tree.atom_forward
+_chem_mod_tree.connect_type
+ NH1      change   N      n/a    .        CA     START
+ NH1      add      HN     N      .        .      .
+  loop_
+_chem_mod_bond.mod_id
+_chem_mod_bond.function
+_chem_mod_bond.atom_id_1
+_chem_mod_bond.atom_id_2
+_chem_mod_bond.new_type
+_chem_mod_bond.new_value_dist
+_chem_mod_bond.new_value_dist_esd
+_chem_mod_bond.new_value_dist_neutron
+ NH1      add      N       HN        single       0.960    0.020 1.040
+  loop_
+_chem_mod_angle.mod_id
+_chem_mod_angle.function
+_chem_mod_angle.atom_id_1
+_chem_mod_angle.atom_id_2
+_chem_mod_angle.atom_id_3
+_chem_mod_angle.new_value_angle
+_chem_mod_angle.new_value_angle_esd
+ NH1      add      HN      N       CA      120.000    3.000
+ NH1      add      HN      N       CD      120.000    3.000
+#
+data_mod_NH1NOTPRO # same as NH1 but without the HN-N-CD angle
+#
+loop_
+_chem_mod_atom.mod_id
+_chem_mod_atom.function
+_chem_mod_atom.atom_id
+_chem_mod_atom.new_atom_id
+_chem_mod_atom.new_type_symbol
+_chem_mod_atom.new_type_energy
+_chem_mod_atom.new_partial_charge
+ NH1NOTPRO      change   N      N      .    NH1     0.000
+ NH1NOTPRO      add      .      HN     H    HNH1    0.000
+ loop_
+_chem_mod_tree.mod_id
+_chem_mod_tree.function
+_chem_mod_tree.atom_id
+_chem_mod_tree.atom_back
+_chem_mod_tree.back_type
+_chem_mod_tree.atom_forward
+_chem_mod_tree.connect_type
+ NH1NOTPRO      change   N      n/a    .        CA     START
+ NH1NOTPRO      add      HN     N      .        .      .
+  loop_
+_chem_mod_bond.mod_id
+_chem_mod_bond.function
+_chem_mod_bond.atom_id_1
+_chem_mod_bond.atom_id_2
+_chem_mod_bond.new_type
+_chem_mod_bond.new_value_dist
+_chem_mod_bond.new_value_dist_esd
+_chem_mod_bond.new_value_dist_neutron
+ NH1NOTPRO      add      N       HN        single       0.960    0.020 1.040
+  loop_
+_chem_mod_angle.mod_id
+_chem_mod_angle.function
+_chem_mod_angle.atom_id_1
+_chem_mod_angle.atom_id_2
+_chem_mod_angle.atom_id_3
+_chem_mod_angle.new_value_angle
+_chem_mod_angle.new_value_angle_esd
+ NH1NOTPRO      add      HN      N       CA      120.000    3.000
+#
+data_mod_NH2
+#
+loop_
+_chem_mod_atom.mod_id
+_chem_mod_atom.function
+_chem_mod_atom.atom_id
+_chem_mod_atom.new_atom_id
+_chem_mod_atom.new_type_symbol
+_chem_mod_atom.new_type_energy
+_chem_mod_atom.new_partial_charge
+ NH2      change   N      N       .    NH2    -0.112
+ NH2      add      .      HN1     H    HNH2    0.260
+ NH2      add      .      HN2     H    HNH2    0.260
+ loop_
+_chem_mod_tree.mod_id
+_chem_mod_tree.function
+_chem_mod_tree.atom_id
+_chem_mod_tree.atom_back
+_chem_mod_tree.back_type
+_chem_mod_tree.atom_forward
+_chem_mod_tree.connect_type
+ NH2      change   N       n/a    .        CA     START
+ NH2      add      HN1     N      .        .      .
+ NH2      add      HN2     N      .        .      .
+  loop_
+_chem_mod_bond.mod_id
+_chem_mod_bond.function
+_chem_mod_bond.atom_id_1
+_chem_mod_bond.atom_id_2
+_chem_mod_bond.new_type
+_chem_mod_bond.new_value_dist
+_chem_mod_bond.new_value_dist_esd
+_chem_mod_bond.new_value_dist_neutron
+ NH2      add      N       HN1       single       0.960    0.020 1.040
+ NH2      add      N       HN2       single       0.960    0.020 1.040
+  loop_
+_chem_mod_angle.mod_id
+_chem_mod_angle.function
+_chem_mod_angle.atom_id_1
+_chem_mod_angle.atom_id_2
+_chem_mod_angle.atom_id_3
+_chem_mod_angle.new_value_angle
+_chem_mod_angle.new_value_angle_esd
+ NH2      add      HN1      N       CA      109.470    3.000
+ NH2      add      HN2      N       CA      109.470    3.000
+ NH2      add      HN1      N       CD      109.470    3.000
+ NH2      add      HN2      N       CD      109.470    3.000
+ NH2      add      HN1      N       HN2     109.470    3.000
+#
+data_mod_NH2NOTPRO # same as NH2 but without the HN2-N-CD angle
+#
+loop_
+_chem_mod_atom.mod_id
+_chem_mod_atom.function
+_chem_mod_atom.atom_id
+_chem_mod_atom.new_atom_id
+_chem_mod_atom.new_type_symbol
+_chem_mod_atom.new_type_energy
+_chem_mod_atom.new_partial_charge
+ NH2      change   N      N       .    NH2     0.000
+ NH2      add      .      HN1     H    HNH2    0.000
+ NH2      add      .      HN2     H    HNH2    0.000
+ loop_
+_chem_mod_tree.mod_id
+_chem_mod_tree.function
+_chem_mod_tree.atom_id
+_chem_mod_tree.atom_back
+_chem_mod_tree.back_type
+_chem_mod_tree.atom_forward
+_chem_mod_tree.connect_type
+ NH2      change   N       n/a    .        CA     START
+ NH2      add      HN1     N      .        .      .
+ NH2      add      HN2     N      .        .      .
+  loop_
+_chem_mod_bond.mod_id
+_chem_mod_bond.function
+_chem_mod_bond.atom_id_1
+_chem_mod_bond.atom_id_2
+_chem_mod_bond.new_type
+_chem_mod_bond.new_value_dist
+_chem_mod_bond.new_value_dist_esd
+_chem_mod_bond.new_value_dist_neutron
+ NH2      add      N       HN1       single       0.960    0.020 1.040
+ NH2      add      N       HN2       single       0.960    0.020 1.040
+  loop_
+_chem_mod_angle.mod_id
+_chem_mod_angle.function
+_chem_mod_angle.atom_id_1
+_chem_mod_angle.atom_id_2
+_chem_mod_angle.atom_id_3
+_chem_mod_angle.new_value_angle
+_chem_mod_angle.new_value_angle_esd
+ NH2      add      HN1      N       CA      109.470    3.000
+ NH2      add      HN2      N       CA      109.470    3.000
+ NH2      add      HN1      N       HN2     109.470    3.000
+#
+#
+data_mod_NH2N
+#
+loop_
+_chem_mod_atom.mod_id
+_chem_mod_atom.function
+_chem_mod_atom.atom_id
+_chem_mod_atom.new_atom_id
+_chem_mod_atom.new_type_symbol
+_chem_mod_atom.new_type_energy
+_chem_mod_atom.new_partial_charge
+ NH2N      change   N      N       .    NH2     0.000
+ NH2N      add      .      HN1     H    HNH2    0.000
+ NH2N      add      .      HN2     H    HNH2    0.000
+ loop_
+_chem_mod_tree.mod_id
+_chem_mod_tree.function
+_chem_mod_tree.atom_id
+_chem_mod_tree.atom_back
+_chem_mod_tree.back_type
+_chem_mod_tree.atom_forward
+_chem_mod_tree.connect_type
+ NH2N      change   N       n/a    .        CA     START
+ NH2N      add      HN1     N      .        .      .
+ NH2N      add      HN2     N      .        .      .
+  loop_
+_chem_mod_bond.mod_id
+_chem_mod_bond.function
+_chem_mod_bond.atom_id_1
+_chem_mod_bond.atom_id_2
+_chem_mod_bond.new_type
+_chem_mod_bond.new_value_dist
+_chem_mod_bond.new_value_dist_esd
+_chem_mod_bond.new_value_dist_neutron
+ NH2N      add      N       HN1       single       0.960    0.020 1.040
+ NH2N      add      N       HN2       single       0.960    0.020 1.040
+  loop_
+_chem_mod_angle.mod_id
+_chem_mod_angle.function
+_chem_mod_angle.atom_id_1
+_chem_mod_angle.atom_id_2
+_chem_mod_angle.atom_id_3
+_chem_mod_angle.new_value_angle
+_chem_mod_angle.new_value_angle_esd
+ NH2N      add      HN1      N       CA      109.470    3.000
+ NH2N      add      HN2      N       CN      109.470    3.000
+ NH2N      add      HN1      N       HN2     109.470    3.000
+#
+data_mod_CF-CBH
+#
+loop_
+_chem_mod_atom.mod_id
+_chem_mod_atom.function
+_chem_mod_atom.atom_id
+_chem_mod_atom.new_atom_id
+_chem_mod_atom.new_type_symbol
+_chem_mod_atom.new_type_energy
+_chem_mod_atom.new_partial_charge
+ CF-CBH      add      .      HBC    H    H     0.0000
+loop_
+_chem_mod_bond.mod_id
+_chem_mod_bond.function
+_chem_mod_bond.atom_id_1
+_chem_mod_bond.atom_id_2
+_chem_mod_bond.new_type
+_chem_mod_bond.new_value_dist
+_chem_mod_bond.new_value_dist_esd
+ CF-CBH      add      CB       HBC       single       1.    0.020
+#
+data_mod_CF-COH
+#
+loop_
+_chem_mod_atom.mod_id
+_chem_mod_atom.function
+_chem_mod_atom.atom_id
+_chem_mod_atom.new_atom_id
+_chem_mod_atom.new_type_symbol
+_chem_mod_atom.new_type_energy
+_chem_mod_atom.new_partial_charge
+ CF-COH      add      .      HC    H    H     0.0000
+loop_
+_chem_mod_tree.mod_id
+_chem_mod_tree.function
+_chem_mod_tree.atom_id
+_chem_mod_tree.atom_back
+_chem_mod_tree.back_type
+_chem_mod_tree.atom_forward
+_chem_mod_tree.connect_type
+ CF-COH      add      HC    C      .        .      END
+loop_
+_chem_mod_bond.mod_id
+_chem_mod_bond.function
+_chem_mod_bond.atom_id_1
+_chem_mod_bond.atom_id_2
+_chem_mod_bond.new_type
+_chem_mod_bond.new_value_dist
+_chem_mod_bond.new_value_dist_esd
+ CF-COH      add      C       HC       single       1.    0.020
+loop_
+_chem_mod_angle.mod_id
+_chem_mod_angle.function
+_chem_mod_angle.atom_id_1
+_chem_mod_angle.atom_id_2
+_chem_mod_angle.atom_id_3
+_chem_mod_angle.new_value_angle
+_chem_mod_angle.new_value_angle_esd
+ CF-COH      add      CA      C       HC     121.000    3.000
+loop_
+_chem_mod_tor.mod_id
+_chem_mod_tor.function
+_chem_mod_tor.id
+_chem_mod_tor.atom_id_1
+_chem_mod_tor.atom_id_2
+_chem_mod_tor.atom_id_3
+_chem_mod_tor.atom_id_4
+_chem_mod_tor.new_value_angle
+_chem_mod_tor.new_value_angle_esd
+_chem_mod_tor.new_period
+ CF-COH      add      psi      N      CA     C      HC     160.00  30.0 2
+loop_
+_chem_mod_plane_atom.mod_id
+_chem_mod_plane_atom.function
+_chem_mod_plane_atom.plane_id
+_chem_mod_plane_atom.atom_id
+_chem_mod_plane_atom.new_dist_esd
+ CF-COH        add       oxt      C         0.020
+ CF-COH        add       oxt      CA        0.020
+ CF-COH        add       oxt      O         0.020
+ CF-COH        add       oxt      HC        0.020
+#
+data_link_PEPTIDE-PLANE
+#
+loop_
+_chem_link_plane.link_id
+_chem_link_plane.plane_id
+_chem_link_plane.atom_comp_id
+_chem_link_plane.atom_id
+_chem_link_plane.dist_esd
+ PEPTIDE-PLANE    plane1    1 CA         .020
+ PEPTIDE-PLANE    plane1    1 C          .020
+ PEPTIDE-PLANE    plane1    1 O          .020
+ PEPTIDE-PLANE    plane1    2 N          .020
+ PEPTIDE-PLANE    plane1    2 CA         .020
+#
+data_link_PRE-BETA-TRANS
+#
+loop_
+_chem_link_bond.link_id
+_chem_link_bond.atom_1_comp_id
+_chem_link_bond.atom_id_1
+_chem_link_bond.atom_2_comp_id
+_chem_link_bond.atom_id_2
+_chem_link_bond.type
+_chem_link_bond.value_dist
+_chem_link_bond.value_dist_esd
+ PRE-BETA-TRANS    1 C       2 N         single       1.33400760678    0.014
+loop_
+_chem_link_angle.link_id
+_chem_link_angle.atom_1_comp_id
+_chem_link_angle.atom_id_1
+_chem_link_angle.atom_2_comp_id
+_chem_link_angle.atom_id_2
+_chem_link_angle.atom_3_comp_id
+_chem_link_angle.atom_id_3
+_chem_link_angle.value_angle
+_chem_link_angle.value_angle_esd
+ PRE-BETA-TRANS    1 O       1 C       2 N       122.6653721    1.600
+ PRE-BETA-TRANS    1 CA      1 C       2 N       115.72419265    2.000
+ PRE-BETA-TRANS    1 C       2 N       2 H       124.3    3.000
+ PRE-BETA-TRANS    1 C       2 N       2 CB      122.65660647    1.800
+loop_
+_chem_link_tor.link_id
+_chem_link_tor.id
+_chem_link_tor.atom_1_comp_id
+_chem_link_tor.atom_id_1
+_chem_link_tor.atom_2_comp_id
+_chem_link_tor.atom_id_2
+_chem_link_tor.atom_3_comp_id
+_chem_link_tor.atom_id_3
+_chem_link_tor.atom_4_comp_id
+_chem_link_tor.atom_id_4
+_chem_link_tor.value_angle
+_chem_link_tor.value_angle_esd
+_chem_link_tor.period
+ PRE-BETA-TRANS    psi      1 N      1 CA   1 C      2 N     160.00  30.0 2
+ PRE-BETA-TRANS    omega    1 CA     1 C    2 N      2 CB    180.00   5.0 0
+ # PRE-BETA-TRANS    phi      1 C      2 N    2 CB     2 CA     60.00  20.0 3
+loop_
+_chem_link_plane.link_id
+_chem_link_plane.plane_id
+_chem_link_plane.atom_comp_id
+_chem_link_plane.atom_id
+_chem_link_plane.dist_esd
+ PRE-BETA-TRANS      plane1    1 CA        0.020
+ PRE-BETA-TRANS      plane1    1 C         0.020
+ PRE-BETA-TRANS      plane1    1 O         0.020
+ PRE-BETA-TRANS      plane1    2 N         0.020
+ PRE-BETA-TRANS      plane2    1 C         0.020
+ PRE-BETA-TRANS      plane2    2 N         0.020
+ PRE-BETA-TRANS      plane2    2 CB        0.020
+ PRE-BETA-TRANS      plane2    2 H         0.020
+#
+data_link_POST-BETA-TRANS
+#
+loop_
+_chem_link_bond.link_id
+_chem_link_bond.atom_1_comp_id
+_chem_link_bond.atom_id_1
+_chem_link_bond.atom_2_comp_id
+_chem_link_bond.atom_id_2
+_chem_link_bond.type
+_chem_link_bond.value_dist
+_chem_link_bond.value_dist_esd
+ POST-BETA-TRANS    1 C       2 N         single       1.34296580218    0.014
+loop_
+_chem_link_angle.link_id
+_chem_link_angle.atom_1_comp_id
+_chem_link_angle.atom_id_1
+_chem_link_angle.atom_2_comp_id
+_chem_link_angle.atom_id_2
+_chem_link_angle.atom_3_comp_id
+_chem_link_angle.atom_id_3
+_chem_link_angle.value_angle
+_chem_link_angle.value_angle_esd
+ POST-BETA-TRANS    1 O       1 C       2 N       121.31193666    1.600
+ POST-BETA-TRANS    1 CA      1 C       2 N       115.9381203    2.000
+ POST-BETA-TRANS    1 C       2 N       2 H       124.3    3.000
+ POST-BETA-TRANS    1 C       2 N       2 CA      120.8154213    1.800
+loop_
+_chem_link_tor.link_id
+_chem_link_tor.id
+_chem_link_tor.atom_1_comp_id
+_chem_link_tor.atom_id_1
+_chem_link_tor.atom_2_comp_id
+_chem_link_tor.atom_id_2
+_chem_link_tor.atom_3_comp_id
+_chem_link_tor.atom_id_3
+_chem_link_tor.atom_4_comp_id
+_chem_link_tor.atom_id_4
+_chem_link_tor.value_angle
+_chem_link_tor.value_angle_esd
+_chem_link_tor.period
+ # POST-BETA-TRANS    psi      1 CB      1 CA     1 C      2 N  160.00  30.0 2
+ POST-BETA-TRANS    omega    1 CA     1 C      2 N      2 CA 180.00   5.0 0
+ POST-BETA-TRANS    phi      1 C      2 N      2 CA     2 C   60.00  20.0 3
+loop_
+_chem_link_plane.link_id
+_chem_link_plane.plane_id
+_chem_link_plane.atom_comp_id
+_chem_link_plane.atom_id
+_chem_link_plane.dist_esd
+ POST-BETA-TRANS      plane1    1 CA        0.020
+ POST-BETA-TRANS      plane1    1 C         0.020
+ POST-BETA-TRANS      plane1    1 O         0.020
+ POST-BETA-TRANS      plane1    2 N         0.020
+ POST-BETA-TRANS      plane2    1 C         0.020
+ POST-BETA-TRANS      plane2    2 N         0.020
+ POST-BETA-TRANS      plane2    2 CA        0.020
+ POST-BETA-TRANS      plane2    2 H         0.020
+
+#
+data_link_ASP_CG-ANY_N
+#
+loop_
+_chem_link_bond.link_id
+_chem_link_bond.atom_1_comp_id
+_chem_link_bond.atom_id_1
+_chem_link_bond.atom_2_comp_id
+_chem_link_bond.atom_id_2
+_chem_link_bond.type
+_chem_link_bond.value_dist
+_chem_link_bond.value_dist_esd
+ ASP_CG-ANY_N    1 CG       2 N         single       1.329    0.014
+loop_
+_chem_link_angle.link_id
+_chem_link_angle.atom_1_comp_id
+_chem_link_angle.atom_id_1
+_chem_link_angle.atom_2_comp_id
+_chem_link_angle.atom_id_2
+_chem_link_angle.atom_3_comp_id
+_chem_link_angle.atom_id_3
+_chem_link_angle.value_angle
+_chem_link_angle.value_angle_esd
+ ASP_CG-ANY_N    1 OD1     1 CG      2 N       123.000    1.600
+ ASP_CG-ANY_N    1 CB      1 CG      2 N       116.200    2.000
+ ASP_CG-ANY_N    1 CG      2 N       2 H       124.300    3.000
+ ASP_CG-ANY_N    1 CG      2 N       2 CA      121.700    1.800
+loop_
+_chem_link_tor.link_id
+_chem_link_tor.id
+_chem_link_tor.atom_1_comp_id
+_chem_link_tor.atom_id_1
+_chem_link_tor.atom_2_comp_id
+_chem_link_tor.atom_id_2
+_chem_link_tor.atom_3_comp_id
+_chem_link_tor.atom_id_3
+_chem_link_tor.atom_4_comp_id
+_chem_link_tor.atom_id_4
+_chem_link_tor.value_angle
+_chem_link_tor.value_angle_esd
+_chem_link_tor.period
+ ASP_CG-ANY_N    psi      1 CA     1 CB     1 CG     2 N       160.00  30.0 2
+ ASP_CG-ANY_N    omega    1 CB     1 CG     2 N      2 CA      180.00   5.0 0
+ ASP_CG-ANY_N    phi      1 CG     2 N      2 CA     2 C        60.00  20.0 3
+loop_
+_chem_link_plane.link_id
+_chem_link_plane.plane_id
+_chem_link_plane.atom_comp_id
+_chem_link_plane.atom_id
+_chem_link_plane.dist_esd
+ ASP_CG-ANY_N      plane1    1 CG        0.020
+ ASP_CG-ANY_N      plane1    1 OD1       0.020
+ ASP_CG-ANY_N      plane1    1 CB        0.020
+ ASP_CG-ANY_N      plane1    2 N         0.020
+ ASP_CG-ANY_N      plane2    1 CG        0.020
+ ASP_CG-ANY_N      plane2    2 N         0.020
+ ASP_CG-ANY_N      plane2    2 CA        0.020
+ ASP_CG-ANY_N      plane2    2 H1        0.020
+#
