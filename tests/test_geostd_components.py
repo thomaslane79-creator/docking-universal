@@ -10,6 +10,7 @@ from docking_universal.services.geostd_components import (
     bundled_minimal_library,
     download_components,
     missing_components,
+    modified_polymer_component_ids,
     network_disclosure,
     retained_component_ids_from_pdb,
 )
@@ -84,6 +85,7 @@ HETATM    4 ZN   ZN  A 200       3.000   0.000   0.000  1.00 10.00          ZN
             path = Path(temporary) / "input.pdb"
             path.write_text(pdb)
             self.assertEqual(retained_component_ids_from_pdb(path), ("ALA", "CSO", "ZN"))
+            self.assertEqual(modified_polymer_component_ids(path), ("CSO",))
 
 
 if __name__ == "__main__":

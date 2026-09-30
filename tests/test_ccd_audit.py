@@ -53,6 +53,36 @@ class CcdAuditTests(unittest.TestCase):
             self.assertEqual(audit["modified_polymer_residue_count"], 0)
             self.assertTrue(audit["all_retained"])
 
+    def test_reviewed_local_template_is_distinguished_from_implicit_generation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pdb = root / "input.pdb"
+            pdbqt = root / "receptor.pdbqt"
+            log = root / "meeko.log"
+            templates = root / "additional.json"
+            output_json = root / "audit.json"
+            output_tsv = root / "audit.tsv"
+            pdb.write_text("MODRES 1ABC CSO A   67  CYS  S-HYDROXYCYSTEINE\n")
+            pdbqt.write_text(
+                "ATOM      1  CA  CSO A  67       0.000   0.000   0.000  1.00  0.00     0.000 C \n"
+            )
+            log.write_text("Meeko used explicitly supplied templates.\n")
+            templates.write_text(json.dumps({
+                "ambiguous": {"CSO": ["CSO"]},
+                "residue_templates": {"CSO": {}},
+            }))
+            subprocess.run([
+                str(SCRIPT), str(pdb), str(pdbqt), str(log), "strict_meeko",
+                str(output_json), str(output_tsv),
+                "--additional-templates", str(templates),
+            ], check=True, capture_output=True, text=True)
+            audit = json.loads(output_json.read_text())
+            self.assertEqual(
+                audit["residues"][0]["resolution"],
+                "reviewed local CCD/GeoStd template supplied to Meeko",
+            )
+            self.assertEqual(audit["residues"][0]["evidence"], str(templates))
+
 
 if __name__ == "__main__":
     unittest.main()

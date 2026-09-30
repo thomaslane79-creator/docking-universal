@@ -936,6 +936,7 @@ class DesktopWorkspaceTests(unittest.TestCase):
             self.assertEqual((study_id, operation), ("setup", "start_receptor_preparation"))
             self.assertEqual(payload["site_mode"], "pockets")
             self.assertEqual(payload["feedback_level"], "verbose")
+            self.assertIsNone(payload["meeko_template_file"])
             self.assertEqual(revision, self.store.load("setup").revision)
             self.assertNotIn("command", payload)
         finally:

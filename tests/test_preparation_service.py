@@ -63,6 +63,20 @@ class PreparationServiceTests(unittest.TestCase):
             plan.request.environment["DOCKING_UNIVERSAL_GEOSTD"], str(library.resolve()),
         )
 
+    def test_reviewed_meeko_template_is_passed_explicitly(self):
+        template = self.root / "reviewed templates.json"
+        template.write_text("{}\n")
+        plan = build_receptor_preparation_plan(
+            self.executable,
+            ReceptorPreparationOptions(
+                self.input, self.root / "output", "pockets",
+                meeko_template_file=template,
+            ),
+        )
+        self.assertEqual(
+            plan.request.environment["MEEKO_ADD_TEMPLATES"], str(template.resolve()),
+        )
+
     def test_mmcif_source_is_retained_while_engine_receives_derived_pdb(self):
         from tests.test_structure_input import MMCIF
 

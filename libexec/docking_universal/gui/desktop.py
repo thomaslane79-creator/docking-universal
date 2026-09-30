@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 from ..runtime_inventory import discover_poseedit_runtime
@@ -80,6 +82,7 @@ if QtWidgets is not None:
             self.viewer_coordinator = viewer_coordinator
             self.viewer_widget = viewer_widget
             self._retained_setup_signature = None
+            self._prepared_meeko_template_file = None
             if self.viewer_widget is not None and self.viewer_coordinator is None:
                 raise ValueError("An embedded viewer widget requires a viewer coordinator")
             self._build_study_menu()
@@ -2532,15 +2535,21 @@ if QtWidgets is not None:
                 self.screen_output.setText(path)
 
         def prepare_geostd_library(self, input_path: str, output_directory: str) -> str | None:
-            """Resolve standard restraints or obtain explicit consent for exact requests."""
+            """Resolve restraints and any explicitly reviewed PTM template bridge."""
             from ..services.geostd_components import (
                 available_library, bundled_minimal_library, default_component_cache,
                 download_components, missing_components, network_disclosure,
-                retained_component_ids,
+                modified_polymer_component_ids, retained_component_ids,
+            )
+            from ..services.meeko_template_bridge import (
+                ccd_network_disclosure, ccd_path, default_ccd_cache,
+                download_ccd_components,
             )
 
+            self._prepared_meeko_template_file = None
             try:
                 components = retained_component_ids(Path(input_path))
+                modified_components = modified_polymer_component_ids(Path(input_path))
                 available = available_library(components)
             except Exception as exc:
                 QtWidgets.QMessageBox.critical(
@@ -2548,60 +2557,196 @@ if QtWidgets is not None:
                     f"The retained receptor components could not be reviewed safely: {exc}",
                 )
                 return None
-            if available is not None:
-                return str(available)
             cache = default_component_cache()
-            reference = cache if cache.is_dir() else bundled_minimal_library()
-            requested = missing_components(reference, components)
-            disclosure = network_disclosure(requested)
-            if not requested:
-                return str(reference)
-            identifiers = ", ".join(requested)
-            dialog = QtWidgets.QMessageBox(self)
-            dialog.setIcon(QtWidgets.QMessageBox.Icon.Question)
-            dialog.setWindowTitle("Missing public chemical definitions")
-            dialog.setText(
-                "Reduce2 needs additional GeoStd restraints for: " + identifiers
-            )
-            dialog.setInformativeText(
-                "If approved, Docking Universal will request only the listed public component "
-                "identifiers from the pinned phenix-project/geostd repository on GitHub. "
-                "GitHub also receives ordinary connection metadata such as your IP address "
-                "and request time. Receptor coordinates, ligand files, docking boxes, poses, "
-                "scores, results, study names, and reports are not transmitted."
-            )
-            dialog.setDetailedText(json.dumps(disclosure, indent=2))
-            download = dialog.addButton(
-                "Download listed definitions", QtWidgets.QMessageBox.ButtonRole.AcceptRole,
-            )
-            cancel = dialog.addButton(
-                "Cancel preparation", QtWidgets.QMessageBox.ButtonRole.RejectRole,
-            )
-            dialog.setDefaultButton(cancel)
-            dialog.exec()
-            if dialog.clickedButton() is not download:
-                self.statusBar().showMessage(
-                    "Preparation cancelled; no component identifier or structure data was shared."
+            reference = available or (cache if cache.is_dir() else bundled_minimal_library())
+            requested_geostd = () if available else missing_components(reference, components)
+
+            missing_meeko = ()
+            helper = Path(__file__).resolve().parents[2] / "docking-universal-meeko-template-bridge.py"
+            scientific_python = getattr(self.host_client, "python_executable", None)
+            if modified_components:
+                if not scientific_python or not helper.is_file():
+                    QtWidgets.QMessageBox.critical(
+                        self, "PTM template review unavailable",
+                        "The selected scientific Python or Meeko template helper is unavailable. "
+                        "Preparation stopped before guessing modified-residue chemistry.",
+                    )
+                    return None
+                inspected = subprocess.run(
+                    [str(scientific_python), str(helper), "--list-missing", *modified_components],
+                    text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
                 )
-                return None
+                if inspected.returncode != 0:
+                    QtWidgets.QMessageBox.critical(
+                        self, "PTM template review failed",
+                        inspected.stderr.strip() or "Meeko template coverage could not be inspected.",
+                    )
+                    return None
+                try:
+                    missing_meeko = tuple(json.loads(inspected.stdout)["missing_components"])
+                except (KeyError, TypeError, ValueError):
+                    QtWidgets.QMessageBox.critical(
+                        self, "PTM template review failed",
+                        "The scientific template helper returned an invalid coverage record.",
+                    )
+                    return None
+
+            ccd_cache = default_ccd_cache()
+            requested_ccd = tuple(
+                component for component in missing_meeko
+                if not ccd_path(ccd_cache, component).is_file()
+            )
+            if requested_geostd or requested_ccd:
+                disclosure = {
+                    "geostd": network_disclosure(requested_geostd) if requested_geostd else None,
+                    "ccd": ccd_network_disclosure(requested_ccd) if requested_ccd else None,
+                }
+                descriptions = []
+                if requested_geostd:
+                    descriptions.append(
+                        "Reduce2 restraints: " + ", ".join(requested_geostd)
+                    )
+                if requested_ccd:
+                    descriptions.append(
+                        "Meeko chemical templates: " + ", ".join(requested_ccd)
+                    )
+                dialog = QtWidgets.QMessageBox(self)
+                dialog.setIcon(QtWidgets.QMessageBox.Icon.Question)
+                dialog.setWindowTitle("Missing public chemical definitions")
+                dialog.setText("Additional public definitions are required for " + "; ".join(descriptions))
+                dialog.setInformativeText(
+                    "If approved, Docking Universal will request only the listed public component "
+                    "identifiers from the named public repositories. The services also receive "
+                    "ordinary connection metadata such as your IP address and request time. "
+                    "Receptor coordinates, ligand files, docking boxes, poses, scores, results, "
+                    "study names, and reports are not transmitted."
+                )
+                dialog.setDetailedText(json.dumps(disclosure, indent=2))
+                download = dialog.addButton(
+                    "Download listed definitions", QtWidgets.QMessageBox.ButtonRole.AcceptRole,
+                )
+                cancel = dialog.addButton(
+                    "Cancel preparation", QtWidgets.QMessageBox.ButtonRole.RejectRole,
+                )
+                dialog.setDefaultButton(cancel)
+                dialog.exec()
+                if dialog.clickedButton() is not download:
+                    self.statusBar().showMessage(
+                        "Preparation cancelled; no component identifier or structure data was shared."
+                    )
+                    return None
+
+            geostd_library = Path(reference)
+            inputs = Path(output_directory) / "inputs"
+            inputs.mkdir(parents=True, exist_ok=True)
             QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
             try:
-                record = download_components(requested, cache, approved=True)
-                provenance = Path(output_directory) / "inputs" / "geostd-component-provenance.json"
-                provenance.parent.mkdir(parents=True, exist_ok=True)
-                provenance.write_text(json.dumps(record, indent=2) + "\n")
+                if requested_geostd:
+                    record = download_components(requested_geostd, cache, approved=True)
+                    geostd_library = cache
+                    (inputs / "geostd-component-provenance.json").write_text(
+                        json.dumps(record, indent=2) + "\n"
+                    )
+                if missing_meeko:
+                    ccd_record = download_ccd_components(
+                        missing_meeko, ccd_cache, approved=True,
+                    )
+                    (inputs / "ccd-component-provenance.json").write_text(
+                        json.dumps(ccd_record, indent=2) + "\n"
+                    )
             except Exception as exc:
                 QtWidgets.QMessageBox.critical(
                     self, "Component download failed",
-                    f"No receptor coordinates were sent. The public restraint download failed: {exc}",
+                    f"No receptor coordinates were sent. The public definition step failed: {exc}",
                 )
                 return None
             finally:
                 QtWidgets.QApplication.restoreOverrideCursor()
+
+            if missing_meeko:
+                template_file = inputs / "reviewed-meeko-ptm-templates.json"
+                audit_file = inputs / "meeko-ptm-template-audit.json"
+                QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+                try:
+                    generated = subprocess.run(
+                        [
+                            str(scientific_python), str(helper), *missing_meeko,
+                            "--geostd-library", str(geostd_library),
+                            "--ccd-cache", str(ccd_cache),
+                            "--output-json", str(template_file),
+                            "--audit-json", str(audit_file),
+                        ],
+                        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+                    )
+                finally:
+                    QtWidgets.QApplication.restoreOverrideCursor()
+                if generated.returncode != 0 or not template_file.is_file() or not audit_file.is_file():
+                    QtWidgets.QMessageBox.critical(
+                        self, "PTM template generation stopped",
+                        (
+                            generated.stderr.strip()
+                            or generated.stdout.strip()
+                            or "The deposited modification could not be converted without guessing."
+                        ),
+                    )
+                    return None
+                audit = json.loads(audit_file.read_text())
+                summaries = []
+                for entry in audit.get("components", []):
+                    if entry.get("status") != "candidate_validated":
+                        continue
+                    summaries.append(
+                        f"{entry['component_id']} — {entry.get('component_name') or 'unnamed component'}; "
+                        f"parent {entry.get('parent_component_id') or 'not deposited'}; "
+                        f"formal charge {entry.get('ccd_formal_charge', 'not deposited')}"
+                    )
+                review = QtWidgets.QMessageBox(self)
+                review.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+                review.setWindowTitle("Review generated modified-residue template")
+                review.setText("A local Meeko template was generated for:\n" + "\n".join(summaries))
+                review.setInformativeText(
+                    "The candidate preserves the CCD heavy atoms and formal charges and has an "
+                    "unambiguous peptide backbone with N- and C-terminal links. Using it changes "
+                    "receptor parameterization. It does not prove the biological protonation state; "
+                    "review the prepared structure and require target-matched control evidence."
+                )
+                review.setDetailedText(json.dumps(audit, indent=2))
+                use_template = review.addButton(
+                    "Use validated local template", QtWidgets.QMessageBox.ButtonRole.AcceptRole,
+                )
+                stop = review.addButton(
+                    "Stop for structural review", QtWidgets.QMessageBox.ButtonRole.RejectRole,
+                )
+                review.setDefaultButton(stop)
+                review.exec()
+                if review.clickedButton() is not use_template:
+                    self.statusBar().showMessage(
+                        "Preparation cancelled; the generated candidate was retained but not used."
+                    )
+                    return None
+                approval = {
+                    "schema_name": "docking-universal-meeko-template-approval",
+                    "schema_version": 1,
+                    "approved_at": datetime.now(timezone.utc).isoformat(),
+                    "actor": "desktop-user",
+                    "selection": "use_validated_local_template",
+                    "components": list(missing_meeko),
+                    "template_file": str(template_file.resolve()),
+                    "audit_file": str(audit_file.resolve()),
+                    "warning_acknowledged": (
+                        "Template generation does not establish the biological protonation state; "
+                        "prepared-structure review and control evidence remain required."
+                    ),
+                }
+                (inputs / "meeko-ptm-template-approval.json").write_text(
+                    json.dumps(approval, indent=2) + "\n"
+                )
+                self._prepared_meeko_template_file = str(template_file.resolve())
+
             self.statusBar().showMessage(
-                f"Cached {len(requested)} approved GeoStd component definition(s) with provenance."
+                "Public component definitions and any reviewed Meeko PTM template are ready."
             )
-            return str(cache)
+            return str(Path(geostd_library).resolve())
 
         def start_preparation(self) -> None:
             if not self.host_controller.available:
@@ -2652,6 +2797,7 @@ if QtWidgets is not None:
                     "engine": self.control_engine.currentData(),
                     "control_tier": self.control_tier.currentData(),
                     "geostd_library": geostd_library,
+                    "meeko_template_file": self._prepared_meeko_template_file,
                 }
                 try:
                     self.host_controller.start_control_validation(control_payload, self.state.revision)
@@ -2681,6 +2827,7 @@ if QtWidgets is not None:
                 "centroid_mode": 1,
                 "pocket_engine": self.pocket_engine.currentData(),
                 "geostd_library": geostd_library,
+                "meeko_template_file": self._prepared_meeko_template_file,
                 "pdb_pocket_evidence": (
                     "related-structures" if self.study_setup_panel.pdb_evidence.isChecked() else "off"
                 ),

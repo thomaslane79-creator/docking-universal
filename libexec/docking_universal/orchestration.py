@@ -69,6 +69,7 @@ class ProtocolWorkflowRunner:
         allowed = {"input_structure", "output_directory", "ligand_resname", "ligand_chain_id",
                    "ligand_residue_number", "ligand_insertion_code", "engine", "control_tier",
                    "geostd_library"}
+        allowed.add("meeko_template_file")
         unknown = set(payload) - allowed
         if unknown:
             raise ValueError(f"Unknown control options: {', '.join(sorted(unknown))}")
@@ -127,6 +128,8 @@ class ProtocolWorkflowRunner:
             "ligand_residue_number": payload["ligand_residue_number"],
             "engine": engine, "control_tier": tier,
             "geostd_library": str(geostd_library),
+            "meeko_template_file": str(Path(payload["meeko_template_file"]).resolve())
+            if payload.get("meeko_template_file") else None,
         }
         retained, _ = self.controller.store.update(
             study_id, lambda current: current.workflow_data.setdefault("study_setup", setup),
@@ -138,7 +141,14 @@ class ProtocolWorkflowRunner:
                      "--out", str(output), "--engine", engine, "--control-tier", tier,
                      "--non-interactive"),
             cwd=output.parent,
-            environment={**os.environ, "DOCKING_UNIVERSAL_GEOSTD": str(geostd_library)},
+            environment={
+                **os.environ,
+                "DOCKING_UNIVERSAL_GEOSTD": str(geostd_library),
+                "MEEKO_ADD_TEMPLATES": (
+                    str(Path(payload["meeko_template_file"]).resolve())
+                    if payload.get("meeko_template_file") else ""
+                ),
+            },
             log_directory=output.parent / f".{output.name}.docking-universal-application-logs",
             log_name="known-ligand-control", check=False,
         )
@@ -252,6 +262,7 @@ class ProtocolWorkflowRunner:
             "feedback_level", "cavity_mode", "max_pockets", "center_mode",
             "centroid_mode", "pdbfixer", "preparation_backend", "pocket_engine",
             "meeko_templates",
+            "meeko_template_file",
             "geostd_library",
             "pdb_pocket_evidence",
         }
@@ -265,6 +276,8 @@ class ProtocolWorkflowRunner:
             values[name] = Path(values[name])
         if values.get("geostd_library"):
             values["geostd_library"] = Path(values["geostd_library"])
+        if values.get("meeko_template_file"):
+            values["meeko_template_file"] = Path(values["meeko_template_file"])
         evidence_mode = values.pop("pdb_pocket_evidence", "related-structures")
         if evidence_mode not in {"related-structures", "off"}:
             raise ValueError("PDB pocket evidence must be related-structures or off")
@@ -294,6 +307,9 @@ class ProtocolWorkflowRunner:
             "preparation_backend": options.preparation_backend,
             "pocket_engine": options.pocket_engine,
             "meeko_templates": options.meeko_templates,
+            "meeko_template_file": (
+                str(options.meeko_template_file.resolve()) if options.meeko_template_file else None
+            ),
             "geostd_library": str(options.geostd_library.resolve()) if options.geostd_library else None,
             "pdb_pocket_evidence": evidence_mode,
             "accepted_at_revision": state.revision,
@@ -395,6 +411,8 @@ class ProtocolWorkflowRunner:
             preparation_backend=str(setup.get("preparation_backend") or "auto"),
             pocket_engine=str(setup.get("pocket_engine") or "auto"),
             meeko_templates=assignments,
+            meeko_template_file=(Path(setup["meeko_template_file"])
+                                 if setup.get("meeko_template_file") else None),
             geostd_library=(Path(setup["geostd_library"])
                             if setup.get("geostd_library") else None),
         )
@@ -519,6 +537,8 @@ class ProtocolWorkflowRunner:
                 preparation_backend=str(setup.get("preparation_backend") or "auto"),
                 pocket_engine=str(setup.get("pocket_engine") or "auto"),
                 meeko_templates=assignment,
+                meeko_template_file=(Path(setup["meeko_template_file"])
+                                     if setup.get("meeko_template_file") else None),
                 geostd_library=(Path(setup["geostd_library"])
                                 if setup.get("geostd_library") else None),
             )

@@ -282,6 +282,32 @@ def retained_component_ids(path: Path | str) -> tuple[str, ...]:
     return tuple(sorted(retained))
 
 
+def modified_polymer_component_ids(path: Path | str) -> tuple[str, ...]:
+    """Return deposited modified-polymer component names, excluding parents."""
+
+    source = Path(path)
+    if source.suffix.lower() not in {".cif", ".mmcif"}:
+        values = {
+            line[12:15].strip().upper()
+            for line in source.read_text(errors="replace").splitlines()
+            if line.startswith("MODRES") and line[12:15].strip()
+        }
+        return tuple(sorted(values))
+    try:
+        import gemmi
+    except ImportError as exc:
+        raise RuntimeError("mmCIF modified-residue review requires gemmi") from exc
+    block = gemmi.cif.read_file(str(source)).sole_block()
+    table = block.get_mmcif_category("_pdbx_struct_mod_residue.")
+    values = set()
+    for field in ("auth_comp_id", "label_comp_id"):
+        values.update(
+            str(value).strip().upper() for value in table.get(field, [])
+            if str(value).strip() not in {"", ".", "?"}
+        )
+    return tuple(sorted(values))
+
+
 def missing_components(library: Path | str, component_ids) -> tuple[str, ...]:
     return tuple(sorted(
         component for component in {canonical_component_id(value) for value in component_ids}

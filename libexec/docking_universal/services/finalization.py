@@ -94,6 +94,11 @@ def _preparation_summary(root: Path) -> str:
             "User explicitly approved removal of unmatched receptor components after safe "
             "preparation fallbacks failed; retained records identify the altered model"
         )
+    if next(iter(sorted(root.glob("receptor/meeko_ptm_template_approval.json"))), None):
+        return (
+            "Strict Meeko used an explicitly reviewed local PTM template derived from retained "
+            "CCD and GeoStd definitions; the template, approval, and validation audit are retained"
+        )
     if "Initial receptor preparation succeeded; PDBFixer was not needed" in text:
         return "Strict Meeko succeeded; PDBFixer was not needed"
     if "PDBFixer" in text and "succeeded" in text:
@@ -146,6 +151,9 @@ def build_site_guided_protocol(
     preparation = request.preparation_root
     audit = next(iter(sorted(preparation.glob("receptor/pdbfixer_audit.json"))), None)
     ccd_audit = next(iter(sorted(preparation.glob("receptor/ccd_modification_audit.json"))), None)
+    meeko_template = next(iter(sorted(preparation.glob("receptor/meeko_additional_templates.json"))), None)
+    meeko_template_audit = next(iter(sorted(preparation.glob("receptor/meeko_ptm_template_audit.json"))), None)
+    meeko_template_approval = next(iter(sorted(preparation.glob("receptor/meeko_ptm_template_approval.json"))), None)
     removal_log = next(iter(sorted(preparation.glob("receptor/receptor_user_approved_removal.log"))), None)
     removal_record = next(iter(sorted(preparation.glob("receptor/user_approved_component_removal.txt"))), None)
     removal_manifest = next(iter(sorted(preparation.glob("receptor/user_approved_component_removal.tsv"))), None)
@@ -153,6 +161,9 @@ def build_site_guided_protocol(
     receptor_preparation = {
         "pdbfixer_audit": str(audit) if audit else None,
         "ccd_modification_audit": str(ccd_audit) if ccd_audit else None,
+        "meeko_additional_templates": str(meeko_template) if meeko_template else None,
+        "meeko_ptm_template_audit": str(meeko_template_audit) if meeko_template_audit else None,
+        "meeko_ptm_template_approval": str(meeko_template_approval) if meeko_template_approval else None,
         "user_approved_component_removal": bool(removal_record),
         "user_approved_component_removal_log": str(removal_log) if removal_log else None,
         "user_approved_component_removal_record": str(removal_record) if removal_record else None,

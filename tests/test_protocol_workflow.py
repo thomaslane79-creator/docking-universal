@@ -45,6 +45,7 @@ class ProtocolWorkflowTests(unittest.TestCase):
             + "mkdir -p \"$root/receptor\" \"$root/cavity/frozen_pockets\" \"$root/cavity/pdb_site_evidence/structural_ensemble\"\n"
             + "cp \"$1\" \"$root/receptor/${name}.pdb\"\n"
             + "printf 'RECEPTOR\\n' > \"$root/receptor/${name}.pdbqt\"\n"
+            + "printf '%s\\n' \"${MEEKO_ADD_TEMPLATES:-}\" > \"$root/receptor/meeko-template-environment.txt\"\n"
             + "printf 'complete\\n' > \"$root/run.log\"\n"
             + "printf 'unchanged preliminary report\\n' > \"$root/preliminary-pocket-review.pdf\"\n"
             + "printf 'retained static image\\n' > \"$root/pocket-overview.png\"\n"
@@ -137,6 +138,25 @@ class ProtocolWorkflowTests(unittest.TestCase):
         self.assertIsNotNone(request.source_structure_sha256)
         self.assertIsNotNone(request.receptor_pdb_sha256)
         self.assertIsNotNone(request.receptor_pdbqt_sha256)
+
+    def test_reviewed_meeko_template_path_reaches_the_supervised_preparation(self):
+        template = self.root / "reviewed-meeko-templates.json"
+        template.write_text('{"ambiguous":{"CSO":["CSO"]},"residue_templates":{}}\n')
+        dispatcher = CommandDispatcher(self.controller, "session", self.executable())
+        command = self.start_command(dispatcher, "reviewed-template")
+        command.payload["meeko_template_file"] = str(template)
+        response = dispatcher.dispatch(command)
+        self.assertEqual(response.status, "applied", response.error)
+        state = self.wait_for(lambda item: bool(item.pending_decisions))
+        recorded = (
+            Path(state.workflow_data["preparation_root"])
+            / "receptor" / "meeko-template-environment.txt"
+        )
+        self.assertEqual(recorded.read_text().strip(), str(template.resolve()))
+        self.assertEqual(
+            state.workflow_data["study_setup"]["meeko_template_file"],
+            str(template.resolve()),
+        )
 
     def test_histidine_decision_resumes_same_preparation_job_and_archives_failed_attempt(self):
         dispatcher = CommandDispatcher(

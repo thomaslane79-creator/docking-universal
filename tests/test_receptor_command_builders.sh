@@ -16,6 +16,9 @@ assert_array $'meeko\n--read_pdb\nreceptor.pdb\n-o\nprefix\n-p\nreceptor.pdbqt' 
 build_meeko_receptor_command meeko receptor.pdb prefix receptor.pdbqt 1 A 'A:1=HIE,B:2=CYX'
 assert_array $'meeko\n--read_pdb\nreceptor.pdb\n-o\nprefix\n-p\nreceptor.pdbqt\n--allow_bad_res\n--default_altloc\nA\n--set_template\nA:1=HIE,B:2=CYX' "explicit Meeko options changed"
 
+build_meeko_receptor_command meeko receptor.pdb prefix receptor.pdbqt 0 '' '' 'reviewed templates.json'
+assert_array $'meeko\n--read_pdb\nreceptor.pdb\n-o\nprefix\n-p\nreceptor.pdbqt\n--add_templates\nreviewed templates.json' "reviewed additional Meeko template changed"
+
 build_adfr_receptor_command adfr receptor.pdb receptor.pdbqt
 assert_array $'adfr\n-r\nreceptor.pdb\n-o\nreceptor.pdbqt\n-A\nnone\n-U\nwaters' "ADFR primary command changed"
 

@@ -188,12 +188,14 @@ write_receptor_failure_diagnosis() {
 build_meeko_receptor_command() {
   local executable="$1" receptor_pdb="$2" output_prefix="$3" receptor_pdbqt="$4"
   local allow_bad="$5" altloc="$6" templates="$7"
+  local additional_templates="${8:-${MEEKO_ADD_TEMPLATES:-}}"
   local reader=--read_pdb
   case "$receptor_pdb" in *.cif|*.mmcif) reader=--read_with_prody ;; esac
   PREPARATION_COMMAND=("$executable" "$reader" "$receptor_pdb" -o "$output_prefix" -p "$receptor_pdbqt")
   [ "$allow_bad" = 1 ] && PREPARATION_COMMAND+=(--allow_bad_res)
   [ -z "$altloc" ] || PREPARATION_COMMAND+=(--default_altloc "$altloc")
   [ -z "$templates" ] || PREPARATION_COMMAND+=(--set_template "$templates")
+  [ -z "$additional_templates" ] || PREPARATION_COMMAND+=(--add_templates "$additional_templates")
 }
 
 # Build, but do not execute, the legacy ADFRsuite preparation command used as
@@ -452,6 +454,18 @@ finalize_receptor_preparation_audit() {
   [ -s "$RECEPTOR_PDBQT" ] || { echo "ERROR: receptor backend did not create PDBQT: $RECEPTOR_PDBQT"; return 1; }
   log "Prepared receptor PDBQT written to $RECEPTOR_PDBQT"
 
+  RETAINED_MEEKO_TEMPLATE=""
+  if [ -n "${MEEKO_ADD_TEMPLATES:-}" ] && [ -f "$MEEKO_ADD_TEMPLATES" ]; then
+    RETAINED_MEEKO_TEMPLATE="$RECEPTOR_DIR/meeko_additional_templates.json"
+    cp "$MEEKO_ADD_TEMPLATES" "$RETAINED_MEEKO_TEMPLATE"
+    template_parent=$(dirname "$MEEKO_ADD_TEMPLATES")
+    [ ! -f "$template_parent/meeko-ptm-template-audit.json" ] || \
+      cp "$template_parent/meeko-ptm-template-audit.json" "$RECEPTOR_DIR/meeko_ptm_template_audit.json"
+    [ ! -f "$template_parent/meeko-ptm-template-approval.json" ] || \
+      cp "$template_parent/meeko-ptm-template-approval.json" "$RECEPTOR_DIR/meeko_ptm_template_approval.json"
+    log "Retained the explicitly reviewed Meeko PTM template and provenance with the prepared receptor"
+  fi
+
   ccd_helper="$LIBEXEC_DIR/docking-universal-ccd-audit.py"
   if [ ! -f "$ccd_helper" ] && [ -f "$(dirname "$0")/docking-universal-ccd-audit.py" ]; then
     ccd_helper="$(dirname "$0")/docking-universal-ccd-audit.py"
@@ -465,8 +479,12 @@ finalize_receptor_preparation_audit() {
       pdbfixer_then_strict_meeko) ccd_evidence_log="$PDBFIXER_MEEKO_LOG" ;;
       *) ccd_evidence_log="$RECEPTOR_BACKEND_LOG" ;;
     esac
-    "$PYTHON_COMMAND" "$ccd_helper" "$INPUT_PDB" "$RECEPTOR_PDBQT" "$ccd_evidence_log" \
-      "$PREP_ROUTE" "$CCD_AUDIT_JSON" "$CCD_AUDIT_TSV" >/dev/null
+    CCD_AUDIT_ARGS=(
+      "$INPUT_PDB" "$RECEPTOR_PDBQT" "$ccd_evidence_log"
+      "$PREP_ROUTE" "$CCD_AUDIT_JSON" "$CCD_AUDIT_TSV"
+    )
+    [ -z "$RETAINED_MEEKO_TEMPLATE" ] || CCD_AUDIT_ARGS+=(--additional-templates "$RETAINED_MEEKO_TEMPLATE")
+    "$PYTHON_COMMAND" "$ccd_helper" "${CCD_AUDIT_ARGS[@]}" >/dev/null
     ccd_count=$("$PYTHON_COMMAND" -c 'import json,sys; print(json.load(open(sys.argv[1]))["modified_polymer_residue_count"])' "$CCD_AUDIT_JSON")
     if [ "$ccd_count" -gt 0 ]; then
       log "CCD/MODRES audit recorded $ccd_count modified polymer residue(s): $CCD_AUDIT_TSV"

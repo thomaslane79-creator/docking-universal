@@ -37,6 +37,7 @@ class ReceptorPreparationOptions:
     preparation_backend: str = "auto"
     pocket_engine: str = "auto"
     meeko_templates: str = ""
+    meeko_template_file: Path | None = None
     protonation: str = "auto"
     receptor_ph: float = 7.4
     reduce2: str = "auto"
@@ -76,6 +77,10 @@ class ReceptorPreparationOptions:
             raise ValueError("Reduce2 policy must be auto, required, or off")
         if self.geostd_library is not None and not self.geostd_library.is_dir():
             raise FileNotFoundError(f"GeoStd component library is unavailable: {self.geostd_library}")
+        if self.meeko_template_file is not None and not self.meeko_template_file.is_file():
+            raise FileNotFoundError(
+                f"Reviewed Meeko template file is unavailable: {self.meeko_template_file}"
+            )
 
 
 @dataclass(frozen=True)
@@ -138,6 +143,9 @@ def build_receptor_preparation_plan(
         "DOCKING_UNIVERSAL_LOG_MODE": environment.get("DOCKING_UNIVERSAL_LOG_MODE", "tee"),
         "MEEKO_ALLOW_BAD_RES": "0",
         "MEEKO_SET_TEMPLATE": options.meeko_templates,
+        "MEEKO_ADD_TEMPLATES": (
+            str(options.meeko_template_file.resolve()) if options.meeko_template_file else ""
+        ),
     })
     if options.geostd_library is not None:
         environment["DOCKING_UNIVERSAL_GEOSTD"] = str(options.geostd_library.resolve())
@@ -241,7 +249,10 @@ class ReceptorPreparationService:
                                ("reduce2.log", "reduce2_log"),
                                (f"{plan.receptor_pdb.stem}_reduce2H.pdb", "reduce2_receptor"),
                                (f"{plan.receptor_pdb.stem}_protonated.pdb", "protonated_receptor"),
-                               (f"{plan.receptor_pdb.stem}.pqr", "protonated_receptor_pqr")):
+                               (f"{plan.receptor_pdb.stem}.pqr", "protonated_receptor_pqr"),
+                               ("meeko_additional_templates.json", "meeko_template"),
+                               ("meeko_ptm_template_audit.json", "meeko_template_audit"),
+                               ("meeko_ptm_template_approval.json", "meeko_template_approval")):
                 candidate = receptor_dir / name
                 if candidate.is_file():
                     discovered.append((f"protonation-{name}", kind, candidate))

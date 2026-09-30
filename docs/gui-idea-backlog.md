@@ -180,3 +180,20 @@ rigid-receptor milestone:
   approval and exact disclosure/audit behavior.
 - Remaining acceptance: GUI decision/continuation for a real unusual component,
   Windows/Linux/macOS cache paths, and a versioned complete offline bundle.
+
+### Reviewed GeoStd/CCD bridge for Meeko PTM templates
+
+- Date accepted: 2026-09-28.
+- Status: first peptide-PTM bridge implemented and validated with CSO in 1HVR.
+- User/scientific problem: Reduce2 can understand a modified residue through
+  GeoStd while Meeko may still reject it because the two programs use separate
+  template systems.
+- Implemented boundary: exact-ID, consent-gated CCD acquisition; local candidate
+  generation only for CCD-classified peptide-linking modifications; complete
+  non-leaving heavy-atom transfer, N/C peptide-link validation, source hashes,
+  explicit user approval, and retained portable provenance.
+- Deliberate exclusions: non-polymer ligands, metals, glycans, arbitrary
+  cofactors, covalent adducts, and ambiguous backbones are not auto-converted.
+- Acceptance evidence: a generated CSO/CSO_N/CSO_C set loads into Meeko 0.7.1,
+  and the internal CSO residues in deposited 1HVR are retained in a real
+  receptor PDBQT.

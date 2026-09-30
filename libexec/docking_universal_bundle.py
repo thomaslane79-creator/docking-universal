@@ -213,6 +213,17 @@ def create_bundle(
             if ccd_audit_source.is_file():
                 ccd_audit_copy = _copy(ccd_audit_source, assets / "ccd_modification_audit.json")
                 protocol["receptor_preparation"]["ccd_modification_audit"] = f"assets/{ccd_audit_copy.name}"
+        for key, filename in (
+            ("meeko_additional_templates", "meeko_additional_templates.json"),
+            ("meeko_ptm_template_audit", "meeko_ptm_template_audit.json"),
+            ("meeko_ptm_template_approval", "meeko_ptm_template_approval.json"),
+        ):
+            value = protocol.get("receptor_preparation", {}).get(key)
+            if value:
+                source = Path(value).expanduser().resolve()
+                if source.is_file():
+                    copied = _copy(source, assets / filename)
+                    protocol["receptor_preparation"][key] = f"assets/{copied.name}"
         adfr_log_value = protocol.get("receptor_preparation", {}).get("adfr_fallback_log")
         if adfr_log_value:
             adfr_log_source = Path(adfr_log_value).expanduser().resolve()

@@ -309,6 +309,54 @@ class ProtocolTypeTests(unittest.TestCase):
             self.assertTrue(warning["structural_review_required"])
             self.assertIn("explicit user-approved removal", warning["summary"])
 
+    def test_bundle_retains_reviewed_meeko_ptm_template_and_provenance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            receptor = root / "target.pdbqt"
+            receptor_pdb = root / "target.pdb"
+            box = root / "target.conf"
+            template = root / "reviewed-templates.json"
+            audit = root / "template-audit.json"
+            approval = root / "template-approval.json"
+            receptor.write_text("ATOM\n")
+            receptor_pdb.write_text("ATOM\n")
+            box.write_text("center_x = 1\n")
+            template.write_text('{"ambiguous":{"CSO":["CSO"]},"residue_templates":{}}\n')
+            audit.write_text('{"status":"review_required","components":[{"component_id":"CSO"}]}\n')
+            approval.write_text('{"selection":"use_validated_local_template"}\n')
+            protocol = root / "protocol.json"
+            protocol.write_text(json.dumps({
+                "schema_name": "docking-universal-protocol", "schema_version": 1,
+                "protocol_type": BUNDLE.SITE_GUIDED_EXPLORATORY,
+                "control_status": "not_performed", "unknown_docking_allowed": False,
+                "exploratory_screening_allowed": True,
+                "screening_authority": "user-confirmed-exploratory-use",
+                "locked_inputs": {
+                    "receptor": str(receptor), "receptor_pdb": str(receptor_pdb),
+                    "box": str(box),
+                },
+                "receptor_preparation": {
+                    "meeko_additional_templates": str(template),
+                    "meeko_ptm_template_audit": str(audit),
+                    "meeko_ptm_template_approval": str(approval),
+                },
+            }))
+            output = root / "reviewed-template.duprotocol"
+            BUNDLE.create_bundle(protocol, root, output)
+            extracted = BUNDLE.extract_bundle(output)
+            record = json.loads(extracted.read_text())
+            preparation = record["receptor_preparation"]
+            for key in (
+                "meeko_additional_templates", "meeko_ptm_template_audit",
+                "meeko_ptm_template_approval",
+            ):
+                retained = extracted.parent / preparation[key]
+                self.assertTrue(retained.is_file(), key)
+                self.assertEqual(retained.parent.name, "assets")
+            self.assertIn(
+                "CSO", (extracted.parent / preparation["meeko_additional_templates"]).read_text(),
+            )
+
     def test_protocol_warning_records_standard_amino_acid_count(self):
         warning = BUNDLE.build_receptor_modification_warning([
             {"residue_name": "SER"}, {"residue_name": "CSO"},

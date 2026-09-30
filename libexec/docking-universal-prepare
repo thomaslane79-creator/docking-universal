@@ -67,6 +67,7 @@ Common environment settings:
   MEEKO_ALLOW_BAD_RES=0         Set 1 to delete unmatched residues (review output)
   MEEKO_DEFAULT_ALTLOC          Optional default alternate location, e.g. A
   MEEKO_SET_TEMPLATE            Explicit residue template, e.g. A:36=HIE
+  MEEKO_ADD_TEMPLATES           Reviewed additional Meeko template JSON
 
 Example:
   FEEDBACK_LEVEL=guided docking-universal prepare-receptor receptor_complex.pdb
