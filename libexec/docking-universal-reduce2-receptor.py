@@ -10,6 +10,7 @@ import site
 import subprocess
 import tempfile
 from collections import Counter
+from math import dist
 from pathlib import Path
 
 try:
@@ -34,6 +35,66 @@ def atoms(path: Path):
             if element != "H" and not line[12:16].strip().upper().startswith("H"):
                 rows.append(atom_key(line))
     return rows
+
+
+def backbone_nitrogen_hydrogen_conflicts(path: Path) -> list[dict]:
+    """Find peptide nitrogens that Reduce2 has made over-valent.
+
+    A backbone nitrogen covalently connected to the preceding residue carbonyl
+    carbon can carry at most one hydrogen in the neutral peptide templates
+    consumed by Meeko.  This coordinate-based check deliberately avoids atom
+    naming conventions for added hydrogens while retaining residue identity in
+    the audit record.
+    """
+
+    residues: dict[tuple[str, str, str, str], list[dict]] = {}
+    order: dict[str, list[tuple[str, str, str, str]]] = {}
+    for line in path.read_text(errors="replace").splitlines():
+        if not line.startswith(("ATOM  ", "HETATM")):
+            continue
+        altloc = line[16:17]
+        if altloc not in {" ", "A"}:
+            continue
+        chain = line[21:22].strip()
+        key = (chain, line[22:26].strip(), line[26:27].strip(), line[17:20].strip())
+        try:
+            xyz = (float(line[30:38]), float(line[38:46]), float(line[46:54]))
+        except ValueError:
+            continue
+        atom_name = line[12:16].strip()
+        element = line[76:78].strip().upper()
+        if not element:
+            element = "H" if atom_name.upper().startswith("H") else atom_name[:1].upper()
+        if key not in residues:
+            residues[key] = []
+            order.setdefault(chain, []).append(key)
+        residues[key].append({"name": atom_name, "element": element, "xyz": xyz})
+
+    conflicts = []
+    for chain, keys in order.items():
+        for previous_key, key in zip(keys, keys[1:]):
+            previous_c = next((atom for atom in residues[previous_key] if atom["name"] == "C"), None)
+            nitrogen = next((atom for atom in residues[key] if atom["name"] == "N"), None)
+            alpha_carbon = next((atom for atom in residues[key] if atom["name"] == "CA"), None)
+            if previous_c is None or nitrogen is None or alpha_carbon is None:
+                continue
+            if dist(previous_c["xyz"], nitrogen["xyz"]) > 1.8:
+                continue
+            if dist(nitrogen["xyz"], alpha_carbon["xyz"]) > 1.8:
+                continue
+            bonded_hydrogens = sorted(
+                atom["name"] for atom in residues[key]
+                if atom["element"] in {"H", "D"} and dist(nitrogen["xyz"], atom["xyz"]) <= 1.3
+            )
+            if len(bonded_hydrogens) > 1:
+                conflicts.append({
+                    "residue": f"{chain or '_'}:{key[1]}{key[2]}",
+                    "component": key[3],
+                    "backbone_nitrogen_hydrogen_count": len(bonded_hydrogens),
+                    "hydrogen_atoms": bonded_hydrogens,
+                    "reason": "internal peptide backbone nitrogen has more than one bonded hydrogen",
+                })
+    return conflicts
 
 
 def locate_reduce2() -> Path | None:
@@ -149,17 +210,20 @@ def main(argv=None) -> int:
         reduced = candidates[0]
         after = Counter(atoms(reduced))
         missing = list((before - after).elements())
+        backbone_conflicts = backbone_nitrogen_hydrogen_conflicts(reduced)
         record = {
-            "tool": "CCTBX reduce2", "status": "incompatible" if missing else "compatible",
+            "tool": "CCTBX reduce2",
+            "status": "incompatible" if missing or backbone_conflicts else "compatible",
             "command": " ".join(cmd), "input": str(args.input_pdb.resolve()),
             "component_library": str(geostd.resolve()),
             **geostd_provenance(geostd),
             "output": str(args.output_pdb.resolve()), "input_heavy_atom_count": sum(before.values()),
             "output_heavy_atom_count": sum(after.values()), "missing_input_heavy_atoms": [list(x) for x in missing],
+            "backbone_nitrogen_hydrogen_conflicts": backbone_conflicts,
             "added_hydrogen_count": sum(1 for line in reduced.read_text(errors="replace").splitlines() if line.startswith(("ATOM  ", "HETATM")) and (line[76:78].strip().upper() == "H" or line[12:16].strip().upper().startswith("H"))),
         }
         args.audit_json.write_text(json.dumps(record, indent=2) + "\n")
-        if missing:
+        if missing or backbone_conflicts:
             return 2
         shutil.copyfile(reduced, args.output_pdb)
     return 0

@@ -539,7 +539,7 @@ run_safe_receptor_preparation_attempts() {
         log "CCTBX reduce2 was unavailable or failed; retaining its audit and continuing to the compatibility protonation route"
       fi
     fi
-    if [ "$REDUCE2_USED" = "0" ] && [ "$PROTONATION_MODE" != off ] && [ "$PROTONATION_AVAILABLE" = "1" ]; then
+    if [ "$REDUCE2_USED" = "0" ] && { [ "$REDUCE2_AVAILABLE" = "0" ] || [ "$PROTONATION_MODE" = required ]; } && [ "$PROTONATION_MODE" != off ] && [ "$PROTONATION_AVAILABLE" = "1" ]; then
       log "Running pH-aware PDB2PQR/PROPKA receptor assessment at pH $PROTONATION_PH; audit -> $PROTONATION_AUDIT"
       if run_logged_preparation_command "$PROTONATION_LOG" "$PYTHON_COMMAND" "$PROTONATION_HELPER" \
         "$initial_input" "$PROTONATION_PDB" "$PROTONATION_PQR" "$PROTONATION_AUDIT" "$PROTONATION_LOG" --ph "$PROTONATION_PH"; then
@@ -564,6 +564,8 @@ run_safe_receptor_preparation_attempts() {
         fi
         log "PDB2PQR/PROPKA was not adopted (status: $protonation_status); retaining the original filtered receptor and audit"
       fi
+    elif [ "$REDUCE2_USED" = "0" ] && [ "$REDUCE2_AVAILABLE" = "1" ]; then
+      log "CCTBX reduce2 output was rejected by chemistry validation; retaining the original filtered receptor rather than substituting a second protonation engine"
     elif [ "$PROTONATION_MODE" != off ]; then
       log "PDB2PQR/PROPKA unavailable; retaining the original filtered receptor (set DOCKING_UNIVERSAL_PROTONATION=required to stop)"
     fi

@@ -151,11 +151,37 @@ run_integration() {
     --geometry-mode preserve --target-engines vina
   [ "$(find "$out/ligand_preparation/pdbqt_ligands" -type f -name '*.pdbqt' | wc -l | tr -d ' ')" -ge 2 ]
 
+  current_stage="reviewed CSO template generation"; write_status "RUNNING"
+  ptm_root="$out/ptm_template_validation"
+  mkdir -p "$ptm_root/geostd/c" "$ptm_root/ccd"
+  cp -R "$SCRIPT_DIR/docking_universal/data/geostd/." "$ptm_root/geostd/"
+  cp "$ASSETS/validation_components/CSO_geostd.cif" "$ptm_root/geostd/c/data_CSO.cif"
+  cp "$ASSETS/validation_components/CSO_ccd.cif" "$ptm_root/ccd/CSO.cif"
+  "$PYTHON_COMMAND" "$SCRIPT_DIR/docking-universal-meeko-template-bridge.py" CSO \
+    --geostd-library "$ptm_root/geostd" --ccd-cache "$ptm_root/ccd" \
+    --output-json "$ptm_root/reviewed-meeko-ptm-templates.json" \
+    --audit-json "$ptm_root/meeko-ptm-template-audit.json" \
+    > "$ptm_root/generation-result.json"
+
   current_stage="ligand-centered receptor and box preparation"; write_status "RUNNING"
   mkdir -p "$out/ligand_centered"
   (cd "$out/ligand_centered" && env FEEDBACK_LEVEL=concise DOCKING_UNIVERSAL_SITE_MODE=ligand \
+    DOCKING_UNIVERSAL_POCKET_ENGINE=fpocket \
     DOCKING_UNIVERSAL_LIGAND_RESNAME=XK2 BOX_SIZE=26 DOCKING_UNIVERSAL_LOG_MODE=file \
+    DOCKING_UNIVERSAL_GEOSTD="$ptm_root/geostd" \
+    MEEKO_ADD_TEMPLATES="$ptm_root/reviewed-meeko-ptm-templates.json" \
     "$CLI" prepare "$ASSETS/tutorials/01_bound_ligand/inputs/1HVR.pdb")
+  prepared_1hvr=$(find "$out/ligand_centered" -maxdepth 1 -type d -name '*_receptor_prep' | head -1)
+  retained_1hvr=$(find "$prepared_1hvr/receptor" -type f -name '*.pdbqt' | head -1)
+  grep -q ' CSO ' "$retained_1hvr"
+  "$PYTHON_COMMAND" - "$prepared_1hvr/receptor/ccd_modification_audit.json" <<'PY'
+import json, sys
+record = json.load(open(sys.argv[1]))
+if not record.get("all_retained"):
+    raise SystemExit("reviewed CSO template did not preserve every deposited CSO residue")
+if not all("reviewed local CCD/GeoStd template" in row.get("resolution", "") for row in record["residues"]):
+    raise SystemExit("CCD audit did not identify the reviewed local CSO template")
+PY
 
   for cavity_mode in 1 2 3; do
     current_stage="fpocket cavity mode $cavity_mode"; write_status "RUNNING"
@@ -164,6 +190,7 @@ run_integration() {
     [ "$cavity_mode" != "2" ] || center_mode="deepest"
     [ "$cavity_mode" != "3" ] || centroid_mode=1
     (cd "$mode_root" && env FEEDBACK_LEVEL=concise DOCKING_UNIVERSAL_SITE_MODE=pockets \
+      DOCKING_UNIVERSAL_POCKET_ENGINE=fpocket \
       DOCKING_UNIVERSAL_CAVITY_MODE="$cavity_mode" DOCKING_UNIVERSAL_MAX_POCKETS=5 \
       DOCKING_UNIVERSAL_CENTER_MODE="$center_mode" DOCKING_UNIVERSAL_CENTROID_MODE="$centroid_mode" \
       SCORE_THRESHOLD=0.0 STRICT_LOCAL_POCKETS=1 DOCKING_UNIVERSAL_LOG_MODE=file \
@@ -236,7 +263,7 @@ run_integration() {
     > "$out/reuse_equivalence.json"
 
   current_stage="ligand-free planning, fallback, and report"; write_status "RUNNING"
-  "$CLI" run --mode exploratory \
+  env DOCKING_UNIVERSAL_POCKET_ENGINE=fpocket "$CLI" run --mode exploratory \
     --complex "$ASSETS/tutorials/02_ligand_free_cavity/inputs/2R8N.pdb" \
     --ligands "$ASSETS/tutorials/02_ligand_free_cavity/inputs/indinavir_pubchem_5362440.sdf" \
     --out "$out/exploratory_plan" --name validation_exploratory --plan-only --non-interactive
