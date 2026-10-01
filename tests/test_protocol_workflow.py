@@ -254,7 +254,9 @@ class ProtocolWorkflowTests(unittest.TestCase):
         reviewed = self.wait_for(lambda item: any(
             pending.kind == "select_pockets" for pending in item.pending_decisions
         ) and (item.workflow_data.get("receptor_state_sensitivity") or {}).get("status")
-            == "prepared_for_box_review")
+            == "prepared_for_box_review"
+            and item.workflow_data.get("continuation_queue", [{}])[0].get("status")
+            == "completed")
 
         sensitivity = reviewed.workflow_data["receptor_state_sensitivity"]
         self.assertEqual(sensitivity["states"], ["HIE", "HID"])
