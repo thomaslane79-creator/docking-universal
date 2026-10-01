@@ -55,6 +55,14 @@ class ReceptorPreparationOptions:
             raise ValueError("GUI preparation requires an explicit ligand or pockets site mode")
         if self.site_mode == "ligand" and not self.ligand_resname:
             raise ValueError("Ligand mode requires an explicitly selected bound-ligand residue name")
+        if self.site_mode == "ligand" and not all((
+            self.ligand_chain_id, self.ligand_residue_number,
+        )):
+            raise ValueError(
+                "Ligand mode requires one exact deposited ligand instance (residue name, "
+                "chain, and residue number); residue-name-only selection can average "
+                "symmetry-related or repeated ligand sites"
+            )
         if bool(self.ligand_chain_id) != bool(self.ligand_residue_number):
             raise ValueError("Exact ligand selection requires both chain and residue number")
         if self.feedback_level not in {"concise", "guided", "verbose"}:

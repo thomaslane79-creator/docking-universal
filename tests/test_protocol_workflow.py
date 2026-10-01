@@ -139,6 +139,41 @@ class ProtocolWorkflowTests(unittest.TestCase):
         self.assertIsNotNone(request.receptor_pdb_sha256)
         self.assertIsNotNone(request.receptor_pdbqt_sha256)
 
+    def test_ligand_guided_preparation_collects_related_pdb_evidence(self):
+        self.controller.create_study("ligand-workflow", "Ligand workflow")
+        runner = ProtocolWorkflowRunner(self.controller, self.executable())
+        state = self.store.load("ligand-workflow")
+        runner.start_preparation(
+            "ligand-workflow",
+            {
+                "input_pdb": str(self.input),
+                "working_directory": str(self.root / "ligand-work"),
+                "site_mode": "ligand",
+                "ligand_resname": "LIG",
+                "ligand_chain_id": "A",
+                "ligand_residue_number": "101",
+                "pdb_pocket_evidence": "related-structures",
+            },
+            request_id="ligand-related-evidence",
+            expected_revision=state.revision,
+        )
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            reviewed = self.store.load("ligand-workflow")
+            if reviewed.pending_decisions:
+                break
+            time.sleep(0.02)
+        else:
+            self.fail("Timed out waiting for ligand-guided evidence review")
+        self.assertEqual(
+            reviewed.workflow_data["pdb_pocket_evidence"]["mode"],
+            "related-structures",
+        )
+        self.assertTrue(any(
+            artifact.kind == "pocket_evidence" for artifact in reviewed.artifacts
+        ))
+        runner.shutdown()
+
     def test_reviewed_meeko_template_path_reaches_the_supervised_preparation(self):
         template = self.root / "reviewed-meeko-templates.json"
         template.write_text('{"ambiguous":{"CSO":["CSO"]},"residue_templates":{}}\n')

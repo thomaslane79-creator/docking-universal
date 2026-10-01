@@ -26,7 +26,7 @@ Calibration is lowest-complexity-first when guided mode is selected. A quick dia
 
 ## 3. Ligand-centered mode
 
-When a detected ligand is selected as a site anchor, its atom centroid becomes the localized docking-box center. Protein atoms within 12 Å of the ligand form a local structure for `fpocket`. Alpha spheres are retained when they overlap ligand van der Waals volume, subject to a default 10 Å centroid-distance filter and a −0.5 Å overlap margin. The generated scene exposes the retained surface and ligand reference for review. The ligand is not docked unless the user separately chooses the bound-ligand control pathway.
+When a detected ligand is selected as a site anchor, the workflow requires one exact deposited instance (residue name, author chain, residue number, insertion code, and alternate location where present). A residue name alone is rejected because repeated or symmetry-related copies must never be averaged into a box between sites. The selected instance's atom centroid becomes the localized docking-box center. Protein atoms within 12 Å of that ligand form a local structure for `fpocket`. Alpha spheres are retained when they overlap ligand van der Waals volume, subject to a default 10 Å centroid-distance filter and a −0.5 Å overlap margin. The generated 3D review exposes the retained receptor, surface context, selected ligand, and proposed box before approval. Related public-PDB ligand-site evidence is collected when that option is enabled for either predicted-pocket or ligand-guided site definition. The ligand is not docked unless the user separately chooses the bound-ligand control pathway.
 
 ## 4. Cavity mode
 

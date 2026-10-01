@@ -41,6 +41,25 @@ class PreparationServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "explicitly selected"):
             build_receptor_preparation_plan(self.executable, options)
 
+    def test_ligand_mode_rejects_residue_name_without_exact_instance(self):
+        options = ReceptorPreparationOptions(
+            self.input, self.root, "ligand", ligand_resname="LIG",
+        )
+        with self.assertRaisesRegex(ValueError, "one exact deposited ligand instance"):
+            build_receptor_preparation_plan(self.executable, options)
+
+    def test_ligand_mode_passes_exact_instance_to_engine(self):
+        plan = build_receptor_preparation_plan(
+            self.executable,
+            ReceptorPreparationOptions(
+                self.input, self.root, "ligand", ligand_resname="LIG",
+                ligand_chain_id="B", ligand_residue_number="601",
+            ),
+        )
+        self.assertEqual(plan.request.environment["DOCKING_UNIVERSAL_LIGAND_RESNAME"], "LIG")
+        self.assertEqual(plan.request.environment["DOCKING_UNIVERSAL_LIGAND_CHAIN"], "B")
+        self.assertEqual(plan.request.environment["DOCKING_UNIVERSAL_LIGAND_RESSEQ"], "601")
+
     def test_model_changing_removal_cannot_be_enabled_by_plan(self):
         plan = build_receptor_preparation_plan(
             self.executable,

@@ -191,6 +191,30 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.assertTrue(self.window.pymol_controls.isHidden())
         self.assertLessEqual(self.window.candidates.maximumHeight(), 125)
 
+    def test_candidate_review_opens_retained_structure_without_report_figure(self):
+        class Viewer:
+            backend_kind = "embedded"
+            backend_name = "Embedded PyMOL"
+            connected = False
+            report_view_available = False
+            status = "disconnected"
+
+            def open(self, state):
+                self.connected = True
+                self.opened_study = state.study_id
+
+            def show_candidate(self, state, candidate_id):
+                self.candidate_id = candidate_id
+
+        viewer = Viewer()
+        self.window.viewer_coordinator = viewer
+        self.window._update_candidate_review_action()
+        self.assertTrue(self.window.candidate_review_button.isEnabled())
+        self.window.open_selected_candidate_review()
+        self.assertEqual(viewer.opened_study, "desktop")
+        self.assertEqual(viewer.candidate_id, "P1")
+        self.assertIn("reviewing P1", self.window.viewer_status.text())
+
     def test_embedded_viewer_gets_a_real_central_tab_and_controls(self):
         from docking_universal.gui.qt import QtWidgets
 

@@ -439,11 +439,23 @@ if QtWidgets is not None:
             layout.addWidget(self.candidates, 1)
             self.candidates.setMaximumHeight(125)
             approval_row = QtWidgets.QHBoxLayout()
+            self.candidate_review_button = QtWidgets.QPushButton(
+                "Review selected region in 3D"
+            )
+            self.candidate_review_button.setObjectName("review_selected_candidate_button")
+            self.candidate_review_button.setToolTip(
+                "Open the retained receptor, pocket coordinates, and proposed box. "
+                "Viewing does not approve the region."
+            )
+            self.candidate_review_button.clicked.connect(
+                self.open_selected_candidate_review
+            )
             self.rationale = QtWidgets.QLineEdit()
             self.rationale.setPlaceholderText("Optional scientific rationale for the audit trail")
             self.approve_button = QtWidgets.QPushButton("Approve selected docking region(s)")
             self.approve_button.setObjectName("approve_regions_button")
             self.approve_button.clicked.connect(self.approve_selected_regions)
+            approval_row.addWidget(self.candidate_review_button)
             approval_row.addWidget(self.rationale, 1)
             approval_row.addWidget(self.approve_button)
             layout.addLayout(approval_row)
@@ -904,6 +916,13 @@ if QtWidgets is not None:
                     "PLIP contacts follow geometric definitions; they do not demonstrate binding affinity."
                 )
             explanations = {
+                "Interactive pocket review required": (
+                    "HOW TO REVIEW THIS DECISION\n\n"
+                    "No static figure was retained at this checkpoint. Select a candidate row and "
+                    "open Review selected region in 3D. Confirm that the colored pocket and matching "
+                    "box cover the intended site on the retained receptor before approval.\n\n"
+                    "Opening the structure does not approve the candidate."
+                ),
                 "Pocket scores and ranking — Panel A": (
                     "HOW TO READ THIS FIGURE\n\n"
                     "Panel A: candidates are ordered by P2Rank rank. The vertical axis is the P2Rank "
@@ -1274,18 +1293,40 @@ if QtWidgets is not None:
             if path is None or not path.is_file():
                 self._decision_figure_pixmap = None
                 self._decision_figure_source = None
+                for control in (
+                    self.figure_fit_button, self.figure_actual_size_button,
+                    self.figure_zoom_out_button, self.figure_zoom_in_button,
+                    self.figure_full_screen_button,
+                ):
+                    control.setEnabled(False)
+                pocket_review = any(
+                    decision.kind == "select_pockets"
+                    for decision in self.state.pending_decisions
+                )
                 self._render_decision_figure_explanations(
-                    "No retained decision figure"
+                    "Interactive pocket review required"
+                    if pocket_review else "No retained decision figure"
                 )
                 self.decision_figure_caption.setText(
+                    "No static pocket-review figure was retained for this preparation."
+                    if pocket_review else
                     "No retained decision figure is available for this stage yet."
                 )
                 self.decision_figure_view.clear()
                 self.decision_figure_view.setText(
+                    "Select a candidate below, then choose ‘Review selected region in 3D’ "
+                    "to inspect the retained receptor, pocket, and docking box before approval."
+                    if pocket_review else
                     "Figures appear here after the corresponding scientific stage completes."
                 )
                 self._update_figure_scene_action(None)
                 return
+            for control in (
+                self.figure_fit_button, self.figure_actual_size_button,
+                self.figure_zoom_out_button, self.figure_zoom_in_button,
+                self.figure_full_screen_button,
+            ):
+                control.setEnabled(True)
             stat = path.stat()
             source = (str(path), stat.st_mtime_ns, stat.st_size)
             if source == self._decision_figure_source and self._decision_figure_pixmap is not None:
@@ -2393,6 +2434,20 @@ if QtWidgets is not None:
             if not pending or not rows:
                 QtWidgets.QMessageBox.warning(self, "Selection required", "Select one or more docking regions first.")
                 return
+            setup = self.state.workflow_data.get("study_setup") or {}
+            if setup.get("site_mode") == "ligand" and not all((
+                setup.get("ligand_resname"), setup.get("ligand_chain_id"),
+                setup.get("ligand_residue_number"),
+            )):
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Exact ligand instance required",
+                    "This retained ligand-guided setup identifies only a residue name. "
+                    "If the structure contains repeated or symmetry-related instances, its "
+                    "box can be centered between sites. Create a new study, detect deposited "
+                    "ligands, and select one exact chain/residue instance before preparation.",
+                )
+                return
             candidates = self.state.workflow_data.get("pocket_candidates", [])
             selections = [str(candidates[row]["id"]) for row in rows]
             try:
@@ -2811,6 +2866,16 @@ if QtWidgets is not None:
                     "Detect deposited ligands from the receptor and choose the ligand that defines the site.",
                 )
                 return
+            if self.site_mode.currentData() == "ligand" and not all((
+                ligand_identity.get("chain_id"), ligand_identity.get("residue_number"),
+            )):
+                QtWidgets.QMessageBox.warning(
+                    self, "Exact ligand instance required",
+                    "Detect deposited ligands and choose one exact chain/residue instance. "
+                    "A residue name alone may refer to multiple sites and cannot safely define "
+                    "one docking box.",
+                )
+                return
             payload = {
                 "input_pdb": input_text,
                 "working_directory": output_text,
@@ -3108,6 +3173,7 @@ if QtWidgets is not None:
 
         def _candidate_highlight_changed(self) -> None:
             rows = self.candidates.selectionModel().selectedRows()
+            self._update_candidate_review_action()
             if not rows:
                 self.pocket_evidence_panel.set_candidate(None)
                 return
@@ -3122,6 +3188,81 @@ if QtWidgets is not None:
                 self.viewer_coordinator.show_candidate(self.state, str(candidate["id"]))
             except Exception as exc:
                 self.viewer_status.setText(f"Candidate display failed: {exc}")
+
+        def _update_candidate_review_action(self) -> None:
+            rows = self.candidates.selectionModel().selectedRows()
+            available = bool(
+                self.viewer_coordinator
+                and rows
+                and any(
+                    decision.kind == "select_pockets"
+                    for decision in self.state.pending_decisions
+                )
+            )
+            self.candidate_review_button.setEnabled(available)
+            if self.viewer_widget is not None:
+                self.candidate_review_button.setText(
+                    "Review selected region in interactive 3D"
+                )
+            elif self.viewer_coordinator is not None:
+                self.candidate_review_button.setText("Review selected region in PyMOL")
+            else:
+                self.candidate_review_button.setText("3D review unavailable")
+
+        def open_selected_candidate_review(self) -> None:
+            """Open retained structural evidence without requiring a report figure."""
+            rows = self.candidates.selectionModel().selectedRows()
+            candidates = self.state.workflow_data.get("pocket_candidates", [])
+            if not rows or rows[0].row() >= len(candidates):
+                QtWidgets.QMessageBox.warning(
+                    self, "Selection required", "Select a docking-region candidate first.",
+                )
+                return
+            if self.viewer_coordinator is None:
+                QtWidgets.QMessageBox.warning(
+                    self, "3D review unavailable",
+                    "A PyMOL review backend is not configured for this installation.",
+                )
+                return
+            candidate = candidates[rows[0].row()]
+            candidate_id = str(candidate.get("id"))
+            try:
+                if not self.viewer_coordinator.connected:
+                    if (
+                        getattr(self.viewer_coordinator, "status", None) == "failed"
+                        and hasattr(self.viewer_coordinator, "reconnect")
+                    ):
+                        self.viewer_coordinator.reconnect(self.state)
+                    else:
+                        self.viewer_coordinator.open(self.state)
+                self.viewer_coordinator.show_candidate(self.state, candidate_id)
+                adapter = getattr(self.viewer_coordinator, "adapter", None)
+                if (
+                    self._uses_companion_viewer() and adapter is not None
+                    and hasattr(adapter, "bring_to_front")
+                ):
+                    self._send_windows_back()
+                    QtCore.QTimer.singleShot(200, adapter.bring_to_front)
+                else:
+                    self._show_embedded_viewer()
+                backend = getattr(
+                    self.viewer_coordinator, "backend_name", "3D structural viewer",
+                )
+                self.viewer_status.setText(
+                    f"{backend}: reviewing {candidate_id}; viewing does not imply approval"
+                )
+                self.session.set_viewer_state(
+                    connected=True,
+                    report_view_available=bool(
+                        getattr(self.viewer_coordinator, "report_view_available", False)
+                    ),
+                    detail=self.viewer_status.text(), lifecycle="connected",
+                )
+            except Exception as exc:
+                self._viewer_failed(exc)
+                QtWidgets.QMessageBox.critical(
+                    self, "3D pocket review unavailable", str(exc),
+                )
 
         def _show_candidate_evidence_details(self, item) -> None:
             """Open the complete retained record without expanding the navigation table."""
@@ -3284,6 +3425,7 @@ if QtWidgets is not None:
             self.pocket_evidence_panel.set_candidate(
                 values[rows[0].row()] if rows and rows[0].row() < len(values) else None
             )
+            self._update_candidate_review_action()
 
         @staticmethod
         def _candidate_evidence_digest(candidate: dict, evidence: dict) -> tuple[str, str]:

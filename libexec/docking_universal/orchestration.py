@@ -341,7 +341,7 @@ class ProtocolWorkflowRunner:
                     request_id=request_id, expected_revision=preparation_revision,
                 )
                 if result.status.value == "completed":
-                    if options.site_mode == "pockets" and evidence_mode == "related-structures":
+                    if evidence_mode == "related-structures":
                         self._collect_pdb_pocket_evidence(study_id, plan)
                     self._start_review(study_id, plan.output_root)
             except Exception as exc:
@@ -466,7 +466,7 @@ class ProtocolWorkflowRunner:
                     study_id, plan, resume_job_id=job.id, cancel_event=cancellation,
                 )
                 if result.status.value == "completed":
-                    if options.site_mode == "pockets" and evidence_mode == "related-structures":
+                    if evidence_mode == "related-structures":
                         self._collect_pdb_pocket_evidence(study_id, plan)
                     self._start_review(study_id, plan.output_root)
             except Exception as exc:
@@ -656,7 +656,7 @@ class ProtocolWorkflowRunner:
                                     known.add(artifact_id)
 
                     self.controller.store.update(study_id, retain_variants)
-                if setup.get("site_mode") == "pockets" and evidence_mode == "related-structures":
+                if evidence_mode == "related-structures":
                     self._collect_pdb_pocket_evidence(study_id, plans["HIE"])
                 self._start_review(study_id, plans["HIE"].output_root)
                 final_status = "completed"
