@@ -2539,7 +2539,7 @@ if QtWidgets is not None:
             from ..services.geostd_components import (
                 available_library, bundled_minimal_library, default_component_cache,
                 download_components, missing_components, network_disclosure,
-                modified_polymer_component_ids, retained_component_ids,
+                modified_polymer_component_ids, reduce2_required_component_ids,
             )
             from ..services.meeko_template_bridge import (
                 ccd_network_disclosure, ccd_path, default_ccd_cache,
@@ -2548,7 +2548,7 @@ if QtWidgets is not None:
 
             self._prepared_meeko_template_file = None
             try:
-                components = retained_component_ids(Path(input_path))
+                components = reduce2_required_component_ids(Path(input_path))
                 modified_components = modified_polymer_component_ids(Path(input_path))
                 available = available_library(components)
             except Exception as exc:

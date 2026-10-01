@@ -282,6 +282,46 @@ def retained_component_ids(path: Path | str) -> tuple[str, ...]:
     return tuple(sorted(retained))
 
 
+def reduce2_required_component_ids(path: Path | str) -> tuple[str, ...]:
+    """Return polymer components whose restraints Reduce2 must resolve.
+
+    Retained cofactors, deposited ligands, and metals remain part of the
+    receptor policy, but they are not automatically protonated as protein
+    residues.  Requiring a GeoStd file for every retained non-polymer can make
+    preparation impossible: the GeoStd catalogue lists some such components
+    without publishing a corresponding restraint file.  Modified polymer
+    residues remain mandatory because they participate directly in the
+    polymer that Reduce2 prepares.
+    """
+
+    source = Path(path)
+    if source.suffix.lower() not in {".cif", ".mmcif"}:
+        polymer = {
+            line[17:20].strip().upper()
+            for line in source.read_text(errors="replace").splitlines()
+            if line.startswith("ATOM  ") and line[17:20].strip()
+        }
+        polymer.update(modified_polymer_component_ids(source))
+        return tuple(sorted(polymer))
+    try:
+        import gemmi
+    except ImportError as exc:
+        raise RuntimeError("mmCIF Reduce2 component review requires gemmi") from exc
+    block = gemmi.cif.read_file(str(source)).sole_block()
+    atoms = block.get_mmcif_category("_atom_site.")
+    groups = atoms.get("group_PDB", [])
+    component_columns = atoms.get("auth_comp_id", []) or atoms.get("label_comp_id", [])
+    polymer = {
+        str(component_columns[index]).strip().upper()
+        for index, group in enumerate(groups)
+        if str(group).upper() == "ATOM"
+        and index < len(component_columns)
+        and str(component_columns[index]).strip() not in {"", ".", "?"}
+    }
+    polymer.update(modified_polymer_component_ids(source))
+    return tuple(sorted(polymer))
+
+
 def modified_polymer_component_ids(path: Path | str) -> tuple[str, ...]:
     """Return deposited modified-polymer component names, excluding parents."""
 

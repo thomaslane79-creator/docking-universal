@@ -173,8 +173,10 @@ rigid-receptor milestone:
   2.4 GB, while Reduce2 must not silently lack restraints or disclose private
   structural information to obtain them.
 - Implemented boundary: ship a small standard-protein restraint core; identify
-  unusual retained components; disclose exact pinned component requests; require
-  explicit approval; cache validated responses with checksums and provenance.
+  deposited modified polymer components; disclose exact pinned component
+  requests; require explicit approval; cache validated responses with checksums
+  and provenance. Retained non-polymer cofactors and metals remain in the
+  receptor but do not trigger a restraint download merely by being present.
 - Acceptance evidence: the 2R8N filtered receptor completes Reduce2 with the
   minimal core and preserves all 754 heavy atoms; tests verify refusal without
   approval and exact disclosure/audit behavior.

@@ -12,7 +12,7 @@ from docking_universal.services.geostd_components import (
     download_components,
     missing_components,
     network_disclosure,
-    retained_component_ids,
+    reduce2_required_component_ids,
 )
 
 
@@ -30,7 +30,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     components = list(args.component)
     if args.input_pdb:
-        components.extend(retained_component_ids(args.input_pdb))
+        components.extend(reduce2_required_component_ids(args.input_pdb))
     reference = args.library if args.library and args.library.is_dir() else bundled_minimal_library()
     requested = missing_components(reference, components)
     if args.download:

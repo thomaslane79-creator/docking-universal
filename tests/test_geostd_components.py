@@ -12,6 +12,7 @@ from docking_universal.services.geostd_components import (
     missing_components,
     modified_polymer_component_ids,
     network_disclosure,
+    reduce2_required_component_ids,
     retained_component_ids_from_pdb,
 )
 
@@ -86,6 +87,53 @@ HETATM    4 ZN   ZN  A 200       3.000   0.000   0.000  1.00 10.00          ZN
             path.write_text(pdb)
             self.assertEqual(retained_component_ids_from_pdb(path), ("ALA", "CSO", "ZN"))
             self.assertEqual(modified_polymer_component_ids(path), ("CSO",))
+            self.assertEqual(reduce2_required_component_ids(path), ("ALA", "CSO"))
+
+    def test_linked_nonpolymer_is_retained_but_not_required_by_reduce2(self):
+        pdb = """LINK         FE  COH A 500                 NE2 HIS A  90
+ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00 10.00           C
+ATOM      2  CA  HIS A  90       1.000   0.000   0.000  1.00 10.00           C
+HETATM    3 FE   COH A 500       2.000   0.000   0.000  1.00 10.00          FE
+HETATM    4  C1  COH A 500       3.000   0.000   0.000  1.00 10.00           C
+"""
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "cofactor.pdb"
+            path.write_text(pdb)
+            self.assertIn("COH", retained_component_ids_from_pdb(path))
+            self.assertEqual(reduce2_required_component_ids(path), ("ALA", "HIS"))
+
+    def test_mmcif_nonpolymer_is_not_required_by_reduce2(self):
+        mmcif = """data_test
+loop_
+_atom_site.group_PDB
+_atom_site.id
+_atom_site.type_symbol
+_atom_site.label_atom_id
+_atom_site.label_alt_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_entity_id
+_atom_site.label_seq_id
+_atom_site.pdbx_PDB_ins_code
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+_atom_site.occupancy
+_atom_site.B_iso_or_equiv
+_atom_site.pdbx_formal_charge
+_atom_site.auth_seq_id
+_atom_site.auth_comp_id
+_atom_site.auth_asym_id
+_atom_site.auth_atom_id
+_atom_site.pdbx_PDB_model_num
+ATOM 1 C CA . ALA A 1 1 ? 0 0 0 1 10 ? 1 ALA A CA 1
+ATOM 2 C CA . HIS A 1 2 ? 1 0 0 1 10 ? 2 HIS A CA 1
+HETATM 3 FE FE . COH B 2 . ? 2 0 0 1 10 ? 500 COH A FE 1
+"""
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "cofactor.cif"
+            path.write_text(mmcif)
+            self.assertEqual(reduce2_required_component_ids(path), ("ALA", "HIS"))
 
 
 if __name__ == "__main__":

@@ -36,7 +36,7 @@ from .services.preparation_interventions import (
 )
 from .services.structure_input import normalize_structure_input
 from .services.bound_ligands import detect_bound_ligands
-from .services.geostd_components import available_library, retained_component_ids
+from .services.geostd_components import available_library, reduce2_required_component_ids
 
 
 class ProtocolWorkflowRunner:
@@ -84,7 +84,7 @@ class ProtocolWorkflowRunner:
         if payload.get("geostd_library"):
             geostd_library = Path(str(payload["geostd_library"])).resolve()
         else:
-            geostd_library = available_library(retained_component_ids(source))
+            geostd_library = available_library(reduce2_required_component_ids(source))
         if geostd_library is None or not geostd_library.is_dir():
             raise FileNotFoundError(
                 "Required GeoStd components are unavailable locally; approve the exact "

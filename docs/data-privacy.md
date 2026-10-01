@@ -25,12 +25,17 @@ visible in its help text and, where relevant, show a clear “local-only” stat
 ## Public chemical-component restraints
 
 The standard-protein Reduce2 route uses a bundled minimal GeoStd library and
-does not require a network request. If an unusual retained receptor component
+does not require a network request. If a deposited modified polymer residue
 lacks local restraints, an optional request may retrieve only that public
 component's GeoStd CIF from a pinned revision of the official
 `phenix-project/geostd` repository. Before retrieval, the application must show
 the exact component identifiers and URLs. GitHub receives those identifiers in
 the URL plus ordinary connection metadata such as IP address and request time.
+
+Retained non-polymers such as cofactors, ligands, and metals do not trigger this
+request merely because they remain in the receptor. They are preserved for the
+separate compatibility and scientific review instead of being misclassified as
+protein residues requiring Reduce2 restraints.
 
 No coordinate file, atom coordinates, ligand file, private chemical structure,
 docking box, pose, score, result, study name, or report is included. Retrieval
