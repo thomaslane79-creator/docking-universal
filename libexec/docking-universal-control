@@ -285,18 +285,6 @@ EOF
   exit 2
 }
 
-instance_count=$(awk -v r="$ligand_resname" '
-  /^HETATM/ {
-    rn=substr($0,18,3); gsub(/ /,"",rn)
-    if (rn==r) { ch=substr($0,22,1); seq=substr($0,23,4); gsub(/ /,"",seq); seen[ch ":" seq]=1 }
-  }
-  END { for (x in seen) n++; print n+0 }
-' "$complex")
-[ "$instance_count" -eq 1 ] || {
-  echo "ERROR: $ligand_resname occurs in $instance_count residue instances. This control command currently requires a unique bound-ligand instance." >&2
-  exit 1
-}
-
 complex_base=$(basename "$complex" .pdb | sed 's/[^A-Za-z0-9._-]/_/g')
 ligand_base=$(printf '%s' "$ligand_resname" | sed 's/[^A-Za-z0-9._-]/_/g')
 [ -n "$out_dir" ] || out_dir="control_${complex_base}_${ligand_base}_$(date '+%Y%m%d_%H%M%S')"
@@ -340,6 +328,8 @@ log "CONTROL 1/6: preparing ligand-free receptor and experimental-site box"
     DOCKING_UNIVERSAL_LOG_MODE=file \
     DOCKING_UNIVERSAL_SITE_MODE=ligand \
     DOCKING_UNIVERSAL_LIGAND_RESNAME="$ligand_resname" \
+    DOCKING_UNIVERSAL_LIGAND_CHAIN="$([ "$ligand_chain" = _ ] && printf '' || printf '%s' "$ligand_chain")" \
+    DOCKING_UNIVERSAL_LIGAND_RESSEQ="$ligand_position" \
     "$CLI" prepare "$complex_copy"
 )
 
