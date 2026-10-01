@@ -338,9 +338,17 @@ prep_roots=("$prep_parent"/*_receptor_prep)
 prep_root="${prep_roots[0]}"
 receptor_pdb=$(find "$prep_root/receptor" -maxdepth 1 -type f -name '*.pdb' | head -1)
 receptor_pdbqt=$(find "$prep_root/receptor" -maxdepth 1 -type f -name '*.pdbqt' | head -1)
-crystal_ligand="$prep_root/ligand/${ligand_resname}.pdb"
+all_crystal_ligand="$prep_root/ligand/${ligand_resname}.pdb"
+crystal_ligand="$experimental_dir/selected_${ligand_resname}_${ligand_chain}_${ligand_position}.pdb"
+awk -v wanted_chain="$ligand_chain" -v wanted_position="$ligand_position" '
+  /^HETATM/ {
+    chain=substr($0,22,1); gsub(/ /,"",chain); if (chain=="") chain="_"
+    position=substr($0,23,4); gsub(/ /,"",position)
+    if (chain==wanted_chain && position==wanted_position) print
+  }
+' "$all_crystal_ligand" > "$crystal_ligand"
 box_config=$(find "$prep_root/cavity" -maxdepth 1 -type f -name '*_pocket1.conf' | head -1)
-[ -s "$receptor_pdb" ] && [ -s "$receptor_pdbqt" ] && [ -s "$crystal_ligand" ] && [ -s "$box_config" ] || {
+[ -s "$receptor_pdb" ] && [ -s "$receptor_pdbqt" ] && [ -s "$all_crystal_ligand" ] && [ -s "$crystal_ligand" ] && [ -s "$box_config" ] || {
   echo "ERROR: preparation did not produce the receptor, selected ligand, and pocket-1 configuration" >&2
   exit 1
 }
