@@ -57,6 +57,14 @@ done
 [ -x "$project_dir/install.sh" ] || fail "user-facing installer"
 [ -x "$project_dir/bin/docking-universal-launcher" ] || fail "host-side Conda launcher"
 
+mock_conda_bin="$work_dir/mock-conda/bin"
+mkdir -p "$mock_conda_bin"
+: > "$mock_conda_bin/conda"
+chmod +x "$mock_conda_bin/conda"
+CONDA_EXE="$mock_conda_bin/conda" make -C "$project_dir" install-launcher >/dev/null
+cmp -s "$project_dir/bin/docking-universal-launcher" "$mock_conda_bin/docking-universal" \
+  || fail "install-conda host launcher refresh"
+
 installed_dir="$work_dir/outside-source"
 mkdir -p "$installed_dir"
 (

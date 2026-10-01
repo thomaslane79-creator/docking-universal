@@ -42,16 +42,17 @@ if [ "${1:-}" = "desktop" ]; then
   gui_python="$gui_prefix/bin/python"
   pymol_command="$pymol_prefix/bin/pymol"
   host_python="$scientific_prefix/bin/python"
+  desktop_script="$scientific_prefix/libexec/docking-universal/docking-universal-desktop.py"
   if [ ! -x "$gui_python" ]; then gui_python="$gui_prefix/python.exe"; fi
   if [ ! -x "$pymol_command" ]; then pymol_command="$pymol_prefix/Scripts/pymol.exe"; fi
   if [ ! -x "$host_python" ]; then host_python="$scientific_prefix/python.exe"; fi
   [ -x "$gui_python" ] || { printf 'Error: Python was not found in %s\n' "$gui_environment" >&2; exit 1; }
   [ -x "$pymol_command" ] || { printf 'Error: PyMOL was not found in %s\n' "$pymol_environment" >&2; exit 1; }
   [ -x "$host_python" ] || { printf 'Error: Python was not found in %s\n' "$scientific_environment" >&2; exit 1; }
+  [ -f "$desktop_script" ] || { printf 'Error: Docking Universal desktop is not installed in %s\n' "$scientific_environment" >&2; exit 1; }
   shift
   exec "$conda_command" run --no-capture-output -n "$gui_environment" \
-    env DOCKING_UNIVERSAL_PYTHON="$gui_python" \
-    "$launcher_dir/docking-universal" desktop --pymol "$pymol_command" \
+    "$gui_python" "$desktop_script" --pymol "$pymol_command" \
     --host-python "$host_python" "$@"
 fi
 

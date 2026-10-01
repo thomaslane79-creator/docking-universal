@@ -8,11 +8,22 @@ mock_bin="$work_dir/bin"
 state_file="$work_dir/environments"
 log_file="$work_dir/conda.log"
 mock_scientific_prefix="$work_dir/mock-scientific-prefix"
+mock_gui_prefix="$work_dir/mock-gui-prefix"
+mock_pymol_prefix="$work_dir/mock-pymol-prefix"
 mkdir -p "$mock_bin"
 mkdir -p "$mock_scientific_prefix/share/docking-universal/p2rank-2.5.1"
+mkdir -p "$mock_scientific_prefix/bin" "$mock_scientific_prefix/libexec/docking-universal"
+mkdir -p "$mock_gui_prefix/bin" "$mock_pymol_prefix/bin"
 : > "$mock_scientific_prefix/share/docking-universal/p2rank-2.5.1/prank"
-chmod +x "$mock_scientific_prefix/share/docking-universal/p2rank-2.5.1/prank"
+: > "$mock_scientific_prefix/bin/python"
+: > "$mock_scientific_prefix/libexec/docking-universal/docking-universal-desktop.py"
+: > "$mock_gui_prefix/bin/python"
+: > "$mock_pymol_prefix/bin/pymol"
+chmod +x "$mock_scientific_prefix/share/docking-universal/p2rank-2.5.1/prank" \
+  "$mock_scientific_prefix/bin/python" "$mock_gui_prefix/bin/python" "$mock_pymol_prefix/bin/pymol"
 export BOOTSTRAP_TEST_SCIENTIFIC_PREFIX="$mock_scientific_prefix"
+export BOOTSTRAP_TEST_GUI_PREFIX="$mock_gui_prefix"
+export BOOTSTRAP_TEST_PYMOL_PREFIX="$mock_pymol_prefix"
 
 fail() {
   printf 'FAIL: %s\n' "$1" >&2
@@ -60,7 +71,12 @@ case "${1:-} ${2:-}" in
     ;;
   "run -n")
     if [ "${4:-}" = "printenv" ] && [ "${5:-}" = "CONDA_PREFIX" ]; then
-      printf '%s\n' "$BOOTSTRAP_TEST_SCIENTIFIC_PREFIX"
+      case "${3:-}" in
+        docking-universal-gui-next) printf '%s\n' "$BOOTSTRAP_TEST_GUI_PREFIX" ;;
+        docking-universal-pymol-next) printf '%s\n' "$BOOTSTRAP_TEST_PYMOL_PREFIX" ;;
+        docking-universal) printf '%s\n' "$BOOTSTRAP_TEST_SCIENTIFIC_PREFIX" ;;
+        *) printf 'Unexpected environment prefix request: %s\n' "$*" >&2; exit 2 ;;
+      esac
     else
       printf 'Unexpected fake Conda run invocation: %s\n' "$*" >&2
       exit 2
@@ -96,6 +112,13 @@ env PATH="$mock_bin:$PATH" BOOTSTRAP_TEST_STATE="$state_file" \
   BOOTSTRAP_TEST_LOG="$log_file" DOCKING_UNIVERSAL_CONDA=conda \
   "$mock_bin/docking-universal" prepare-ligand --help >/dev/null || fail "all-command launcher"
 grep -q 'run --no-capture-output -n docking-universal docking-universal prepare-ligand --help' "$log_file" || fail "all-command environment routing"
+
+: > "$log_file"
+env PATH="$mock_bin:$PATH" BOOTSTRAP_TEST_STATE="$state_file" \
+  BOOTSTRAP_TEST_LOG="$log_file" DOCKING_UNIVERSAL_CONDA=conda \
+  "$mock_bin/docking-universal" desktop --help >/dev/null || fail "desktop environment launcher"
+grep -q "run --no-capture-output -n docking-universal-gui-next $mock_gui_prefix/bin/python $mock_scientific_prefix/libexec/docking-universal/docking-universal-desktop.py --pymol $mock_pymol_prefix/bin/pymol --host-python $mock_scientific_prefix/bin/python --help" "$log_file" \
+  || fail "desktop did not route GUI, PyMOL, and scientific runtimes separately"
 
 : > "$log_file"
 background_out="$work_dir/background-validation"

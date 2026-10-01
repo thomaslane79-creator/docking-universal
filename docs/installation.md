@@ -84,7 +84,7 @@ make install-conda
 docking-universal check-install --full
 ```
 
-`make install-conda` uses the active `CONDA_PREFIX`; it fails rather than guessing when no Conda environment is active. The installed command and its private helpers remain relocatable within that environment.
+`make install-conda` uses the active `CONDA_PREFIX`; it fails rather than guessing when no Conda environment is active. It also refreshes the outer Conda launcher so `docking-universal desktop` continues to route through the dedicated PyQt6 environment after an update. The installed command and its private helpers remain relocatable within that environment.
 
 `make install-conda` installs the Docking Universal files; it does not independently install or change scientific packages. A new environment created from `environment.yml` receives PDBFixer 1.11 and its OpenMM dependency automatically. It also receives CCTBX for the Vina/Meeko Reduce2 receptor-hydrogen route. Docking Universal now includes a roughly 650 KB, history-free GeoStd core for ordinary protein residues; a multi-gigabyte Git clone is not required for that route. Unusual retained receptor chemistry requires either an explicitly approved, pinned per-component download or a complete offline library. The per-component request shares the listed public component identifier and ordinary connection metadata with GitHub, never coordinates or docking results; see [Data privacy](data-privacy.md). Developers may still override the library with `DOCKING_UNIVERSAL_GEOSTD=/path/to/geostd`. To update an existing Docking Universal environment after pulling this release, run:
 

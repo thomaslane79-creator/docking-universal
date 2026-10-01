@@ -2,7 +2,7 @@ PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 LIBEXECDIR ?= $(PREFIX)/libexec/docking-universal
 
-.PHONY: test test-integration test-release setup install install-conda uninstall
+.PHONY: test test-integration test-release setup install install-conda install-launcher uninstall
 
 test:
 	./tests/test_install.sh
@@ -80,6 +80,20 @@ install:
 install-conda:
 	@test -n "$(CONDA_PREFIX)" || { echo "Error: activate a Conda environment first." >&2; exit 1; }
 	$(MAKE) install PREFIX="$(CONDA_PREFIX)"
+	$(MAKE) install-launcher
+
+install-launcher:
+	@conda_executable="$${CONDA_EXE:-}"; \
+	if [ -z "$$conda_executable" ]; then \
+		conda_executable=$$(command -v conda 2>/dev/null || true); \
+	fi; \
+	case "$$conda_executable" in \
+		*/*) ;; \
+		*) echo "Error: the Conda executable path could not be determined." >&2; exit 1 ;; \
+	esac; \
+	launcher_path=$$(dirname -- "$$conda_executable")/docking-universal; \
+	install -m 0755 bin/docking-universal-launcher "$$launcher_path"; \
+	printf 'Installed environment-routing launcher: %s\n' "$$launcher_path"
 
 uninstall:
 	rm -f "$(DESTDIR)$(BINDIR)/docking-universal"
