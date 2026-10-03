@@ -144,6 +144,13 @@ class PymolSpikeTests(unittest.TestCase):
             core = self.bridge.BridgeCore(FakeCmd())
             result = core.dispatch("load_pocket", {"path": str(pocket), "object_name": "du_pocket_1", "color": "marine"})
             self.assertEqual(result["color"], "marine")
+            from docking_universal.gui.study_viewer import POCKET_COLORS
+            for color in POCKET_COLORS:
+                with self.subTest(color=color):
+                    result = core.dispatch("load_pocket", {
+                        "path": str(pocket), "object_name": "du_pocket_1", "color": color,
+                    })
+                    self.assertEqual(result["color"], color)
             with self.assertRaisesRegex(ValueError, "color"):
                 core.dispatch("load_pocket", {"path": str(pocket), "object_name": "du_pocket_2", "color": "user_expression"})
 

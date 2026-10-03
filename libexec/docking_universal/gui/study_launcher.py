@@ -26,9 +26,13 @@ class StudyLauncherDialog(QtWidgets.QDialog):
             raise ValueError(f"Unknown study chooser mode: {mode}")
         self.mode = mode
         self.setWindowTitle("Docking Universal — Studies")
-        self.resize(760, 480)
+        self.resize(820, 560)
+        self.setMinimumWidth(640)
 
         layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+        layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
         heading = QtWidgets.QLabel("Open a scientific study")
         font = heading.font(); font.setPointSize(font.pointSize() + 4); font.setBold(True)
         heading.setFont(font)
@@ -48,24 +52,33 @@ class StudyLauncherDialog(QtWidgets.QDialog):
         self.studies.itemSelectionChanged.connect(self._selection_changed)
         self.studies.itemDoubleClicked.connect(lambda _item: self.open_selected())
         layout.addWidget(self.studies, 1)
+        self.empty_notice = QtWidgets.QLabel("No saved studies. Create a study below to begin.")
+        self.empty_notice.setWordWrap(True)
+        layout.addWidget(self.empty_notice)
+        for label in (heading, explanation, self.empty_notice):
+            label.setSizePolicy(
+                QtWidgets.QSizePolicy.Policy.Preferred,
+                QtWidgets.QSizePolicy.Policy.Maximum,
+            )
 
         create_group = self.create_group = QtWidgets.QGroupBox("Create a new study")
-        form = QtWidgets.QFormLayout(create_group)
-        self.study_name = QtWidgets.QLineEdit()
-        self.study_name.setPlaceholderText("A descriptive scientific study name")
-        self.workflow = QtWidgets.QComboBox()
-        self.workflow.addItem(
-            "Site-guided exploratory protocol", "site_guided_protocol"
+        create_group.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Maximum,
         )
+        form = QtWidgets.QVBoxLayout(create_group)
+        form.setContentsMargins(14, 18, 14, 14)
+        form.setSpacing(10)
+        self.study_name = QtWidgets.QLineEdit()
+        self.study_name.setPlaceholderText("For example: COX-2 compound screening")
+        self.study_name.setMinimumWidth(360)
         self.workflow_scope = QtWidgets.QLabel(
-            "Begin with a local PDBx/mmCIF or legacy PDB file, or download a retained "
-            "mmCIF structure by RCSB PDB ID. The chronological workflow supports "
-            "predicted-pocket exploration and exact deposited-ligand control redocking."
+            "Next, choose a structure file or download one by PDB ID. "
+            "You’ll choose exploratory docking or known-ligand redocking in Study setup."
         )
         self.workflow_scope.setWordWrap(True)
-        form.addRow("Study name", self.study_name)
-        form.addRow("Initial workflow", self.workflow)
-        form.addRow("Scope", self.workflow_scope)
+        form.addWidget(QtWidgets.QLabel("Study name"))
+        form.addWidget(self.study_name)
+        form.addWidget(self.workflow_scope)
         layout.addWidget(create_group)
         if mode == "create":
             heading.setText("Create a new scientific study")
@@ -98,10 +111,14 @@ class StudyLauncherDialog(QtWidgets.QDialog):
         self.delete_button.setVisible(mode != "create")
         layout.addLayout(buttons)
         self.reload()
+        if not self.store.list_studies() or mode == "create":
+            self.resize(820, 340)
 
     def reload(self) -> None:
         values = self.store.list_studies()
         self.studies.setRowCount(len(values))
+        self.studies.setVisible(bool(values) and self.mode != "create")
+        self.empty_notice.setVisible(not values and self.mode != "create")
         for row, state in enumerate(values):
             cells = (state.name, state.workflow, state.completion_status.value, state.updated_at)
             for column, value in enumerate(cells):
@@ -137,10 +154,20 @@ class StudyLauncherDialog(QtWidgets.QDialog):
             )
             return
         name = self.studies.item(row, 0).text()
+        state = self.store.load(study_id)
+        unfinished = state.active_job is not None
+        stage_notice = (
+            "This study has an unfinished stage recorded. If this was a broken or "
+            "abandoned job, would you like to override that record and delete the "
+            "study anyway? A calculation still running in the application cannot "
+            "be overridden.\n\n"
+            if unfinished else ""
+        )
         answer = QtWidgets.QMessageBox.question(
             self, "Delete study from Docking Universal?",
             (
                 f"Delete '{name}' from the active Docking Universal study list?\n\n"
+                + stage_notice +
                 "This does not delete external reports, .duprotocol bundles, receptor files, "
                 "or docking output directories. The retained application-state record remains "
                 "recoverable on disk."
@@ -152,7 +179,9 @@ class StudyLauncherDialog(QtWidgets.QDialog):
         if answer != QtWidgets.QMessageBox.StandardButton.Yes:
             return
         try:
-            self.host_client.request(study_id, "remove_study", {})
+            self.host_client.request(
+                study_id, "remove_study", {"override_stale_job": unfinished},
+            )
         except Exception as exc:
             QtWidgets.QMessageBox.critical(
                 self, "Study could not be deleted from the library", str(exc)
@@ -182,7 +211,7 @@ class StudyLauncherDialog(QtWidgets.QDialog):
             suffix += 1
         try:
             self.host_client.request(study_id, "create_study", {
-                "name": name, "workflow": self.workflow.currentData(),
+                "name": name, "workflow": "site_guided_protocol",
             })
         except Exception as exc:
             QtWidgets.QMessageBox.critical(self, "Study could not be created", str(exc))

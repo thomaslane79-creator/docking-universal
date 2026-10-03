@@ -25,6 +25,7 @@ try:
     from .workspace_controller import WorkspaceWindowController
     from .application_host_controller import ApplicationHostController
     from .pocket_evidence import PocketEvidencePanel
+    from .pocket_plot import PocketScorePlot
     from .decision_dialog import DecisionDialog
     from .linked_pose_review import LinkedPosePanel, pose_view, control_view, write_comparison_report
 except ImportError as exc:  # pragma: no cover - diagnosed by runtime inventory
@@ -110,6 +111,8 @@ if QtWidgets is not None:
             self.session.detailChanged.connect(self._apply_session_detail)
             self.refresh()
             self.workspace_controller.restore_layout()
+            self.study_setup_dock.hide()
+            self._update_stage_review_visibility()
             # Dense diagnostic surfaces never reopen automatically. They are
             # available from explicit toolbar actions when the user asks.
             self.workflow_detail_dock.hide()
@@ -229,6 +232,17 @@ if QtWidgets is not None:
             )
             feedback_layout.addWidget(self.feedback_heading)
             feedback_layout.addWidget(self.feedback_text)
+            self.running_indicator = QtWidgets.QProgressBar()
+            self.running_indicator.setObjectName("central_running_indicator")
+            self.running_indicator.setRange(0, 0)
+            self.running_indicator.setTextVisible(False)
+            self.running_indicator.setFixedHeight(10)
+            self.running_indicator.hide()
+            feedback_layout.addWidget(self.running_indicator)
+            self.running_elapsed = QtWidgets.QLabel()
+            self.running_elapsed.setObjectName("central_running_elapsed")
+            self.running_elapsed.hide()
+            feedback_layout.addWidget(self.running_elapsed)
             self.feedback_card.setStyleSheet(
                 "QFrame#scientific_feedback_card { background:#eef5ff; "
                 "border:1px solid #8bb7e8; border-radius:5px; }"
@@ -269,7 +283,9 @@ if QtWidgets is not None:
             self.scene_figure_choice.setObjectName("scene_figure_choice")
             self.scene_figure_choice.setToolTip("Choose the retained figure whose 3D scene you want to inspect")
             self.scene_figure_choice.currentIndexChanged.connect(self._scene_figure_changed)
-            figure_controls = QtWidgets.QHBoxLayout()
+            self.figure_controls_widget = QtWidgets.QWidget()
+            figure_controls = QtWidgets.QHBoxLayout(self.figure_controls_widget)
+            figure_controls.setContentsMargins(0, 0, 0, 0)
             self.figure_fit_button = QtWidgets.QPushButton("Fit")
             self.figure_fit_button.setObjectName("decision_figure_fit")
             self.figure_fit_button.clicked.connect(self._fit_decision_figure)
@@ -341,7 +357,7 @@ if QtWidgets is not None:
             self.figure_split.setStretchFactor(0, 5)
             self.figure_split.setStretchFactor(1, 2)
             self.figure_split.setSizes([840, 250])
-            figure_layout.addLayout(figure_controls)
+            figure_layout.addWidget(self.figure_controls_widget)
             figure_layout.addWidget(self.decision_figure_caption)
             figure_layout.addWidget(self.figure_split, 1)
             self.review_tabs.addTab(figure_page, "Decision figures")
@@ -438,7 +454,9 @@ if QtWidgets is not None:
             layout.addWidget(self.pymol_controls)
             layout.addWidget(self.candidates, 1)
             self.candidates.setMaximumHeight(125)
-            approval_row = QtWidgets.QHBoxLayout()
+            self.region_approval_controls = QtWidgets.QWidget()
+            approval_row = QtWidgets.QHBoxLayout(self.region_approval_controls)
+            approval_row.setContentsMargins(0, 0, 0, 0)
             self.candidate_review_button = QtWidgets.QPushButton(
                 "Review selected region in 3D"
             )
@@ -458,13 +476,13 @@ if QtWidgets is not None:
             approval_row.addWidget(self.candidate_review_button)
             approval_row.addWidget(self.rationale, 1)
             approval_row.addWidget(self.approve_button)
-            layout.addLayout(approval_row)
+            layout.addWidget(self.region_approval_controls)
             self.setCentralWidget(central)
 
             self.view_toolbar = self.addToolBar("View")
             self.view_toolbar.setObjectName("view_toolbar")
-            detail_action = self.view_toolbar.addAction("Scientific Detail")
-            detail_action.triggered.connect(self.show_scientific_detail)
+            self.scientific_detail_action = self.view_toolbar.addAction("Scientific Detail")
+            self.scientific_detail_action.setCheckable(True)
             full_screen = self.view_toolbar.addAction("Full Screen")
             full_screen.setShortcut("F11")
             full_screen.triggered.connect(self.toggle_full_screen)
@@ -485,6 +503,15 @@ if QtWidgets is not None:
             self.selection_view = QtWidgets.QTreeWidget()
             self.selection_view.setHeaderLabels(("Proposed selection", "Identity"))
             self.workflow_detail_dock = self._dock("Scientific Workflow Detail", self.scientific_detail_panel, QtCore.Qt.DockWidgetArea.RightDockWidgetArea, "workflow_detail_dock")
+            self.scientific_detail_action.triggered.connect(
+                lambda checked: self._set_auxiliary_dock_visible(
+                    self.workflow_detail_dock,
+                    QtCore.Qt.DockWidgetArea.RightDockWidgetArea, checked,
+                )
+            )
+            self.workflow_detail_dock.visibilityChanged.connect(
+                self.scientific_detail_action.setChecked
+            )
             self.selection_dock = self._dock("Selections", self.selection_view, QtCore.Qt.DockWidgetArea.RightDockWidgetArea, "selection_dock")
             self.selection_dock.hide()
             self.selections_action = self._add_auxiliary_dock_action(
@@ -502,6 +529,9 @@ if QtWidgets is not None:
                 "Artifacts", self.reports_dock, QtCore.Qt.DockWidgetArea.BottomDockWidgetArea,
             )
             self.pocket_evidence_panel = PocketEvidencePanel()
+            self.pocket_score_plot = PocketScorePlot()
+            self.pocket_evidence_panel.layout().insertWidget(0, self.pocket_score_plot)
+            self.pocket_score_plot.candidateActivated.connect(self._select_plotted_candidate)
             self.pocket_evidence_panel.set_viewer_presentation(
                 embedded=self.viewer_widget is not None
             )
@@ -1774,12 +1804,21 @@ if QtWidgets is not None:
             ):
                 self.workflow_stage_stack.addWidget(panel)
             self.study_setup_dock.setWindowTitle("Workflow Stage")
-            self.study_setup_dock.setWidget(self.workflow_stage_stack)
+            self.study_setup_dock.setWidget(QtWidgets.QWidget())
+            self.stage_form_scroll = QtWidgets.QScrollArea()
+            self.stage_form_scroll.setObjectName("central_stage_form")
+            self.stage_form_scroll.setWidgetResizable(True)
+            self.stage_form_scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+            self.stage_form_scroll.setWidget(self.workflow_stage_stack)
+            self.stage_form_heading = QtWidgets.QLabel("1. Study setup")
+            self.stage_form_heading.setStyleSheet("font-size: 18px; font-weight: 600;")
+            self.centralWidget().layout().insertWidget(4, self.stage_form_heading)
+            self.centralWidget().layout().insertWidget(5, self.stage_form_scroll, 1)
             self.protocol_finalization_dock.setWidget(QtWidgets.QWidget())
             self.screening_dock.setWidget(QtWidgets.QWidget())
             self.protocol_finalization_dock.hide()
             self.screening_dock.hide()
-            self.study_setup_dock.show()
+            self.study_setup_dock.hide()
             self._workflow_stage_pages = {
                 "study_setup_dock": self.study_setup_panel,
                 "preparation_progress": self.preparation_progress_panel,
@@ -1809,10 +1848,10 @@ if QtWidgets is not None:
 
         def _stabilize_workflow_rail(self) -> None:
             """Keep stage changes from re-scaling the scientific workspace."""
-            docks = (self.workflow_navigation_dock, self.study_setup_dock)
+            docks = (self.workflow_navigation_dock,)
             for dock in docks:
                 dock.setMinimumWidth(self.WORKFLOW_RAIL_MINIMUM_WIDTH)
-                dock.setMaximumWidth(16777215)
+                dock.setMaximumWidth(300)
             self.workflow_navigation.setUniformItemSizes(True)
             self.resizeDocks(
                 list(docks), [self.WORKFLOW_RAIL_WIDTH] * len(docks),
@@ -1976,7 +2015,12 @@ if QtWidgets is not None:
             )
 
             active_row = 0
-            next_action = "Enter the receptor and preparation settings, then start preparation."
+            if not self.output_directory.text().strip():
+                next_action = "Choose a study output folder, then load or download your receptor structure."
+            elif not Path(self.input_pdb.text().strip()).is_file():
+                next_action = "Choose a structure file, or enter a PDB ID and click Fetch RCSB ID."
+            else:
+                next_action = "Review the deposited structure information and choose your pathway, then start preparation."
             if pending_pockets:
                 active_row = 2
                 next_action = "Scientific decision required: review the evidence and approve one or more docking regions."
@@ -2072,8 +2116,30 @@ if QtWidgets is not None:
                 feedback_heading = "Next scientific action"
             self.feedback_heading.setText(feedback_heading)
             self.feedback_text.setText(next_action)
+            running = bool(state.active_job and state.active_job.status.value in {"running", "queued"})
+            self.running_indicator.setVisible(running)
+            self.running_elapsed.setVisible(running)
+            if running:
+                stage_name = {
+                    "preparation_and_pocket_detection": "Preparing receptor and detecting pockets",
+                    "control_validation": "Running known-ligand redocking",
+                    "final_report": "Generating report and protocol",
+                    "screening": "Screening ligands",
+                    "pose_interaction": "Calculating pose interactions",
+                }.get(state.active_job.stage, state.active_job.stage.replace("_", " ").capitalize())
+                self.feedback_heading.setText(f"RUNNING — {stage_name}")
+                elapsed_text = "Calculation active"
+                if state.active_job.started_at:
+                    try:
+                        started = datetime.fromisoformat(state.active_job.started_at.replace("Z", "+00:00"))
+                        seconds = max(0, int((datetime.now(timezone.utc) - started).total_seconds()))
+                        elapsed_text += f" · elapsed {seconds // 60}:{seconds % 60:02d}"
+                    except (ValueError, TypeError):
+                        pass
+                self.running_elapsed.setText(elapsed_text)
             feedback_colors = (
                 ("#fff1b8", "#c99a16") if pending_pockets
+                else ("#dceeff", "#2478bd") if running
                 else ("#fff1e8", "#c98963") if failed_job and not screening_done and not state.active_job
                 else ("#e8f6ec", "#64a878") if screening_done
                 else ("#eef5ff", "#8bb7e8")
@@ -2109,6 +2175,8 @@ if QtWidgets is not None:
                     self.active_stage_progress.setRange(0, 0)
 
         def _activate_workflow_target(self, target: str) -> None:
+            self._workflow_target = target
+            self._update_stage_review_visibility()
             page = self._workflow_stage_pages.get(target, self.workflow_stage_blank)
             self.workflow_stage_stack.setCurrentWidget(page)
             stage_titles = {
@@ -2122,6 +2190,12 @@ if QtWidgets is not None:
             self.study_setup_dock.setWindowTitle(
                 stage_titles.get(target, "Workflow Stage")
             )
+            self.stage_form_heading.setText({
+                "study_setup_dock": "1. Study setup",
+                "preparation_progress": "2. Prepare and detect",
+                "protocol_finalization_dock": "4. Finalize protocol",
+                "locked_protocol_screening_dock": "5. Screen ligands",
+            }.get(target, ""))
             if target == "screening_results_dock":
                 self.right_review_stack.setCurrentWidget(self.results_review_panel)
                 self._select_decision_figure("Docking clusters and representative poses")
@@ -2131,10 +2205,40 @@ if QtWidgets is not None:
             else:
                 if target == "central":
                     self.right_review_stack.setCurrentWidget(self.pocket_evidence_panel)
-                    self._select_decision_figure("Pocket ranking and structural evidence")
+                    if self.viewer_widget is not None:
+                        self.review_tabs.setCurrentIndex(1)
+                    else:
+                        self._select_decision_figure("Pocket ranking and structural evidence")
                     self.centralWidget().setFocus()
                 else:
                     self.right_review_stack.setCurrentWidget(self.right_review_blank)
+
+        def _update_stage_review_visibility(self) -> None:
+            target = getattr(self, "_workflow_target", "study_setup_dock")
+            review = target in {"central", "screening_results_dock"}
+            pocket_review = target == "central"
+            for widget in (
+                self.workspace_heading, self.review_tabs,
+            ):
+                widget.setVisible(review)
+            embedded = self.viewer_widget is not None and self.review_tabs.currentIndex() == 1
+            self.workspace_context.setVisible(review and not embedded)
+            self.central_selection_status.setVisible(review and not embedded)
+            self.pymol_controls.setVisible(review and embedded)
+            self.candidates.setVisible(pocket_review)
+            self.region_approval_controls.setVisible(pocket_review)
+            if hasattr(self, "stage_form_scroll"):
+                self.stage_form_heading.setVisible(not review)
+                self.stage_form_scroll.setVisible(not review)
+                self.study_setup_dock.hide()
+                self.pocket_evidence_dock.setVisible(review)
+            figures_available = self.decision_figure_choice.count() > 0
+            self.figure_controls_widget.setVisible(figures_available)
+            self.figure_split.setVisible(figures_available)
+            self.decision_figure_legend_scroll.setVisible(figures_available)
+            self.reset_view_button.setVisible(self.reset_view_button.isEnabled())
+            self.decision_synopsis_button.setVisible(self.decision_synopsis_button.isEnabled())
+            self.full_synopsis_button.setVisible(self.full_synopsis_button.isEnabled())
 
         def _dock(self, title, widget, area, name):
             dock = QtWidgets.QDockWidget(title, self)
@@ -2356,6 +2460,8 @@ if QtWidgets is not None:
             self.cancel_job_button.setEnabled(bool(
                 self.host_controller.available and active and active.status.value == "running"
             ))
+            self.cancel_job_button.setVisible(self.cancel_job_button.isEnabled())
+            self.results_review_action.setVisible(bool(state.workflow_data.get("latest_screening_output")))
             preparation_root = state.workflow_data.get("preparation_root")
             if preparation_root and not self.final_output_directory.text().strip():
                 root = Path(str(preparation_root))
@@ -2421,6 +2527,7 @@ if QtWidgets is not None:
             self._render_screening_results(state)
             self._refresh_pending_pose_interaction(state)
             self._render_events()
+            self._update_stage_review_visibility()
             if self._exit_after_cancel and not active:
                 self._exit_after_cancel = False
                 QtCore.QTimer.singleShot(0, self.close)
@@ -3184,13 +3291,29 @@ if QtWidgets is not None:
             if rows[0].row() >= len(candidates):
                 return
             candidate = candidates[rows[0].row()]
+            self.pocket_score_plot.selected = str(candidate["id"])
+            self.pocket_score_plot.update()
             self.pocket_evidence_panel.set_candidate(candidate)
-            if not self.viewer_coordinator or not self.viewer_coordinator.connected:
+            if not self.viewer_coordinator:
+                return
+            if not self.viewer_coordinator.connected:
+                self.open_selected_candidate_review()
                 return
             try:
                 self.viewer_coordinator.show_candidate(self.state, str(candidate["id"]))
+                self._show_embedded_viewer()
             except Exception as exc:
                 self.viewer_status.setText(f"Candidate display failed: {exc}")
+
+        def _select_plotted_candidate(self, candidate_id: str) -> None:
+            for row, candidate in enumerate(self.state.workflow_data.get("pocket_candidates", [])):
+                if str(candidate["id"]) == candidate_id:
+                    blocker = QtCore.QSignalBlocker(self.candidates)
+                    self.candidates.clearSelection()
+                    self.candidates.selectRow(row)
+                    del blocker
+                    self._candidate_highlight_changed()
+                    return
 
         def _update_candidate_review_action(self) -> None:
             rows = self.candidates.selectionModel().selectedRows()
@@ -3391,6 +3514,9 @@ if QtWidgets is not None:
                 self.viewer_status.setText(f"Evidence selection sync failed: {exc}")
 
         def _render_candidates(self, state: StudyState) -> None:
+            # Polling repaints evidence; only user navigation should reload 3D.
+            blocker = QtCore.QSignalBlocker(self.candidates)
+            self.pocket_score_plot.set_study(state)
             values = state.workflow_data.get("pocket_candidates", [])
             self.candidates.setRowCount(len(values))
             for row, candidate in enumerate(values):
@@ -3428,7 +3554,13 @@ if QtWidgets is not None:
             self.pocket_evidence_panel.set_candidate(
                 values[rows[0].row()] if rows and rows[0].row() < len(values) else None
             )
+            self.pocket_score_plot.selected = (
+                str(values[rows[0].row()]["id"])
+                if rows and rows[0].row() < len(values) else None
+            )
+            self.pocket_score_plot.update()
             self._update_candidate_review_action()
+            del blocker
 
         @staticmethod
         def _candidate_evidence_digest(candidate: dict, evidence: dict) -> tuple[str, str]:

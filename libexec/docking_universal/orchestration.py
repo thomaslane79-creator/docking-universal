@@ -1037,6 +1037,11 @@ class ProtocolWorkflowRunner:
             time.sleep(0.01)
         raise RuntimeError("Pose-interaction worker did not persist its job start")
 
+    def has_live_worker(self, study_id: str) -> bool:
+        with self._guard:
+            worker = self._threads.get(study_id)
+            return bool(worker and worker.is_alive())
+
     def cancel(self, study_id: str) -> bool:
         with self._guard:
             cancellation = self._cancellations.get(study_id)
@@ -1056,8 +1061,7 @@ class ProtocolWorkflowRunner:
             worker.join(max(0.0, deadline - time.monotonic()))
 
     def _assert_no_active_stage(self) -> None:
-        for path in self.controller.store.root.glob("*/application_state.json"):
-            state = self.controller.store.load(path.parent.name)
+        for state in self.controller.store.list_studies():
             if state.active_job:
                 raise ActiveStageError(
                     f"Study {state.study_id} already has an active stage: {state.active_job.stage}"

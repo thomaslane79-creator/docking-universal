@@ -43,12 +43,12 @@ class StudyController:
     def get_study(self, study_id: str) -> StudyState:
         return self.store.load(study_id)
 
-    def remove_study_from_library(self, study_id: str) -> StudyState:
-        """Remove an idle study from GUI discovery without deleting its outputs."""
+    def remove_study_from_library(self, study_id: str, *, override_stale_job: bool = False) -> StudyState:
+        """Remove an idle or paused study without deleting its outputs."""
         state = self.get_study(study_id)
-        if state.active_job:
+        if state.active_job and not override_stale_job:
             raise ActiveStageError(
-                f"Study {study_id} has an active stage and cannot be removed from the library"
+                f"Study {study_id} has an unfinished stage recorded; confirm removal to override this record"
             )
         return self.store.remove_from_library(study_id)
 

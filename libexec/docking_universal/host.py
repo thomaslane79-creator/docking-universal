@@ -125,7 +125,12 @@ class CommandDispatcher:
                     raise FileExistsError(f"Study already exists: {command.study_id}")
             return Response(command.request_id, "applied", state.revision, {"study": state.to_dict()})
         if command.operation == "remove_study":
-            state = self.controller.remove_study_from_library(command.study_id)
+            if self.workflow_runner and self.workflow_runner.has_live_worker(command.study_id):
+                raise RuntimeError("A calculation is still running. Cancel it before deleting this study.")
+            state = self.controller.remove_study_from_library(
+                command.study_id,
+                override_stale_job=command.payload.get("override_stale_job") is True,
+            )
             return Response(
                 command.request_id, "applied", state.revision,
                 {"study_id": command.study_id, "external_outputs_preserved": True},
@@ -262,8 +267,7 @@ class CommandDispatcher:
         raise ValueError(f"Unsupported application-host operation: {command.operation}")
 
     def _assert_no_other_active_study(self, requested_study_id: str) -> None:
-        for path in self.controller.store.root.glob("*/application_state.json"):
-            state = self.controller.store.load(path.parent.name)
+        for state in self.controller.store.list_studies():
             if state.study_id != requested_study_id and state.active_job:
                 raise RuntimeError(
                     f"Study {state.study_id} already owns the active scientific stage: {state.active_job.stage}"

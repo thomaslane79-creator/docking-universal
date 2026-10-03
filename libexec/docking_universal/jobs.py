@@ -349,8 +349,7 @@ class _ScientificJobLease:
                     fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError as exc:
                     raise ActiveStageError("Another scientific stage is already running in this application") from exc
-            for path in self.store.root.glob("*/application_state.json"):
-                state = self.store.load(path.parent.name)
+            for state in self.store.list_studies():
                 if state.active_job:
                     if self.allowed_active == (state.study_id, state.active_job.id):
                         continue

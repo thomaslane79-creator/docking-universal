@@ -154,6 +154,22 @@ Copy this block for each new idea:
 
 ## Accepted current work
 
+### Pocket-score navigation into 3D
+
+- Date accepted: 2026-10-03.
+- Status: implemented; real user interaction validation pending.
+- Observed problem: the pocket-review stage offered empty retained-figure
+  controls rather than a useful route from pocket ranking to structural review.
+- Smallest correction: a native Qt plot of retained detector scores; click a
+  point or its P# label to select the matching candidate and display its 3D
+  scene through the existing viewer. Table selection follows the same path.
+  Neither action approves a region. Unscored ligand-expanded regions remain
+  selectable in the table without an invented detector score.
+- Acceptance tests: real mouse clicks on P2 synchronize the table and viewer;
+  retained-box numbering is distinguished from the original detector rank.
+- Scope: pocket review only; interactive docking-results plots remain future
+  work. No additional plotting dependency or scientific engine change.
+
 These are not backlog expansion. They are required to finish the active
 rigid-receptor milestone:
 

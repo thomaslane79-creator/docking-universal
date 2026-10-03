@@ -19,7 +19,8 @@ from pymol.wizard import Wizard
 PROTOCOL_VERSION = 1
 SAFE_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
 SAFE_SUFFIXES = {".pdb", ".pdbqt", ".mol2", ".sdf", ".pqr"}
-SAFE_COLORS = {"cyan", "marine", "orange", "salmon", "yellow", "violet"}
+# Match the report/GUI palette while keeping arbitrary expressions forbidden.
+SAFE_COLORS = {"red", "marine", "gold", "magenta", "cyan", "orange", "violet", "salmon", "yellow"}
 
 
 class BridgeCore:

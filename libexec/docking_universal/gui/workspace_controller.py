@@ -8,10 +8,9 @@ from .qt import QtCore
 class WorkspaceWindowController(QtCore.QObject):
     """Own window layout and polling; never own or mutate scientific state."""
 
-    # Version 6 replaces visibility-swapped stage docks with persistent stacked
-    # shells.  Restoring a version-5 dock graph can hide the shell and make the
-    # workflow navigator appear inert, so those layouts must not be replayed.
-    LAYOUT_VERSION = 6
+    # Stage forms now occupy the central workspace; old side-panel layouts
+    # must not restore oversized rails or empty stage docks.
+    LAYOUT_VERSION = 7
 
     def __init__(self, window, settings, refresh_callback, parent=None):
         super().__init__(parent or window)

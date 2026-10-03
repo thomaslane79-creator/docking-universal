@@ -24,7 +24,9 @@ class Host:
                 study_id, payload["name"], payload.get("workflow", "site_guided_protocol")
             )
         elif operation == "remove_study":
-            self.controller.remove_study_from_library(study_id)
+            self.controller.remove_study_from_library(
+                study_id, override_stale_job=payload.get("override_stale_job", False),
+            )
         return {"status": "applied"}
 
 

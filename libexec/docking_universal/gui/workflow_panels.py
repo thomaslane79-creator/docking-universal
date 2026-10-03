@@ -46,6 +46,9 @@ class StudySetupPanel(QtWidgets.QWidget):
         self.input_pdb = QtWidgets.QLineEdit()
         self.input_pdb.setPlaceholderText("Local .cif/.mmCIF/.pdb path or RCSB ID, e.g. 2R8N")
         self.output_directory = QtWidgets.QLineEdit()
+        self.output_directory.setPlaceholderText("Choose where this study will be saved")
+        form.setFieldGrowthPolicy(QtWidgets.QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        form.setRowWrapPolicy(QtWidgets.QFormLayout.RowWrapPolicy.WrapAllRows)
         self.pathway = QtWidgets.QComboBox()
         self.pathway.addItem("Exploratory — no redocking control", "exploratory")
         self.pathway.addItem("Known-ligand pose-recovery control", "control")
@@ -86,6 +89,7 @@ class StudySetupPanel(QtWidgets.QWidget):
         )
         self.deposited_evidence_details = QtWidgets.QPushButton("Full deposited evidence…")
         self.deposited_evidence_details.setEnabled(False)
+        self.deposited_evidence_details.hide()
         self._coordinate_evidence_record = None
         input_row, input_button = _path_row(self.input_pdb, "Browse…")
         self.fetch_button = QtWidgets.QPushButton("Fetch RCSB ID")
@@ -103,6 +107,7 @@ class StudySetupPanel(QtWidgets.QWidget):
         self.prepare_button.setObjectName("start_preparation_button")
         self.cancel_button = QtWidgets.QPushButton("Cancel active stage")
         self.cancel_button.setObjectName("cancel_job_button")
+        self.cancel_button.hide()
         buttons = QtWidgets.QVBoxLayout()
         buttons.addWidget(self.prepare_button)
         buttons.addWidget(self.cancel_button)
@@ -115,10 +120,10 @@ class StudySetupPanel(QtWidgets.QWidget):
         )
         self.lock_notice.hide()
         form.addRow(self.lock_notice)
+        form.addRow("Study output directory", output_row)
         form.addRow("Receptor structure", input_row)
         form.addRow("Deposited structure", self.deposited_evidence)
         form.addRow("", self.deposited_evidence_details)
-        form.addRow("Study output directory", output_row)
         form.addRow("Scientific pathway", self.pathway)
         form.addRow("Site definition", self.site_mode)
         form.addRow("Pocket detector", self.pocket_engine)
@@ -127,6 +132,7 @@ class StudySetupPanel(QtWidgets.QWidget):
         form.addRow("Control docking engine", self.control_engine)
         form.addRow("Initial control sampling", self.control_tier)
         form.addRow(buttons)
+        QtWidgets.QWidget.setTabOrder(self.output_directory, self.input_pdb)
         input_button.clicked.connect(self.chooseInputRequested)
         self.fetch_button.clicked.connect(self.fetchInputRequested)
         self.detect_ligands_button.clicked.connect(self.detectLigandsRequested)
@@ -136,19 +142,29 @@ class StudySetupPanel(QtWidgets.QWidget):
         self.site_mode.currentIndexChanged.connect(self._update_mode)
         self.pathway.currentIndexChanged.connect(self._update_mode)
         self.deposited_evidence_details.clicked.connect(self.show_deposited_evidence_details)
+        self.output_directory.textChanged.connect(self._update_download_availability)
+        self._update_download_availability()
         self._update_mode()
+
+    def _update_download_availability(self):
+        ready = bool(self.output_directory.text().strip()) and not self._locked
+        self.fetch_button.setEnabled(ready)
+        self.fetch_button.setToolTip(
+            "Download the structure into this study’s inputs folder."
+            if ready else "Choose a study output directory above before downloading."
+        )
 
     def set_coordinate_evidence(self, record) -> None:
         from ..services.coordinate_evidence import evidence_lines
 
         self._coordinate_evidence_record = record
         self.deposited_evidence_details.setEnabled(bool(record))
+        self.deposited_evidence_details.setVisible(bool(record))
         if record:
             self.deposited_evidence.setText("\n".join(evidence_lines(record)))
         else:
             self.deposited_evidence.setText(
-                "Choose a structure to review deposited assembly and ligand evidence. "
-                "Legacy PDB input keeps its existing preparation and review path."
+                "Load or download a structure above to review its assembly and deposited components."
             )
 
     def show_deposited_evidence_details(self) -> None:
@@ -190,6 +206,8 @@ class StudySetupPanel(QtWidgets.QWidget):
         for button in self.findChildren(QtWidgets.QPushButton):
             if button is not self.cancel_button:
                 button.setEnabled(not locked)
+        self.deposited_evidence_details.setEnabled(bool(self._coordinate_evidence_record))
+        self._update_download_availability()
 
     def _update_mode(self):
         control = self.pathway.currentData() == "control"

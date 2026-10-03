@@ -57,6 +57,7 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.window.resize(1100, 700)
         self.application.processEvents()
         for action, dock in (
+            (self.window.scientific_detail_action, self.window.workflow_detail_dock),
             (self.window.selections_action, self.window.selection_dock),
             (self.window.logs_action, self.window.logs_dock),
             (self.window.artifacts_action, self.window.reports_dock),
@@ -214,6 +215,39 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.assertEqual(viewer.opened_study, "desktop")
         self.assertEqual(viewer.candidate_id, "P1")
         self.assertIn("reviewing P1", self.window.viewer_status.text())
+
+    def test_plot_click_selects_candidate_and_loads_3d_without_report(self):
+        from PyQt6.QtTest import QTest
+        from docking_universal.gui.qt import QtCore
+
+        class Viewer:
+            backend_kind = "embedded"
+            backend_name = "Embedded PyMOL"
+            connected = False
+            report_view_available = False
+            status = "disconnected"
+
+            def open(self, state):
+                self.connected = True
+
+            def show_candidate(self, state, candidate_id):
+                self.candidate_id = candidate_id
+
+        state = self.window.state
+        state.workflow_data["pocket_candidates"].append({
+            "id": "P2", "rank": 2, "evidence": {"score": 0.4},
+        })
+        self.window._render_candidates(state)
+        viewer = Viewer()
+        self.window.viewer_coordinator = viewer
+        plot = self.window.pocket_score_plot
+        QTest.mouseClick(plot, QtCore.Qt.MouseButton.LeftButton,
+                         pos=plot.positions()[1].toPoint())
+        self.assertTrue(viewer.connected)
+        self.assertEqual(viewer.candidate_id, "P2")
+        self.assertEqual(self.window.candidates.selectionModel().selectedRows()[0].row(), 1)
+        self.assertEqual(plot.selected, "P2")
+        self.assertEqual(state.selected_pocket_ids, [])
 
     def test_embedded_viewer_gets_a_real_central_tab_and_controls(self):
         from docking_universal.gui.qt import QtWidgets
@@ -517,7 +551,8 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.window.workflow_navigation.setCurrentRow(3)
         self.application.processEvents()
         self.assertEqual(self.window.study_setup_dock.windowTitle(), "Finalize Protocol")
-        self.assertTrue(self.window.study_setup_dock.isVisibleTo(self.window))
+        self.assertTrue(self.window.stage_form_scroll.isVisibleTo(self.window))
+        self.assertTrue(self.window.study_setup_dock.isHidden())
         self.assertTrue(self.window.protocol_finalization_dock.isHidden())
         self.assertIs(
             self.window.workflow_stage_stack.currentWidget(),
@@ -527,16 +562,16 @@ class DesktopWorkspaceTests(unittest.TestCase):
             self.window.right_review_stack.currentWidget(),
             self.window.right_review_blank,
         )
-        self.assertFalse(self.window.pocket_evidence_dock.isHidden())
+        self.assertTrue(self.window.pocket_evidence_dock.isHidden())
         self.assertTrue(self.window.screening_results_dock.isHidden())
         self.assertEqual(self.window.size(), initial_window_size)
-        self.assertEqual(self.window.centralWidget().width(), initial_center_width)
+        self.assertGreaterEqual(self.window.centralWidget().width(), initial_center_width)
 
         self.window.workflow_navigation.setCurrentRow(4)
         self.application.processEvents()
         self.assertEqual(self.window.study_setup_dock.windowTitle(), "Screen Ligands")
         self.assertEqual(self.window.size(), initial_window_size)
-        self.assertEqual(self.window.centralWidget().width(), initial_center_width)
+        self.assertGreaterEqual(self.window.centralWidget().width(), initial_center_width)
         self.assertIs(
             self.window.workflow_stage_stack.currentWidget(),
             self.window.screening_setup_panel,
@@ -547,8 +582,8 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.application.processEvents()
         self.assertEqual(self.window.study_setup_dock.windowTitle(), "Review and Decide")
         self.assertEqual(self.window.size(), initial_window_size)
-        self.assertEqual(self.window.centralWidget().width(), initial_center_width)
-        self.assertTrue(self.window.study_setup_dock.isVisibleTo(self.window))
+        self.assertTrue(self.window.stage_form_scroll.isHidden())
+        self.assertTrue(self.window.study_setup_dock.isHidden())
         self.assertFalse(self.window.protocol_finalization_dock.isVisibleTo(self.window))
         self.assertFalse(self.window.screening_dock.isVisibleTo(self.window))
         self.assertIs(

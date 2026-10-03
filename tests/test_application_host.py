@@ -6,11 +6,12 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import Mock
 from pathlib import Path
 
 from docking_universal.application import StudyController
 from docking_universal.host import CommandDispatcher, reconcile_interrupted_jobs, serve_json_lines
-from docking_universal.models import CompletionStatus, Job, JobStatus
+from docking_universal.models import CompletionStatus, Job, JobStatus, PocketCandidate
 from docking_universal.state import JsonStudyStore
 from docking_universal.viewer.messages import Command
 
@@ -150,6 +151,52 @@ class ApplicationHostTests(unittest.TestCase):
             "removed_from_library_at",
             self.store.load("host-study").workflow_data,
         )
+
+    def test_remove_study_waiting_for_pocket_decision(self):
+        self.controller.start_pocket_review("host-study", [
+            PocketCandidate(**self.candidates[0])
+        ])
+        response = self.dispatcher.dispatch(command(
+            "session-1", "remove", "remove_study", payload={"override_stale_job": True},
+        ))
+        self.assertEqual(response.status, "applied")
+        self.assertEqual(self.store.list_studies(), [])
+        self.assertTrue(self.store.load("host-study").pending_decisions)
+
+        self.controller.create_study("fresh", "Fresh study")
+        self.dispatcher._assert_no_other_active_study("fresh")
+        from docking_universal.orchestration import ProtocolWorkflowRunner
+        runner = ProtocolWorkflowRunner(self.controller, Path("unused-prepare"))
+        runner._assert_no_active_stage()
+
+    def test_remove_study_rejects_running_and_queued_calculations(self):
+        for status in (JobStatus.RUNNING, JobStatus.QUEUED):
+            with self.subTest(status=status):
+                state = self.store.load("host-study")
+                state.jobs = [Job("work", "preparation", status)]
+                self.store.save(state)
+                response = self.dispatcher.dispatch(command(
+                    "session-1", f"remove-{status.value}", "remove_study",
+                ))
+                self.assertEqual(response.status, "rejected")
+                self.assertEqual(len(self.store.list_studies()), 1)
+
+    def test_override_removes_broken_job_record_but_rejects_live_worker(self):
+        state = self.store.load("host-study")
+        state.jobs = [Job("broken", "preparation", JobStatus.RUNNING)]
+        self.store.save(state)
+        runner = self.dispatcher.workflow_runner = Mock()
+        runner.has_live_worker.return_value = True
+        blocked = self.dispatcher.dispatch(command(
+            "session-1", "live", "remove_study", payload={"override_stale_job": True},
+        ))
+        self.assertEqual(blocked.status, "rejected")
+        runner.has_live_worker.return_value = False
+        removed = self.dispatcher.dispatch(command(
+            "session-1", "broken", "remove_study", payload={"override_stale_job": True},
+        ))
+        self.assertEqual(removed.status, "applied")
+        self.assertEqual(self.store.list_studies(), [])
 
 
 if __name__ == "__main__":
