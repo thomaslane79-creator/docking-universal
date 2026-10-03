@@ -142,10 +142,33 @@ class JsonStudyStore:
             return studies
         for path in self.root.glob("*/application_state.json"):
             try:
-                studies.append(StudyState.from_dict(json.loads(path.read_text())))
+                state = StudyState.from_dict(json.loads(path.read_text()))
+                if state.workflow_data.get("removed_from_library_at"):
+                    continue
+                studies.append(state)
             except (OSError, ValueError, KeyError, json.JSONDecodeError):
                 continue
         return sorted(studies, key=lambda item: item.updated_at, reverse=True)
+
+    def remove_from_library(self, study_id: str) -> StudyState:
+        """Hide a retained study from the active desktop library.
+
+        Scientific outputs often live outside the application-state directory.
+        Removing a study from the library must never silently delete those
+        reports, protocol bundles, or docking results.  The retained state is
+        therefore marked as removed instead of being unlinked, which also
+        leaves a recoverable audit record on disk.
+        """
+        from .models import utc_now
+
+        state, _result = self.update(
+            study_id,
+            lambda value: value.workflow_data.update({
+                "removed_from_library_at": utc_now(),
+                "removed_from_library_policy": "external_scientific_outputs_preserved",
+            }),
+        )
+        return state
 
     def save(self, state: StudyState, *, expected_revision: int | None = None) -> None:
         """Save one loaded state using optimistic revision validation."""

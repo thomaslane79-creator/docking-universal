@@ -343,6 +343,8 @@ standalone pipeline scripts.
 Use deterministic small fixtures for branch coverage and a separate opt-in suite
 for real engines and OpenGL. Keep private structures local and out of committed
 test fixtures. Obtain public fixtures using retained provenance when needed.
+The concrete public examples, chronological paths and acceptance artifacts are
+defined in [Real GUI workflow validation](gui-real-workflow-validation.md).
 
 Required journeys:
 

@@ -43,6 +43,15 @@ class StudyController:
     def get_study(self, study_id: str) -> StudyState:
         return self.store.load(study_id)
 
+    def remove_study_from_library(self, study_id: str) -> StudyState:
+        """Remove an idle study from GUI discovery without deleting its outputs."""
+        state = self.get_study(study_id)
+        if state.active_job:
+            raise ActiveStageError(
+                f"Study {study_id} has an active stage and cannot be removed from the library"
+            )
+        return self.store.remove_from_library(study_id)
+
     def event_view(self, study_id: str, detail: ScientificDetail) -> list[dict]:
         return [event.presented(detail) for event in self.get_study(study_id).events]
 

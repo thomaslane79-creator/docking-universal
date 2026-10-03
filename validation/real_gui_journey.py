@@ -41,12 +41,17 @@ def main() -> int:
     parser.add_argument("--ligand", type=Path, required=True)
     parser.add_argument("--scientific-python", type=Path, required=True)
     parser.add_argument("--host-script", type=Path, required=True)
+    parser.add_argument("--study-id", default="real-gui-validation")
+    parser.add_argument("--study-name", default="Real GUI validation")
+    parser.add_argument("--case-id", default="C1")
+    parser.add_argument("--selected-pocket", default="P1")
+    parser.add_argument("--allow-no-evidence", action="store_true")
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
     root = args.root.resolve()
     root.mkdir(parents=True, exist_ok=args.resume)
     state_root = root / "state"
-    study_id = "2r8n-real-gui-validation"
+    study_id = args.study_id
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     message_patches = [
         patch.object(
@@ -64,7 +69,7 @@ def main() -> int:
     ) as host:
         store = JsonStudyStore(state_root)
         if not args.resume:
-            host.request(study_id, "create_study", {"name": "2R8N real GUI validation"})
+            host.request(study_id, "create_study", {"name": args.study_name})
         window = StudyWindow(store, study_id, settings=settings, host_client=host)
         if args.resume:
             state = store.load(study_id)
@@ -87,22 +92,31 @@ def main() -> int:
             window.start_preparation()
             state = wait_for(app, window, store, study_id, lambda s: bool(s.pending_decisions), "pocket evidence and review")
         candidates = state.workflow_data.get("pocket_candidates", [])
-        p1_row = next(i for i, item in enumerate(candidates) if item["id"] == "P1")
-        window.candidates.selectRow(p1_row)
+        selected_row = next(
+            i for i, item in enumerate(candidates)
+            if item["id"] == args.selected_pocket
+        )
+        window.candidates.selectRow(selected_row)
         app.processEvents()
         evidence_rows = window.pocket_evidence_panel.table.rowCount()
         evidence_heading = window.pocket_evidence_panel.heading.text()
-        if evidence_rows < 1:
-            raise RuntimeError("P1 reached GUI review without experimental observations")
+        if evidence_rows < 1 and not args.allow_no_evidence:
+            raise RuntimeError(
+                f"{args.selected_pocket} reached GUI review without experimental observations"
+            )
         if state.pending_decisions:
-            window.rationale.setText("Real GUI validation: selected P1 after reviewing P2Rank and deposited-ligand evidence")
+            window.rationale.setText(
+                "Real GUI validation: selected " + args.selected_pocket
+                + " after reviewing pocket and deposited-ligand evidence"
+            )
             window.approve_selected_regions()
             state = wait_for(
                 app, window, store, study_id,
-                lambda s: s.selected_pocket_ids == ["P1"] or not s.pending_decisions,
-                "P1 approval",
+                lambda s: s.selected_pocket_ids == [args.selected_pocket]
+                or not s.pending_decisions,
+                args.selected_pocket + " approval",
             )
-        if state.selected_pocket_ids != ["P1"]:
+        if state.selected_pocket_ids != [args.selected_pocket]:
             raise RuntimeError(f"Unexpected approved regions: {state.selected_pocket_ids}")
         if not any(a.kind == "protocol_bundle" for a in state.artifacts):
             window.final_output_directory.setText(str(root / "protocol"))
@@ -148,7 +162,12 @@ def main() -> int:
         evidence_artifact = next(a for a in state.artifacts if a.kind == "pocket_evidence")
         evidence = json.loads(Path(evidence_artifact.path).read_text())
         summary = {
+            "schema_name": "docking-universal-gui-acceptance-record",
+            "schema_version": 1,
+            "case_id": args.case_id,
             "status": "passed", "study_id": study_id,
+            "receptor_input": str(source_path),
+            "screening_input": str(args.ligand.resolve()),
             "selected_pockets": state.selected_pocket_ids,
             "gui_evidence_heading": evidence_heading,
             "gui_evidence_rows": evidence_rows,
@@ -163,6 +182,7 @@ def main() -> int:
             ),
         }
         (root / "validation_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+        (root / "acceptance_record.json").write_text(json.dumps(summary, indent=2) + "\n")
         print(json.dumps(summary, indent=2))
         window.close()
     for message_patch in reversed(message_patches):

@@ -67,7 +67,7 @@ class CommandDispatcher:
     """Apply a small command whitelist under one serialized mutation lock."""
 
     MUTATIONS = {
-        "create_study", "start_pocket_review", "resolve_decision",
+        "create_study", "remove_study", "start_pocket_review", "resolve_decision",
         "start_receptor_preparation", "start_protocol_finalization", "start_screening",
         "start_control_validation",
         "start_pose_interaction",
@@ -124,6 +124,12 @@ class CommandDispatcher:
                 if state.workflow_data.get("creation_request_id") != command.request_id:
                     raise FileExistsError(f"Study already exists: {command.study_id}")
             return Response(command.request_id, "applied", state.revision, {"study": state.to_dict()})
+        if command.operation == "remove_study":
+            state = self.controller.remove_study_from_library(command.study_id)
+            return Response(
+                command.request_id, "applied", state.revision,
+                {"study_id": command.study_id, "external_outputs_preserved": True},
+            )
         if command.operation == "snapshot":
             state = self.controller.get_study(command.study_id)
             return Response(command.request_id, "applied", state.revision, {"study": state.to_dict()})

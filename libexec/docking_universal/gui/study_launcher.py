@@ -13,11 +13,15 @@ def study_id_from_name(name: str) -> str:
 
 
 class StudyLauncherDialog(QtWidgets.QDialog):
-    def __init__(self, store, host_client, parent=None, *, mode="all"):
+    def __init__(
+        self, store, host_client, parent=None, *, mode="all",
+        current_study_id: str | None = None,
+    ):
         super().__init__(parent)
         self.store = store
         self.host_client = host_client
         self.selected_study_id: str | None = None
+        self.current_study_id = current_study_id
         if mode not in {"all", "create", "open"}:
             raise ValueError(f"Unknown study chooser mode: {mode}")
         self.mode = mode
@@ -54,9 +58,9 @@ class StudyLauncherDialog(QtWidgets.QDialog):
             "Site-guided exploratory protocol", "site_guided_protocol"
         )
         self.workflow_scope = QtWidgets.QLabel(
-            "Current desktop scope: pocket/ligand-guided exploratory protocol. "
-            "PDB-ID acquisition, deposited-ligand selection, and control redocking "
-            "are not yet available when creating a new GUI study."
+            "Begin with a local PDBx/mmCIF or legacy PDB file, or download a retained "
+            "mmCIF structure by RCSB PDB ID. The chronological workflow supports "
+            "predicted-pocket exploration and exact deposited-ligand control redocking."
         )
         self.workflow_scope.setWordWrap(True)
         form.addRow("Study name", self.study_name)
@@ -76,16 +80,22 @@ class StudyLauncherDialog(QtWidgets.QDialog):
         self.create_button = QtWidgets.QPushButton("Create study")
         self.open_button = QtWidgets.QPushButton("Open selected study")
         self.open_button.setEnabled(False)
+        self.delete_button = QtWidgets.QPushButton("Delete selected study…")
+        self.delete_button.setObjectName("delete_selected_study_button")
+        self.delete_button.setEnabled(False)
         cancel = QtWidgets.QPushButton("Cancel")
         self.create_button.clicked.connect(self.create_study)
         self.open_button.clicked.connect(self.open_selected)
+        self.delete_button.clicked.connect(self.delete_selected)
         cancel.clicked.connect(self.reject)
         buttons.addWidget(self.create_button)
+        buttons.addWidget(self.delete_button)
         buttons.addStretch(1)
         buttons.addWidget(cancel)
         buttons.addWidget(self.open_button)
         self.create_button.setVisible(mode != "open")
         self.open_button.setVisible(mode != "create")
+        self.delete_button.setVisible(mode != "create")
         layout.addLayout(buttons)
         self.reload()
 
@@ -103,7 +113,52 @@ class StudyLauncherDialog(QtWidgets.QDialog):
         self._selection_changed()
 
     def _selection_changed(self) -> None:
-        self.open_button.setEnabled(bool(self.studies.selectionModel().selectedRows()))
+        rows = self.studies.selectionModel().selectedRows()
+        self.open_button.setEnabled(bool(rows))
+        selected = None
+        if rows:
+            selected = str(
+                self.studies.item(rows[0].row(), 0).data(QtCore.Qt.ItemDataRole.UserRole)
+            )
+        self.delete_button.setEnabled(bool(selected and selected != self.current_study_id))
+
+    def delete_selected(self) -> None:
+        rows = self.studies.selectionModel().selectedRows()
+        if not rows:
+            return
+        row = rows[0].row()
+        study_id = str(
+            self.studies.item(row, 0).data(QtCore.Qt.ItemDataRole.UserRole)
+        )
+        if study_id == self.current_study_id:
+            QtWidgets.QMessageBox.information(
+                self, "Current study is open",
+                "Open a different study before deleting this study from the active library.",
+            )
+            return
+        name = self.studies.item(row, 0).text()
+        answer = QtWidgets.QMessageBox.question(
+            self, "Delete study from Docking Universal?",
+            (
+                f"Delete '{name}' from the active Docking Universal study list?\n\n"
+                "This does not delete external reports, .duprotocol bundles, receptor files, "
+                "or docking output directories. The retained application-state record remains "
+                "recoverable on disk."
+            ),
+            QtWidgets.QMessageBox.StandardButton.Yes
+            | QtWidgets.QMessageBox.StandardButton.Cancel,
+            QtWidgets.QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.host_client.request(study_id, "remove_study", {})
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(
+                self, "Study could not be deleted from the library", str(exc)
+            )
+            return
+        self.reload()
 
     def open_selected(self) -> None:
         rows = self.studies.selectionModel().selectedRows()
@@ -136,6 +191,10 @@ class StudyLauncherDialog(QtWidgets.QDialog):
         self.accept()
 
 
-def choose_study(store, host_client, parent=None, *, mode="all") -> str | None:
-    dialog = StudyLauncherDialog(store, host_client, parent, mode=mode)
+def choose_study(
+    store, host_client, parent=None, *, mode="all", current_study_id: str | None = None,
+) -> str | None:
+    dialog = StudyLauncherDialog(
+        store, host_client, parent, mode=mode, current_study_id=current_study_id,
+    )
     return dialog.selected_study_id if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted else None

@@ -137,6 +137,20 @@ class ApplicationHostTests(unittest.TestCase):
         self.assertEqual(second.status, "applied")
         self.assertEqual(new_store.load("created").revision, 1)
 
+    def test_remove_study_hides_it_without_deleting_retained_state(self):
+        retained_path = self.store.path_for("host-study")
+        response = self.dispatcher.dispatch(command(
+            "session-1", "remove", "remove_study",
+        ))
+        self.assertEqual(response.status, "applied")
+        self.assertTrue(response.result["external_outputs_preserved"])
+        self.assertTrue(retained_path.is_file())
+        self.assertEqual(self.store.list_studies(), [])
+        self.assertIn(
+            "removed_from_library_at",
+            self.store.load("host-study").workflow_data,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,6 +2,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -22,6 +23,8 @@ class Host:
             self.controller.create_study(
                 study_id, payload["name"], payload.get("workflow", "site_guided_protocol")
             )
+        elif operation == "remove_study":
+            self.controller.remove_study_from_library(study_id)
         return {"status": "applied"}
 
 
@@ -73,6 +76,30 @@ class StudyLauncherTests(unittest.TestCase):
         opened = StudyLauncherDialog(self.store, self.host, mode="open")
         self.assertTrue(opened.create_button.isHidden())
         self.assertTrue(opened.create_group.isHidden())
+
+    def test_delete_removes_study_from_active_library_but_preserves_state(self):
+        state = self.controller.create_study("old-study", "Old study")
+        retained_path = self.store.path_for(state.study_id)
+        dialog = StudyLauncherDialog(self.store, self.host, mode="open")
+        dialog.studies.selectRow(0)
+        with patch.object(
+            QtWidgets.QMessageBox, "question",
+            return_value=QtWidgets.QMessageBox.StandardButton.Yes,
+        ):
+            dialog.delete_selected()
+        self.assertEqual(dialog.studies.rowCount(), 0)
+        self.assertTrue(retained_path.is_file())
+        retained = self.store.load("old-study")
+        self.assertIn("removed_from_library_at", retained.workflow_data)
+        self.assertEqual(self.host.calls[-1][0:2], ("old-study", "remove_study"))
+
+    def test_current_study_cannot_be_deleted_from_switch_dialog(self):
+        self.controller.create_study("current", "Current")
+        dialog = StudyLauncherDialog(
+            self.store, self.host, mode="open", current_study_id="current",
+        )
+        dialog.studies.selectRow(0)
+        self.assertFalse(dialog.delete_button.isEnabled())
 
 
 if __name__ == "__main__":

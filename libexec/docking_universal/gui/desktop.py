@@ -688,7 +688,10 @@ if QtWidgets is not None:
                 )
                 return
             from .study_launcher import choose_study
-            selected = choose_study(self.store, self.host_client, self, mode=mode)
+            selected = choose_study(
+                self.store, self.host_client, self, mode=mode,
+                current_study_id=self.study_id,
+            )
             if selected and selected != self.study_id:
                 self.studySwitchRequested.emit(selected)
 
