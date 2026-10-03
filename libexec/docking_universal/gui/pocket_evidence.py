@@ -5,7 +5,7 @@ from __future__ import annotations
 from .qt import QtCore, QtWidgets
 
 
-class PocketEvidencePanel(QtWidgets.QWidget):
+class PocketEvidencePanel(QtWidgets.QScrollArea):
     ligandRequested = QtCore.pyqtSignal(str)
     ligandsRequested = QtCore.pyqtSignal(list)
     selectionChanged = QtCore.pyqtSignal(list)
@@ -13,12 +13,20 @@ class PocketEvidencePanel(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("pocket_evidence_panel")
-        layout = QtWidgets.QVBoxLayout(self)
+        self.setWidgetResizable(True)
+        self.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        content = QtWidgets.QWidget()
+        self.setWidget(content)
+        layout = QtWidgets.QVBoxLayout(content)
+        layout.setSizeConstraint(QtWidgets.QLayout.SizeConstraint.SetMinimumSize)
+        self.content_layout = layout
         self.heading = QtWidgets.QLabel("Select a docking-box candidate to inspect its evidence.")
         self.heading.setWordWrap(True)
+        self.heading.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Fixed)
         self.heading.setFixedHeight(self.heading.fontMetrics().lineSpacing() * 3)
         self.warning = QtWidgets.QLabel()
         self.warning.setWordWrap(True)
+        self.warning.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Preferred)
         self.warning.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
         self.warning.setStyleSheet("background:#fff1b8;color:#332600;padding:6px")
         self.warning_scroll = QtWidgets.QScrollArea()
@@ -36,7 +44,9 @@ class PocketEvidencePanel(QtWidgets.QWidget):
             "Experimental correspondence supports a decision; it does not approve a box."
         )
         self.note.setWordWrap(True)
+        self.note.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Preferred)
         self.compare_button = QtWidgets.QPushButton("Show selected observations in PyMOL")
+        self.compare_button.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Fixed)
         self.compare_button.setEnabled(False)
         self.compare_button.clicked.connect(self._request_selected_ligands)
         layout.addWidget(self.heading)

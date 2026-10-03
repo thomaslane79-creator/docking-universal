@@ -534,7 +534,7 @@ if QtWidgets is not None:
             )
             self.pocket_evidence_panel = PocketEvidencePanel()
             self.pocket_score_plot = PocketScorePlot()
-            self.pocket_evidence_panel.layout().insertWidget(0, self.pocket_score_plot)
+            self.pocket_evidence_panel.content_layout.insertWidget(0, self.pocket_score_plot)
             self.pocket_score_plot.candidateActivated.connect(self._select_plotted_candidate)
             self.pocket_evidence_panel.set_viewer_presentation(
                 embedded=self.viewer_widget is not None
