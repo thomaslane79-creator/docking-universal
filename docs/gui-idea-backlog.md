@@ -163,12 +163,18 @@ Copy this block for each new idea:
 - Smallest correction: a native Qt plot of retained detector scores; click a
   point or its P# label to select the matching candidate and display its 3D
   scene through the existing viewer. Table selection follows the same path.
-  Neither action approves a region. Unscored ligand-expanded regions remain
-  selectable in the table without an invented detector score.
+  Neither action approves a region. Every retained region appears in the plot,
+  including unscored ligand-expanded regions below the score axis. Green rings
+  identify deposited-ligand evidence; an amber exclamation marks a retained
+  conformational conflict. A fixed-height scrollable plot keeps all candidates
+  legible without resizing the surrounding workspace.
 - Acceptance tests: real mouse clicks on P2 synchronize the table and viewer;
   retained-box numbering is distinguished from the original detector rank.
 - Scope: pocket review only; interactive docking-results plots remain future
-  work. No additional plotting dependency or scientific engine change.
+  work. No additional plotting dependency. New GUI preparation requests all
+  eligible regions (`max_pockets=0`) instead of an arbitrary three-region count
+  cutoff; existing overlap filtering and CLI defaults are preserved. Existing
+  studies are not silently regenerated.
 
 These are not backlog expansion. They are required to finish the active
 rigid-receptor milestone:

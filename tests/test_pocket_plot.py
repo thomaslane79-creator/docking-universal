@@ -34,7 +34,7 @@ class PocketPlotTests(unittest.TestCase):
                     {"id": "L1", "evidence": {}},
                 ],
             }))
-            self.assertEqual([(p[0], p[1]) for p in plot.points], [("P1", 2.49), ("P2", 1.8)])
+            self.assertEqual([(p[0], p[1]) for p in plot.points], [("P1", 2.49), ("P2", 1.8), ("L1", None)])
             self.assertEqual(plot.detector, "P2Rank")
             selected = []
             plot.candidateActivated.connect(selected.append)
@@ -44,7 +44,7 @@ class PocketPlotTests(unittest.TestCase):
             center = plot.positions()[1]
             QTest.mouseClick(plot, QtCore.Qt.MouseButton.LeftButton, pos=center.toPoint())
             QTest.mouseClick(plot, QtCore.Qt.MouseButton.LeftButton,
-                             pos=QtCore.QPoint(int(center.x()), plot.height() - 30))
+                             pos=QtCore.QPoint(int(center.x()), plot.height() - 50))
             self.assertEqual(selected, ["P2", "P2"])
             plot.close()
 
@@ -54,8 +54,8 @@ class PocketPlotTests(unittest.TestCase):
             {"id": "L1", "evidence": {}},
             {"id": "P2", "evidence": {"score": float("nan")}},
         ]}))
-        self.assertEqual(plot.points, [])
-        self.assertTrue(plot.isHidden())
+        self.assertEqual([(p[0], p[1]) for p in plot.points], [("L1", None), ("P2", None)])
+        self.assertFalse(plot.isHidden())
 
     def test_retained_box_number_is_not_original_detector_rank(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -73,4 +73,21 @@ class PocketPlotTests(unittest.TestCase):
                                       for i in range(1, 5)],
             }))
             self.assertEqual([(p[0], p[1]) for p in plot.points],
-                             [("P1", 2.49), ("P2", 1.8), ("P3", 1.11)])
+                             [("P1", 2.49), ("P2", 1.8), ("P3", 1.11), ("P4", None)])
+
+    def test_all_candidates_have_clickable_evidence_markers(self):
+        plot = PocketScorePlot()
+        plot.set_study(SimpleNamespace(workflow_data={"pocket_candidates": [
+            {"id": f"P{i}", "evidence": {
+                "score": 8 - i,
+                "experimental_ligand_evidence": {"observation_count": 4 if i == 5 else 0},
+                "conformational_site_evidence": {"box_decision_warning": "Conflict" if i == 5 else ""},
+            }} for i in range(1, 8)
+        ]}))
+        self.assertEqual(len(plot.points), 7)
+        self.assertEqual(plot.evidence_counts["P5"], 4)
+        self.assertEqual(plot.conflicts, {"P5"})
+        selected = []
+        plot.candidateActivated.connect(selected.append)
+        QTest.mouseClick(plot, QtCore.Qt.MouseButton.LeftButton, pos=plot.positions()[6].toPoint())
+        self.assertEqual(selected, ["P7"])

@@ -4,6 +4,23 @@ from docking_universal.p2rank_adapter import materialize_p2rank_candidates
 from docking_universal.pocket_equivalence import find_pocket_equivalences
 
 class P2RankAdapterTests(unittest.TestCase):
+    def test_zero_limit_retains_all_nonoverlapping_predictions(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            receptor = root / "target.pdb"
+            receptor.write_text("END\n")
+            predictions = root / "predictions.csv"
+            predictions.write_text(
+                "name,rank,score,probability,center_x,center_y,center_z,residue_ids\n"
+                + "".join(f"pocket{i},{i},{10-i},0.5,{i*50},0,0,\n" for i in range(1, 7))
+                + "overlap,7,1,0.2,50,0,0,\n"
+            )
+            all_record = materialize_p2rank_candidates(predictions, receptor, root / "all", "target", maximum_pockets=0)
+            limited = materialize_p2rank_candidates(predictions, receptor, root / "limited", "target")
+            self.assertEqual(all_record["retained_count"], 6)
+            self.assertEqual(limited["retained_count"], 3)
+            self.assertIn("overlaps_higher_ranked_box", (root / "all/pocket_selection_diagnostics.tsv").read_text())
+
     def test_large_p2rank_pocket_can_expand_beyond_legacy_36_angstrom_cap(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

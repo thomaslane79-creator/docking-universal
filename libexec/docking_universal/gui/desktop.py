@@ -534,7 +534,12 @@ if QtWidgets is not None:
             )
             self.pocket_evidence_panel = PocketEvidencePanel()
             self.pocket_score_plot = PocketScorePlot()
-            self.pocket_evidence_panel.content_layout.insertWidget(0, self.pocket_score_plot)
+            self.pocket_score_scroll = QtWidgets.QScrollArea()
+            self.pocket_score_scroll.setWidgetResizable(True)
+            self.pocket_score_scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+            self.pocket_score_scroll.setFixedHeight(290)
+            self.pocket_score_scroll.setWidget(self.pocket_score_plot)
+            self.pocket_evidence_panel.content_layout.insertWidget(0, self.pocket_score_scroll)
             self.pocket_score_plot.candidateActivated.connect(self._select_plotted_candidate)
             self.pocket_evidence_panel.set_viewer_presentation(
                 embedded=self.viewer_widget is not None
@@ -577,7 +582,7 @@ if QtWidgets is not None:
                 [260, 700], QtCore.Qt.Orientation.Vertical,
             )
             self.resizeDocks(
-                [self.pocket_evidence_dock], [300],
+                [self.pocket_evidence_dock], [360],
                 QtCore.Qt.Orientation.Horizontal,
             )
 
@@ -1844,7 +1849,7 @@ if QtWidgets is not None:
             self.right_review_stack.addWidget(self.results_review_panel)
             self.right_review_stack.addWidget(self.right_review_blank)
             self.pocket_evidence_dock.setWindowTitle("Scientific Evidence")
-            self.pocket_evidence_dock.setMinimumWidth(240)
+            self.pocket_evidence_dock.setMinimumWidth(320)
             self.pocket_evidence_dock.setWidget(self.right_review_stack)
             self.screening_results_dock.setWidget(QtWidgets.QWidget())
             self.screening_results_dock.hide()
@@ -3001,7 +3006,7 @@ if QtWidgets is not None:
                 "ligand_altloc": ligand_identity.get("altloc", ""),
                 "feedback_level": self.detail.currentText().lower().replace("teaching", "verbose").replace("technical", "verbose"),
                 "cavity_mode": 1,
-                "max_pockets": 3,
+                "max_pockets": 0,  # No count cutoff; review all eligible regions.
                 "center_mode": "deepest",
                 "centroid_mode": 1,
                 "pocket_engine": self.pocket_engine.currentData(),
@@ -3520,6 +3525,7 @@ if QtWidgets is not None:
             # Polling repaints evidence; only user navigation should reload 3D.
             blocker = QtCore.QSignalBlocker(self.candidates)
             self.pocket_score_plot.set_study(state)
+            self.pocket_score_scroll.setVisible(bool(self.pocket_score_plot.points))
             values = state.workflow_data.get("pocket_candidates", [])
             self.candidates.setRowCount(len(values))
             for row, candidate in enumerate(values):
@@ -4238,7 +4244,7 @@ if QtWidgets is not None:
             if not enabled:
                 self._stabilize_workflow_rail()
                 self.resizeDocks(
-                    [self.pocket_evidence_dock], [300],
+                    [self.pocket_evidence_dock], [360],
                     QtCore.Qt.Orientation.Horizontal,
                 )
 

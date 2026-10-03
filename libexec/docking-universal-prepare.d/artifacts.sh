@@ -168,6 +168,10 @@ write_pymol_review_scene() {
 # tests/test_receptor_preparation_routes.sh.
 write_preparation_summary() {
   local output_file="$1"
+  local retained_description="$MAX_POCKETS"
+  if [ "$MAX_POCKETS" -eq 0 ]; then
+    retained_description="All eligible regions (no count cutoff; overlap filtering retained)"
+  fi
   cat > "$output_file" <<EOF
 ###############################################################################
 Docking Preparation Summary
@@ -252,7 +256,7 @@ Cavity Selection
 ###############################################################################
 
 Number of cavities selected:
-$MAX_POCKETS
+$retained_description
 
 Selection ordering:
 Candidate order = raw fpocket score (descending); protein-centroid weighting is not applied
@@ -421,7 +425,7 @@ materialize_selected_site_artifacts() {
     if [ "$LIG_PRESENT" -eq 1 ] && [ "$index" -gt 1 ]; then
       break
     fi
-    if [ "$LIG_PRESENT" -eq 0 ] && [ "$index" -gt "$MAX_POCKETS" ]; then
+    if [ "$LIG_PRESENT" -eq 0 ] && [ "$MAX_POCKETS" -gt 0 ] && [ "$index" -gt "$MAX_POCKETS" ]; then
       break
     fi
 

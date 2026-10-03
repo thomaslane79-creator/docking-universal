@@ -1048,6 +1048,7 @@ class DesktopWorkspaceTests(unittest.TestCase):
             study_id, operation, payload, revision = host.calls[0]
             self.assertEqual((study_id, operation), ("setup", "start_receptor_preparation"))
             self.assertEqual(payload["site_mode"], "pockets")
+            self.assertEqual(payload["max_pockets"], 0)
             self.assertEqual(payload["feedback_level"], "verbose")
             self.assertIsNone(payload["meeko_template_file"])
             self.assertEqual(revision, self.store.load("setup").revision)

@@ -67,8 +67,8 @@ class ReceptorPreparationOptions:
             raise ValueError("Exact ligand selection requires both chain and residue number")
         if self.feedback_level not in {"concise", "guided", "verbose"}:
             raise ValueError("Feedback level must be concise, guided, or verbose")
-        if self.cavity_mode not in {1, 2, 3} or self.max_pockets < 1:
-            raise ValueError("Cavity mode must be 1-3 and max pockets must be positive")
+        if self.cavity_mode not in {1, 2, 3} or self.max_pockets < 0:
+            raise ValueError("Cavity mode must be 1-3 and max pockets must be nonnegative (0 means all)")
         if self.center_mode not in {"deepest", "centroid"} or self.centroid_mode not in {1, 2}:
             raise ValueError("Invalid cavity center policy")
         if self.pdbfixer not in {"auto", "required", "off"}:

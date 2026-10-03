@@ -101,7 +101,11 @@ resolve_pocket_search_policy() {
     CENTER_MODE=centroid
     CENTROID_SEL="${DOCKING_UNIVERSAL_CENTROID_MODE:-1}"
     read -r PROT_CX PROT_CY PROT_CZ <<< "$(protein_ranking_centroid "$RECEPTOR_PDB" "$CENTROID_SEL")"
-    log "P2Rank mode: retaining up to $MAX_POCKETS ranked ML pocket hypotheses"
+    if [ "$MAX_POCKETS" -eq 0 ]; then
+      log "P2Rank mode: reviewing all eligible ranked pocket hypotheses"
+    else
+      log "P2Rank mode: retaining up to $MAX_POCKETS ranked ML pocket hypotheses"
+    fi
     return 0
   fi
 
@@ -129,7 +133,7 @@ resolve_pocket_search_policy() {
     read -r -p "How many cavities to select? [3] " MAX_POCKETS
     MAX_POCKETS="${MAX_POCKETS:-3}"
   fi
-  if ! [[ "$MAX_POCKETS" =~ ^[0-9]+$ ]] || [ "$MAX_POCKETS" -lt 3 ]; then
+  if ! [[ "$MAX_POCKETS" =~ ^[0-9]+$ ]] || { [ "$MAX_POCKETS" -ne 0 ] && [ "$MAX_POCKETS" -lt 3 ]; }; then
     echo "Exploratory pocket review retains at least three candidates; using 3."
     MAX_POCKETS=3
   fi
@@ -687,7 +691,7 @@ select_ranked_fpocket_candidates() {
   while IFS= read -r rec; do
     [ -n "$rec" ] || continue
     order=$((order+1)); IFS='|' read -r rank geom cx cy cz score <<< "$rec"
-    if [ "$selected_count" -ge "$max_pockets" ]; then
+    if [ "$max_pockets" -gt 0 ] && [ "$selected_count" -ge "$max_pockets" ]; then
       printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\tskipped\tnot_retained_after_max_pockets\tNA\n' "$order" "$(basename "$geom")" "$score" "$rank" "$cx" "$cy" "$cz" >> "$diagnostic_file"
       continue
     fi

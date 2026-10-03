@@ -42,6 +42,8 @@ def materialize_p2rank_candidates(
     p2rank_version: str | None = None,
 ) -> dict:
     """Convert P2Rank rows into the stable downstream pocket contract."""
+    if maximum_pockets < 0:
+        raise ValueError("Maximum pockets must be nonnegative (0 means all)")
     predictions_csv, receptor_pdb, cavity = Path(predictions_csv), Path(receptor_pdb), Path(cavity_directory)
     cavity.mkdir(parents=True, exist_ok=True)
     frozen = cavity / "frozen_pockets"; frozen.mkdir(exist_ok=True)
@@ -68,13 +70,15 @@ def materialize_p2rank_candidates(
                          "name": row.get("name") or f"pocket{rank}", "geometry": geometry,
                          "residue_ids": sorted(f"{c}_{n}" for c, n in keys), "atom_lines": atom_lines})
     rows.sort(key=lambda item: (item["rank"], -item["score"]))
+    # Zero means all eligible regions; the default CLI limit remains three.
+    limit = maximum_pockets if maximum_pockets > 0 else len(rows)
     retained = []
     diagnostics = []
     for item in rows:
         observed = max((_overlap(item["geometry"], prior["geometry"]) for prior in retained), default=0.0)
-        selected = len(retained) < maximum_pockets and observed <= maximum_overlap
+        selected = len(retained) < limit and observed <= maximum_overlap
         diagnostics.append((item, selected, observed, "selected" if selected else
-                            "maximum_candidates_reached" if len(retained) >= maximum_pockets else "overlaps_higher_ranked_box"))
+                            "maximum_candidates_reached" if len(retained) >= limit else "overlaps_higher_ranked_box"))
         if selected:
             retained.append(item)
     selection = cavity / "pocket_selection_diagnostics.tsv"

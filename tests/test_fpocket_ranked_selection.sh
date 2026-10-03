@@ -29,6 +29,16 @@ grep -q $'p2.pdb\t.*\tskipped\tbox_overlap_exceeds_MAX_OVERLAP_FRAC' "$tmp/diagn
 grep -q $'p4.pdb\t.*\tskipped\tnot_retained_after_max_pockets\tNA' "$tmp/diagnostic.tsv" || fail "post-maximum audit changed"
 [ "$(awk 'END{print NR}' "$tmp/diagnostic.tsv")" -eq 5 ] || fail "complete ranked audit changed"
 
+# GUI all-regions policy removes only the count cutoff, not overlap filtering.
+write_pocket "$tmp/pockets/p5.pdb" 0.60 60
+write_pocket "$tmp/pockets/p6.pdb" 0.50 -60
+cp "$tmp/eligible.list" "$tmp/all-eligible.list"
+printf '%s\n' "$tmp/pockets/p5.pdb" "$tmp/pockets/p6.pdb" >> "$tmp/all-eligible.list"
+select_ranked_fpocket_candidates "$tmp/all-eligible.list" centroid 0 0 0 0 13 0.60 \
+  "$tmp/all-selected" "$tmp/all-diagnostic.tsv"
+[ "$(wc -l < "$tmp/all-selected" | tr -d ' ')" -eq 5 ] || fail "zero limit did not retain all eligible regions"
+grep -q 'box_overlap_exceeds_MAX_OVERLAP_FRAC' "$tmp/all-diagnostic.tsv" || fail "all-regions policy removed overlap filtering"
+
 # Protein-centroid coordinates remain accepted for compatibility with older
 # callers, but must not influence fpocket ordering or the retained sites.
 select_ranked_fpocket_candidates "$tmp/eligible.list" centroid 1000 -750 500 2 13 0.60 \

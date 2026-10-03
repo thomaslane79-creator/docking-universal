@@ -41,6 +41,15 @@ class PreparationServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "explicitly selected"):
             build_receptor_preparation_plan(self.executable, options)
 
+    def test_zero_pocket_limit_requests_all_without_changing_cli_default(self):
+        options = ReceptorPreparationOptions(self.input, self.root, "pockets", max_pockets=0)
+        plan = build_receptor_preparation_plan(self.executable, options)
+        self.assertEqual(plan.request.environment["DOCKING_UNIVERSAL_MAX_POCKETS"], "0")
+        self.assertEqual(ReceptorPreparationOptions(self.input, self.root, "pockets").max_pockets, 3)
+        with self.assertRaises(ValueError):
+            build_receptor_preparation_plan(self.executable,
+                ReceptorPreparationOptions(self.input, self.root, "pockets", max_pockets=-1))
+
     def test_ligand_mode_rejects_residue_name_without_exact_instance(self):
         options = ReceptorPreparationOptions(
             self.input, self.root, "ligand", ligand_resname="LIG",
