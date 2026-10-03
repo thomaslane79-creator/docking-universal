@@ -216,6 +216,37 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.assertEqual(viewer.candidate_id, "P1")
         self.assertIn("reviewing P1", self.window.viewer_status.text())
 
+    def test_active_embedded_navigation_does_not_reactivate_window(self):
+        from docking_universal.gui.qt import QtWidgets
+        widget = QtWidgets.QFrame()
+        self.window.viewer_widget = widget
+        self.window.review_tabs.addTab(QtWidgets.QWidget(), "Interactive structure")
+        self.window.review_tabs.setCurrentIndex(1)
+        with patch.object(self.window, "isActiveWindow", return_value=True), \
+             patch.object(self.window, "raise_") as raise_window, \
+             patch.object(self.window, "activateWindow") as activate:
+            self.window._show_embedded_viewer()
+            self.window._show_embedded_viewer()
+            raise_window.assert_not_called()
+            activate.assert_not_called()
+
+    def test_evidence_warning_changes_keep_graph_and_table_in_place(self):
+        panel = self.window.pocket_evidence_panel
+        self.window.show()
+        warning_candidate = {"id": "P1", "evidence": {
+            "conformational_site_evidence": {
+                "box_decision_warning": "A deposited ligand conflicts with the receptor. " * 12,
+            },
+        }}
+        geometry = []
+        for candidate in (warning_candidate, {"id": "P2", "evidence": {}}, warning_candidate):
+            panel.set_candidate(candidate)
+            self.application.processEvents()
+            geometry.append((panel.table.geometry(), self.window.pocket_score_plot.geometry()))
+        self.assertEqual(geometry[0], geometry[1])
+        self.assertEqual(geometry[1], geometry[2])
+        self.assertTrue(panel.warning_scroll.isVisibleTo(self.window))
+
     def test_evidence_opens_structure_without_a_retained_report_scene(self):
         from unittest.mock import Mock
         viewer = Mock()

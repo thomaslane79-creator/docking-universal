@@ -16,10 +16,16 @@ class PocketEvidencePanel(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(self)
         self.heading = QtWidgets.QLabel("Select a docking-box candidate to inspect its evidence.")
         self.heading.setWordWrap(True)
+        self.heading.setFixedHeight(self.heading.fontMetrics().lineSpacing() * 3)
         self.warning = QtWidgets.QLabel()
         self.warning.setWordWrap(True)
+        self.warning.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
         self.warning.setStyleSheet("background:#fff1b8;color:#332600;padding:6px")
-        self.warning.hide()
+        self.warning_scroll = QtWidgets.QScrollArea()
+        self.warning_scroll.setWidgetResizable(True)
+        self.warning_scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        self.warning_scroll.setWidget(self.warning)
+        self.warning_scroll.setFixedHeight(self.warning.fontMetrics().lineSpacing() * 6 + 12)
         self.table = QtWidgets.QTableWidget(0, 6)
         self.table.setHorizontalHeaderLabels(("Class", "PDB", "Ligand", "Cα RMSD (Å)", "Identity", "Coverage"))
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
@@ -34,7 +40,7 @@ class PocketEvidencePanel(QtWidgets.QWidget):
         self.compare_button.setEnabled(False)
         self.compare_button.clicked.connect(self._request_selected_ligands)
         layout.addWidget(self.heading)
-        layout.addWidget(self.warning)
+        layout.addWidget(self.warning_scroll)
         layout.addWidget(self.table, 1)
         layout.addWidget(self.compare_button)
         layout.addWidget(self.note)
@@ -70,10 +76,19 @@ class PocketEvidencePanel(QtWidgets.QWidget):
             f"{experimental.get('pdb_entry_count', 0)} PDB entries · "
             f"exact {classes.get('exact_sequence_match', 0)} · homolog {classes.get('close_structural_homolog', 0)}"
         )
+        self.heading.setToolTip(self.heading.text())
         conformation = evidence.get("conformational_site_evidence") or {}
         warning = conformation.get("box_decision_warning") or ""
-        self.warning.setText(warning)
-        self.warning.setVisible(bool(warning))
+        self.warning.setText(warning or (
+            "Conformational compatibility has not been evaluated for this region."
+            if conformation.get("status", "not_evaluated") == "not_evaluated"
+            else "No conformational incompatibility was recorded in the reviewed evidence."
+        ))
+        self.warning.setStyleSheet(
+            "background:#fff1b8;color:#332600;padding:6px" if warning
+            else "background:#f2f4f6;color:#333333;padding:6px"
+        )
+        self.warning_scroll.verticalScrollBar().setValue(0)
         self.table.setRowCount(len(observations))
         for row, item in enumerate(observations):
             values = (

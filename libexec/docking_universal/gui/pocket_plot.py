@@ -14,8 +14,7 @@ class PocketScorePlot(QtWidgets.QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumHeight(200)
-        self.setMaximumHeight(260)
+        self.setFixedHeight(220)
         self.setMouseTracking(True)
         self.points = []
         self.selected = None

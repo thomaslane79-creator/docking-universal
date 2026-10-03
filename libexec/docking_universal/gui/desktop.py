@@ -57,9 +57,13 @@ if QtWidgets is not None:
 
         def _show_embedded_viewer(self) -> None:
             if self.viewer_widget is not None and self.review_tabs.count() > 1:
-                self.review_tabs.setCurrentIndex(1)
-                self.raise_()
-                self.activateWindow()
+                if self.review_tabs.currentIndex() != 1:
+                    self.review_tabs.setCurrentIndex(1)
+                # In-window navigation already has focus. Re-activating the
+                # native window on every row click can disturb macOS stacking.
+                if not self.isActiveWindow():
+                    self.raise_()
+                    self.activateWindow()
         """Multiple instances present the same store; none owns scientific state."""
 
         WORKFLOW_RAIL_WIDTH = 235

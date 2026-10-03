@@ -47,6 +47,28 @@ def main():
             check("matching table row selected", window.candidates.selectionModel().selectedRows()[0].row() == 1)
             check("interactive tab active", window.review_tabs.currentIndex() == 1)
             check("receptor loaded", adapter.cmd.count_atoms("polymer") > 0)
+            QTest.qWait(100)
+            geometries = []
+            for candidate in ("P1", "P2", "P1", "P2"):
+                window._select_plotted_candidate(candidate)
+                QTest.qWait(100)
+                rect = widget.geometry()
+                geometries.append([rect.x(), rect.y(), rect.width(), rect.height(),
+                                   window.centralWidget().width(), window.width(), window.height(),
+                                   window.x(), window.y(), plot.height(),
+                                   window.pocket_evidence_panel.table.y()])
+            result["candidate_geometries"] = geometries
+            check("candidate switches keep viewport geometry", all(g == geometries[0] for g in geometries))
+            window.resize(1100, 700)
+            window.resizeDocks([window.pocket_evidence_dock], [300], QtCore.Qt.Orientation.Horizontal)
+            QTest.qWait(100)
+            compact = []
+            for candidate in ("P1", "P2", "P1", "P2"):
+                window._select_plotted_candidate(candidate)
+                QTest.qWait(100)
+                compact.append([widget.width(), widget.height(), window.width(), window.height()])
+            result["compact_candidate_geometries"] = compact
+            check("compact candidate switches keep viewport geometry", all(g == compact[0] for g in compact))
             observations = window.state.workflow_data["pocket_candidates"][0]["evidence"]["experimental_ligand_evidence"]["observations"]
             ligand = observations[0]["aligned_ligand_pdb"]
             # Exercise the previously broken first-open evidence route too.
