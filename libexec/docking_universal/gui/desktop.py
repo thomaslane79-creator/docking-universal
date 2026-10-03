@@ -3429,23 +3429,27 @@ if QtWidgets is not None:
             dialog.raise_()
             dialog.activateWindow()
 
+        def _connect_structure_review(self) -> bool:
+            """Evidence/candidate review does not depend on a report figure."""
+            if not self.viewer_coordinator:
+                return False
+            if self.viewer_coordinator.connected:
+                return True
+            try:
+                if getattr(self.viewer_coordinator, "status", None) == "failed":
+                    self.viewer_coordinator.reconnect(self.state)
+                else:
+                    self.viewer_coordinator.open(self.state)
+            except Exception as exc:
+                self._viewer_failed(exc)
+                return False
+            return bool(self.viewer_coordinator.connected)
+
         def show_evidence_ligand(self, path: str) -> None:
             if not self.viewer_coordinator:
                 self.viewer_status.setText("PyMOL is not configured for this installation")
                 return
-            # Evidence inspection is deliberately a clean, foregrounded
-            # session: restart the companion so stale overlays, camera state,
-            # and an old bridge process cannot leak into the next observation.
-            scenes = getattr(self, "_selected_figure_scenes", [])
-            if scenes:
-                self._selected_figure_scene = scenes[0][1]
-            else:
-                preferred = self.viewer_coordinator._preferred_report_view(self.state)
-                if preferred is not None:
-                    self._selected_figure_scene = Path(preferred.path)
-            if not self.viewer_coordinator.connected:
-                self.open_visual_review()
-            if not self.viewer_coordinator.connected:
+            if not self._connect_structure_review():
                 self.viewer_status.setText(
                     "Could not connect to PyMOL; the evidence remains selected for review"
                 )
@@ -3469,12 +3473,7 @@ if QtWidgets is not None:
             if not self.viewer_coordinator:
                 self.viewer_status.setText("PyMOL is not configured for this installation")
                 return
-            scenes = getattr(self, "_selected_figure_scenes", [])
-            if scenes:
-                self._selected_figure_scene = scenes[0][1]
-            if not self.viewer_coordinator.connected:
-                self.open_visual_review()
-            if not self.viewer_coordinator.connected:
+            if not self._connect_structure_review():
                 self.viewer_status.setText("Could not connect to PyMOL for evidence comparison")
                 return
             try:

@@ -225,6 +225,7 @@ class EmbeddedPymolAdapter:
         self.cmd.show("cartoon", structure.object_name)
         self.cmd.color("gray70", structure.object_name)
         self.structures[structure.object_name] = structure
+        self._frame_whole_protein()
         self.widget.update()
         return {"object_name": structure.object_name, "path": str(structure.path.resolve())}
 
@@ -238,7 +239,14 @@ class EmbeddedPymolAdapter:
             if existing != retained:
                 raise ValueError(f"PyMOL pocket object name is already registered: {object_name}")
             return {**retained, "already_loaded": True}
-        self.cmd.load(str(pocket), object_name)
+        view = self.cmd.get_view()
+        auto_zoom = self.cmd.get_setting_int("auto_zoom")
+        try:
+            self.cmd.set("auto_zoom", 0)
+            self.cmd.load(str(pocket), object_name, zoom=0)
+        finally:
+            self.cmd.set("auto_zoom", auto_zoom)
+            self.cmd.set_view(view)
         self.cmd.hide("everything", object_name)
         self.cmd.show("surface", object_name)
         self.cmd.set("transparency", 0.35, object_name)

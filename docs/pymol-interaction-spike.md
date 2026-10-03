@@ -81,3 +81,21 @@ reads `pk1` and closes PyMOL. This interactive script is feasibility tooling,
 not the production viewer adapter described by roadmap task 06.
 
 No study, protocol, or report schema is changed by this spike.
+# Desktop runtime routing (2026-10-03)
+
+The public Conda launcher supports `DOCKING_UNIVERSAL_GUI_PYTHON` as an
+explicit combined Qt6/PyMOL interpreter override. Alternatively, a local
+installation may register that interpreter's absolute path in
+`<scientific-prefix>/share/docking-universal/desktop-python` (one line).
+Registered runtimes launch directly, without activation of the separate GUI
+environment, and default to `--viewer-backend embedded`. Missing registered
+interpreters fail visibly rather than silently opening an independent viewer.
+`docking-universal desktop --viewer-backend companion` remains an explicit
+fallback. No machine-specific interpreter path is stored in repository code.
+
+On the development Mac, the existing source-built prototype runtime is
+registered; this does not install that experimental binary for other platforms.
+The read-only `validation/embedded_pocket_review.py` check validates P2 graph
+navigation, receptor/evidence display without a report scene, one host window,
+and engine shutdown with the actual OpenGL renderer. This is not full pipeline
+or cross-platform acceptance.

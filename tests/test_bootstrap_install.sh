@@ -120,6 +120,25 @@ env PATH="$mock_bin:$PATH" BOOTSTRAP_TEST_STATE="$state_file" \
 grep -q "run --no-capture-output -n docking-universal-gui-next $mock_gui_prefix/bin/python $mock_scientific_prefix/libexec/docking-universal/docking-universal-desktop.py --pymol $mock_pymol_prefix/bin/pymol --host-python $mock_scientific_prefix/bin/python --help" "$log_file" \
   || fail "desktop did not route GUI, PyMOL, and scientific runtimes separately"
 
+# An explicitly registered embedded runtime must not be wrapped in the old
+# GUI Conda environment or silently select the companion backend.
+custom_python="$work_dir/embedded python"
+cat > "$custom_python" <<'EOF'
+#!/usr/bin/env bash
+printf 'CUSTOM %s\n' "$*" >> "$BOOTSTRAP_TEST_LOG"
+EOF
+chmod +x "$custom_python"
+mkdir -p "$mock_scientific_prefix/share/docking-universal"
+printf '%s\n' "$custom_python" > "$mock_scientific_prefix/share/docking-universal/desktop-python"
+: > "$log_file"
+env PATH="$mock_bin:$PATH" BOOTSTRAP_TEST_STATE="$state_file" \
+  BOOTSTRAP_TEST_LOG="$log_file" DOCKING_UNIVERSAL_CONDA=conda \
+  "$mock_bin/docking-universal" desktop --help >/dev/null || fail "registered embedded launcher"
+grep -q "CUSTOM .*--viewer-backend embedded .*--host-python .*--help" "$log_file" \
+  || fail "registered runtime did not default to embedded viewer"
+if grep -q 'run --no-capture-output' "$log_file"; then fail "registered runtime was wrapped in another environment"; fi
+rm "$mock_scientific_prefix/share/docking-universal/desktop-python"
+
 : > "$log_file"
 background_out="$work_dir/background-validation"
 background_output=$(env PATH="$mock_bin:$PATH" BOOTSTRAP_TEST_STATE="$state_file" \

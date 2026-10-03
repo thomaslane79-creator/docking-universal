@@ -216,6 +216,29 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.assertEqual(viewer.candidate_id, "P1")
         self.assertIn("reviewing P1", self.window.viewer_status.text())
 
+    def test_evidence_opens_structure_without_a_retained_report_scene(self):
+        from unittest.mock import Mock
+        viewer = Mock()
+        viewer.connected = False
+        viewer.status = "disconnected"
+        viewer.backend_kind = "embedded"
+        viewer.open.side_effect = lambda state: setattr(viewer, "connected", True)
+        self.window.viewer_coordinator = viewer
+        self.window._selected_figure_scene = None
+        with patch.object(self.window, "open_visual_review") as report_route:
+            self.window.show_evidence_ligand("aligned-one.pdb")
+            viewer.open.assert_called_once_with(self.window.state)
+            viewer.show_evidence_ligand.assert_called_once_with("aligned-one.pdb", None)
+            report_route.assert_not_called()
+            viewer.connected = False
+            viewer.open.reset_mock()
+            self.window.show_evidence_ligands(["aligned-one.pdb", "aligned-two.pdb"])
+            viewer.open.assert_called_once_with(self.window.state)
+            viewer.show_evidence_ligands.assert_called_once_with(
+                ["aligned-one.pdb", "aligned-two.pdb"], None,
+            )
+            report_route.assert_not_called()
+
     def test_plot_click_selects_candidate_and_loads_3d_without_report(self):
         from PyQt6.QtTest import QTest
         from docking_universal.gui.qt import QtCore

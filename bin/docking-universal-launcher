@@ -20,9 +20,8 @@ if ! command -v "$conda_command" >/dev/null 2>&1; then
   exit 1
 fi
 
-# The modern desktop and PyMOL deliberately use different Qt generations.
-# Resolve PyMOL in its companion environment and pass the executable to the
-# PyQt6 desktop instead of exposing either environment to the user's shell.
+# The scientific host stays isolated. A locally validated combined Qt6/PyMOL
+# runtime can be registered without modifying the companion environment.
 if [ "${1:-}" = "desktop" ]; then
   gui_environment=${DOCKING_UNIVERSAL_GUI_ENV:-docking-universal-gui-next}
   pymol_environment=${DOCKING_UNIVERSAL_PYMOL_ENV:-docking-universal-pymol-next}
@@ -43,6 +42,18 @@ if [ "${1:-}" = "desktop" ]; then
   pymol_command="$pymol_prefix/bin/pymol"
   host_python="$scientific_prefix/bin/python"
   desktop_script="$scientific_prefix/libexec/docking-universal/docking-universal-desktop.py"
+  registered_python="$scientific_prefix/share/docking-universal/desktop-python"
+  custom_gui_python=${DOCKING_UNIVERSAL_GUI_PYTHON:-}
+  if [ -z "$custom_gui_python" ] && [ -f "$registered_python" ]; then
+    IFS= read -r custom_gui_python < "$registered_python" || true
+  fi
+  if [ -n "$custom_gui_python" ]; then
+    [ -x "$custom_gui_python" ] || {
+      printf 'Error: registered desktop Python is unavailable: %s\n' "$custom_gui_python" >&2
+      exit 1
+    }
+    gui_python="$custom_gui_python"
+  fi
   if [ ! -x "$gui_python" ]; then gui_python="$gui_prefix/python.exe"; fi
   if [ ! -x "$pymol_command" ]; then pymol_command="$pymol_prefix/Scripts/pymol.exe"; fi
   if [ ! -x "$host_python" ]; then host_python="$scientific_prefix/python.exe"; fi
@@ -51,6 +62,13 @@ if [ "${1:-}" = "desktop" ]; then
   [ -x "$host_python" ] || { printf 'Error: Python was not found in %s\n' "$scientific_environment" >&2; exit 1; }
   [ -f "$desktop_script" ] || { printf 'Error: Docking Universal desktop is not installed in %s\n' "$scientific_environment" >&2; exit 1; }
   shift
+  if [ -n "$custom_gui_python" ]; then
+    # Do not activate another Conda environment over the registered runtime.
+    # Fail visibly if embedding is unavailable; --viewer-backend companion
+    # remains an explicit user-selectable fallback.
+    exec "$gui_python" "$desktop_script" --viewer-backend embedded \
+      --pymol "$pymol_command" --host-python "$host_python" "$@"
+  fi
   exec "$conda_command" run --no-capture-output -n "$gui_environment" \
     "$gui_python" "$desktop_script" --pymol "$pymol_command" \
     --host-python "$host_python" "$@"

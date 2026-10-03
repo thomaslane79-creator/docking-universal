@@ -89,6 +89,18 @@ class FakeWidget:
 
 
 class EmbeddedEvidenceCameraTests(unittest.TestCase):
+    def test_pocket_coordinate_loading_cannot_reset_protein_camera(self):
+        with TemporaryDirectory() as directory:
+            pocket = Path(directory) / "pocket.pdb"
+            pocket.write_text("ATOM\n")
+            widget = FakeWidget()
+            adapter = EmbeddedPymolAdapter(widget)
+            before = widget.cmd.get_view()
+            adapter.show_pocket(pocket, "du_pocket_1", "red")
+            self.assertEqual(widget.cmd.get_view(), before)
+            self.assertEqual(widget.cmd.loads[0][2:], (0, 0))
+            self.assertEqual(widget.cmd.auto_zoom, 1)
+
     def test_first_and_repeated_evidence_changes_preserve_exact_camera(self):
         with TemporaryDirectory() as directory:
             first = Path(directory) / "first.pdb"
