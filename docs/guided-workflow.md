@@ -1,16 +1,196 @@
 # Guided studies
 
+## Desktop site discovery with a bound ligand
+
+**Starting point for site review** chooses initial guidance, not the final
+docking location. During review you can select one or more regions, including
+sites elsewhere supported by related structures or optional pocket prediction.
+
+Choose **Selected bound ligand** for its experimental site. Optionally enable
+**Also run P2Rank to look for other pockets?** and leave the detector
+at **P2Rank** to explore alternatives on the prepared receptor with the ligand
+removed. Prediction does not dock anything or select/approve a site. The exact
+input-ligand region is retained separately, without a prediction score or an
+extra independent-evidence count. Effectively identical boxes share provenance
+instead of becoming duplicate choices.
+
+The related-public-PDB search is a separate checkbox, also available for a
+known-ligand control. Turn it off for local-only site review. A recorded input
+PDB entry is excluded from new related-entry evidence; unavailable entry IDs
+are not guessed from filenames. Online failure/partial coverage is disclosed,
+not interpreted as proof that no ligand evidence exists.
+
+Without running P2Rank, qualified related-structure ligand locations can still
+provide independent selectable boxes. Select these L# regions in **Review &
+decide**, alone or alongside the input ligand site; a prediction score is not
+required. Corresponding sites share evidence rather than becoming duplicate
+boxes. Only regions you explicitly approve proceed to the next step.
+
+The interface marks the recommended choices explicitly: experimental-ligand
+redocking when a suitable control is available, related-public-PDB evidence
+lookup with internet access, and optional P2Rank for additional-site review.
+These labels do not turn options on automatically or approve any boxes. You
+can still skip redocking (explicitly exploratory), use local-only evidence,
+or use the known ligand site without running P2Rank.
+
+These analyses are independent checkboxes, not a list of every possible
+configuration. **Redock experimental ligand** controls pose-recovery testing;
+leave it unchecked to create an exploratory protocol. **Search related public
+PDB structures** controls online site evidence, and **Also run P2Rank to look
+for other pockets?** controls extra prediction. Related-structure ligand boxes
+remain selectable with P2Rank off. Turning redocking off preserves the chosen
+ligand site. **Study source** separately chooses a new structure or reuse of a
+saved protocol. Recommendation labels guide choices without changing defaults:
+PDB lookup starts on; redocking and additional prediction remain explicit opt-ins.
+
+For controls, prepare and gather evidence first, approve one or more sites,
+then run the reviewed control. Only its tested site/receptor/engine/settings
+can receive control authority. Other selected sites or receptor states remain
+explicitly exploratory and require separate exploratory protocol approval.
+Reopening a study does not rerun preparation, lookup or docking. Imported
+protocols remain locked; they are not silently expanded with new sites.
+
 For the two starting cases, see [bound-ligand and ligand-free workflow examples](workflow-examples.md). Runnable inputs and direct public-command tutorials are included under `examples/tutorials/` in the repository.
 
 `docking-universal run` is the recommended entry point for a complete study. It organizes the composable preparation, docking, clustering, interaction, and rendering commands without hiding their files or assumptions.
 
-This release performs rigid-receptor docking with AutoDock Vina or QuickVina-W. Protein coordinates are fixed during searches; ligand torsions and independently prepared ligand conformers may still be sampled according to the engine-compatible ligand representation. Receptor conformational change and induced fit are outside the current scope. One SDF, a multi-record SDF, or a directory of SDF files can be processed as a batch, with failures and outputs isolated by compound.
+This release performs rigid-receptor docking with AutoDock Vina or QuickVina-W. Protein coordinates are fixed during searches; ligand torsions and independently prepared ligand conformers may still be sampled according to the engine-compatible ligand representation. Receptor conformational change and induced fit are outside the current scope. One MOL (V2000/V3000), a single/multi-record SDF, or a folder containing SDF and MOL files can be processed, with failures and outputs isolated by compound. In the GUI use **File…** or **Folder…** under screening. MOL is one molecule per file; use SDF for multi-molecule libraries. Input extensions are case-insensitive. Imports preserve typed chemistry and original-source provenance; normal protocol-driven ligand preparation occurs afterward.
 
 Batch processing attempts every independent compound by default. Successful outputs and reports are retained, but the command returns a nonzero final status if any ligand preparation or docking job fails, so automated callers cannot mistake a partial batch for complete success.
+
+## Reuse a saved protocol in a new desktop study
+
+Create a fresh study, then choose **Study setup → Study source → Use a
+saved protocol**. Browse to a `.duprotocol` and choose **Review and import
+protocol**. Review the target, scientific status, locked regions and settings,
+then explicitly import. Verification checks the archive inventory and retained
+input hashes; it does not establish that the scientific choices are correct.
+Damaged, changed or unauthorized bundles are rejected. Existing studies cannot
+be replaced by an import; create a new study instead.
+
+The host saves a verified study-owned copy, so later screening/reopening does not
+depend on the original bundle location. The prepared receptor, regions, engine,
+ligand-preparation policy and search settings stay locked. Preparation and region
+approval are inherited, not silently rerun or recorded as new decisions.
+**Review imported settings…** remains available in Study setup. To change locked
+scientific choices, create and approve a new protocol instead.
+
+Continue to **Screen ligands**, read/select compounds, preview the workload and
+choose an output folder. Exploratory protocols still require explicit
+exploratory-use approval; importing does not turn them into control-validated
+protocols. A saved AD4 protocol remains AD4 and still requires its supported
+local engine installation; it is never silently switched to Vina. The bundle is
+portable, but it does not install engines or dependencies on the receiving
+machine. Reopen the study to review retained results, interactions, reports and
+elapsed time without repeating docking.
+
+## Choose compounds for screening
+
+In the desktop screening step, **File…** reads SDF, MOL, CSV, TSV or XLSX locally;
+**Folder…** reads an SDF/MOL folder. For a manually entered path, click
+**Read/select compounds…**. Click a
+row to inspect the input molecule's 2D structure; use its **Dock** checkbox to
+include it. Inspection does not select it. **Select all valid** and **Clear
+selection** are explicit batch shortcuts; invalid records stay visible and cannot
+be selected. Once a library is read, nothing is selected until you check it.
+Preview the selected workload, approve exploratory use if required, then choose
+**Dock selected compounds**. Changing selection invalidates the previous preview.
+Changing a source file requires reading/selecting again. Input records and file
+hashes are saved in `inputs/ligand_library_review.json`; only selected compounds
+appear in the docking inventory. This does not change locked protocol chemistry.
+The unreviewed/all-compound path remains available for SDF/MOL, explicitly
+labeled, as does the existing SDF/MOL CLI default.
+
+For **CSV/TSV/XLSX**, the first nonempty row is the header. Choose the Excel
+worksheet, then review the **SMILES column** and optional **Name / ID column**.
+A recognized header such as `SMILES`, `isomeric_smiles` or `canonical_smiles`
+prefills the dropdown only: click **Use these columns** to approve it before any
+compounds load. Every header is selectable, including duplicate/unnamed headers
+identified by column number. Choose **None** for generated Compound numbers.
+Changing a column or worksheet clears selected compounds and invalidates the
+workload; approve the new mapping and select compounds again. No compounds are
+selected by approval alone.
+
+CSV uses commas and TSV uses tabs; quoted fields and UTF-8/BOM or UTF-16/BOM text
+are supported. Excel cells must contain literal SMILES text: formulas (even with
+cached results), numeric SMILES, dates, booleans and error cells are invalid.
+Macros, formulas and external links are never executed. Blank rows are ignored;
+nonempty rows with missing/invalid SMILES remain visible with a reason. Import
+does not deduplicate molecules, generate conformations or change charge/stereo.
+Only explicitly selected valid records are materialized into individual typed
+SDF inputs for the existing preparation/engine workflow.
+
+Original file hashes, worksheet, source row, submitted SMILES and approved column
+positions are retained in the review ledger and selected compound inventory.
+The selection fingerprint includes the mapping: a changed file or mapping is
+rejected before launch and again before materialization, including after a host
+restart. The CLI can consume the same reviewed selection JSON with
+`--ligands table.csv --ligand-selection selection.json`; it will not guess/approve
+table columns on an unattended run. Interactive terminal file pickers remain
+SDF/MOL-only; table mapping is available in the desktop or the host review API.
+Tables must be opened individually, not as a mixed-table folder. Only `.xlsx`
+is supported (not legacy `.xls` or `.xlsm`); worksheets are imported one at a
+time. Limits are 100,000 data rows, 4,096 columns, and 128 MB of file/uncompressed
+Excel XML. These bounds and pagination do not imply unlimited-memory streaming.
+
+The compound table defaults to **50 records per page**. Choose 25, 50, 100 or
+250 rows, use Previous/Next, or enter a page number. Dock selections persist
+across pages; the selected count and workload include the entire library, not
+just the visible page. Select all valid and Clear selection also cover all pages.
+Page navigation alone does not alter a selection or invalidate its workload.
+The scientific host initially indexes the full local library, then reuses bounded
+review/2D caches while browsing. File-change guards protect preview reuse, and
+full source hashes are checked again for workload and launch. Initial loading
+still depends on library size and chemistry; pagination is not unlimited-memory
+streaming. Library indexing runs off the GUI thread with visible read feedback.
+
+The library's 2D preview, formula and charge describe the **submitted input**,
+not a structure recalculated at the protocol pH. During screening, ligand-state
+preparation considers protonation and tautomers using the locked pH before
+generating/preparing starting conformers for docking. The input drawing is not
+silently replaced with a single supposedly definitive pH-dependent state.
+
+While screening runs, the existing activity area shows the current compound,
+preparation/docking/analysis phase, site and repeat/seed when docking, and report
+generation. Docking output counts are compared with the **initial planned** job
+count; chemical-state enumeration can change the actual count. Phase messages and
+written files do not prove scientific success or whole-run completion: the
+supervised process's final status and retained failures remain authoritative.
+Some searches/rendering phases can be quiet; elapsed time is not proof of
+progress. Logs remain available for diagnostics. These worker phase records are
+available for newly launched runs; an already running process is not restarted.
+
+**Screen ligands** also keeps the latest screening's total elapsed time after
+completion and reopening. This is supervised wall time for preparation, docking,
+analysis and reporting together. Running time continues to update; older jobs
+without usable timestamps explicitly show that the duration is unavailable.
+
+Screening options include brief explanations beside their controls.
+**Representative clusters** sets how many lowest-energy distinct pose groups per
+compound receive detailed output, using each group's lowest-energy pose; it does
+not limit the number of compounds or total retained poses. **Clustering cutoff**
+uses symmetry-aware heavy-atom RMSD in the receptor frame without realignment:
+smaller values separate more groups and larger values merge more. The default is
+1.5 Å; explicit saved choices remain unchanged. This distance is not RMSD to an
+experimental pose or the separate pose-recovery acceptance threshold. Analysis
+choices affect post-docking outputs, not the docking search itself.
 
 ## Default or custom ligand ensemble
 
 The interactive `docking-universal run` command is sufficient for ligand-state and conformer configuration; users do not need to call the standalone ensemble script. The recommended path uses pH 7.4, three conformers per chemical state where the selected tier does not specify otherwise, deterministic seeded ETKDG generation, MMFF94 with UFF fallback, a 0.75 A conformer-pruning threshold, tautomer enumeration, and Gasteiger charges.
+
+The current MMFF94/MMFF94s/UFF ligand minimization uses a **vacuum-energy model**,
+without explicit solvent or an implicit-water term. Its energy ranks starting
+conformers within the same chemical state; it is not a solution free energy or
+a docking/binding-affinity score. pH-aware state enumeration does not make this
+geometry minimization solvent-aware. Docking subsequently applies the selected
+engine's separate scoring function in the receptor environment.
+
+An opt-in solvent-aware preparation method is being evaluated in an isolated
+[paired benchmark](conformer-ab-benchmark.md), with a substantial runtime cost.
+It is not yet a production GUI/CLI backend or an automatic recommendation based
+on ligand size. Benefits with other scoring functions, including AD4 or smina,
+would require matched validation rather than being inferred from Vina results.
 
 Custom mode presents every ligand-ensemble setting used by the guided workflow: pH, conformers retained per chemical state, base seed, MMFF94/MMFF94s/UFF selection, RMSD pruning threshold, tautomer enumeration, and charge model. Exploratory mode also presents the number of independent docking seeds. During control calibration, a custom conformer count overrides the count in the chosen tier while seed count, exhaustiveness, and retained docking modes remain tier-controlled. The resulting values are written into the protocol and screen manifests.
 
@@ -48,10 +228,11 @@ When `--ligands` is omitted during an interactive desktop run, the guide offers 
 docking-universal screen \
   --protocol target_control_20260818_120000.duprotocol \
   --ligands compounds.sdf \
+  --cluster-rmsd 1.5 \
   --out approved_study
 ```
 
-The default runs the protocol's independent conformers and seeds, retains every pose, clusters poses at 2 Å receptor-frame RMSD, and creates detailed outputs for up to three low-energy distinct clusters per compound. If only one cluster is present, its lowest-energy representative is used.
+This workflow runs the protocol's independent conformers and seeds, retains every pose, clusters poses at **1.5 Å receptor-frame RMSD by default**, and creates detailed outputs for up to three low-energy distinct clusters per compound. `--cluster-rmsd 1.5` makes the default explicit; the GUI uses the same default unless a saved user setting overrides it. If only one cluster is present, its lowest-energy representative is used. The separate 2 Å experimental-pose recovery threshold is unchanged.
 
 ### Ligand-free exploratory docking
 
@@ -80,7 +261,7 @@ Interactive use lists each generated box with its source pocket and fpocket scor
 - `--analysis summary` writes pose and cluster tables without representative visuals.
 - `--analysis none` retains docking and score outputs only.
 - `--representatives 3` controls how many distinct low-energy clusters receive detailed output.
-- `--cluster-rmsd 2.0` controls the heavy-atom RMSD grouping threshold in ångströms.
+- `--cluster-rmsd 1.5` sets the current workflow's heavy-atom RMSD clustering threshold to 1.5 Å.
 - `--stop-on-error` stops at the first failed compound. By default the study records that failure and continues.
 - `--non-interactive` requires all scientifically meaningful inputs on the command line and is suitable for recorded batch work.
 
@@ -106,9 +287,17 @@ study/
 
 `report/run_details.md` consolidates the readable run record: what was found in the input PDB, every accepted SDF compound, the scientific mode, coordinate policy, receptor/box/protocol information, the observed or protocol-carried receptor-preparation path, seeds, job counts, calibration history, failures, and the locations of raw outputs and logs. The Markdown, HTML, and JSON study summaries also identify that preparation path.
 
-The PDF report stage automatically generates numbered control and compound figures from retained pose, cluster, receptor, and protocol artifacts. A control-backed screen is divided explicitly into configured protocol, experimental control redocking, and ligand docking sections. The target and ligand labels appear only where they describe the corresponding evidence or docking result. The report shows the approved control figures and the recorded control date, ligand, PASS/REVIEW status, best-sampled RMSD, acceptance threshold, and locked pocket/box. Detailed artifacts and provenance remain in the `.duprotocol` bundle and retained study directory.
+The PDF report stage automatically generates numbered control and compound figures from retained pose, cluster, receptor, and protocol artifacts. A control-backed screen is divided explicitly into configured protocol, experimental control redocking, and ligand docking sections. The configured-protocol table contains only selectable options: docking program, preparation pH, starting shapes, independent repeats, starting seed and engine-specific search/output controls. Scoring-function identification belongs beside the best docking score in the results: an adjacent column in the overview and an adjacent row in each compound summary identify AD4 or Vina. Energy values remain in kcal/mol. Fixed defaults, derived values and approval/file metadata are not included in protocol options. Full technical details stay in the saved protocol and study files; actual AD4 grid dimensions belong with pocket geometry. The target and ligand labels appear only where they describe the corresponding evidence or docking result. The report shows the approved control figures and the recorded control date, ligand, PASS/REVIEW status, best-sampled RMSD, acceptance threshold, and locked pocket/box. Detailed artifacts and provenance remain in the `.duprotocol` bundle and retained study directory.
 
 New-ligand results include the three top energy-ranked cluster representatives. Ligand chemistry comes from retained SDF files and PLIP calls come from retained XML; the report-figure manifest and per-diagram manifests record these sources and coordinate mapping. Filename-only provenance suffixes such as `_pubchem` and `_pubchem_<CID>` are not presented as part of a ligand's chemical name.
+
+Report headings identify the protein name and annotated fragment, structure accession,
+and source species from the exact local PDB/mmCIF annotations. Source species is
+not the expression host. Multi-protein structures retain chain-specific identity
+and species; unavailable annotations are explicitly marked as not recorded.
+New exploratory protocol bundles retain an identity snapshot for later reports.
+No internet lookup is performed for these labels, and opening an older study does
+not silently rewrite its completed PDF or bundle.
 
 When no bound-ligand control is supplied, the generator writes a distinct **Ligand-Free Cavity and Docking Report** instead of silently omitting validation. Its summary identifies the selected pocket and fpocket druggability score; the retained technical record contains candidate ranks, fpocket score, volume, alpha-sphere count, cavity bounds, box center, dimensions, and volume. Panel A shows ranked decisions; Panel B places retained pocket hypotheses on the receptor. A following figure records the chosen pocket and docking box. These are site-selection records, not pose-recovery validation or evidence that a predicted cavity is biologically correct. A preparation-only run receives cavity results only—no empty ligand, docking, RMSD, 2D interaction, or protocol section. Missing descriptors in older runs are reported as `NA`, never reconstructed or guessed.
 
@@ -137,3 +326,46 @@ unambiguous.
 ## Interpreting a completed study
 
 Docking energy is a model score used for ranking under one protocol; it is not a measured binding free energy. A cluster supported by several seeds indicates repeatability of the search, not necessarily pose correctness. Review steric fit, chemical plausibility, protonation, interactions, alternative clusters, and relevant experimental evidence before drawing conclusions.
+
+## Understanding Finalize protocol
+
+The Finalize protocol screen also serves as a teaching step: every setting has a
+visible explanation beside its control, including runtime/workload tradeoffs.
+**Settings guide…** and each **?** button open a reusable, modeless guide showing
+current values and fuller definitions. Reading help does not change settings or
+authorize anything. Defaults are starting values, not target-specific validation.
+The live shapes × repeats hint is per chemical state and approved site; it is not
+the full library job count or a runtime prediction. Review the actual workload in
+the later screening step. Finalization packages the approved recipe; it does not
+dock new ligands.
+
+## Saving custom GUI images
+
+Use **Save image…** in the main workspace or the 2D/3D review window. Available
+choices include the current customized PyMOL view, the selected 2D diagram at its
+original pixel resolution, and a clean side-by-side 2D/3D panel. The main workspace
+also saves the selected retained report figure or pocket-ranking plot. Full
+PyMOL has the same **Save image…** menu for its current 3D view.
+
+Adjust orientation, zoom, residue labels, cartoon and contact visibility before
+saving. The quick OpenGL 3D PNG uses the current native viewport resolution and appearance,
+without Qt controls or PyMOL's object sidebar; active native selection markers
+remain part of that appearance, so deselect them first if unwanted. Saving the
+2D diagram uses its retained original resolution regardless of Fit/zoom and
+omits clickable GUI outlines. Clean paired panels include the experimental or
+docked coordinate basis and the color key for contact types currently shown in
+3D; hiding a 3D contact type does not alter the retained 2D diagram.
+
+Choose **3D PyMOL view — ray-traced PNG** for optional CPU ray rendering instead
+of the quick OpenGL image. The paired window also offers **2D / 3D panel —
+ray-traced 3D**; full PyMOL offers **Save image… → Ray-traced 3D PNG…**. Ray rendering
+preserves current scene choices but may look different because it uses ray-traced
+lighting rather than OpenGL. Labels floated in front of the OpenGL view can be
+occluded by geometry in a ray image; inspect the saved result. It uses native viewport dimensions, not a larger
+requested resolution. A busy dialog stays responsive and allows cancellation;
+cancellation leaves the destination unchanged. The same live engine is used.
+
+These local PNG exports contain context metadata and are presentation derivatives,
+not newly generated scientific reports. They do not rerun docking/PLIP, modify
+coordinates, approve a selection, or replace retained source files. Native-view
+export does not add arbitrary output dimensions or vector formats.

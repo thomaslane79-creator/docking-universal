@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,10 +25,13 @@ try:
     from .scientific_detail import ScientificDetailPanel
     from .workspace_controller import WorkspaceWindowController
     from .application_host_controller import ApplicationHostController
-    from .pocket_evidence import PocketEvidencePanel
+    from .pocket_evidence import PocketEvidencePanel, conformation_summary
     from .pocket_plot import PocketScorePlot
+    from .navigation_table import NavigationTable
     from .decision_dialog import DecisionDialog
     from .linked_pose_review import LinkedPosePanel, pose_view, control_view, write_comparison_report
+    from .cluster_contacts import ClusterContactControls
+    from .image_export import ImageExport, save_image_button, pymol_export, diagram_export, export_dialog
 except ImportError as exc:  # pragma: no cover - diagnosed by runtime inventory
     QtCore = QtGui = QtWidgets = None
     QT_IMPORT_ERROR = exc
@@ -56,9 +60,16 @@ if QtWidgets is not None:
             )
 
         def _show_embedded_viewer(self) -> None:
-            if self.viewer_widget is not None and self.review_tabs.count() > 1:
-                if self.review_tabs.currentIndex() != 1:
-                    self.review_tabs.setCurrentIndex(1)
+            if getattr(self, "_paired_interaction_window", None) is not None:
+                return
+            if self.viewer_widget is not None and self.live_page is not None:
+                detached = getattr(self, "_detached_structure_window", None)
+                if detached is not None:
+                    # The live viewport is already in this window. Never pull
+                    # the main application over it during study navigation.
+                    return
+                if self.review_tabs.currentWidget() is not self.live_page:
+                    self.review_tabs.setCurrentWidget(self.live_page)
                 # In-window navigation already has focus. Re-activating the
                 # native window on every row click can disturb macOS stacking.
                 if not self.isActiveWindow():
@@ -106,7 +117,7 @@ if QtWidgets is not None:
             self._build()
             self._show_runtime_identity()
             self.workspace_controller = WorkspaceWindowController(
-                self, self.settings, self.refresh,
+                self, self.settings, self._refresh_polled_state,
             )
             self.refresh_timer = self.workspace_controller.timer
             self.session.selectionChanged.connect(self._apply_session_selection)
@@ -240,7 +251,11 @@ if QtWidgets is not None:
             self.running_indicator.setObjectName("central_running_indicator")
             self.running_indicator.setRange(0, 0)
             self.running_indicator.setTextVisible(False)
-            self.running_indicator.setFixedHeight(10)
+            self.running_indicator.setFixedHeight(22)
+            self.running_indicator.setStyleSheet(
+                "QProgressBar {background:#c9dff1;border:1px solid #2478bd;"
+                "border-radius:4px;} QProgressBar::chunk {background:#2478bd;}"
+            )
             self.running_indicator.hide()
             feedback_layout.addWidget(self.running_indicator)
             self.running_elapsed = QtWidgets.QLabel()
@@ -250,6 +265,7 @@ if QtWidgets is not None:
             self.feedback_card.setStyleSheet(
                 "QFrame#scientific_feedback_card { background:#eef5ff; "
                 "border:1px solid #8bb7e8; border-radius:5px; }"
+                "QFrame#scientific_feedback_card QLabel {color:#172b3a;background:transparent;}"
             )
             self.workspace_heading = QtWidgets.QLabel("Structural Review")
             self.workspace_heading.setObjectName("workspace_heading")
@@ -275,96 +291,11 @@ if QtWidgets is not None:
             )
             self.review_tabs = QtWidgets.QTabWidget()
             self.review_tabs.setObjectName("central_review_modes")
-            figure_page = QtWidgets.QWidget()
-            figure_layout = QtWidgets.QVBoxLayout(figure_page)
-            figure_layout.setContentsMargins(0, 0, 0, 0)
-            self.decision_figure_choice = QtWidgets.QComboBox()
-            self.decision_figure_choice.setObjectName("decision_figure_choice")
-            self.decision_figure_choice.currentIndexChanged.connect(
-                self._show_selected_decision_figure
-            )
-            self.scene_figure_choice = QtWidgets.QComboBox()
-            self.scene_figure_choice.setObjectName("scene_figure_choice")
-            self.scene_figure_choice.setToolTip("Choose the retained figure whose 3D scene you want to inspect")
-            self.scene_figure_choice.currentIndexChanged.connect(self._scene_figure_changed)
-            self.figure_controls_widget = QtWidgets.QWidget()
-            figure_controls = QtWidgets.QHBoxLayout(self.figure_controls_widget)
-            figure_controls.setContentsMargins(0, 0, 0, 0)
-            self.figure_fit_button = QtWidgets.QPushButton("Fit")
-            self.figure_fit_button.setObjectName("decision_figure_fit")
-            self.figure_fit_button.clicked.connect(self._fit_decision_figure)
-            self.figure_actual_size_button = QtWidgets.QPushButton("100%")
-            self.figure_actual_size_button.setObjectName("decision_figure_actual_size")
-            self.figure_actual_size_button.clicked.connect(
-                lambda: self._set_decision_figure_zoom(1.0)
-            )
-            self.figure_zoom_out_button = QtWidgets.QPushButton("−")
-            self.figure_zoom_out_button.setObjectName("decision_figure_zoom_out")
-            self.figure_zoom_out_button.clicked.connect(
-                lambda: self._change_decision_figure_zoom(1 / 1.25)
-            )
-            self.figure_zoom_in_button = QtWidgets.QPushButton("+")
-            self.figure_zoom_in_button.setObjectName("decision_figure_zoom_in")
-            self.figure_zoom_in_button.clicked.connect(
-                lambda: self._change_decision_figure_zoom(1.25)
-            )
-            self.figure_zoom_status = QtWidgets.QLabel("Fit")
-            self.figure_zoom_status.setMinimumWidth(44)
-            self.figure_full_screen_button = QtWidgets.QPushButton("Full screen")
-            self.figure_full_screen_button.setObjectName("decision_figure_full_screen")
-            self.figure_full_screen_button.clicked.connect(self._show_figure_full_screen)
-            figure_controls.addWidget(self.decision_figure_choice, 1)
-            figure_controls.addWidget(self.figure_fit_button)
-            figure_controls.addWidget(self.figure_actual_size_button)
-            figure_controls.addWidget(self.figure_zoom_out_button)
-            figure_controls.addWidget(self.figure_zoom_in_button)
-            figure_controls.addWidget(self.figure_zoom_status)
-            figure_controls.addWidget(self.figure_full_screen_button)
-            self.decision_figure_caption = QtWidgets.QLabel()
-            self.decision_figure_caption.setObjectName("decision_figure_caption")
-            self.decision_figure_caption.setWordWrap(True)
-            self.decision_figure_view = QtWidgets.QLabel(
-                "Decision-support figures will appear here as they are retained."
-            )
-            self.decision_figure_view.setObjectName("decision_figure_view")
-            self.decision_figure_view.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-            self.decision_figure_view.setMinimumHeight(180)
-            self.decision_figure_view.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
-            self.decision_figure_view.setContextMenuPolicy(
-                QtCore.Qt.ContextMenuPolicy.CustomContextMenu
-            )
-            self.decision_figure_view.customContextMenuRequested.connect(
-                self._show_decision_figure_context_menu
-            )
-            self.decision_figure_scroll = QtWidgets.QScrollArea()
-            self.decision_figure_scroll.setWidgetResizable(False)
-            self.decision_figure_scroll.setWidget(self.decision_figure_view)
-            self.decision_figure_scroll.viewport().installEventFilter(self)
-            self.decision_figure_legend = QtWidgets.QWidget()
-            self.decision_figure_legend.setObjectName("decision_figure_legend")
-            self.decision_figure_legend_layout = QtWidgets.QVBoxLayout(
-                self.decision_figure_legend
-            )
-            self.decision_figure_legend_layout.setContentsMargins(5, 5, 5, 5)
-            self.decision_figure_legend_layout.setSpacing(8)
-            self.decision_figure_legend_layout.addStretch(1)
-            self.decision_figure_legend_scroll = QtWidgets.QScrollArea()
-            self.decision_figure_legend_scroll.setObjectName("decision_figure_guidance")
-            self.decision_figure_legend_scroll.setWidgetResizable(True)
-            self.decision_figure_legend_scroll.setWidget(self.decision_figure_legend)
-            self.decision_figure_legend_scroll.setMinimumWidth(220)
-            self.decision_figure_legend_scroll.setMaximumWidth(290)
-            self.figure_split = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
-            self.figure_split.setObjectName("decision_figure_splitter")
-            self.figure_split.addWidget(self.decision_figure_scroll)
-            self.figure_split.addWidget(self.decision_figure_legend_scroll)
-            self.figure_split.setStretchFactor(0, 5)
-            self.figure_split.setStretchFactor(1, 2)
-            self.figure_split.setSizes([840, 250])
-            figure_layout.addWidget(self.figure_controls_widget)
-            figure_layout.addWidget(self.decision_figure_caption)
-            figure_layout.addWidget(self.figure_split, 1)
-            self.review_tabs.addTab(figure_page, "Decision figures")
+            self.structure_scene_choice = QtWidgets.QComboBox()
+            self.structure_scene_choice.setObjectName("structure_scene_choice")
+            self.structure_scene_choice.setToolTip("Choose a retained interactive 3D scene")
+            self.structure_scene_choice.currentIndexChanged.connect(self._structure_scene_changed)
+            self.review_tabs.tabBar().hide()
             if self.viewer_widget is not None:
                 self.live_page = QtWidgets.QWidget()
                 self.live_layout = QtWidgets.QVBoxLayout(self.live_page)
@@ -381,26 +312,34 @@ if QtWidgets is not None:
                 self.linked_pose_panel.hide()
                 self.linked_pose_panel.ligandActivated.connect(self._highlight_linked_ligand)
                 self.linked_pose_panel.exportRequested.connect(self._export_ligand_comparison)
+                self.linked_pose_panel.detaching.connect(self._return_detached_structure)
+                self.linked_pose_panel.detach_button.clicked.disconnect(self.linked_pose_panel.detach_diagram)
+                self.linked_pose_panel.detach_button.clicked.connect(
+                    lambda: self._open_interaction_review(self.linked_pose_panel.query))
+                self.linked_pose_panel.detach_button.setText("Open 2D/3D review")
                 self.live_layout.addWidget(self.pose_split, 1)
+                self.cluster_contact_controls = ClusterContactControls(getattr(self.viewer_coordinator, 'adapter', None))
+                self.live_layout.addWidget(self.cluster_contact_controls)
                 self.review_tabs.addTab(self.live_page, "Interactive structure")
             else:
-                self.live_page = None
+                self.live_page = self.structural_view
                 self.live_layout = None
+                self.review_tabs.addTab(self.live_page, "Interactive structure")
             self._detached_structure_window = None
-            # Do not present an empty pseudo-viewer for the companion fallback.
-            self._decision_figure_pixmap = None
-            self._decision_figure_zoom = None
-            self._decision_figure_source = None
-            self._decision_figure_artifacts = None
+            self._paired_interaction_window = None
+            self._structure_scene_artifacts = None
+            self._selected_structure_scene = None
+            self._selected_structure_scenes = []
             self.central_selection_status = QtWidgets.QLabel("No shared structural selection")
             self.central_selection_status.setObjectName("central_selection_status")
             self.central_selection_status.setWordWrap(True)
-            self.candidates = QtWidgets.QTableWidget(0, 4)
+            self.candidates = NavigationTable(0, 4)
             self.candidates.setHorizontalHeaderLabels(("Candidate", "Rank", "Summary", "Evidence"))
             self.candidates.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
             self.candidates.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
             self.candidates.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
             self.candidates.itemDoubleClicked.connect(self._show_candidate_evidence_details)
+            self.candidates.itemClicked.connect(self._schedule_initial_candidate_review)
             self._candidate_evidence_dialogs = []
             central = QtWidgets.QWidget()
             layout = QtWidgets.QVBoxLayout(central)
@@ -429,10 +368,11 @@ if QtWidgets is not None:
             self.reset_view_button = QtWidgets.QPushButton("Reset to report view")
             self.reset_view_button.setObjectName("reset_report_view_button")
             self.reset_view_button.clicked.connect(self.reset_report_view)
-            self.detach_viewer_button = QtWidgets.QPushButton("Detach full screen")
+            self.detach_viewer_button = QtWidgets.QPushButton("Detach PyMOL")
             self.detach_viewer_button.setObjectName("detach_embedded_viewer_button")
             self.detach_viewer_button.setVisible(self.viewer_widget is not None)
-            self.detach_viewer_button.clicked.connect(self.detach_embedded_viewer)
+            self.detach_viewer_button.setToolTip("Open the full PyMOL interface using this same live scene and camera; closing it returns to the workspace.")
+            self.detach_viewer_button.clicked.connect(self.open_full_pymol)
             self.decision_synopsis_button = QtWidgets.QPushButton("Review decision…")
             self.decision_synopsis_button.setObjectName("decision_synopsis_button")
             self.decision_synopsis_button.clicked.connect(self.show_decision_synopsis)
@@ -443,8 +383,9 @@ if QtWidgets is not None:
                 "Interactive structure has not been loaded"
                 if self.viewer_widget is not None else "PyMOL review has not been opened"
             )
-            viewer_row.addWidget(QtWidgets.QLabel("Scene:"), 0, 0)
-            viewer_row.addWidget(self.scene_figure_choice, 0, 1)
+            self.scene_choice_label = QtWidgets.QLabel("Scene:")
+            viewer_row.addWidget(self.scene_choice_label, 0, 0)
+            viewer_row.addWidget(self.structure_scene_choice, 0, 1)
             viewer_row.addWidget(self.viewer_button, 0, 2)
             viewer_row.addWidget(self.detach_viewer_button, 0, 3)
             viewer_row.addWidget(self.reset_view_button, 0, 4)
@@ -473,7 +414,8 @@ if QtWidgets is not None:
                 self.open_selected_candidate_review
             )
             self.rationale = QtWidgets.QLineEdit()
-            self.rationale.setPlaceholderText("Optional scientific rationale for the audit trail")
+            self.rationale.setPlaceholderText("Optional decision note")
+            self.rationale.setToolTip("Record why you chose these regions. This note is saved with your approval.")
             self.approve_button = QtWidgets.QPushButton("Approve selected docking region(s)")
             self.approve_button.setObjectName("approve_regions_button")
             self.approve_button.clicked.connect(self.approve_selected_regions)
@@ -487,9 +429,6 @@ if QtWidgets is not None:
             self.view_toolbar.setObjectName("view_toolbar")
             self.scientific_detail_action = self.view_toolbar.addAction("Scientific Detail")
             self.scientific_detail_action.setCheckable(True)
-            full_screen = self.view_toolbar.addAction("Full Screen")
-            full_screen.setShortcut("F11")
-            full_screen.triggered.connect(self.toggle_full_screen)
             self.focus_canvas_action = self.view_toolbar.addAction("Focus canvas")
             self.focus_canvas_action.setCheckable(True)
             self.focus_canvas_action.setShortcut("Ctrl+Shift+F")
@@ -522,7 +461,7 @@ if QtWidgets is not None:
                 "Selections", self.selection_dock, QtCore.Qt.DockWidgetArea.RightDockWidgetArea,
             )
             self.logs_dock = self._dock("Complete Logs", self.log_view, QtCore.Qt.DockWidgetArea.BottomDockWidgetArea, "logs_dock")
-            self.reports_dock = self._dock("Reports and Artifacts", self.report_list, QtCore.Qt.DockWidgetArea.BottomDockWidgetArea, "reports_dock")
+            self.reports_dock = self._dock("Reports and Study Files", self.report_list, QtCore.Qt.DockWidgetArea.BottomDockWidgetArea, "reports_dock")
             self.tabifyDockWidget(self.logs_dock, self.reports_dock)
             self.logs_dock.hide()
             self.reports_dock.hide()
@@ -530,7 +469,7 @@ if QtWidgets is not None:
                 "Logs", self.logs_dock, QtCore.Qt.DockWidgetArea.BottomDockWidgetArea,
             )
             self.artifacts_action = self._add_auxiliary_dock_action(
-                "Artifacts", self.reports_dock, QtCore.Qt.DockWidgetArea.BottomDockWidgetArea,
+                "Study files", self.reports_dock, QtCore.Qt.DockWidgetArea.BottomDockWidgetArea,
             )
             self.pocket_evidence_panel = PocketEvidencePanel()
             self.pocket_score_plot = PocketScorePlot()
@@ -545,6 +484,8 @@ if QtWidgets is not None:
                 embedded=self.viewer_widget is not None
             )
             self.pocket_evidence_panel.ligandRequested.connect(self.show_evidence_ligand)
+            self.pocket_evidence_panel.interactionsRequested.connect(self.render_evidence_interactions)
+            self.pocket_evidence_panel.residuesRequested.connect(self.highlight_evidence_residues)
             self.pocket_evidence_panel.ligandsRequested.connect(self.show_evidence_ligands)
             self.pocket_evidence_panel.selectionChanged.connect(self.sync_evidence_selection)
             self.pocket_evidence_dock = self._dock(
@@ -563,9 +504,58 @@ if QtWidgets is not None:
             self.results_review_action = self.view_toolbar.addAction("Detach Results Review")
             self.results_review_action.setObjectName("detach_results_review_action")
             self.results_review_action.triggered.connect(self.toggle_results_review_window)
+            self.save_image = save_image_button(self, [
+                ('3D PyMOL view', lambda: self.viewer_widget is not None and self.viewer_widget.isVisible(),
+                 self._export_current_pymol_image),
+                ('Selected 2D interaction diagram — original resolution',
+                 lambda: self._export_diagram_path() is not None, self._export_selected_diagram),
+                ('Pocket-ranking plot', lambda: bool(self.pocket_score_plot.points),
+                 lambda: ImageExport(self.pocket_score_plot.grab().toImage(),
+                     {'kind': 'pocket_ranking_plot', 'study_id': self.study_id,
+                      'detector': self.pocket_score_plot.detector}, self._protected_image_sources())),
+                ('3D PyMOL view — ray-traced PNG',
+                 lambda: self.viewer_widget is not None and self.viewer_widget.isVisible(),
+                 lambda: self._export_current_pymol_image(ray=True)),
+            ])
+            self.view_toolbar.addWidget(self.save_image)
             self._render_results_session_status(self.session.selection)
             self._render_central_selection_status(self.session.selection)
             self.statusBar().showMessage("Selections are proposals until explicitly approved through the application host")
+
+        def _protected_image_sources(self):
+            paths = [artifact.path for artifact in self.state.artifacts]
+            query = getattr(getattr(self, 'linked_pose_panel', None), 'query', None)
+            if query:
+                paths.extend((query.diagram, query.ligand, query.receptor, query.interactions))
+            return tuple(p for p in paths if p)
+
+        def _export_current_pymol_image(self, *, ray=False):
+            return pymol_export(self.viewer_widget, {'study_id': self.study_id}, self._protected_image_sources(), ray=ray)
+
+        def _export_diagram_path(self):
+            if getattr(self, '_paired_interaction_window', None) is not None:
+                return self.linked_pose_panel.query.diagram
+            value = self.interaction_diagram_choice.currentData()
+            if value and getattr(self, '_interaction_source_pixmap', None) is not None:
+                path = Path(str(value))
+                if path.is_file():
+                    return path
+            query = getattr(getattr(self, 'linked_pose_panel', None), 'query', None)
+            return query.diagram if query and query.diagram.is_file() else None
+
+        def _export_selected_diagram(self):
+            path = self._export_diagram_path()
+            if path is None:
+                raise ValueError('Select a retained 2D diagram first.')
+            view = pose_view(path)
+            if view:
+                result = diagram_export(view)
+                result.protected_paths += self._protected_image_sources()
+                return result
+            return ImageExport(QtGui.QImage(str(path)),
+                {'kind': 'retained_2d_diagram', 'source': str(path.resolve()), 'study_id': self.study_id},
+                self._protected_image_sources() + (path,))
+
 
         def _establish_default_dock_layout(self) -> None:
             """Provide a readable three-column baseline before optional saved state."""
@@ -599,6 +589,8 @@ if QtWidgets is not None:
             self.start_preparation_button = panel.prepare_button
             self.cancel_job_button = panel.cancel_button
             panel.chooseInputRequested.connect(self.choose_input_pdb)
+            panel.chooseProtocolRequested.connect(self.choose_saved_protocol)
+            panel.reviewProtocolRequested.connect(self.review_imported_protocol)
             panel.fetchInputRequested.connect(self.fetch_input_pdb)
             self.input_pdb.editingFinished.connect(self.refresh_input_coordinate_evidence)
             self.input_pdb.editingFinished.connect(
@@ -623,6 +615,7 @@ if QtWidgets is not None:
                 "protocol_seeds": "seeds", "protocol_base_seed": "base_seed",
                 "protocol_exhaustiveness": "exhaustiveness", "protocol_modes": "modes",
                 "protocol_energy_range": "energy_range", "exploratory_approval": "approval",
+                "protocol_ad4_runs":"ad4_runs", "protocol_ad4_heuristic_cap":"ad4_heuristic_cap",
                 "finalize_button": "finalize_button", "open_final_report_button": "open_report_button",
                 "open_bundle_location_button": "open_bundle_button", "finalization_status": "status",
             }
@@ -647,6 +640,14 @@ if QtWidgets is not None:
             for window_name, panel_name in aliases.items():
                 setattr(self, window_name, getattr(panel, panel_name))
             self._screening_plan = None
+            self._ligand_read_generation = 0
+            self._ligand_read_tasks = set()
+            panel.library_panel.loadRequested.connect(self.read_screening_library)
+            panel.library_panel.columnsApprovalRequested.connect(self.read_screening_library)
+            panel.library_panel.sheetRequested.connect(lambda sheet: self.read_screening_library(sheet=sheet))
+            panel.library_panel.previewRequested.connect(self.preview_library_record)
+            panel.library_panel.selectionChanged.connect(self._invalidate_screening_plan)
+            panel.ligands.textChanged.connect(self._clear_screening_library)
             panel.chooseFileRequested.connect(self.choose_screen_ligand_file)
             panel.chooseDirectoryRequested.connect(self.choose_screen_ligand_directory)
             panel.chooseOutputRequested.connect(self.choose_screen_output)
@@ -754,6 +755,7 @@ if QtWidgets is not None:
                 "setup/control_tier": self.control_tier.currentData(),
                 "setup/ligand_resname": self.study_setup_panel.ligand_value(),
                 "setup/pocket_engine": self.pocket_engine.currentData(),
+                "setup/predict_with_ligand": self.study_setup_panel.predict_with_ligand.isChecked(),
                 "final/output_directory": self.final_output_directory.text(),
                 "final/engine": self.protocol_engine.currentData(),
                 "final/ph": self.protocol_ph.value(),
@@ -763,6 +765,8 @@ if QtWidgets is not None:
                 "final/exhaustiveness": self.protocol_exhaustiveness.value(),
                 "final/modes": self.protocol_modes.value(),
                 "final/energy_range": self.protocol_energy_range.value(),
+                "final/ad4_runs":self.protocol_ad4_runs.value(),
+                "final/ad4_heuristic_cap":self.protocol_ad4_heuristic_cap.value(),
                 "screen/ligands": self.screen_ligands.text(),
                 "screen/output": self.screen_output.text(),
                 "screen/analysis": self.screen_analysis.currentData(),
@@ -791,6 +795,9 @@ if QtWidgets is not None:
                     )
                     self._restore_combo(
                         self.site_mode, self.settings.value("setup/site_mode", "pockets", type=str)
+                    )
+                    self.study_setup_panel.predict_with_ligand.setChecked(
+                        self.settings.value("setup/predict_with_ligand", False, type=bool)
                     )
                     self._restore_combo(
                         self.study_pathway, self.settings.value("setup/pathway", "exploratory", type=str)
@@ -822,6 +829,8 @@ if QtWidgets is not None:
                     ("final/exhaustiveness", self.protocol_exhaustiveness, int),
                     ("final/modes", self.protocol_modes, int),
                     ("final/energy_range", self.protocol_energy_range, float),
+                    ("final/ad4_runs",self.protocol_ad4_runs,int),
+                    ("final/ad4_heuristic_cap",self.protocol_ad4_heuristic_cap,int),
                     ("screen/representatives", self.screen_representatives, int),
                     ("screen/cluster_rmsd", self.screen_cluster_rmsd, float),
                 ):
@@ -911,8 +920,20 @@ if QtWidgets is not None:
             )
 
         @staticmethod
-        def _decision_figure_label(path: Path) -> str | None:
+        def _report_asset_label(path: Path) -> str | None:
             name = path.stem.lower()
+            control_labels = {
+                "control_panel_a_cluster": "Control pose recovery — cluster landscape",
+                "control_panel_b_overlay": "Control pose recovery — 3D overlay",
+                "control_panels_ab": "Control pose recovery — landscape and 3D",
+                "control_experimental_plip2d": "Control interactions — experimental ligand",
+                "control_top_ranked_plip2d": "Control interactions — lowest-energy pose",
+                "control_lowest_rmsd_plip2d": "Control interactions — global lowest-RMSD pose",
+            }
+            if name in control_labels:
+                return control_labels[name]
+            if name.startswith("control_energy_rank_") and name.endswith("_plip2d"):
+                return f"Control interactions — energy rank {name.split('_')[3]}"
             if name.endswith("cavity_panel_a_selection"):
                 return "Pocket scores and ranking — Panel A"
             if name.endswith("cavity_panel_b_structure"):
@@ -942,277 +963,274 @@ if QtWidgets is not None:
                 return f"Pose interaction diagram — Cluster {cluster}"
             return None
 
-        @staticmethod
-        def _decision_figure_explanation(label: str) -> str:
-            if label.startswith("Top receptor pose — Panel"):
-                return (
-                    "HOW TO READ THIS FIGURE\n\n"
-                    f"{label.split('— ', 1)[1]}: one retained pose in its receptor context.\n\n"
-                    "Compare orientation, pocket occupancy, and contacts rather than relying only on rank."
-                )
-            if label.startswith("Pose interaction diagram —"):
-                return (
-                    "HOW TO READ THIS FIGURE\n\n"
-                    "This is the full-resolution PoseEdit-style PLIP diagram for one exact retained pose. "
-                    "The embedded line legend identifies interaction classes.\n\n"
-                    "PLIP contacts follow geometric definitions; they do not demonstrate binding affinity."
-                )
-            explanations = {
-                "Interactive pocket review required": (
-                    "HOW TO REVIEW THIS DECISION\n\n"
-                    "No static figure was retained at this checkpoint. Select a candidate row and "
-                    "open Review selected region in 3D. Confirm that the colored pocket and matching "
-                    "box cover the intended site on the retained receptor before approval.\n\n"
-                    "Opening the structure does not approve the candidate."
-                ),
-                "Pocket scores and ranking — Panel A": (
-                    "HOW TO READ THIS FIGURE\n\n"
-                    "Panel A: candidates are ordered by P2Rank rank. The vertical axis is the P2Rank "
-                    "prediction score; higher values indicate stronger predicted-pocket evidence.\n\n"
-                    "Colors identify the same pockets in the structural views. Deposited-ligand "
-                    "correspondence is supporting evidence, not automatic approval.\n\n"
-                    "P2Rank scores are not binding affinities."
-                ),
-                "Pocket structural evidence — Panel B": (
-                    "HOW TO READ THIS FIGURE\n\n"
-                    "Panel B: color-matched pocket surfaces and proposed docking boxes on the receptor.\n\n"
-                    "Filled color = predicted pocket surface\n"
-                    "Matching outline = proposed docking box\n"
-                    "Green = deposited-ligand evidence"
-                ),
-                "Pocket ranking and structural evidence": (
-                    "HOW TO READ THIS FIGURE\n\n"
-                    "Panel A: predicted-pocket ranking and P2Rank scores.\n"
-                    "Panel B: the same color-matched pocket surfaces and proposed docking boxes "
-                    "on the receptor.\n\n"
-                    "Filled color = predicted pocket surface\n"
-                    "Matching outline = proposed docking box\n"
-                    "Green = deposited-ligand evidence\n\n"
-                    "Choose a region only after comparing its score, geometry, and experimental evidence."
-                ),
-                "Deposited-ligand site evidence": (
-                    "HOW TO READ THIS FIGURE\n\n"
-                    "Panel A: the deposited ligand aligned onto the current receptor, together with "
-                    "the corresponding predicted pocket and docking box.\n"
-                    "Panel B: the deposited ligand's 2D chemical identity.\n\n"
-                    "The ligand was observed experimentally in a related PDB structure. Its aligned "
-                    "location supports site plausibility.\n\n"
-                    "A mismatch or inaccessible cavity can indicate a conformational or rotamer difference. "
-                    "It does not by itself prove that flexible docking is required."
-                ),
-                "Deposited-ligand alignment — Panel A": (
-                    "HOW TO READ THIS FIGURE\n\n"
-                    "Panel A: the deposited ligand aligned onto the current receptor, together with the "
-                    "corresponding predicted pocket and docking box. Its location supports site plausibility."
-                ),
-                "Deposited-ligand identity — Panel B": (
-                    "HOW TO READ THIS FIGURE\n\n"
-                    "Panel B: the 2D chemical identity of the deposited ligand used as structural evidence."
-                ),
-                "Selected docking region": (
-                    "HOW TO READ THIS FIGURE\n\n"
-                    "The colored surface is the retained predicted pocket. The matching wireframe is "
-                    "the docking box approved for the protocol.\n\n"
-                    "The box records the searched volume; it does not establish biological validity."
-                ),
-                "Docking scores and cluster distribution": (
-                    "HOW TO READ THIS FIGURE\n\n"
-                    "Panel A: docking energies and cluster assignments for retained poses.\n\n"
-                    "More negative docking energies rank more favorably within this run. Clusters group "
-                    "geometrically similar poses, helping distinguish repeated solutions from alternatives.\n\n"
-                    "Docking scores are computational rankings, not measured affinity or activity."
-                ),
-                "Docking scores and clusters — Panel A": (
-                    "HOW TO READ THIS FIGURE\n\n"
-                    "Panel A: docking energies and cluster assignments for retained poses. More negative "
-                    "energies rank more favorably within this run. Scores are not measured affinity."
-                ),
-                "Docking pose representatives — Panel B": (
-                    "HOW TO READ THIS FIGURE\n\n"
-                    "Panel B: lowest-energy representatives from the selected pose clusters, shown together "
-                    "in the receptor for direct geometric comparison."
-                ),
-                "Docking clusters and representative poses": (
-                    "HOW TO READ THIS FIGURE\n\n"
-                    "Panel A: docking energy and cluster membership for the retained poses.\n"
-                    "Panel B: the lowest-energy representative from each selected cluster.\n\n"
-                    "Review both score and pose geometry; energy alone should not determine the conclusion."
-                ),
-                "Top three poses in the receptor": (
-                    "HOW TO READ THIS FIGURE\n\n"
-                    "Panel A: highest-ranked retained pose.\n"
-                    "Panel B: second-ranked retained pose.\n"
-                    "Panel C: third-ranked retained pose.\n"
-                    "Each is shown in receptor context and labeled with docking energy.\n\n"
-                    "Compare orientation, pocket occupancy, and contacts rather than relying only on rank."
-                ),
-                "Top-pose interaction diagrams": (
-                    "HOW TO READ THIS FIGURE\n\n"
-                    "Panel A: interactions for the highest-ranked retained pose.\n"
-                    "Panel B: interactions for the second-ranked retained pose.\n"
-                    "Panel C: interactions for the third-ranked retained pose.\n"
-                    "The embedded line legend identifies interaction classes.\n\n"
-                    "PLIP contacts follow geometric definitions; they do not demonstrate binding affinity."
-                ),
-            }
-            return explanations.get(
-                label,
-                "HOW TO READ THIS FIGURE\n\nThis is a retained scientific figure from the report.",
-            )
 
-        def _refresh_decision_figures(self, state: StudyState) -> None:
-            retained = []
-            seen = set()
-            top_pose_sources = []
+        def _refresh_structure_scenes(self, state: StudyState) -> None:
+            """Discover live sessions without decoding any report PNGs.
+
+            Legacy inventories may identify PSEs only through report assets.
+            Keep that filename/manifest mapping, not the static image viewer.
+            """
+            retained = {}
+
+            def add(label, scene):
+                scene = Path(scene)
+                if scene.suffix.lower() == '.pse' and scene.is_file():
+                    retained.setdefault(str(scene.resolve()), label)
+
             for artifact in state.artifacts:
-                if artifact.kind not in {
-                    "scientific_image", "final_report_figure", "screening_report_figure",
-                    "screening_interaction_diagram",
-                }:
-                    continue
                 path = Path(artifact.path)
-                if path.stem.lower().endswith("_top3_3d_snapshots"):
-                    manifest = path.with_suffix(".manifest.json")
-                    try:
-                        record = json.loads(manifest.read_text())
-                    except (OSError, json.JSONDecodeError):
-                        record = {}
-                    for index, source in enumerate(record.get("sources") or []):
-                        source_path = Path(str(source))
-                        if source_path.is_file():
-                            top_pose_sources.append((
-                                f"Top receptor pose — Panel {'ABC'[index]}",
-                                str(source_path.resolve()),
-                            ))
-                label = self._decision_figure_label(path)
-                figure_key = (label, path.name)
-                if label is None or not path.is_file() or figure_key in seen:
-                    continue
-                seen.add(figure_key)
-                retained.append((label, str(path.resolve())))
-            retained.extend(top_pose_sources)
-            available_labels = {label for label, _path in retained}
-            if "Pocket ranking and structural evidence" in available_labels:
-                retained = [item for item in retained if item[0] not in {
-                    "Pocket scores and ranking — Panel A",
-                    "Pocket structural evidence — Panel B",
-                }]
-            if "Deposited-ligand site evidence" in available_labels:
-                retained = [item for item in retained if not item[0].startswith(
-                    ("Deposited-ligand alignment", "Deposited-ligand identity")
-                )]
-            if "Docking clusters and representative poses" in available_labels:
-                retained = [item for item in retained if item[0] not in {
-                    "Docking scores and clusters — Panel A",
-                    "Docking pose representatives — Panel B",
-                }]
-            if "Top three poses in the receptor" in available_labels:
-                retained = [item for item in retained if not item[0].startswith(
-                    "Top receptor pose — Panel"
-                )]
-            if "Top-pose interaction diagrams" in available_labels:
-                retained = [item for item in retained if not item[0].startswith(
-                    "Pose interaction diagram —"
-                )]
-            retained.sort(key=lambda item: (
-                0 if item[0].startswith("Pocket ranking") else
-                1 if item[0].startswith("Pocket scores") else
-                2 if item[0].startswith("Deposited") else
-                3 if item[0].startswith("Selected") else
-                4 if item[0].startswith("Docking scores") else
-                5 if item[0].startswith("Docking pose") else
-                6 if item[0].startswith("Top receptor") else
-                7 if item[0].startswith("Pose interaction") else 8,
-                item[1],
-            ))
-            current = self.decision_figure_choice.currentData()
-            current_scene = self.scene_figure_choice.currentData()
-            existing = [
-                self.decision_figure_choice.itemData(index)
-                for index in range(self.decision_figure_choice.count())
-            ]
-            self.decision_figure_choice.blockSignals(True)
-            self.decision_figure_choice.clear()
-            for label, path in retained:
-                self.decision_figure_choice.addItem(label, path)
-            if current:
-                index = self.decision_figure_choice.findData(current)
-                if index >= 0:
-                    self.decision_figure_choice.setCurrentIndex(index)
-            self.decision_figure_choice.blockSignals(False)
-            self.scene_figure_choice.blockSignals(True)
-            self.scene_figure_choice.clear()
-            retained_scenes = []
-            for label, path in retained:
-                scenes = self._scenes_for_decision_figure(Path(path))
-                for panel, scene in scenes:
-                    scene_label = label if len(scenes) == 1 else f"{label} — {panel}"
-                    retained_scenes.append((scene_label, str(scene), path))
-            for label, scene, figure in retained_scenes:
-                self.scene_figure_choice.addItem(label, scene)
-                self.scene_figure_choice.setItemData(
-                    self.scene_figure_choice.count() - 1,
-                    figure,
-                    QtCore.Qt.ItemDataRole.UserRole + 1,
-                )
-            if current_scene:
-                scene_index = self.scene_figure_choice.findData(current_scene)
-                if scene_index >= 0:
-                    self.scene_figure_choice.setCurrentIndex(scene_index)
-            self.scene_figure_choice.blockSignals(False)
-            self._show_selected_decision_figure()
-
-        def _select_decision_figure(self, label: str) -> None:
-            index = self.decision_figure_choice.findText(label)
+                if path.suffix.lower() == '.pse':
+                    add(self._report_asset_label(path) or path.stem.replace('_', ' '), path)
+                elif artifact.kind in {'scientific_image', 'final_report_figure', 'screening_report_figure'}:
+                    label = self._report_asset_label(path) or path.stem.replace('_', ' ')
+                    for panel, scene in self._scenes_for_report_asset(path):
+                        add(label + ' — ' + panel, scene)
+            control_root = state.workflow_data.get('latest_control_output')
+            if control_root:
+                for scene in sorted((Path(control_root) / 'report').glob('*.pse')):
+                    add(self._report_asset_label(scene) or scene.stem.replace('_', ' '), scene)
+            current = self.structure_scene_choice.currentData()
+            self.structure_scene_choice.blockSignals(True)
+            self.structure_scene_choice.clear()
+            for scene, label in sorted(retained.items(), key=lambda item: (item[1], item[0])):
+                self.structure_scene_choice.addItem(label, scene)
+            index = self.structure_scene_choice.findData(current)
             if index >= 0:
-                self.decision_figure_choice.setCurrentIndex(index)
-                self.review_tabs.setCurrentIndex(0)
-
-        def _scene_figure_changed(self, index: int) -> None:
-            if index < 0:
-                return
-            scene = self.scene_figure_choice.itemData(index)
-            if not scene:
-                return
-            if self.viewer_widget is not None:
-                self._open_visual_scene(Path(str(scene)))
-                self.review_tabs.setCurrentIndex(1)
-                return
-            figure = self.scene_figure_choice.itemData(
-                index, QtCore.Qt.ItemDataRole.UserRole + 1,
+                self.structure_scene_choice.setCurrentIndex(index)
+            self.structure_scene_choice.blockSignals(False)
+            self._selected_structure_scenes = list(retained)
+            selected = self.structure_scene_choice.currentData()
+            self._selected_structure_scene = Path(selected) if selected else None
+            has_scenes = bool(retained)
+            self.scene_choice_label.setVisible(has_scenes)
+            self.structure_scene_choice.setVisible(has_scenes)
+            self.viewer_button.setVisible(self.viewer_widget is None and has_scenes)
+            self.viewer_button.setEnabled(self.viewer_coordinator is not None and has_scenes)
+            self.structural_view.setText(
+                "Interactive 3D review\n\nChoose a scene or review a selected pocket in PyMOL. "
+                "Static figures are available in the reports. Viewing is not approval."
             )
-            decision_index = self.decision_figure_choice.findData(figure)
-            if decision_index >= 0:
-                self.decision_figure_choice.setCurrentIndex(decision_index)
 
-        def _review_mode_changed(self, index: int) -> None:
-            """Reserve structural controls for a genuine embedded workspace."""
-            embedded = self.viewer_widget is not None and index == 1
-            self.pymol_controls.setVisible(embedded)
-            # The molecular viewport is the primary work surface in this mode.
-            # Retain the scene chooser and compact candidate navigation while
-            # reclaiming explanatory/status rows that duplicate nearby panels.
+
+        def _structure_scene_changed(self, index: int) -> None:
+            scene = self.structure_scene_choice.itemData(index) if index >= 0 else None
+            self._selected_structure_scene = Path(scene) if scene else None
+            if scene and self.viewer_widget is not None:
+                self._open_visual_scene(Path(scene))
+                self.review_tabs.setCurrentWidget(self.live_page)
+
+        def _review_mode_changed(self, _index: int) -> None:
+            """The central review surface is interactive only."""
+            embedded = self.viewer_widget is not None
+            self.pymol_controls.setVisible(embedded or self.viewer_coordinator is not None)
             self.workspace_context.setVisible(not embedded)
             self.central_selection_status.setVisible(not embedded)
             self.viewer_status.setVisible(not embedded)
-            self.candidates.setMaximumHeight(82 if embedded else 125)
-            if index == 0:
-                QtCore.QTimer.singleShot(0, self._rescale_decision_figure)
-            elif embedded and not getattr(self, "_linked_pose_active", False):
-                scene = self.scene_figure_choice.currentData()
-                if scene:
-                    selected = Path(str(scene)).resolve()
-                    current = getattr(
-                        getattr(self.viewer_coordinator, "adapter", None),
-                        "report_session", None,
-                    )
-                    if current is None or Path(current).resolve() != selected:
-                        self._open_visual_scene(selected)
+            self._size_candidate_table()
+            if embedded and not getattr(self, '_linked_pose_active', False):
+                self._schedule_initial_candidate_review()
+
+        def _schedule_initial_candidate_review(self, *_args) -> None:
+            # Default table highlighting is performed with signals blocked.
+            # Replay it only after the window and GL viewport can be displayed;
+            # clicking the already-highlighted row must work too.
+            if getattr(self, "_initial_candidate_review_pending", False):
+                return
+            self._initial_candidate_review_pending = True
+            QtCore.QTimer.singleShot(0, self._initialize_candidate_review)
+
+        def _initialize_candidate_review(self) -> None:
+            self._initial_candidate_review_pending = False
+            if (
+                not self.isVisible() or self.viewer_widget is None
+                or self.viewer_coordinator is None or self.viewer_coordinator.connected
+                or self.review_tabs.currentWidget() is not self.live_page
+                or getattr(self, "_workflow_target", None) != "central"
+            ):
+                return
+            rows = self.candidates.selectionModel().selectedRows()
+            candidates = self.state.workflow_data.get("pocket_candidates", [])
+            if not rows or rows[0].row() >= len(candidates):
+                return
+            candidate = candidates[rows[0].row()]
+            geometry = candidate.get("evidence", {}).get("geometry", {})
+            if any(geometry.get(f"{field}_{axis}") is None
+                   for field in ("center", "size") for axis in "xyz"):
+                return
+            # Draft/simulated studies are not renderable. Do not turn their
+            # placeholder rows into an automatic error dialog or launch a
+            # companion process. The normal coordinator validates provenance.
+            if not any(
+                artifact.kind in {"prepared_receptor_structure", "report_view_session"}
+                and artifact.sha256 and Path(artifact.path).is_file()
+                for artifact in self.state.artifacts
+            ):
+                return
+            if self._connect_structure_review():
+                self._candidate_highlight_changed()
+
+        def _return_detached_structure(self) -> None:
+            self._close_interaction_review()
+            if self._detached_structure_window is not None:
+                self._detached_structure_window.close()
+
+        def _close_interaction_review(self):
+            window = getattr(self, "_paired_interaction_window", None)
+            if window is not None:
+                window.close()
+
+        def _open_interaction_review(self, view):
+            import time
+            started = time.perf_counter()
+            if view is None or self.viewer_widget is None:
+                return False
+            existing = getattr(self, "_paired_interaction_window", None)
+            if existing is not None and existing.view == view:
+                existing.show()
+                existing.raise_()
+                return True
+            self._close_interaction_review()
+            self._return_detached_structure()
+            if self.linked_pose_panel._detached_window is not None:
+                self.linked_pose_panel._detached_window.close()
+            adapter = self.viewer_coordinator.adapter
+            snapshot = None
+            previous_linked = getattr(self, "_linked_pose_active", False)
+            try:
+                if not self.viewer_coordinator.connected:
+                    adapter.launch()
+                    self.viewer_coordinator.connected = True
+                snapshot = adapter.begin_interaction_review(view)
+                panel = self.linked_pose_panel
+                sizes = self.pose_split.sizes()
+                panel.set_pose(view)
+                panel.detach_button.hide()
+                from .interaction_review_window import InteractionReviewWindow
+                window = InteractionReviewWindow(view, panel, self.viewer_widget, adapter, self)
+                self._paired_interaction_window = window
+                self._linked_pose_active = True
+                restored = {"done": False}
+                frame_callback = {"connected": False}
+
+                def restore(*_args):
+                    if restored["done"]:
+                        return
+                    restored["done"] = True
+                    if frame_callback["connected"]:
+                        self.viewer_widget.frameSwapped.disconnect(first_frame)
+                        frame_callback["connected"] = False
+                    window.dispose()
+                    self.pose_split.insertWidget(0, self.viewer_widget)
+                    self.pose_split.insertWidget(1, panel)
+                    self.pose_split.setSizes(sizes)
+                    panel.detach_button.show()
+                    panel.detach_button.setText("Open 2D/3D review")
+                    panel.hide()  # diagrams use the paired window, not a crowded embedded column
+                    self.viewer_widget.show()
+                    try:
+                        adapter.end_interaction_review(snapshot)
+                    except Exception as exc:
+                        self.viewer_status.setText(f"Study scene could not be restored: {exc}")
+                    self._paired_interaction_window = None
+                    self._linked_pose_active = previous_linked
+                    self._sync_residue_highlight_actions()
+                    self._ensure_pocket_space()
+                    window.deleteLater()
+
+                window.finished.connect(restore)
+                window.showMaximized()
+                panel.show()
+                self.viewer_widget.show()
+                QtCore.QTimer.singleShot(0, panel._fit)
+                self._paired_review_latency = {'setup_seconds': time.perf_counter() - started,
+                                              'first_frame_seconds': None, 'source': view.label}
+                def first_frame():
+                    self._paired_review_latency['first_frame_seconds'] = time.perf_counter() - started
+                    self.viewer_widget.frameSwapped.disconnect(first_frame)
+                    frame_callback["connected"] = False
+                if hasattr(self.viewer_widget, 'frameSwapped'):
+                    self.viewer_widget.frameSwapped.connect(first_frame)
+                    frame_callback["connected"] = True
+                return True
+            except Exception as exc:
+                if snapshot is not None:
+                    adapter.end_interaction_review(snapshot)
+                self.pose_split.insertWidget(0, self.viewer_widget)
+                self.pose_split.insertWidget(1, self.linked_pose_panel)
+                self.linked_pose_panel.detach_button.show()
+                self.linked_pose_panel.hide()
+                self._paired_interaction_window = None
+                self._linked_pose_active = previous_linked
+                self.viewer_status.setText(f"Paired 2D/3D review unavailable: {exc}")
+                QtWidgets.QMessageBox.warning(self, "2D/3D review unavailable", str(exc))
+                return False
+
+        def open_full_pymol(self) -> None:
+            """Move the live viewport into upstream PyMOL's complete Qt shell."""
+            if self.viewer_widget is None:
+                return
+            self._close_interaction_review()
+            existing = self._detached_structure_window
+            if existing is not None:
+                if getattr(existing, "_du_full_pymol", False):
+                    existing.show()
+                    existing.raise_()
+                    existing.activateWindow()
+                    return
+                existing.close()
+            if self.linked_pose_panel._detached_window is not None:
+                self.linked_pose_panel._detached_window.close()
+            from ..viewer.full_pymol import create_full_pymol_window
+            sizes = self.pose_split.sizes()
+
+            def restore():
+                browser = getattr(self._detached_structure_window, "study_panel", None)
+                if browser is not None:
+                    browser.dispose()
+                self.pose_split.insertWidget(0, self.viewer_widget)
+                self.pose_split.setSizes(sizes)
+                self.viewer_widget.show()
+                self._detached_structure_window = None
+                self.review_tabs.setCurrentWidget(self.live_page)
+
+            try:
+                window = create_full_pymol_window(self.viewer_widget, self, restore)
+                window._du_full_pymol = True
+                self._detached_structure_window = window
+                from .full_pymol_study import FullPyMOLStudyPanel
+                window.study_panel = FullPyMOLStudyPanel(self)
+                dock = QtWidgets.QDockWidget("Study evidence", window)
+                dock.setObjectName("full_pymol_study_evidence_dock")
+                dock.setFeatures(QtWidgets.QDockWidget.DockWidgetFeature.DockWidgetClosable |
+                                 QtWidgets.QDockWidget.DockWidgetFeature.DockWidgetMovable)
+                dock.setWidget(window.study_panel)
+                window.addDockWidget(QtCore.Qt.DockWidgetArea.LeftDockWidgetArea, dock)
+                window.menudict["Display"].addAction(dock.toggleViewAction())
+                window.study_dock = dock
+                image_menu = window.menuBar().addMenu('Save image…')
+                save_action = image_menu.addAction('Current 3D view — OpenGL PNG…')
+                save_action.triggered.connect(lambda _checked=False:
+                    export_dialog(window, '3D PyMOL view', self._export_current_pymol_image))
+                ray_action = image_menu.addAction('Ray-traced 3D PNG…')
+                ray_action.triggered.connect(lambda _checked=False:
+                    export_dialog(window, 'ray-traced 3D PNG', lambda: self._export_current_pymol_image(ray=True)))
+                window.resizeDocks([dock], [360], QtCore.Qt.Orientation.Horizontal)
+                window.showMaximized()
+                window.raise_()
+                window.activateWindow()
+                self.viewer_widget.setFocus(QtCore.Qt.FocusReason.OtherFocusReason)
+            except Exception as exc:
+                if self._detached_structure_window is not None:
+                    self._detached_structure_window.close()
+                QtWidgets.QMessageBox.warning(self, "Full PyMOL unavailable", str(exc))
 
         def detach_embedded_viewer(self) -> None:
-            """Move the one live embedded engine into a dedicated full-screen window."""
+            """Move the one live embedded engine into a maximized, resizable window."""
             if self.viewer_widget is None or self.live_layout is None:
                 return
+            self._close_interaction_review()
+            if self.linked_pose_panel._detached_window is not None:
+                self.linked_pose_panel._detached_window.close()
             existing = self._detached_structure_window
             if existing is not None:
                 existing.raise_()
@@ -1221,7 +1239,7 @@ if QtWidgets is not None:
 
             dialog = QtWidgets.QDialog(self, QtCore.Qt.WindowType.Window)
             dialog.setObjectName("detached_embedded_pymol_window")
-            dialog.setWindowTitle("Docking Universal — Full-screen interactive structure")
+            dialog.setWindowTitle("Docking Universal — Interactive structure")
             layout = QtWidgets.QVBoxLayout(dialog)
             layout.setContentsMargins(0, 0, 0, 0)
             controls = QtWidgets.QHBoxLayout()
@@ -1238,8 +1256,8 @@ if QtWidgets is not None:
             controls.addWidget(return_button)
             layout.addLayout(controls)
 
-            self.live_layout.removeWidget(self.pose_split)
-            layout.addWidget(self.pose_split, 1)
+            split_sizes = self.pose_split.sizes()
+            layout.addWidget(self.viewer_widget, 1)
             self._detached_structure_window = dialog
 
             restored = {"done": False}
@@ -1248,8 +1266,9 @@ if QtWidgets is not None:
                 if restored["done"]:
                     return
                 restored["done"] = True
-                layout.removeWidget(self.pose_split)
-                self.live_layout.addWidget(self.pose_split, 1)
+                layout.removeWidget(self.viewer_widget)
+                self.pose_split.insertWidget(0, self.viewer_widget)
+                self.pose_split.setSizes(split_sizes)
                 self.viewer_widget.show()
                 self._detached_structure_window = None
                 self.review_tabs.setCurrentWidget(self.live_page)
@@ -1259,139 +1278,12 @@ if QtWidgets is not None:
             dialog.finished.connect(restore_viewer)
             return_button.clicked.connect(dialog.close)
             QtGui.QShortcut(QtGui.QKeySequence("Escape"), dialog).activated.connect(dialog.close)
-            dialog.showFullScreen()
+            dialog.showMaximized()
             self.viewer_widget.setFocus(QtCore.Qt.FocusReason.OtherFocusReason)
 
-        @staticmethod
-        def _decision_figure_explanation_sections(label: str) -> list[tuple[str, str]]:
-            sections = {
-                "Pocket ranking and structural evidence": [
-                    ("Panel A", "Predicted-pocket ranking and P2Rank scores."),
-                    ("Panel B", "The same color-matched pocket surfaces and proposed docking boxes on the receptor."),
-                    ("Key", "Filled color: predicted pocket surface. Matching outline: proposed docking box. Green: deposited-ligand evidence."),
-                ],
-                "Deposited-ligand site evidence": [
-                    ("Panel A", "Deposited ligand aligned onto the current receptor with the corresponding predicted pocket and docking box."),
-                    ("Panel B", "The deposited ligand's 2D chemical identity."),
-                    ("Interpretation", "The aligned location supports site plausibility. A mismatch can indicate a conformational or rotamer difference, but does not prove flexible docking is required."),
-                ],
-                "Docking clusters and representative poses": [
-                    ("Panel A", "Docking energy and cluster membership for the retained poses."),
-                    ("Panel B", "Lowest-energy representatives from the selected clusters in receptor context."),
-                    ("Interpretation", "Review score and geometry together; energy alone should not determine the conclusion."),
-                ],
-                "Top three poses in the receptor": [
-                    ("Panel A", "Highest-ranked retained pose in receptor context."),
-                    ("Panel B", "Second-ranked retained pose in receptor context."),
-                    ("Panel C", "Third-ranked retained pose in receptor context."),
-                    ("Interpretation", "Compare orientation, pocket occupancy, contacts, and the displayed docking energies."),
-                ],
-                "Top-pose interaction diagrams": [
-                    ("Panel A", "PoseEdit-style PLIP interactions for the highest-ranked retained pose."),
-                    ("Panel B", "Interactions for the second-ranked retained pose."),
-                    ("Panel C", "Interactions for the third-ranked retained pose."),
-                    ("Key", "The embedded line legend identifies interaction classes. PLIP contacts follow geometric definitions and do not demonstrate affinity."),
-                ],
-            }
-            if label in sections:
-                return sections[label]
-            explanation = StudyWindow._decision_figure_explanation(label)
-            body = explanation.removeprefix("HOW TO READ THIS FIGURE\n\n")
-            return [("How to read this figure", body)]
-
-        def _render_decision_figure_explanations(self, label: str) -> None:
-            layout = self.decision_figure_legend_layout
-            while layout.count():
-                item = layout.takeAt(0)
-                widget = item.widget()
-                if widget is not None:
-                    widget.deleteLater()
-            for heading, body in self._decision_figure_explanation_sections(label):
-                card = QtWidgets.QFrame()
-                card.setObjectName("figure_explanation_card")
-                card.setStyleSheet(
-                    "QFrame#figure_explanation_card {background:#e7e7e7;color:#202020;"
-                    "border:1px solid #b8b8b8;border-radius:4px;}"
-                )
-                card_layout = QtWidgets.QVBoxLayout(card)
-                card_layout.setContentsMargins(10, 8, 10, 9)
-                title = QtWidgets.QLabel(heading)
-                title_font = title.font()
-                title_font.setBold(True)
-                title.setFont(title_font)
-                text = QtWidgets.QLabel(body)
-                text.setWordWrap(True)
-                text.setTextInteractionFlags(
-                    QtCore.Qt.TextInteractionFlag.TextSelectableByMouse
-                )
-                card_layout.addWidget(title)
-                card_layout.addWidget(text)
-                layout.addWidget(card)
-            layout.addStretch(1)
-
-        def _show_selected_decision_figure(self, *_args) -> None:
-            value = self.decision_figure_choice.currentData()
-            path = Path(str(value)) if value else None
-            if path is None or not path.is_file():
-                self._decision_figure_pixmap = None
-                self._decision_figure_source = None
-                for control in (
-                    self.figure_fit_button, self.figure_actual_size_button,
-                    self.figure_zoom_out_button, self.figure_zoom_in_button,
-                    self.figure_full_screen_button,
-                ):
-                    control.setEnabled(False)
-                pocket_review = any(
-                    decision.kind == "select_pockets"
-                    for decision in self.state.pending_decisions
-                )
-                self._render_decision_figure_explanations(
-                    "Interactive pocket review required"
-                    if pocket_review else "No retained decision figure"
-                )
-                self.decision_figure_caption.setText(
-                    "No static pocket-review figure was retained for this preparation."
-                    if pocket_review else
-                    "No retained decision figure is available for this stage yet."
-                )
-                self.decision_figure_view.clear()
-                self.decision_figure_view.setText(
-                    "Select a candidate below, then choose ‘Review selected region in 3D’ "
-                    "to inspect the retained receptor, pocket, and docking box before approval."
-                    if pocket_review else
-                    "Figures appear here after the corresponding scientific stage completes."
-                )
-                self._update_figure_scene_action(None)
-                return
-            for control in (
-                self.figure_fit_button, self.figure_actual_size_button,
-                self.figure_zoom_out_button, self.figure_zoom_in_button,
-                self.figure_full_screen_button,
-            ):
-                control.setEnabled(True)
-            stat = path.stat()
-            source = (str(path), stat.st_mtime_ns, stat.st_size)
-            if source == self._decision_figure_source and self._decision_figure_pixmap is not None:
-                return
-            pixmap = QtGui.QPixmap(str(path))
-            if pixmap.isNull():
-                self._decision_figure_pixmap = None
-                self.decision_figure_view.setText(f"Figure could not be decoded: {path.name}")
-                return
-            self._decision_figure_pixmap = pixmap
-            self._decision_figure_source = source
-            self._decision_figure_zoom = None
-            self.decision_figure_caption.setText(
-                f"{self.decision_figure_choice.currentText()} · retained report figure"
-            )
-            self._render_decision_figure_explanations(
-                self.decision_figure_choice.currentText()
-            )
-            self._update_figure_scene_action(path)
-            self._rescale_decision_figure()
 
         @staticmethod
-        def _scenes_for_decision_figure(path: Path | None) -> list[tuple[str, Path]]:
+        def _scenes_for_report_asset(path: Path | None) -> list[tuple[str, Path]]:
             if path is None:
                 return []
             name = path.name
@@ -1420,6 +1312,8 @@ if QtWidgets is not None:
                 return scenes
             if name == "cavity_panels_AB.png":
                 candidate = path.with_name("cavity_panel_B_structure.pse")
+            elif name in {"control_panels_AB.png", "control_panel_B_overlay.png"}:
+                candidate = path.with_name("control_panel_B_overlay.pse")
             elif "pocket_evidence_site_" in name and name.endswith("_AB.png"):
                 candidate = path.with_suffix(".pse")
             elif name.endswith("_panels_AB.png"):
@@ -1431,277 +1325,10 @@ if QtWidgets is not None:
             return [("3D panel", candidate.resolve())] if candidate.is_file() else []
 
         @staticmethod
-        def _scene_for_decision_figure(path: Path | None) -> Path | None:
-            scenes = StudyWindow._scenes_for_decision_figure(path)
+        def _scene_for_report_asset(path: Path | None) -> Path | None:
+            scenes = StudyWindow._scenes_for_report_asset(path)
             return scenes[0][1] if len(scenes) == 1 else None
 
-        def _update_figure_scene_action(self, path: Path | None) -> None:
-            self._selected_figure_scenes = self._scenes_for_decision_figure(path)
-            self._selected_figure_scene = (
-                self._selected_figure_scenes[0][1]
-                if len(self._selected_figure_scenes) == 1 else None
-            )
-            if self.viewer_widget is not None and self._selected_figure_scene is not None:
-                scene_index = next((
-                    index for index in range(self.scene_figure_choice.count())
-                    if self.scene_figure_choice.itemData(index) == str(self._selected_figure_scene)
-                    and self.scene_figure_choice.itemData(
-                        index, QtCore.Qt.ItemDataRole.UserRole + 1,
-                    ) == str(path)
-                ), -1)
-                if scene_index < 0:
-                    scene_index = self.scene_figure_choice.findData(
-                        str(self._selected_figure_scene)
-                    )
-                if scene_index >= 0:
-                    self.scene_figure_choice.blockSignals(True)
-                    self.scene_figure_choice.setCurrentIndex(scene_index)
-                    self.scene_figure_choice.blockSignals(False)
-            available = bool(self._selected_figure_scenes)
-            self.viewer_button.setMenu(None)
-            if self.viewer_widget is None and len(self._selected_figure_scenes) > 1:
-                scene_menu = QtWidgets.QMenu(self.viewer_button)
-                for panel, scene in self._selected_figure_scenes:
-                    verb = "Load" if self.viewer_widget is not None else "Open"
-                    suffix = "" if self.viewer_widget is not None else " in PyMOL"
-                    action = scene_menu.addAction(f"{verb} {panel}{suffix}")
-                    action.triggered.connect(
-                        lambda _checked=False, selected=scene: self._open_visual_scene(selected)
-                    )
-                self.viewer_button.setMenu(scene_menu)
-                self.viewer_button.setText(
-                    "Choose 3D panel to load…" if self.viewer_widget is not None
-                    else "Choose 3D panel to open in PyMOL…"
-                )
-            else:
-                self.viewer_button.setText(
-                    ("Load selected 3D scene" if self.viewer_widget is not None
-                     else "Open selected 3D scene in PyMOL")
-                    if available else "No 3D scene for this figure"
-                )
-            companion_action_available = available and self.viewer_widget is None
-            self.viewer_button.setEnabled(companion_action_available)
-            self.viewer_button.setVisible(companion_action_available)
-            if available:
-                if self.viewer_widget is not None:
-                    self.structural_view.setText(
-                        "Interactive 3D scene ready\n\n"
-                        "Choose the retained scene in the Interactive structure tab. "
-                        "Viewing does not change approval."
-                    )
-                else:
-                    self.structural_view.setText(
-                        "Interactive 3D scene ready\n\n"
-                        "Open the retained scene in the PyMOL companion. "
-                        "Viewing does not change approval."
-                    )
-            else:
-                self.structural_view.setText(
-                    "No 3D scene selected\n\n"
-                    "Choose a figure with a retained 3D scene in Decision Figures. "
-                    "This panel is not a drag-and-drop area."
-                )
-                self.viewer_status.setText(
-                    "This figure is 2D only; use Full screen or zoom for closer inspection"
-                )
-
-        def _show_decision_figure_context_menu(self, position) -> None:
-            if self._decision_figure_pixmap is None:
-                return
-            menu = QtWidgets.QMenu(self)
-            scene = getattr(self, "_selected_figure_scene", None)
-            if scene is not None:
-                label = (
-                    "View corresponding 3D scene"
-                    if self.viewer_widget is not None
-                    else "Open this figure in PyMOL"
-                )
-                open_pymol = menu.addAction(label)
-                open_pymol.triggered.connect(self.open_visual_review)
-                menu.addSeparator()
-            elif getattr(self, "_selected_figure_scenes", None):
-                for panel, panel_scene in self._selected_figure_scenes:
-                    label = (
-                        f"View {panel} in Interactive structure"
-                        if self.viewer_widget is not None
-                        else f"Open {panel} in PyMOL"
-                    )
-                    action = menu.addAction(label)
-                    action.triggered.connect(
-                        lambda _checked=False, selected=panel_scene: self._open_visual_scene(selected)
-                    )
-                menu.addSeparator()
-            full_screen = menu.addAction("Open full screen")
-            full_screen.triggered.connect(self._show_figure_full_screen)
-            fit = menu.addAction("Fit figure")
-            fit.triggered.connect(self._fit_decision_figure)
-            actual = menu.addAction("View at 100%")
-            actual.triggered.connect(lambda: self._set_decision_figure_zoom(1.0))
-            menu.exec(self.decision_figure_view.mapToGlobal(position))
-
-        def _fit_decision_figure(self) -> None:
-            self._decision_figure_zoom = None
-            self._rescale_decision_figure()
-
-        def _set_decision_figure_zoom(self, zoom: float) -> None:
-            self._decision_figure_zoom = max(0.1, min(4.0, zoom))
-            self._rescale_decision_figure()
-
-        def _change_decision_figure_zoom(self, factor: float) -> None:
-            pixmap = getattr(self, "_decision_figure_pixmap", None)
-            if pixmap is None or pixmap.isNull():
-                return
-            current = self._decision_figure_zoom
-            if current is None:
-                viewport = self.decision_figure_scroll.viewport().size()
-                current = min(
-                    max(1, viewport.width() - 8) / pixmap.width(),
-                    max(1, viewport.height() - 8) / pixmap.height(),
-                )
-            self._set_decision_figure_zoom(current * factor)
-
-        def _rescale_decision_figure(self) -> None:
-            pixmap = getattr(self, "_decision_figure_pixmap", None)
-            if pixmap is None or pixmap.isNull():
-                return
-            viewport = self.decision_figure_scroll.viewport().size()
-            zoom = self._decision_figure_zoom
-            if zoom is None:
-                zoom = min(
-                    max(1, viewport.width() - 8) / pixmap.width(),
-                    max(1, viewport.height() - 8) / pixmap.height(),
-                )
-            shown = pixmap.scaled(
-                max(1, round(pixmap.width() * zoom)),
-                max(1, round(pixmap.height() * zoom)),
-                QtCore.Qt.AspectRatioMode.IgnoreAspectRatio,
-                QtCore.Qt.TransformationMode.SmoothTransformation,
-            )
-            self.decision_figure_view.clear()
-            self.decision_figure_view.setPixmap(shown)
-            self.decision_figure_view.resize(shown.size())
-            self.figure_zoom_status.setText(
-                "Fit" if self._decision_figure_zoom is None else f"{round(zoom * 100)}%"
-            )
-
-        def _show_figure_full_screen(self) -> None:
-            pixmap = getattr(self, "_decision_figure_pixmap", None)
-            if pixmap is None or pixmap.isNull():
-                return
-            dialog = QtWidgets.QDialog(self)
-            dialog.setWindowTitle(self.decision_figure_choice.currentText())
-            dialog.setWindowFlags(dialog.windowFlags() | QtCore.Qt.WindowType.Window)
-            layout = QtWidgets.QVBoxLayout(dialog)
-            controls = QtWidgets.QHBoxLayout()
-            title = QtWidgets.QLabel(self.decision_figure_choice.currentText())
-            title_font = title.font()
-            title_font.setBold(True)
-            title.setFont(title_font)
-            fit_button = QtWidgets.QPushButton("Fit")
-            actual_button = QtWidgets.QPushButton("100%")
-            zoom_out = QtWidgets.QPushButton("−")
-            zoom_in = QtWidgets.QPushButton("+")
-            close_button = QtWidgets.QPushButton("Exit full screen")
-            controls.addWidget(title, 1)
-            for button in (fit_button, actual_button, zoom_out, zoom_in, close_button):
-                controls.addWidget(button)
-            layout.addLayout(controls)
-            image = QtWidgets.QLabel()
-            image.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-            scroll = QtWidgets.QScrollArea()
-            scroll.setWidgetResizable(False)
-            scroll.setWidget(image)
-            guidance = QtWidgets.QWidget()
-            guidance.setObjectName("full_screen_figure_guidance")
-            guidance_layout = QtWidgets.QVBoxLayout(guidance)
-            guidance_layout.setContentsMargins(6, 6, 6, 6)
-            guidance_layout.setSpacing(10)
-            for heading, body in self._decision_figure_explanation_sections(
-                self.decision_figure_choice.currentText()
-            ):
-                card = QtWidgets.QFrame()
-                card.setObjectName("full_screen_figure_explanation_card")
-                card.setStyleSheet(
-                    "QFrame#full_screen_figure_explanation_card {background:#e7e7e7;"
-                    "color:#202020;border:1px solid #b8b8b8;border-radius:5px;}"
-                )
-                card_layout = QtWidgets.QVBoxLayout(card)
-                card_layout.setContentsMargins(13, 11, 13, 12)
-                card_title = QtWidgets.QLabel(heading)
-                card_title_font = card_title.font()
-                card_title_font.setBold(True)
-                card_title_font.setPointSize(card_title_font.pointSize() + 1)
-                card_title.setFont(card_title_font)
-                card_text = QtWidgets.QLabel(body)
-                card_text.setWordWrap(True)
-                card_text.setTextInteractionFlags(
-                    QtCore.Qt.TextInteractionFlag.TextSelectableByMouse
-                )
-                card_layout.addWidget(card_title)
-                card_layout.addWidget(card_text)
-                guidance_layout.addWidget(card)
-            guidance_layout.addStretch(1)
-            guidance_scroll = QtWidgets.QScrollArea()
-            guidance_scroll.setObjectName("full_screen_figure_guidance_scroll")
-            guidance_scroll.setWidgetResizable(True)
-            guidance_scroll.setWidget(guidance)
-            guidance_scroll.setMinimumWidth(270)
-            guidance_scroll.setMaximumWidth(340)
-            full_screen_split = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
-            full_screen_split.setObjectName("full_screen_figure_splitter")
-            full_screen_split.addWidget(scroll)
-            full_screen_split.addWidget(guidance_scroll)
-            full_screen_split.setStretchFactor(0, 1)
-            full_screen_split.setStretchFactor(1, 0)
-            full_screen_split.setSizes([1500, 310])
-            layout.addWidget(full_screen_split, 1)
-            zoom = {"value": None}
-
-            def render() -> None:
-                value = zoom["value"]
-                if value is None:
-                    viewport = scroll.viewport().size()
-                    value = min(
-                        max(1, viewport.width() - 8) / pixmap.width(),
-                        max(1, viewport.height() - 8) / pixmap.height(),
-                    )
-                shown = pixmap.scaled(
-                    max(1, round(pixmap.width() * value)),
-                    max(1, round(pixmap.height() * value)),
-                    QtCore.Qt.AspectRatioMode.IgnoreAspectRatio,
-                    QtCore.Qt.TransformationMode.SmoothTransformation,
-                )
-                image.setPixmap(shown)
-                image.resize(shown.size())
-
-            def change(factor: float) -> None:
-                if zoom["value"] is None:
-                    viewport = scroll.viewport().size()
-                    zoom["value"] = min(
-                        max(1, viewport.width() - 8) / pixmap.width(),
-                        max(1, viewport.height() - 8) / pixmap.height(),
-                    )
-                zoom["value"] = max(0.1, min(4.0, zoom["value"] * factor))
-                render()
-
-            fit_button.clicked.connect(lambda: (zoom.update(value=None), render()))
-            actual_button.clicked.connect(lambda: (zoom.update(value=1.0), render()))
-            zoom_out.clicked.connect(lambda: change(1 / 1.25))
-            zoom_in.clicked.connect(lambda: change(1.25))
-            close_button.clicked.connect(dialog.close)
-            dialog.showFullScreen()
-            QtCore.QTimer.singleShot(0, render)
-            self._figure_full_screen_dialog = dialog
-            self._figure_full_screen_guidance = guidance
-
-        def eventFilter(self, watched, event):
-            if (
-                hasattr(self, "decision_figure_scroll")
-                and watched is self.decision_figure_scroll.viewport()
-                and event.type() == QtCore.QEvent.Type.Resize
-            ):
-                QtCore.QTimer.singleShot(0, self._rescale_decision_figure)
-            return super().eventFilter(watched, event)
 
         def _build_workflow_navigation_dock(self) -> None:
             navigation_panel = QtWidgets.QWidget()
@@ -1711,7 +1338,7 @@ if QtWidgets is not None:
             self.next_required_action.setObjectName("next_required_action")
             self.next_required_action.setWordWrap(True)
             self.next_required_action.setStyleSheet(
-                "QLabel { background: #eef5ff; border: 1px solid #8bb7e8; "
+                "QLabel { background: #eef5ff; color:#172b3a; border: 1px solid #8bb7e8; "
                 "border-radius: 4px; padding: 7px; font-weight: 600; }"
             )
             navigation_layout.addWidget(self.next_required_action)
@@ -1757,9 +1384,16 @@ if QtWidgets is not None:
                 QtCore.Qt.LeftDockWidgetArea, "workflow_navigation_dock",
             )
             self.workflow_navigation_dock.setFeatures(
-                QtWidgets.QDockWidget.DockWidgetMovable
+                QtWidgets.QDockWidget.DockWidgetClosable
+                | QtWidgets.QDockWidget.DockWidgetMovable
                 | QtWidgets.QDockWidget.DockWidgetFloatable
             )
+            self.workflow_action = self._add_auxiliary_dock_action(
+                "Scientific workflow", self.workflow_navigation_dock,
+                QtCore.Qt.DockWidgetArea.LeftDockWidgetArea,
+            )
+            self.workflow_action.setToolTip("Show or hide the chronological workflow steps")
+            self.view_toolbar.insertAction(self.scientific_detail_action, self.workflow_action)
             self.splitDockWidget(
                 self.workflow_navigation_dock, self.study_setup_dock, QtCore.Qt.Vertical,
             )
@@ -1976,9 +1610,11 @@ if QtWidgets is not None:
                 for job in state.jobs
             )
             control_path = (state.workflow_data.get("study_setup") or {}).get("pathway") == "control"
+            site_first_control = bool((state.workflow_data.get("study_setup") or {}).get("site_review_first"))
+            reuse_path = (state.workflow_data.get("study_setup") or {}).get("pathway") == "reuse"
             regions_approved = (
                 state.workflow_data.get("latest_control_status") == "approved"
-                if control_path else bool(state.selected_pocket_ids and not pending_pockets)
+                if control_path and not site_first_control else bool(state.selected_pocket_ids and not pending_pockets)
             )
             has_bundle = any(
                 artifact.kind == "protocol_bundle" and Path(artifact.path).is_file()
@@ -2005,6 +1641,9 @@ if QtWidgets is not None:
                 "Screen ligands",
                 "Results review",
             )
+            if site_first_control:
+                labels = ("Study setup", "Prepare & gather evidence", "Review & decide",
+                          "Control & protocol", "Screen ligands", "Results review")
             complete = (
                 preparation_started or preparation_done,
                 preparation_done,
@@ -2022,6 +1661,11 @@ if QtWidgets is not None:
                 has_bundle,
                 screening_started,
             )
+            if reuse_path:
+                labels = ("Saved protocol import", "Preparation (inherited)", "Regions (inherited)",
+                          "Protocol settings (locked)", "Screen ligands", "Results review")
+                complete = (has_bundle, False, False, False, screening_done, screening_done)
+                available = (True, False, False, False, has_bundle, screening_started)
 
             active_row = 0
             if not self.output_directory.text().strip():
@@ -2036,7 +1680,7 @@ if QtWidgets is not None:
             elif state.active_job:
                 stage_rows = {
                     "preparation_and_pocket_detection": 1,
-                    "control_validation": 1,
+                    "control_validation": 3 if site_first_control else 1,
                     "final_report": 3,
                     "screening": 4,
                 }
@@ -2058,9 +1702,16 @@ if QtWidgets is not None:
             elif regions_approved and not has_bundle:
                 active_row = 3
                 next_action = "Review the locked settings and finalize the report and .duprotocol bundle."
+                if site_first_control and not state.workflow_data.get("latest_control_status"):
+                    next_action = "Sites approved. Review the tested-site scope, then explicitly start the known-ligand control."
+                elif site_first_control:
+                    next_action = "Review the site-specific control result. Additional or unvalidated sites require explicit exploratory protocol approval."
             elif has_bundle and not screening_started:
                 active_row = 4
-                next_action = "Protocol validated. Choose ligands to begin sequential screening." if control_path else "Protocol finalized. Choose ligands to begin sequential screening."
+                validated_scope = not site_first_control or (state.workflow_data.get("control_site_review") or {}).get("all_selected_sites_validated")
+                next_action = "Protocol validated. Choose ligands to begin sequential screening." if control_path and validated_scope else "Protocol finalized. Choose ligands to begin sequential screening."
+                if reuse_path:
+                    next_action = "Saved protocol imported. Choose compounds to begin sequential screening; its receptor and settings remain locked."
             elif control_path and state.workflow_data.get("latest_control_status") == "not_approved":
                 active_row = 2
                 next_action = "Control completed but pose recovery did not pass. Review its report; no validated protocol was issued."
@@ -2100,6 +1751,8 @@ if QtWidgets is not None:
                     if available[row]
                     else "Complete the preceding scientific stage first"
                 )
+                if reuse_path and row in (1, 2, 3):
+                    item.setToolTip("Inherited unchanged from the saved protocol, not performed in this study. Review the imported record in Study setup.")
             phase = (
                 "results" if screening_done
                 else "screening" if screening_started or has_bundle
@@ -2137,15 +1790,7 @@ if QtWidgets is not None:
                     "pose_interaction": "Calculating pose interactions",
                 }.get(state.active_job.stage, state.active_job.stage.replace("_", " ").capitalize())
                 self.feedback_heading.setText(f"RUNNING — {stage_name}")
-                elapsed_text = "Calculation active"
-                if state.active_job.started_at:
-                    try:
-                        started = datetime.fromisoformat(state.active_job.started_at.replace("Z", "+00:00"))
-                        seconds = max(0, int((datetime.now(timezone.utc) - started).total_seconds()))
-                        elapsed_text += f" · elapsed {seconds // 60}:{seconds % 60:02d}"
-                    except (ValueError, TypeError):
-                        pass
-                self.running_elapsed.setText(elapsed_text)
+                self._update_running_elapsed(state)
             feedback_colors = (
                 ("#fff1b8", "#c99a16") if pending_pockets
                 else ("#dceeff", "#2478bd") if running
@@ -2157,6 +1802,7 @@ if QtWidgets is not None:
                 "QFrame#scientific_feedback_card { "
                 f"background:{feedback_colors[0]}; border:1px solid {feedback_colors[1]}; "
                 "border-radius:5px; }"
+                "QFrame#scientific_feedback_card QLabel {color:#172b3a;background:transparent;}"
             )
             active = state.active_job
             if active is None:
@@ -2178,7 +1824,7 @@ if QtWidgets is not None:
                     self.active_stage_progress.setValue(active.progress_completed)
                     self.active_stage_progress.setFormat(
                         f"Milestones %v/{active.progress_total}" if active.stage != "screening"
-                        else f"Docking outputs %v/{active.progress_total}"
+                        else f"Outputs %v/{active.progress_total} planned"
                     )
                 else:
                     self.active_stage_progress.setRange(0, 0)
@@ -2186,6 +1832,9 @@ if QtWidgets is not None:
         def _activate_workflow_target(self, target: str) -> None:
             self._workflow_target = target
             self._update_stage_review_visibility()
+            browser = getattr(self._detached_structure_window, "study_panel", None)
+            if browser is not None:
+                browser.refresh()
             page = self._workflow_stage_pages.get(target, self.workflow_stage_blank)
             self.workflow_stage_stack.setCurrentWidget(page)
             stage_titles = {
@@ -2205,9 +1854,10 @@ if QtWidgets is not None:
                 "protocol_finalization_dock": "4. Finalize protocol",
                 "locked_protocol_screening_dock": "5. Screen ligands",
             }.get(target, ""))
+            if target == "protocol_finalization_dock" and (self.state.workflow_data.get("study_setup") or {}).get("site_review_first"):
+                self.stage_form_heading.setText("4. Control and protocol")
             if target == "screening_results_dock":
                 self.right_review_stack.setCurrentWidget(self.results_review_panel)
-                self._select_decision_figure("Docking clusters and representative poses")
                 if self.screening_results_dock.isFloating():
                     self.screening_results_dock.raise_()
                     self.screening_results_dock.activateWindow()
@@ -2215,9 +1865,8 @@ if QtWidgets is not None:
                 if target == "central":
                     self.right_review_stack.setCurrentWidget(self.pocket_evidence_panel)
                     if self.viewer_widget is not None:
-                        self.review_tabs.setCurrentIndex(1)
-                    else:
-                        self._select_decision_figure("Pocket ranking and structural evidence")
+                        self.review_tabs.setCurrentWidget(self.live_page)
+                        self._schedule_initial_candidate_review()
                     self.centralWidget().setFocus()
                 else:
                     self.right_review_stack.setCurrentWidget(self.right_review_blank)
@@ -2230,10 +1879,10 @@ if QtWidgets is not None:
                 self.workspace_heading, self.review_tabs,
             ):
                 widget.setVisible(review)
-            embedded = self.viewer_widget is not None and self.review_tabs.currentIndex() == 1
+            embedded = self.viewer_widget is not None and self.review_tabs.currentWidget() is self.live_page
             self.workspace_context.setVisible(review and not embedded)
             self.central_selection_status.setVisible(review and not embedded)
-            self.pymol_controls.setVisible(review and embedded)
+            self.pymol_controls.setVisible(review and (embedded or self.viewer_coordinator is not None))
             self.candidates.setVisible(pocket_review)
             self.region_approval_controls.setVisible(pocket_review)
             if hasattr(self, "stage_form_scroll"):
@@ -2241,10 +1890,6 @@ if QtWidgets is not None:
                 self.stage_form_scroll.setVisible(not review)
                 self.study_setup_dock.hide()
                 self.pocket_evidence_dock.setVisible(review)
-            figures_available = self.decision_figure_choice.count() > 0
-            self.figure_controls_widget.setVisible(figures_available)
-            self.figure_split.setVisible(figures_available)
-            self.decision_figure_legend_scroll.setVisible(figures_available)
             self.reset_view_button.setVisible(self.reset_view_button.isEnabled())
             self.decision_synopsis_button.setVisible(self.decision_synopsis_button.isEnabled())
             self.full_synopsis_button.setVisible(self.full_synopsis_button.isEnabled())
@@ -2332,10 +1977,25 @@ if QtWidgets is not None:
             if signature == self._retained_setup_signature:
                 return
             self._retained_setup_signature = signature
+            if setup.get("pathway") == "reuse":
+                self.study_setup_panel.protocol_bundle.setText(str(setup['protocol_bundle']))
+                self._restore_combo(self.study_pathway, "reuse")
+                imported = state.workflow_data.get('protocol_import') or {}
+                from ..reporting import engine_display_name
+                self.study_setup_panel.protocol_note.setText(
+                    f"Imported target: {imported.get('target', 'Not recorded')} · "
+                    f"{engine_display_name(imported.get('engine', 'Not recorded'))} · "
+                    f"{imported.get('region_count', '?')} locked docking region(s). "
+                    "Receptor, regions and settings are inherited unchanged. No preparation was repeated. "
+                    + ("Exploratory protocol: no pose-recovery control. "
+                       if imported.get('exploratory_authorization_required') else "Pose-recovery control recorded in the saved bundle. ")
+                    + "Select compounds in Screen ligands."
+                )
+                return
             if setup.get("record_origin") == "reconstructed_from_retained_artifacts":
                 self.study_setup_panel.lock_notice.setText(
                     "This completed study predates the setup record. Available values were recovered "
-                    "from retained artifacts and are read-only. Create a new study to change them."
+                    "from saved study files and are read-only. Create a new study to change them."
                 )
             else:
                 self.study_setup_panel.lock_notice.setText(
@@ -2353,6 +2013,7 @@ if QtWidgets is not None:
             self._restore_combo(self.control_engine, setup.get("engine", "vina"))
             self._restore_combo(self.control_tier, setup.get("control_tier", "quick"))
             self._restore_combo(self.pocket_engine, setup.get("pocket_engine", "auto"))
+            self.study_setup_panel.predict_with_ligand.setChecked(setup.get("predict_pockets_with_ligand", False))
             self.study_setup_panel.pdb_evidence.setChecked(
                 setup.get("pdb_pocket_evidence", "related-structures") == "related-structures"
             )
@@ -2380,42 +2041,90 @@ if QtWidgets is not None:
                 self.ligand_resname.clear()
             self.study_setup_panel.set_locked(True)
 
-        def refresh(self) -> None:
-            self._refresh_host_lifecycle()
+        def _update_running_elapsed(self, state) -> None:
+            self._update_screening_elapsed(state)
+            if not state.active_job or state.active_job.status.value not in {'running', 'queued'}:
+                return
+            text = 'Calculation active'
+            if state.active_job.started_at:
+                try:
+                    started = datetime.fromisoformat(state.active_job.started_at.replace('Z', '+00:00'))
+                    seconds = max(0, int((datetime.now(timezone.utc) - started).total_seconds()))
+                    text += f' · elapsed {seconds // 60}:{seconds % 60:02d}'
+                except (ValueError, TypeError):
+                    pass
+            self.running_elapsed.setText(text)
+
+        def _update_screening_elapsed(self, state) -> None:
+            from ..job_timing import elapsed_seconds, duration_text
+            latest = next((job for job in reversed(state.jobs) if job.stage == 'screening'), None)
+            label = self.screening_setup_panel.elapsed
+            label.setVisible(latest is not None)
+            if latest is None:
+                label.clear()
+                return
+            seconds = elapsed_seconds(latest)
+            status = latest.status.value.replace('_', ' ')
+            timing = (('Elapsed ' if latest.status.value == 'running' else 'Total run time ')
+                      + duration_text(seconds)) if seconds is not None else 'Run time unavailable (timestamps not recorded)'
+            label.setText(f'Latest screening {status} · {timing}. Includes preparation, docking, analysis and reporting.')
+
+        def _refresh_polled_state(self) -> None:
+            """Poll authority; unchanged ticks must not rebuild tables or reload poses."""
+            if getattr(self, '_stage_submission_in_progress', False):
+                return  # preserve STARTING feedback until the host acknowledges
+            if getattr(self.viewer_widget, '_du_ray_export_active', False):
+                # Native ray tracing holds PyMOL's lock; keep GUI Cancel responsive.
+                self._refresh_host_lifecycle()
+                self._update_running_elapsed(self.state)
+                return
             self.session.refresh()
-            self.state = self.session.state
-            state = self.state
-            self._apply_retained_study_setup(state)
+            host_connected = self._host_connected()
+            if (self.session.state.revision != self.state.revision
+                    or host_connected != getattr(self, '_polled_host_connection', host_connected)):
+                self.refresh()
+                return
+            self._refresh_host_lifecycle()
+            self._refresh_viewer_lifecycle()
+            self._update_running_elapsed(self.state)
+
+        def _refresh_viewer_lifecycle(self) -> None:
+            if getattr(self.viewer_widget, '_du_ray_export_active', False):
+                return
             if self.viewer_coordinator is not None:
-                if hasattr(self.viewer_coordinator, "refresh_health"):
+                if hasattr(self.viewer_coordinator, 'refresh_health'):
                     self.viewer_coordinator.refresh_health()
                 self.session.set_viewer_state(
                     connected=bool(self.viewer_coordinator.connected),
-                    report_view_available=bool(
-                        self.viewer_coordinator.connected
-                        and getattr(self.viewer_coordinator, "report_view_available", False)
-                    ),
-                    lifecycle=getattr(
-                        self.viewer_coordinator, "status",
-                        "connected" if self.viewer_coordinator.connected else "disconnected",
-                    ),
-                    error=getattr(self.viewer_coordinator, "last_error", None),
+                    report_view_available=bool(self.viewer_coordinator.connected
+                        and getattr(self.viewer_coordinator, 'report_view_available', False)),
+                    lifecycle=getattr(self.viewer_coordinator, 'status',
+                        'connected' if self.viewer_coordinator.connected else 'disconnected'),
+                    error=getattr(self.viewer_coordinator, 'last_error', None),
                 )
+
+        def refresh(self) -> None:
+            self._refresh_host_lifecycle()
+            self._polled_host_connection = self._host_connected()
+            self.session.refresh()
+            self.state = self.session.state
+            state = self.state
+            from ..services.pdb_lookup_status import lookup_status_for_state
+            self.pocket_evidence_panel.set_lookup_status(lookup_status_for_state(state))
+            self._apply_retained_study_setup(state)
+            self._refresh_viewer_lifecycle()
             self.summary.setText(
                 f"Study: {state.name}    Workflow: {state.workflow}    "
                 f"Status: {state.completion_status.value}    Revision: {state.revision}"
             )
             self._update_workflow_progress(state)
-            figure_artifacts = tuple(
-                (artifact.kind, artifact.path) for artifact in state.artifacts
-                if artifact.kind in {
-                    "scientific_image", "final_report_figure", "screening_report_figure",
-                    "screening_interaction_diagram",
-                }
+            scene_artifacts = (
+                tuple((artifact.kind, artifact.path, artifact.sha256) for artifact in state.artifacts),
+                state.workflow_data.get('latest_control_output'),
             )
-            if figure_artifacts != self._decision_figure_artifacts:
-                self._refresh_decision_figures(state)
-                self._decision_figure_artifacts = figure_artifacts
+            if scene_artifacts != self._structure_scene_artifacts:
+                self._refresh_structure_scenes(state)
+                self._structure_scene_artifacts = scene_artifacts
             policy = state.workflow_data.get("active_automation_policy", {})
             self.automation_banner.setVisible(bool(policy.get("enabled")))
             pending = state.pending_decisions
@@ -2436,7 +2145,7 @@ if QtWidgets is not None:
                 self.viewer_widget is None
                 and
                 self.viewer_coordinator is not None
-                and bool(getattr(self, "_selected_figure_scenes", None))
+                and bool(getattr(self, "_selected_structure_scenes", None))
                 and getattr(self.viewer_coordinator, "status", "disconnected") != "connecting"
             ))
             report_view_available = bool(
@@ -2483,6 +2192,9 @@ if QtWidgets is not None:
                 artifact for artifact in state.artifacts
                 if artifact.kind == "final_report" and Path(artifact.path).is_file()
             ), None)
+            if final_report is None:
+                final_report = next((artifact for artifact in state.artifacts
+                                     if artifact.kind == "control_report" and Path(artifact.path).is_file()), None)
             bundle_artifact = next((
                 artifact for artifact in state.artifacts
                 if artifact.kind == "protocol_bundle" and Path(artifact.path).is_file()
@@ -2490,9 +2202,36 @@ if QtWidgets is not None:
             self.open_final_report_button.setEnabled(final_report is not None)
             self.open_bundle_location_button.setEnabled(bundle_artifact is not None)
             approved_regions = bool(state.selected_pocket_ids and not pending)
+            setup = state.workflow_data.get("study_setup") or {}
+            needs_control = bool(setup.get("site_review_first") and not state.workflow_data.get("latest_control_status"))
+            control_preview, control_error = None, None
+            if needs_control and approved_regions:
+                from ..services.control_review import reviewed_control_inputs, NoControlSiteSelected
+                try:
+                    control_preview = reviewed_control_inputs(state)
+                except NoControlSiteSelected as exc:
+                    needs_control = False
+                    control_error = str(exc)
+                except ValueError as exc:
+                    control_error = str(exc)
+            description = "Review and approve sites first. No redocking has run."
+            if control_preview:
+                extra = control_preview['untested_box_labels']
+                description = (
+                    f"Run {setup['engine']} pose recovery for {control_preview['ligand_id']} in "
+                    f"{control_preview['tested_box_label']} using the {setup['control_tier']} tier. "
+                    "The reviewed receptor and box are reused; preparation and evidence lookup are not repeated. "
+                    + ("Additional selected sites remain exploratory: " + ', '.join(extra) + '. '
+                       "After the control, explicitly finalize an exploratory protocol to screen all selected sites."
+                       if extra else "A passing control authorizes only this tested site, receptor, engine and settings.")
+                    + (" Untested receptor-state variants also remain exploratory: "
+                       + ', '.join(control_preview['untested_receptor_states']) + '.'
+                       if control_preview['untested_receptor_states'] else '')
+                )
+            self.protocol_finalization_panel.set_control_mode(needs_control, description)
             self.finalize_button.setEnabled(bool(
                 self.host_controller.available and approved_regions and not active and not has_bundle
-                and self.exploratory_approval.isChecked()
+                and (control_preview if needs_control else self.exploratory_approval.isChecked())
             ))
             if has_bundle:
                 bundle = next(artifact for artifact in state.artifacts if artifact.kind == "protocol_bundle")
@@ -2508,6 +2247,9 @@ if QtWidgets is not None:
                 )
             elif approved_regions:
                 self.finalization_status.setText(
+                    control_error or "Sites approved. Start the disclosed site-specific control when ready."
+                    if needs_control else control_error or
+                    (state.workflow_data.get('control_site_review') or {}).get('scope_warning') or
                     "Review the locked settings and explicitly authorize exploratory reuse to finalize."
                 )
             if bundle_artifact and not self.screen_output.text().strip():
@@ -2531,12 +2273,14 @@ if QtWidgets is not None:
                        if screening_result != "completed" and latest_screen_job
                        else "")
                 )
+            self._update_screening_elapsed(state)
             self._render_candidates(state)
             self._render_artifacts(state)
             self._render_screening_results(state)
             self._refresh_pending_pose_interaction(state)
             self._render_events()
             self._update_stage_review_visibility()
+            self._sync_residue_highlight_actions()
             if self._exit_after_cancel and not active:
                 self._exit_after_cancel = False
                 QtCore.QTimer.singleShot(0, self.close)
@@ -2693,15 +2437,19 @@ if QtWidgets is not None:
 
         def choose_screen_ligand_file(self) -> None:
             path, _filter = QtWidgets.QFileDialog.getOpenFileName(
-                self, "Choose ligand SDF", "", "Structure Data File (*.sdf)",
+                self, "Choose compound library", "", "Ligand files (*.sdf *.mol *.csv *.tsv *.xlsx *.SDF *.MOL *.CSV *.TSV *.XLSX);;SMILES tables (*.csv *.tsv *.xlsx *.CSV *.TSV *.XLSX);;SDF libraries (*.sdf *.SDF);;MOL molecules (*.mol *.MOL)",
             )
             if path:
                 self.screen_ligands.setText(path)
+                if self.host_controller.available:
+                    self.read_screening_library()
 
         def choose_screen_ligand_directory(self) -> None:
-            path = QtWidgets.QFileDialog.getExistingDirectory(self, "Choose ligand SDF directory")
+            path = QtWidgets.QFileDialog.getExistingDirectory(self, "Choose ligand SDF/MOL folder")
             if path:
                 self.screen_ligands.setText(path)
+                if self.host_controller.available:
+                    self.read_screening_library()
 
         def choose_screen_output(self) -> None:
             path = QtWidgets.QFileDialog.getExistingDirectory(self, "Choose screening output directory")
@@ -2922,7 +2670,67 @@ if QtWidgets is not None:
             )
             return str(Path(geostd_library).resolve())
 
+        def choose_saved_protocol(self) -> None:
+            path, _ = QtWidgets.QFileDialog.getOpenFileName(
+                self, "Choose saved docking protocol", "", "Docking Universal protocol (*.duprotocol)")
+            if path:
+                self.study_setup_panel.protocol_bundle.setText(path)
+
+        def import_saved_protocol(self) -> None:
+            from .workflow_panels import ProtocolImportDialog
+            try:
+                path = self.study_setup_panel.protocol_bundle.text().strip()
+                revision = self.state.revision
+                self.statusBar().showMessage("Verifying saved protocol and retained input hashes…")
+                preview = self.host_controller.inspect_protocol_bundle(path)
+                if ProtocolImportDialog(preview, self).exec() != QtWidgets.QDialog.DialogCode.Accepted:
+                    return
+                self.host_controller.import_protocol_bundle(path, preview['sha256'], revision)
+            except Exception as exc:
+                QtWidgets.QMessageBox.warning(self, "Protocol import unavailable", str(exc))
+            finally:
+                self.refresh()
+
+        def review_imported_protocol(self) -> None:
+            from .workflow_panels import ProtocolImportDialog
+            imported = self.state.workflow_data.get('protocol_import') or {}
+            try:
+                preview = self.host_controller.inspect_protocol_bundle(imported.get('snapshot', ''))
+                if preview['sha256'] != imported.get('sha256'):
+                    raise ValueError('Imported protocol changed; screening is unavailable')
+                ProtocolImportDialog(preview, self, read_only=True).exec()
+            except Exception as exc:
+                QtWidgets.QMessageBox.warning(self, "Saved protocol unavailable", str(exc))
+
         def start_preparation(self) -> None:
+            """Paint immediate feedback before component review or host submission."""
+            if not self.host_controller.available:
+                return
+            if self.study_pathway.currentData() == "reuse":
+                self.import_saved_protocol()
+                return
+            self.feedback_heading.setText("STARTING — Preparing receptor and detecting pockets")
+            self.feedback_text.setText("Checking receptor components and preparation settings…")
+            self.feedback_card.setStyleSheet(
+                "QFrame#scientific_feedback_card {background:#dceeff;"
+                "border:2px solid #2478bd;border-radius:5px;}"
+                "QFrame#scientific_feedback_card QLabel {color:#172b3a;background:transparent;}"
+            )
+            self.running_indicator.show()
+            self.running_elapsed.setText("Preparation requested — please wait")
+            self.running_elapsed.show()
+            self.start_preparation_button.setEnabled(False)
+            self._stage_submission_in_progress = True
+            try:
+                QtWidgets.QApplication.processEvents(
+                    QtCore.QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents
+                )
+                self._submit_preparation()
+            finally:
+                self._stage_submission_in_progress = False
+                self.refresh()
+
+        def _submit_preparation(self) -> None:
             if not self.host_controller.available:
                 return
             input_text = self.input_pdb.text().strip()
@@ -2972,6 +2780,11 @@ if QtWidgets is not None:
                     "control_tier": self.control_tier.currentData(),
                     "geostd_library": geostd_library,
                     "meeko_template_file": self._prepared_meeko_template_file,
+                    "pocket_engine": self.pocket_engine.currentData(),
+                    "predict_pockets_with_ligand": self.study_setup_panel.predict_with_ligand.isChecked(),
+                    "pdb_pocket_evidence": (
+                        "related-structures" if self.study_setup_panel.pdb_evidence.isChecked() else "off"
+                    ),
                 }
                 try:
                     self.host_controller.start_control_validation(control_payload, self.state.revision)
@@ -3010,6 +2823,8 @@ if QtWidgets is not None:
                 "center_mode": "deepest",
                 "centroid_mode": 1,
                 "pocket_engine": self.pocket_engine.currentData(),
+                "predict_pockets_with_ligand": (self.site_mode.currentData() == "ligand" and
+                                                 self.study_setup_panel.predict_with_ligand.isChecked()),
                 "geostd_library": geostd_library,
                 "meeko_template_file": self._prepared_meeko_template_file,
                 "pdb_pocket_evidence": (
@@ -3037,6 +2852,13 @@ if QtWidgets is not None:
         def start_protocol_finalization(self) -> None:
             if not self.host_controller.available:
                 return
+            if self.protocol_finalization_panel._control_mode:
+                try:
+                    self.host_controller.start_control_validation({}, self.state.revision)
+                except Exception as exc:
+                    QtWidgets.QMessageBox.critical(self, "Reviewed control could not start", str(exc))
+                self.refresh()
+                return
             output = self.final_output_directory.text().strip()
             if not output:
                 QtWidgets.QMessageBox.warning(
@@ -3062,6 +2884,8 @@ if QtWidgets is not None:
                 "energy_range": self.protocol_energy_range.value(),
                 "exploratory_use_approved": True,
             }
+            if self.protocol_engine.currentData()=='adgpu':
+                payload.update(ad4_runs=self.protocol_ad4_runs.value(),ad4_heuristic_cap=self.protocol_ad4_heuristic_cap.value())
             try:
                 self.host_controller.start_finalization(payload, self.state.revision)
             except Exception as exc:
@@ -3073,6 +2897,9 @@ if QtWidgets is not None:
                 artifact for artifact in self.state.artifacts
                 if artifact.kind == "final_report" and Path(artifact.path).is_file()
             ), None)
+            if report is None:
+                report = next((artifact for artifact in self.state.artifacts
+                               if artifact.kind == "control_report" and Path(artifact.path).is_file()), None)
             if report:
                 self._open_path(Path(report.path))
 
@@ -3083,6 +2910,81 @@ if QtWidgets is not None:
             ), None)
             if bundle:
                 self._open_path(Path(bundle.path).parent)
+
+        def _clear_screening_library(self, *_args):
+            self._ligand_read_generation += 1
+            self.screening_setup_panel.library_panel.clear()
+            if Path(self.screen_ligands.text().strip()).suffix.lower() in {'.csv', '.tsv', '.xlsx'}:
+                self.screening_setup_panel.library_panel.summary.setText(
+                    'SMILES table: click Read/select compounds, then review and approve its columns.')
+
+        def _read_library_async(self, operation, callback):
+            from .ligand_library_panel import LibraryReadTask
+            task = LibraryReadTask()
+            self._ligand_read_tasks.add(task)
+            generation = self._ligand_read_generation
+
+            def finished(result, error):
+                self._ligand_read_tasks.discard(task)
+                task.deleteLater()
+                if generation == self._ligand_read_generation:
+                    callback(result, error)
+            task.finished.connect(finished)
+            task.start(operation)
+
+        def read_screening_library(self, column_mapping=None, sheet=None):
+            if not self.host_controller.available:
+                return
+            panel = self.screening_setup_panel.library_panel
+            source = self.screen_ligands.text().strip()
+            self._ligand_read_generation += 1
+            panel.clear()
+            panel.loading = True
+            panel.read_button.setEnabled(False)
+            panel.summary.setText("Reading compound records locally… This does not start docking.")
+            self._update_screening_controls()
+
+            def loaded(library, error):
+                panel.loading = False
+                panel.read_button.setEnabled(True)
+                if error:
+                    panel.read_error = error
+                    panel.summary.setText(f"Library could not be read: {error}")
+                    self._update_screening_controls()
+                    return
+                panel.set_library(library)
+                self.screening_status.setText('Review the suggested columns and click Use these columns. This does not start docking.'
+                    if not library.get('mapping_approved', True) else
+                    "Choose compounds using the Dock checkboxes, then preview the selected workload.")
+            options = {}
+            if column_mapping is not None:
+                options['column_mapping'] = column_mapping
+            if sheet is not None:
+                options['sheet'] = sheet
+            self._read_library_async(lambda: self.host_controller.inspect_ligand_library(source, **options), loaded)
+
+        def preview_library_record(self, identifier):
+            panel = self.screening_setup_panel.library_panel
+            library = panel.library
+            if not library or not self.host_controller.available:
+                return
+            panel._pixmap = None
+            panel.preview.clear()
+            panel.preview.setText("Rendering compound structure…")
+
+            def rendered(result, error):
+                if panel.current_record_id() != identifier:
+                    return
+                if error:
+                    panel.preview.setText(error)
+                    return
+                try:
+                    panel.set_preview(result)
+                except ValueError as exc:
+                    panel.preview.setText(str(exc))
+            self._read_library_async(lambda: self.host_controller.ligand_record_preview(
+                library['source'], library['fingerprint'], identifier,
+                **({'column_mapping': library['column_mapping']} if 'column_mapping' in library else {})), rendered)
 
         def _invalidate_screening_plan(self, *_args) -> None:
             self._screening_plan = None
@@ -3097,14 +2999,35 @@ if QtWidgets is not None:
                 or self.screen_exploratory_approval.isChecked()
             )
             active = getattr(self, "state", None) and self.state.active_job
-            self.start_screening_button.setEnabled(bool(plan and authorization_ready and not active))
+            library_panel = self.screening_setup_panel.library_panel
+            self.start_screening_button.setText("Dock selected compounds" if library_panel.library is not None
+                                                else "Run locked-protocol screening")
+            library_ready = not library_panel.loading and not library_panel.read_error
+            if Path(self.screen_ligands.text().strip()).suffix.lower() in {'.csv', '.tsv', '.xlsx'} and library_panel.library is None:
+                library_ready = False
+            if library_panel.library is not None:
+                library_ready = library_ready and bool(library_panel.selection()['record_ids'])
+            self.start_screening_button.setEnabled(bool(plan and authorization_ready and not active
+                                                       and library_ready and self.host_controller.available))
+            self.preview_screening_button.setEnabled(bool(
+                self.host_controller.available and not active and library_ready
+                and self.screen_ligands.text().strip() and self.screen_output.text().strip()
+                and any(item.kind == 'protocol_bundle' and Path(item.path).is_file()
+                        for item in self.state.artifacts)))
 
         def preview_screening(self) -> None:
             if not self.host_controller.available:
                 return
+            library_panel = self.screening_setup_panel.library_panel
+            if (library_panel.loading or library_panel.read_error
+                    or (library_panel.library and not library_panel.library.get('mapping_approved', True))):
+                self.screening_status.setText("Finish reading a valid ligand library before previewing the workload.")
+                return
             try:
                 self._screening_plan = self.host_controller.screening_plan(
                     self.screen_ligands.text().strip(),
+                    **({"ligand_selection": self.screening_setup_panel.library_panel.selection()}
+                       if self.screening_setup_panel.library_panel.library is not None else {}),
                 )
             except Exception as exc:
                 self._screening_plan = None
@@ -3112,12 +3035,16 @@ if QtWidgets is not None:
                 self._update_screening_controls()
                 return
             plan = self._screening_plan
+            self.screening_setup_panel.set_engine(plan['engine'])
             self.screening_status.setText(
                 f"{plan['compound_count']} compound(s) × {plan['conformers_per_compound']} conformers "
                 f"× {plan['independent_seed_count']} seeds × {plan['docking_site_count']} sites = "
                 f"{plan['total_docking_jobs']} sequential docking jobs. Engine: {plan['engine']}."
             )
             self.screen_exploratory_approval.setVisible(
+                bool(plan["exploratory_authorization_required"])
+            )
+            self.screening_setup_panel.inline_explanations['approval'].setVisible(
                 bool(plan["exploratory_authorization_required"])
             )
             self._update_screening_controls()
@@ -3134,21 +3061,45 @@ if QtWidgets is not None:
                 "stop_on_error": self.screen_stop_on_error.isChecked(),
                 "exploratory_use_approved": self.screen_exploratory_approval.isChecked(),
             }
+            cpu = self.screening_setup_panel.cpu_override()
+            if cpu is not None:
+                payload['cpu'] = cpu
+            selection = self.screening_setup_panel.library_panel.selection()
+            if selection is not None:
+                payload["ligand_selection"] = selection
+            self.feedback_heading.setText('STARTING — Screening selected compounds')
+            self.feedback_text.setText('Validating the selected compounds and locked protocol before launch…')
+            self.screening_status.setText('Screening requested — checking inputs, then preparing ligand states and conformers…')
+            self.running_indicator.show()
+            self.running_elapsed.setText('Screening requested — please wait')
+            self.running_elapsed.show()
+            self.start_screening_button.setEnabled(False)
+            self._stage_submission_in_progress = True
             try:
+                QtWidgets.QApplication.processEvents(QtCore.QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
                 self.host_controller.start_screening(payload, self.state.revision)
             except Exception as exc:
+                self._stage_submission_in_progress = False
+                self.refresh()
                 self.screening_status.setText(f"Screening could not start: {exc}")
                 QtWidgets.QMessageBox.critical(self, "Screening could not start", str(exc))
                 return
+            finally:
+                self._stage_submission_in_progress = False
             self._screening_plan = None
             self.refresh()
 
         def _open_visual_scene(self, scene: Path) -> None:
+            self._close_interaction_review()
+            self._evidence_2d_record = None
+            self._evidence_2d_view = None
             self._linked_pose_active = False
             if self.viewer_widget is not None:
+                if getattr(self, 'cluster_contact_controls', None) is not None:
+                    self.cluster_contact_controls.hide()
                 self.linked_pose_panel.clear_pose("Select a docked pose to view linked 2D interactions.")
                 self.linked_pose_panel.hide()
-            self._selected_figure_scene = Path(scene)
+            self._selected_structure_scene = Path(scene)
             self.open_visual_review()
 
         def open_visual_review(self) -> None:
@@ -3165,9 +3116,9 @@ if QtWidgets is not None:
             )
             QtWidgets.QApplication.processEvents()
             try:
-                scene = getattr(self, "_selected_figure_scene", None)
+                scene = getattr(self, "_selected_structure_scene", None)
                 if scene is None:
-                    raise ValueError("The selected figure has no retained 3D PyMOL scene")
+                    raise ValueError("Select a retained 3D PyMOL scene first")
                 if hasattr(self.viewer_coordinator, "set_context"):
                     self.viewer_coordinator.set_context(self.state)
                 if reconnecting and hasattr(self.viewer_coordinator, "reconnect"):
@@ -3291,6 +3242,9 @@ if QtWidgets is not None:
             self._open_path(Path(report.path))
 
         def _candidate_highlight_changed(self) -> None:
+            self._close_interaction_review()
+            from ..services.pdb_lookup_status import lookup_status_for_state
+            self.pocket_evidence_panel.set_lookup_status(lookup_status_for_state(self.state))
             rows = self.candidates.selectionModel().selectedRows()
             self._update_candidate_review_action()
             if not rows:
@@ -3310,6 +3264,7 @@ if QtWidgets is not None:
                 return
             try:
                 self.viewer_coordinator.show_candidate(self.state, str(candidate["id"]))
+                self._ensure_pocket_space()
                 self._show_embedded_viewer()
             except Exception as exc:
                 self.viewer_status.setText(f"Candidate display failed: {exc}")
@@ -3335,6 +3290,9 @@ if QtWidgets is not None:
                 )
             )
             self.candidate_review_button.setEnabled(available)
+            # Embedded candidate selection already loads the scene. Keep the
+            # explicit launcher only for the companion viewer.
+            self.candidate_review_button.setVisible(self.viewer_widget is None)
             if self.viewer_widget is not None:
                 self.candidate_review_button.setText(
                     "Review selected region in interactive 3D"
@@ -3371,6 +3329,7 @@ if QtWidgets is not None:
                     else:
                         self.viewer_coordinator.open(self.state)
                 self.viewer_coordinator.show_candidate(self.state, candidate_id)
+                self._ensure_pocket_space()
                 adapter = getattr(self.viewer_coordinator, "adapter", None)
                 if (
                     self._uses_companion_viewer() and adapter is not None
@@ -3398,6 +3357,95 @@ if QtWidgets is not None:
                 QtWidgets.QMessageBox.critical(
                     self, "3D pocket review unavailable", str(exc),
                 )
+
+        def _ensure_pocket_space(self):
+            """A cached local visualization, independent of approvals/scientific jobs."""
+            from ..services.pocket_space import inputs, cached
+            import os
+            adapter = getattr(self.viewer_coordinator, 'adapter', None)
+            if (not hasattr(adapter, 'show_pocket_space')
+                    or getattr(self, '_paired_interaction_window', None) is not None
+                    or getattr(self, '_linked_pose_active', False)):
+                return
+            if self.state.active_job and self.state.active_job.status.value in {'running', 'queued'}:
+                return
+            try:
+                record = inputs(self.state)
+                if record is None:
+                    return
+                manifest = cached(record)
+                if manifest:
+                    self._apply_pocket_space(manifest)
+                    return
+                process = getattr(self, '_pocket_space_process', None)
+                if process and process.state() != QtCore.QProcess.ProcessState.NotRunning:
+                    return
+                if getattr(self, '_pocket_space_failed_cache', None) == record['cache']:
+                    return
+                python = getattr(self.host_client, 'python_executable', None)
+                if python is None:
+                    return
+                prefix = Path(python).parent.parent
+                prank = Path(os.environ.get('DOCKING_UNIVERSAL_P2RANK_VISUALIZATION') or
+                    prefix / 'share/docking-universal/p2rank-2.6-alpha' /
+                    ('prank.bat' if os.name == 'nt' else 'prank'))
+                if not prank.is_file():
+                    self.viewer_status.setText('Pocket-space surface unavailable: install the pinned alpha visualization dependency.')
+                    return
+                cache = Path(record['cache'])
+                cache.mkdir(parents=True, exist_ok=True)
+                request = cache / 'request.json'
+                request.write_text(json.dumps(record, indent=2))
+                process = QtCore.QProcess(self)
+                environment = QtCore.QProcessEnvironment()
+                for name, value in self.host_client._environment().items():
+                    environment.insert(name, value)
+                if (prefix / 'lib/jvm').is_dir():
+                    environment.insert('JAVA_HOME', str(prefix / 'lib/jvm'))
+                process.setProcessEnvironment(environment)
+                process.setProcessChannelMode(QtCore.QProcess.ProcessChannelMode.MergedChannels)
+                process.setStandardOutputFile(str(cache / 'worker.log'))
+                self._pocket_space_process = process
+                self.statusBar().showMessage('Generating pocket-space surfaces locally · retained scores and boxes are unchanged…')
+                process.finished.connect(lambda code, status: self._pocket_space_finished(record, code))
+                process.errorOccurred.connect(lambda error: self._pocket_space_finished(record, -1)
+                    if error == QtCore.QProcess.ProcessError.FailedToStart else None)
+                worker = Path(__file__).resolve().parents[2] / 'docking-universal-pocket-space.py'
+                process.start(str(python), [str(worker), '--request', str(request), '--prank', str(prank)])
+            except Exception as exc:
+                self.viewer_status.setText(f'Pocket-space surface unavailable: {exc}')
+
+        def _pocket_space_finished(self, record, code):
+            from ..services.pocket_space import cached, inputs
+            try:
+                if code != 0:
+                    raise ValueError(f"generation failed; see {Path(record['cache']) / 'worker.log'}")
+                if inputs(self.state) != record:
+                    return
+                manifest = cached(record)
+                if manifest is None:
+                    raise ValueError('verified grid was not retained')
+                if (getattr(self, '_paired_interaction_window', None) is None
+                        and not getattr(self, '_linked_pose_active', False)):
+                    self._apply_pocket_space(manifest)
+            except Exception as exc:
+                self._pocket_space_failed_cache = record['cache']
+                self.statusBar().showMessage(f'Pocket-space surface unavailable: {exc}', 15000)
+
+        def _apply_pocket_space(self, manifest):
+            import re
+            from .study_viewer import POCKET_COLORS
+            selected = self.candidates.selectionModel().selectedRows()
+            candidates = self.state.workflow_data.get('pocket_candidates', [])
+            if not selected or selected[0].row() >= len(candidates):
+                return
+            candidate = candidates[selected[0].row()]
+            ranks = [int(v) for v in re.findall(r'P(\d+)', str(candidate['id']))]
+            color = POCKET_COLORS[(int(candidate.get('rank') or 1) - 1) % len(POCKET_COLORS)]
+            shown = self.viewer_coordinator.adapter.show_pocket_space(manifest, ranks, color)
+            self.viewer_status.setText('Predicted pocket-space surface · approximate grid boundary, not protein surface'
+                                       if shown else 'This region has no matched P2Rank pocket-space grid.')
+            self.statusBar().showMessage(self.viewer_status.text(), 8000)
 
         def _show_candidate_evidence_details(self, item) -> None:
             """Open the complete retained record without expanding the navigation table."""
@@ -3438,6 +3486,35 @@ if QtWidgets is not None:
             dialog.raise_()
             dialog.activateWindow()
 
+        def highlight_evidence_residues(self, residues) -> bool:
+            """The same exact-residue review action as in the full PyMOL shell."""
+            self._close_interaction_review()
+            try:
+                adapter = getattr(self.viewer_coordinator, "adapter", None)
+                if self.viewer_widget is None or not hasattr(adapter, "highlight_obstruction_residues"):
+                    raise ValueError("Residue highlighting requires the embedded PyMOL backend")
+                self._show_embedded_viewer()
+                if not self._connect_structure_review():
+                    return False
+                result = adapter.highlight_obstruction_residues(residues)
+                self._sync_residue_highlight_actions()
+                shown = result.get("highlighted", True) if isinstance(result, dict) else True
+                self.viewer_status.setText(f"Residue highlight {'shown' if shown else 'hidden'}. Camera unchanged.")
+                self.statusBar().showMessage(self.viewer_status.text(), 6000)
+                return True
+            except Exception as exc:
+                self._sync_residue_highlight_actions()
+                self.viewer_status.setText(f"Residue highlight unavailable: {exc}")
+                self.statusBar().showMessage(self.viewer_status.text(), 10000)
+                return False
+
+        def _sync_residue_highlight_actions(self):
+            adapter = getattr(self.viewer_coordinator, "adapter", None)
+            self.pocket_evidence_panel.sync_residue_highlight(adapter)
+            browser = getattr(self._detached_structure_window, "study_panel", None)
+            if browser is not None:
+                browser.evidence.sync_residue_highlight(adapter)
+
         def _connect_structure_review(self) -> bool:
             """Evidence/candidate review does not depend on a report figure."""
             if not self.viewer_coordinator:
@@ -3454,7 +3531,130 @@ if QtWidgets is not None:
                 return False
             return bool(self.viewer_coordinator.connected)
 
+        def render_evidence_interactions(self, observation):
+            from ..services.evidence_interactions import evidence_inputs, evidence_diagram_current
+            if self.viewer_widget is None:
+                QtWidgets.QMessageBox.information(self, "Embedded viewer required", "Linked experimental 2D review requires the embedded structure viewer.")
+                return
+            process = getattr(self, "_evidence_2d_process", None)
+            if process and process.state() != QtCore.QProcess.ProcessState.NotRunning:
+                return
+            if self.state.active_job and self.state.active_job.status.value in {"running", "queued"}:
+                self.statusBar().showMessage("Wait for the active scientific stage before rendering interactions.")
+                return
+            try:
+                record = evidence_inputs(observation)
+                cache = Path(record["cache"])
+                if evidence_diagram_current(cache):
+                    self._show_evidence_diagram(record)
+                    return
+                python = getattr(self.host_client, "python_executable", None)
+                if not python:
+                    raise ValueError("The scientific Python host is unavailable")
+                cache.mkdir(parents=True, exist_ok=True)
+                record["diagram_only"] = (cache / "result.json").is_file() and all((cache / name).is_file() for name in
+                        ("ligand.sdf", "receptor.pdb", "plip/report.xml"))
+                request = cache / "request.json"
+                request.write_text(json.dumps(record, indent=2))
+                process = QtCore.QProcess(self)
+                environment = QtCore.QProcessEnvironment()
+                for name, value in self.host_client._environment().items():
+                    environment.insert(name, value)
+                process.setProcessEnvironment(environment)
+                process.setProcessChannelMode(QtCore.QProcess.ProcessChannelMode.MergedChannels)
+                process.setStandardOutputFile(str(cache / "worker.log"))
+                self._evidence_2d_process = process
+                self._evidence_2d_record = record
+                self.pocket_evidence_panel.rendering_2d = True
+                self.pocket_evidence_panel._update_2d_action()
+                self.linked_pose_panel.show_loading(f"Rendering 2D interactions for {record['entry']} {record['ligand']}…")
+                self._linked_pose_active = True
+                self.linked_pose_panel.hide()
+                self.statusBar().showMessage(f"Rendering 2D interactions for {record['entry']} {record['ligand']}…")
+                self._show_evidence_render_progress(record)
+                process.finished.connect(lambda code, status: self._evidence_2d_finished(record, code))
+                process.errorOccurred.connect(lambda error: self._evidence_2d_failed_start(record, error))
+                worker = Path(__file__).resolve().parents[2] / "docking-universal-evidence-interactions.py"
+                arguments = [str(worker), "--request", str(request)]
+                if record["diagram_only"]:
+                    arguments.append("--diagram-only")
+                process.start(str(python), arguments)
+            except Exception as exc:
+                self._close_evidence_render_progress()
+                QtWidgets.QMessageBox.warning(self, "2D interactions unavailable", str(exc))
+
+        def _show_evidence_render_progress(self, record):
+            """Visible local computation, not an invented percentage or modal gate."""
+            self._close_evidence_render_progress()
+            progress = QtWidgets.QProgressDialog(self)
+            progress.setWindowTitle("Preparing 2D / 3D interaction review")
+            progress.setWindowModality(QtCore.Qt.WindowModality.NonModal)
+            progress.setCancelButton(None)
+            progress.setRange(0, 0)
+            progress.setAutoClose(False)
+            progress.setMinimumDuration(0)
+            progress.setMinimumWidth(440)
+            elapsed = QtCore.QElapsedTimer()
+            elapsed.start()
+            timer = QtCore.QTimer(progress)
+            def update():
+                activity = ("Updating the 2D drawing from retained PLIP contacts; no new analysis.\n"
+                            if record.get("diagram_only") else
+                            "Calculating PLIP contacts and drawing the 2D diagram locally.\n")
+                progress.setLabelText(
+                    f"{record['entry']} · {record['ligand']} {record['chain']}:{record['residue']}\n"
+                    + activity +
+                    f"Elapsed: {elapsed.elapsed() // 1000} s · the paired review opens when ready.")
+            timer.timeout.connect(update)
+            timer.start(1000)
+            update()
+            self._evidence_2d_progress = progress
+            progress.show()
+
+        def _close_evidence_render_progress(self):
+            progress = getattr(self, "_evidence_2d_progress", None)
+            if progress is not None:
+                progress.close()
+                progress.deleteLater()
+                self._evidence_2d_progress = None
+
+        def _evidence_2d_failed_start(self, record, error):
+            if error == QtCore.QProcess.ProcessError.FailedToStart:
+                self._evidence_2d_finished(record, -1)
+
+        def _evidence_2d_finished(self, record, code):
+            self._close_evidence_render_progress()
+            self.pocket_evidence_panel.rendering_2d = False
+            self.pocket_evidence_panel._update_2d_action()
+            cache = Path(record["cache"])
+            if code == 0 and (cache / "result.json").is_file():
+                current = self.pocket_evidence_panel.selected_observation() or {}
+                if current.get("aligned_ligand_pdb") == record["aligned"]:
+                    self._show_evidence_diagram(record)
+                else:
+                    self.linked_pose_panel.clear_pose("Diagram cached. Select its observation and click Render 2D interactions to view it.")
+            else:
+                self.linked_pose_panel.clear_pose(f"2D rendering failed. Details: {cache / 'worker.log'}")
+                self.statusBar().showMessage(f"2D rendering failed. See {cache / 'worker.log'}")
+                QtWidgets.QMessageBox.warning(self, "2D rendering failed", f"See the local worker log for details:\n{cache / 'worker.log'}")
+
+        def _show_evidence_diagram(self, record):
+            from .linked_pose_review import PoseView
+            from ..services.evidence_interactions import evidence_diagram_path
+            cache = Path(record["cache"])
+            self._evidence_2d_record = record
+            self._evidence_2d_view = PoseView(cache / "ligand.sdf", cache / "receptor.pdb",
+                evidence_diagram_path(cache), cache / "plip" / "report.xml",
+                f"{record['entry']} · {record['ligand']} {record['chain']}:{record['residue']} · deposited interactions",
+                ligand_name=record['ligand'], coordinate_kind="experimental")
+            self._linked_pose_active = True
+            self._open_interaction_review(self._evidence_2d_view)
+            self.linked_pose_panel.status.setText("Interactions and 3D coordinates both come from the original deposited protein and ligand.")
+            result = json.loads((cache / "result.json").read_text())
+            if result.get("diagram_kind") == "ligand_and_plip_contact_summary":
+                self.linked_pose_panel.status.setText("Compact ligand and PLIP contact summary; detailed layout unavailable. Both views use the original deposited coordinates.")
         def show_evidence_ligand(self, path: str) -> None:
+            self._close_interaction_review()
             if not self.viewer_coordinator:
                 self.viewer_status.setText("PyMOL is not configured for this installation")
                 return
@@ -3477,6 +3677,7 @@ if QtWidgets is not None:
                 self.viewer_status.setText(f"Experimental ligand display failed: {exc}")
 
         def show_evidence_ligands(self, paths: list[str]) -> None:
+            self._close_interaction_review()
             if not paths:
                 return
             if not self.viewer_coordinator:
@@ -3502,6 +3703,20 @@ if QtWidgets is not None:
 
         def sync_evidence_selection(self, paths: list[str]) -> None:
             """Mirror table selection immediately without replacing the report scene."""
+            view = getattr(self, "_evidence_2d_view", None)
+            record = getattr(self, "_evidence_2d_record", None)
+            if getattr(self, "_paired_interaction_window", None) is not None:
+                if record and record['aligned'] in paths:
+                    return  # polling/unchanged selection cannot replace the source pair
+                self._close_interaction_review()
+            if record and record['aligned'] not in paths:
+                self._evidence_2d_record = None
+                self._linked_pose_active = False
+                self.linked_pose_panel.hide()
+            if view and self.viewer_widget is not None and (record or {}).get('aligned', str(view.ligand)) not in paths:
+                self._evidence_2d_view = None
+                self._linked_pose_active = False
+                self.linked_pose_panel.hide()
             if not self.viewer_coordinator or not self.viewer_coordinator.connected:
                 return
             try:
@@ -3521,13 +3736,31 @@ if QtWidgets is not None:
             except Exception as exc:
                 self.viewer_status.setText(f"Evidence selection sync failed: {exc}")
 
+        def _size_candidate_table(self) -> None:
+            self.candidates.setMaximumHeight(
+                self.candidates.horizontalHeader().height()
+                + self.candidates.verticalHeader().defaultSectionSize()
+                * min(4, max(1, self.candidates.rowCount()))
+                + self.candidates.horizontalScrollBar().sizeHint().height() + 6
+            )
+
         def _render_candidates(self, state: StudyState) -> None:
             # Polling repaints evidence; only user navigation should reload 3D.
+            fingerprint = json.dumps({
+                "candidates": state.workflow_data.get("pocket_candidates", []),
+                "root": state.workflow_data.get("preparation_root"),
+            }, sort_keys=True)
+            if fingerprint == getattr(self, "_candidate_table_fingerprint", None):
+                self._update_candidate_review_action()
+                return
             blocker = QtCore.QSignalBlocker(self.candidates)
             self.pocket_score_plot.set_study(state)
             self.pocket_score_scroll.setVisible(bool(self.pocket_score_plot.points))
             values = state.workflow_data.get("pocket_candidates", [])
             self.candidates.setRowCount(len(values))
+            # Show short candidate lists in full; selection must not require
+            # finding a barely visible scrollbar below the molecular canvas.
+            self._size_candidate_table()
             for row, candidate in enumerate(values):
                 evidence = candidate.get("evidence", {})
                 evidence_text, evidence_tooltip = self._candidate_evidence_digest(
@@ -3569,7 +3802,9 @@ if QtWidgets is not None:
             )
             self.pocket_score_plot.update()
             self._update_candidate_review_action()
+            self._candidate_table_fingerprint = fingerprint
             del blocker
+            self._schedule_initial_candidate_review()
 
         @staticmethod
         def _candidate_evidence_digest(candidate: dict, evidence: dict) -> tuple[str, str]:
@@ -3577,21 +3812,9 @@ if QtWidgets is not None:
             parts = []
             details = []
             conformational = evidence.get("conformational_site_evidence") or {}
-            residues = ", ".join(
-                f"{item.get('name', 'UNK')}{item.get('number', '?')}{item.get('chain', '')}"
-                for item in conformational.get("occluding_residues", [])
-            )
-            status = conformational.get("status")
-            if status == "conformationally_incompatible":
-                parts.append(f"Rotamer conflict: {residues or 'review residues'}")
-                details.append(
-                    "The current receptor differs from a ligand-bound conformation; "
-                    "review whether rigid docking is appropriate."
-                )
-            elif status == "reviewed_no_geometric_incompatibility":
-                parts.append("No rotamer conflict found")
-            elif status == "not_evaluated":
-                parts.append("Rotamers not evaluated")
+            summary, explanation = conformation_summary(conformational)
+            parts.append(summary)
+            details.append(explanation)
 
             experimental = evidence.get("experimental_ligand_evidence") or {}
             observations = int(experimental.get("observation_count") or 0)
@@ -3630,9 +3853,11 @@ if QtWidgets is not None:
             self.report_list.clear()
             logs = []
             for artifact in state.artifacts:
-                item = QtWidgets.QListWidgetItem(f"{artifact.kind}: {artifact.path}")
+                if Path(artifact.path).suffix.lower() in {'.png', '.jpg', '.jpeg', '.svg', '.webp', '.tif', '.tiff'}:
+                    continue  # Static figures are accessed through reports, not image viewers.
+                item = QtWidgets.QListWidgetItem(f"{artifact.kind.replace('_', ' ').capitalize()}: {artifact.path}")
                 item.setData(QtCore.Qt.UserRole, artifact.path)
-                item.setToolTip("Double-click to open this retained artifact")
+                item.setToolTip("Double-click to open this saved study file")
                 self.report_list.addItem(item)
                 if "log" in artifact.kind and Path(artifact.path).is_file():
                     logs.append(f"[{artifact.description or artifact.kind}]\n{Path(artifact.path).read_text(errors='replace')}")
@@ -3702,11 +3927,11 @@ if QtWidgets is not None:
                 not embedded
                 and
                 self.viewer_coordinator is not None
-                and bool(getattr(self, "_selected_figure_scenes", None))
+                and bool(getattr(self, "_selected_structure_scenes", None))
                 and viewer.lifecycle != "connecting"
             )
             self.viewer_button.setVisible(
-                not embedded and bool(getattr(self, "_selected_figure_scenes", None))
+                not embedded and bool(getattr(self, "_selected_structure_scenes", None))
             )
             self.reset_view_button.setEnabled(bool(
                 self.viewer_coordinator and viewer.report_view_available
@@ -3805,6 +4030,12 @@ if QtWidgets is not None:
                     self.interaction_diagram_choice.addItem(
                         interaction.label, str(interaction.diagram)
                     )
+            control_root = self.state.workflow_data.get("latest_control_output")
+            if control_root:
+                for diagram in sorted((Path(control_root) / "report").glob("control_*_plip2d.png")):
+                    view = pose_view(diagram)
+                    if view is not None:
+                        self.interaction_diagram_choice.addItem(view.label, str(diagram.resolve()))
             self.interaction_diagram_choice.blockSignals(False)
             self._populate_expanded_pose_results(compound)
             self._pose_review_mode_changed()
@@ -3819,6 +4050,12 @@ if QtWidgets is not None:
                 and self.pose_results.selectionModel().selectedRows()
             ))
             if expanded:
+                self._linked_pose_active = False
+                if getattr(self, 'cluster_contact_controls', None) is not None:
+                    self.cluster_contact_controls.hide()
+                    adapter = getattr(self.viewer_coordinator, 'adapter', None)
+                    if adapter is not None and hasattr(adapter, 'clear_linked_contacts'):
+                        adapter.clear_linked_contacts()
                 self.interaction_context.setText("Expanded review — select an exact retained pose")
                 self._interaction_source_pixmap = None
                 self.interaction_diagram_view.clear()
@@ -3917,7 +4154,7 @@ if QtWidgets is not None:
                 if decision.action == "wait":
                     self.interaction_diagram_view.setText(
                         f"Pose {pose_id} was selected in another window. "
-                        "Waiting for its retained interaction artifact; no duplicate analysis was started."
+                        "Waiting for its saved interaction files; no duplicate analysis was started."
                     )
                     return
                 if decision.action == "host_unavailable":
@@ -4004,11 +4241,21 @@ if QtWidgets is not None:
             self._interaction_source_pixmap = None
             self.interaction_diagram_view.clear()
             if not available:
-                if self.viewer_widget is not None:
+                if getattr(self, 'cluster_contact_controls', None) is not None:
+                    self.cluster_contact_controls.hide()
+                    if (getattr(self, '_linked_pose_active', False)
+                            and getattr(self, '_paired_interaction_window', None) is None
+                            and not getattr(self, '_evidence_2d_view', None)):
+                        self.viewer_coordinator.adapter.clear_linked_contacts()
+                        self._linked_pose_active = False
+                if (self.viewer_widget is not None
+                        and getattr(self, "_paired_interaction_window", None) is None
+                        and not getattr(self, "_evidence_2d_record", None)
+                        and not getattr(self, "_evidence_2d_view", None)):
                     self.linked_pose_panel.clear_pose("No 2D interaction diagram is available for this selection.")
                 self.interaction_diagram_view.setText(
                     "No retained PLIP 2D diagram is available for this selection. "
-                    "The raw PLIP record remains listed with the study artifacts when generated."
+                    "The raw PLIP record remains listed with the study files when generated."
                 )
                 return
             pixmap = QtGui.QPixmap(str(path))
@@ -4042,15 +4289,28 @@ if QtWidgets is not None:
                 # An unaligned reference must never be overlaid on another receptor.
                 reference = None
             self.linked_pose_panel.set_pose(view, reference)
-            self.linked_pose_panel.show()
+            self.linked_pose_panel.hide()
             return self._highlight_linked_ligand(view, highlight=highlight)
 
         def _highlight_linked_ligand(self, view, *, highlight=True):
+            if view == getattr(self, "_evidence_2d_view", None):
+                return self._open_interaction_review(view)
+            if getattr(self, "_paired_interaction_window", None) is not None:
+                return self._open_interaction_review(view)
+            if highlight:
+                return self._open_interaction_review(view)
             try:
                 adapter = self.viewer_coordinator.adapter
                 if not self.viewer_coordinator.connected:
                     adapter.launch()
-                adapter.show_linked_pose(view.ligand, view.receptor, highlight=highlight)
+                # Use the exact representative report, not a report-level
+                # overview or another cluster's contact record.
+                try:
+                    styles, residues = adapter.show_linked_interactions(view)
+                    self.cluster_contact_controls.set_contacts(styles, residues)
+                except (OSError, ValueError, ET.ParseError) as exc:
+                    adapter.clear_linked_contacts()
+                    self.cluster_contact_controls.unavailable(f'3D PLIP contacts unavailable for this pose: {exc}')
                 self.viewer_coordinator.connected = True
             except Exception as exc:
                 self.linked_pose_panel.status.setText(f"3D ligand could not be displayed: {exc}")
@@ -4079,7 +4339,8 @@ if QtWidgets is not None:
                 with TemporaryDirectory(prefix="du-comparison-") as temporary:
                     renders = []
                     for index, item in enumerate((panel.query, panel.reference)):
-                        adapter.show_linked_pose(item.ligand, item.receptor)
+                        adapter.show_linked_pose(item.ligand, item.receptor,
+                                                 ligand_color=getattr(item, "ligand_color", "gray70"))
                         adapter.cmd.set_view(camera)
                         output = Path(temporary) / f"view-{index}.png"
                         adapter.cmd.png(str(output), width=1800, height=1400, ray=1, quiet=1)
@@ -4090,7 +4351,8 @@ if QtWidgets is not None:
                 panel.status.setText(f"Comparison report could not be saved: {exc}")
             finally:
                 restore = panel.reference if shown == panel.reference.ligand else panel.query
-                adapter.show_linked_pose(restore.ligand, restore.receptor)
+                adapter.show_linked_pose(restore.ligand, restore.receptor,
+                                         ligand_color=getattr(restore, "ligand_color", "gray70"))
                 adapter.cmd.set_view(camera)
 
         def begin_pose_interaction_loading(self, compound: str, site: str, pose_id: int) -> tuple:
@@ -4193,7 +4455,7 @@ if QtWidgets is not None:
                     "Select a compound and an available cluster interaction diagram first.",
                 )
                 return
-            self._open_path(path)
+            self._activate_interaction_ligand()
 
         def open_artifact(self, item) -> None:
             path = Path(str(item.data(QtCore.Qt.UserRole) or ""))
@@ -4203,6 +4465,12 @@ if QtWidgets is not None:
             self._open_path(path)
 
         def _open_path(self, path: Path) -> None:
+            if path.suffix.lower() in {'.png', '.jpg', '.jpeg', '.svg', '.webp', '.tif', '.tiff'}:
+                QtWidgets.QMessageBox.information(
+                    self, "Figures are in reports",
+                    "Open the study report to view static figures. Use the linked 2D/3D review for interactions.",
+                )
+                return
             if not QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(str(path.resolve()))):
                 QtWidgets.QMessageBox.warning(self, "Artifact could not be opened", str(path))
 
@@ -4227,9 +4495,6 @@ if QtWidgets is not None:
                 return
             self.scientific_detail_panel.render(self.state)
 
-        def toggle_full_screen(self) -> None:
-            self.showNormal() if self.isFullScreen() else self.showFullScreen()
-
         def set_canvas_focus_mode(self, enabled: bool) -> None:
             """Give figures or the live structure the full workspace on demand."""
             for dock in (
@@ -4248,15 +4513,20 @@ if QtWidgets is not None:
                     QtCore.Qt.Orientation.Horizontal,
                 )
 
-        def showEvent(self, event) -> None:
-            """Poll persisted state only while this workspace is actually open."""
-            self.workspace_controller.shown()
-            super().showEvent(event)
-
         def _poll_refresh(self) -> None:
             self.workspace_controller.poll()
 
+        def showEvent(self, event) -> None:
+            super().showEvent(event)
+            self.workspace_controller.shown()
+            QtCore.QTimer.singleShot(0, self._poll_refresh)
+            self._schedule_initial_candidate_review()
+
         def closeEvent(self, event) -> None:
+            self._close_interaction_review()
+            panel = getattr(self, "linked_pose_panel", None)
+            if panel is not None and panel._detached_window is not None:
+                panel._detached_window.close()
             if self._detached_structure_window is not None:
                 self._detached_structure_window.close()
             self.workspace_controller.save_layout()
@@ -4296,6 +4566,19 @@ if QtWidgets is not None:
                 self.statusBar().showMessage("Cancelling the active stage before exit…")
                 event.ignore()
                 return
+            process = getattr(self, "_evidence_2d_process", None)
+            if process and process.state() != QtCore.QProcess.ProcessState.NotRunning:
+                process.terminate()
+                if not process.waitForFinished(5000):
+                    process.kill()
+                    process.waitForFinished(1000)
+            self._close_evidence_render_progress()
+            process = getattr(self, '_pocket_space_process', None)
+            if process and process.state() != QtCore.QProcess.ProcessState.NotRunning:
+                process.terminate()
+                if not process.waitForFinished(5000):
+                    process.kill()
+                    process.waitForFinished(1000)
             self.workspace_controller.closed()
             self._save_form_values()
             super().closeEvent(event)

@@ -8,6 +8,7 @@ from rdkit.Chem import rdDepictor
 parser = argparse.ArgumentParser()
 parser.add_argument('pose', type=Path)
 parser.add_argument('--output', type=Path, required=True)
+parser.add_argument('--spacing', type=float, default=15.0)
 args = parser.parse_args()
 POSE = args.pose
 OUTPUT = args.output
@@ -34,7 +35,7 @@ for atom in mol.GetAtoms():
         'label': None if atom.GetSymbol() == 'C' else atom.GetSymbol(),
         'charge': atom.GetFormalCharge(),
         'hydrogenCount': atom.GetTotalNumHs(),
-        'coordinates': {'x': (p2.x - cx) * 15.0, 'y': -(p2.y - cy) * 15.0},
+        'coordinates': {'x': (p2.x - cx) * args.spacing, 'y': -(p2.y - cy) * args.spacing},
         'aromatic': atom.GetIsAromatic(),
         'stereoCenter': bool(atom.HasProp('_CIPCode')),
         'additionalInformation': {
@@ -70,7 +71,7 @@ scene = {
             'structureName': POSE.stem,
             'structureLabel': POSE.stem,
             'structureType': 'ligand',
-            'additionalInformation': {'source': str(POSE), 'coordinateSource': 'retained docked SDF'},
+            'additionalInformation': {'source': str(POSE), 'coordinateSource': 'retained ligand SDF'},
             'atoms': atoms,
             'bonds': bonds,
             'rings': rings,

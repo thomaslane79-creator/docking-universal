@@ -1,0 +1,13 @@
+{
+  "name": "P2Rank pocket-space visualization",
+  "version": "2.6-alpha",
+  "release_channel": "alpha",
+  "archive": "p2rank_2.6-alpha.tar.gz",
+  "archive_sha256": "d0284cf47e2605c21c6285b30076f33cb7e509359fb9ed4b1808c3274f6f2592",
+  "source": "https://github.com/rdk/p2rank/releases/tag/2.6-alpha",
+  "java_major_minimum": 17,
+  "purpose": "Visualization only; predictions must match retained stable output",
+  "pocket_grid_fill": "none",
+  "spacing_angstrom": 1.2,
+  "display_radius_angstrom": 1.02
+}

@@ -113,7 +113,8 @@ def _deposited_metadata(source: Path) -> dict[str, Any]:
         "chem_comp", "pdbx_nonpoly_scheme", "pdbx_struct_oper_list",
         "struct_conn", "pdbx_struct_mod_residue", "struct_site",
         "struct_site_gen", "exptl", "exptl_crystal_grow", "refine",
-        "em_3d_reconstruction",
+        "em_3d_reconstruction", "entry", "struct", "entity_src_gen",
+        "entity_src_nat", "pdbx_entity_src_syn",
     )
     evidence = {name: block.get_mmcif_category("_" + name + ".") for name in categories}
     atoms = block.get_mmcif_category("_atom_site.")

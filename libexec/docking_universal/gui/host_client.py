@@ -101,7 +101,10 @@ class ApplicationHostClient:
             )
             self.process.stdin.write(json.dumps(command.to_dict(), sort_keys=True) + "\n")
             self.process.stdin.flush()
-            response = self._read_message()
+            # Indexing a large local library is asynchronous in the GUI and may
+            # legitimately exceed the ordinary short command-response timeout.
+            response = self._read_message(timeout_seconds=max(120.0, self.timeout_seconds)
+                                          if operation in {'inspect_ligand_library', 'inspect_protocol_bundle', 'import_protocol_bundle'} else None)
             if response.get("request_id") != command.request_id:
                 raise ApplicationHostError("Application host returned a mismatched request ID")
             if response.get("status") not in {"applied", "replayed"}:
@@ -130,13 +133,13 @@ class ApplicationHostClient:
         if self._log and not self._log.closed:
             self._log.close()
 
-    def _read_message(self) -> dict[str, Any]:
+    def _read_message(self, timeout_seconds=None) -> dict[str, Any]:
         if not self.process or not self.process.stdout:
             raise ApplicationHostError("Application host output is unavailable")
         selector = selectors.DefaultSelector()
         try:
             selector.register(self.process.stdout, selectors.EVENT_READ)
-            if not selector.select(self.timeout_seconds):
+            if not selector.select(self.timeout_seconds if timeout_seconds is None else timeout_seconds):
                 raise ApplicationHostError("Timed out waiting for the application host")
             line = self.process.stdout.readline()
         finally:
@@ -164,7 +167,7 @@ class ApplicationHostClient:
         environment["DOCKING_UNIVERSAL_PYTHON"] = str(self.python_executable)
         prefix = self.python_executable.parent.parent
         scientific_cli = prefix / "bin" / ("docking-universal.exe" if os.name == "nt" else "docking-universal")
-        if scientific_cli.is_file():
+        if scientific_cli.is_file() and not environment.get('DOCKING_UNIVERSAL_CLI'):
             environment["DOCKING_UNIVERSAL_CLI"] = str(scientific_cli)
         runtime_paths = [self.python_executable.parent, prefix / "lib" / "jvm" / "bin"]
         environment["PATH"] = os.pathsep.join(

@@ -1,0 +1,34 @@
+diff --git a/device/calcMergedEneGra.cl b/device/calcMergedEneGra.cl
+index 173007a..45816ce 100644
+--- a/device/calcMergedEneGra.cl
++++ b/device/calcMergedEneGra.cl
+@@ -442,10 +442,10 @@ void gpu_calc_energrad(
+ #endif
+ 	} // End atom_id for-loop (INTERMOLECULAR ENERGY)
+ 
+-	// Inter- and intra-molecular energy calculation
+-	// are independent from each other, so NO barrier is needed here.
+-	// As these two require different operations,
+-	// they can be executed only sequentially on the GPU.
++	// The energy partials are private to each work-item, but the atom-force
++	// arrays are shared. Finish non-atomic per-atom intermolecular writes
++	// before cross-work-item atomic intramolecular additions to those atoms.
++	barrier(CLK_LOCAL_MEM_FENCE);
+ 	float delta_distance = 0.5f*dockpars_smooth;
+ 	float smoothed_distance;
+ 
+diff --git a/host/src/main.cpp b/host/src/main.cpp
+index bb62f4a..6b0c49a 100644
+--- a/host/src/main.cpp
++++ b/host/src/main.cpp
+@@ -89,6 +89,10 @@ inline void start_timer(T& time_start)
+ 
+ int main(int argc, char* argv[])
+ {
++#if defined(__APPLE__) && defined(GPU_DEVICE) && (NUM_OF_THREADS_PER_BLOCK == 1)
++	fprintf(stderr,"Rejected experimental Apple-GPU configuration: one work-item per group failed local numerical/reproducibility checks. Use a separately validated 32, 64 or 128-work-item build. No docking was launched.\n");
++	return 64;
++#endif
+ #ifdef _WIN32
+ 	SetConsoleOutputCP(CP_UTF8);
+ #endif

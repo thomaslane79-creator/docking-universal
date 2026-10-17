@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 import textwrap
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 
@@ -138,6 +139,46 @@ class DockRunnerCharacterizationTests(unittest.TestCase):
         self.assertIn("run   beta\n", completed.stdout)
         self.assertIn("Successful docking jobs: 1\n", completed.stdout)
         self.assertIn("Skipped existing jobs: 1\n", completed.stdout)
+
+    def test_explicit_cpu_above_eight_is_forwarded_and_recorded(self):
+        completed, output = self.run_dock('--cpu', '12')
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertTrue(all("'--cpu', '12'" in line for line in self.argument_log.read_text().splitlines()))
+        manifest = (output / 'run_manifest.tsv').read_text()
+        self.assertIn('cpu\t12\n', manifest)
+        self.assertIn('cpu_source\tcommand_line\n', manifest)
+
+    def test_cpu_policy_respects_overrides_platform_and_small_machines(self):
+        from docking_universal_dock import DockOptions, DockUsageError, resolve_cpu
+        with patch('docking_universal_dock.platform.system', return_value='Darwin'), \
+                patch('docking_universal_dock.platform.machine', return_value='arm64'), \
+                patch('docking_universal_dock.os.cpu_count', return_value=12):
+            for value, environment, expected, source in (
+                (None, {}, '8', 'apple_silicon_bounded_default'),
+                (None, {'DOCKING_UNIVERSAL_CPU': '10'}, '10', 'environment'),
+                ('12', {'DOCKING_UNIVERSAL_CPU': '10'}, '12', 'command_line'),
+                ('0', {}, '0', 'command_line')):
+                options = DockOptions(cpu=value)
+                resolve_cpu(options, environment)
+                self.assertEqual((options.cpu, options.cpu_source), (expected, source))
+            self.config.write_text(self.config.read_text() + 'cpu = 12 # saved override\n')
+            options = DockOptions(config=self.config)
+            resolve_cpu(options, {})
+            self.assertEqual((options.cpu, options.cpu_source), ('12', 'config'))
+            options = DockOptions(engine='qvinaw')
+            resolve_cpu(options, {})
+            self.assertIsNone(options.cpu)
+            with patch('docking_universal_dock.os.cpu_count', return_value=4):
+                options = DockOptions()
+                resolve_cpu(options, {})
+                self.assertEqual(options.cpu, '4')
+            for invalid in ('-1', '1.5', 'many', ''):
+                with self.assertRaises(DockUsageError):
+                    resolve_cpu(DockOptions(cpu=invalid), {})
+        with patch('docking_universal_dock.platform.system', return_value='Linux'):
+            options = DockOptions()
+            resolve_cpu(options, {})
+            self.assertIsNone(options.cpu)
 
     def test_failure_removes_partial_output_but_continues_batch(self):
         completed, output = self.run_dock(environment={"DOCK_FAIL_LIGAND": "alpha"})

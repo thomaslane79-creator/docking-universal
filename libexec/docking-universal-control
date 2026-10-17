@@ -96,6 +96,8 @@ plip_command="${DOCKING_UNIVERSAL_PLIP:-plip}"
 pymol_command="${DOCKING_UNIVERSAL_PYMOL:-pymol}"
 mk_export_command="${DOCKING_UNIVERSAL_MK_EXPORT:-mk_export.py}"
 legacy_single_conformer=0
+reviewed_inputs=""
+reviewed_inputs_sha256=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -128,6 +130,8 @@ while [ "$#" -gt 0 ]; do
     --pymol) pymol_command="$2"; shift 2 ;;
     --mk-export) mk_export_command="$2"; shift 2 ;;
     --legacy-single-conformer) legacy_single_conformer=1; shift ;;
+    --reviewed-inputs) reviewed_inputs="$2"; shift 2 ;;
+    --reviewed-inputs-sha256) reviewed_inputs_sha256="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "ERROR: unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -175,8 +179,12 @@ if ! awk -v value="$BOX_SIZE" 'BEGIN { exit !(value >= 10 && value <= 50) }'; th
   exit 2
 fi
 export BOX_SIZE
-echo "Docking-box edge length: ${BOX_SIZE} Angstroms"
-echo "Docking-box center: experimental ligand coordinates (fixed for control)"
+if [ -n "$reviewed_inputs" ]; then
+  echo "Docking box: hash-verified region explicitly selected during site review"
+else
+  echo "Docking-box edge length: ${BOX_SIZE} Angstroms"
+  echo "Docking-box center: experimental ligand coordinates (fixed for control)"
+fi
 
 complex=$(CDPATH= cd -- "$(dirname -- "$complex")" && pwd)/$(basename "$complex")
 [ -z "$ligand_template" ] || ligand_template=$(CDPATH= cd -- "$(dirname -- "$ligand_template")" && pwd)/$(basename "$ligand_template")
@@ -292,7 +300,11 @@ mkdir -p "$out_dir"
 out_dir=$(CDPATH= cd -- "$out_dir" && pwd)
 
 run_log="$out_dir/run.log"
-exec > >(tee -a "$run_log") 2>&1
+case "${DOCKING_UNIVERSAL_LOG_MODE:-tee}" in
+  tee) exec > >(tee -a "$run_log") 2>&1 ;;
+  file) exec >> "$run_log" 2>&1 ;;
+  *) echo "ERROR: DOCKING_UNIVERSAL_LOG_MODE must be tee or file" >&2; exit 2 ;;
+esac
 
 inputs_dir="$out_dir/00_inputs"
 prep_parent="$out_dir/01_preparation"
@@ -321,6 +333,19 @@ cp "$complex" "$complex_copy"
   printf 'rmsd_threshold_angstrom\t%s\n' "$rmsd_threshold"
 } > "$out_dir/run_manifest.tsv"
 
+if [ -n "$reviewed_inputs" ]; then
+  reviewed_args=("$reviewed_inputs" --complex "$complex" --ligand-id "$ligand_id" --engine "$engine")
+  [ -z "$reviewed_inputs_sha256" ] || reviewed_args+=(--sha256 "$reviewed_inputs_sha256")
+  reviewed_paths=$("$PYTHON_COMMAND" "$SCRIPT_DIR/docking-universal-reviewed-control-inputs.py" "${reviewed_args[@]}")
+  prep_root=$(printf '%s\n' "$reviewed_paths" | sed -n '1p')
+  receptor_pdb=$(printf '%s\n' "$reviewed_paths" | sed -n '2p')
+  receptor_pdbqt=$(printf '%s\n' "$reviewed_paths" | sed -n '3p')
+  box_config=$(printf '%s\n' "$reviewed_paths" | sed -n '4p')
+  all_crystal_ligand=$(printf '%s\n' "$reviewed_paths" | sed -n '5p')
+  cp "$reviewed_inputs" "$inputs_dir/reviewed_control_inputs.json"
+  log "CONTROL 1/6: reusing the reviewed receptor and selected box; no preparation or pocket detection repeated"
+  printf 'preparation_source\tuser_reviewed_retained_preparation\n' >> "$out_dir/run_manifest.tsv"
+else
 log "CONTROL 1/6: preparing ligand-free receptor and experimental-site box"
 (
   cd "$prep_parent"
@@ -339,15 +364,17 @@ prep_root="${prep_roots[0]}"
 receptor_pdb=$(find "$prep_root/receptor" -maxdepth 1 -type f -name '*.pdb' | head -1)
 receptor_pdbqt=$(find "$prep_root/receptor" -maxdepth 1 -type f -name '*.pdbqt' | head -1)
 all_crystal_ligand="$prep_root/ligand/${ligand_resname}.pdb"
+box_config=$(find "$prep_root/cavity" -maxdepth 1 -type f -name '*_pocket1.conf' | head -1)
+fi
 crystal_ligand="$experimental_dir/selected_${ligand_resname}_${ligand_chain}_${ligand_position}.pdb"
-awk -v wanted_chain="$ligand_chain" -v wanted_position="$ligand_position" '
+awk -v wanted_chain="$ligand_chain" -v wanted_position="$ligand_position" -v wanted_resname="$ligand_resname" '
   /^HETATM/ {
     chain=substr($0,22,1); gsub(/ /,"",chain); if (chain=="") chain="_"
     position=substr($0,23,4); gsub(/ /,"",position)
-    if (chain==wanted_chain && position==wanted_position) print
+    resname=substr($0,18,3); gsub(/ /,"",resname)
+    if (chain==wanted_chain && position==wanted_position && resname==wanted_resname && substr($0,27,1)==" ") print
   }
 ' "$all_crystal_ligand" > "$crystal_ligand"
-box_config=$(find "$prep_root/cavity" -maxdepth 1 -type f -name '*_pocket1.conf' | head -1)
 [ -s "$receptor_pdb" ] && [ -s "$receptor_pdbqt" ] && [ -s "$all_crystal_ligand" ] && [ -s "$crystal_ligand" ] && [ -s "$box_config" ] || {
   echo "ERROR: preparation did not produce the receptor, selected ligand, and pocket-1 configuration" >&2
   exit 1
@@ -450,6 +477,7 @@ if [ "$visuals" -eq 1 ]; then
   "$CLI" render3d "$experimental_pml" \
     --out "$experimental_dir/experimental_interactions.png" \
     --session-out "$experimental_dir/experimental_interactions.pse" \
+    --contact-residue-labels \
     --pymol "$pymol_command"
   if [ "$non_interactive" -eq 0 ]; then
     ligand_2d_image="$experimental_dir/ligand_2d/$(basename "$sdf_copy" .sdf).png"
@@ -586,6 +614,7 @@ for current_engine in "${engines[@]}"; do
     "$CLI" render3d "$docked_pml" \
       --out "$engine_dir/top_pose_interactions.png" \
       --session-out "$engine_dir/top_pose_interactions.pse" \
+      --contact-residue-labels \
       --pymol "$pymol_command"
   fi
 done

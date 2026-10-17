@@ -1,5 +1,132 @@
 # Complete interactive GUI workflow plan
 
+User-authorized correction (2026-10-17): related public-PDB ligand lookup must
+not disappear because the receptor already contains a ligand or because the
+known-ligand pathway is chosen. Retain multi-site review, including experimental
+ligand-defined sites without a P2Rank score, explicit online/local-only status,
+and separate site-selection versus pose-recovery authority. Do not transfer a
+passing control at one site to additional untested sites or mutate old protocols.
+
+The user additionally authorizes optional P2Rank prediction with a bound
+ligand. Keep the ligand-defined site available on its own, or predict on the
+ligand-removed receptor and review alternative sites. The input ligand is a
+site definition, not independent supporting evidence. Exclude the recorded
+input PDB entry from related-entry counts; preserve explicit offline operation.
+
+User-authorized full raw-input coverage (2026-10-17): run the shorter sequential
+three-case plan, not a nine-case matrix: freshly downloaded 2R8N with Vina,
+existing local 2R8N PDB with QuickVina-W, and downloaded ligand-present 2R5P/MK1
+with experimental AD4. Recompute preparation, site/evidence and protocols; no
+original-study changes or concurrent scientific jobs. For 2R8N the user permits
+reuse of P1/exploratory approval only with an identical prepared receptor and
+exact box center/dimensions. User separately approves the deposited MK1-defined
+exploratory AD4 site, not AD4 control calibration. Retain failures and approval
+boundaries; do not call workflow coverage an accuracy/speed comparison.
+
+User-selected next item (2026-10-17): complete and validate fresh-study saved-
+protocol import through selected-compound screening and reopening. Preserve
+bundle integrity, engine/settings locks and exploratory versus control authority.
+Use isolated studies and existing preparation, with no original-study changes.
+
+Completed and installed 2026-10-17: fresh-study bundle verification and explicit
+settings review/import, selected-compound real Vina screening and fresh-host
+reopening pass. No receptor preparation was repeated; existing studies and
+locked scientific settings stay unchanged. Source and installed native viewer
+checks pass. See `docs/protocol-reuse-validation.md` for evidence and limitations.
+
+User-authorized workspace simplification (2026-10-17): remove direct static
+report-figure browsing and its zoom/full-screen/export controls. Keep interactive
+pocket plots, selection and approval, retained PyMOL scenes, linked 2D/3D review,
+pose/cluster browsing and image exports from those live views. Report figures
+remain generated and retained; existing Open report actions provide access.
+Do not change scientific settings, results or persisted artifact inventories.
+
+Optional AD4 status (2026-10-16): scoped numerical, full GUI-to-report, retained
+pose identity, native viewer and operational acceptance pass; 374 regressions
+pass. Use the common reports/visuals, distinct AD4 settings and detailed offline
+learning guide. Backed-up local installation and installed native viewer checks
+also pass. The optional local activation is recorded separately in
+`docs/ad4-gpu-integration.md`; default Vina and original studies stay unchanged.
+Windows/Linux GPU builds still require native platform acceptance; production
+AD4 control calibration and unsupported chemistry remain explicitly unavailable.
+
+User-authorized optional AutoDock-GPU completion (2026-10-16): investigate the
+remaining matched-formula numerical failure and finish the outstanding KNI-577
+audit first. Once correctness passes, integrate an explicitly experimental AD4
+option with engine-locked protocols, clear unsupported-input failures and the
+same report/visualization pipeline as other engines. Validate the chronological
+GUI path, pose identity, cancellation/failure handling and reopening retained
+results. Keep Vina defaults and original studies unchanged; no silent fallback
+or reinterpretation of Vina settings. This supersedes validation-only scope
+below, but does not authorize bypassing numerical gates or claiming superiority.
+
+User-authorized execution work (2026-10-15): broaden CPU timing to three retained
+targets, then integrate persistent Vina batches with in-memory map reuse. Preserve
+search budgets, refinement, scientific approvals and CLI compatibility; record
+execution backend and validate complete output equivalence before activation.
+Parallel scientific jobs and a GPU backend are not part of this implementation.
+
+Isolated performance exception (2026-10-15): user authorized a validation-only
+1×8 / 2×4 / 4×2 Vina concurrency pilot, capped at eight simultaneous search
+threads. Reuse retained 2R8N inputs, check full output equality and preserve all
+original studies. This does not enable concurrent production jobs or studies.
+The user subsequently authorized the full five-seed workload comparison: thirty
+searches per layout, one pass each, with compound-specific timing retained.
+That full-workload follow-up was cancelled at the user's request during its
+first arm; further CPU-splitting tests are not authorized to restart.
+
+User-authorized Apple-GPU investigation (2026-10-15): evaluate native Metal
+search acceleration in an isolated feasibility experiment. Audit/pin source,
+verify real GPU work and compare to the same engine's CPU path before making
+any production recommendation. No production GPU integration or OS upgrade.
+The user subsequently approved installing Apple's optional Metal compiler and
+fully validating the isolated candidate: host loading, numerical scoring/forces,
+chemistry mapping, pose recovery/ranking, repeatability and matched timings.
+This is not approval to replace the production engine or change studies.
+
+User-authorized AutoDock-GPU trial (2026-10-16): evaluate the official Apple-
+Silicon OpenCL release in isolation after GNINA failed. Preserve retained input
+chemistry/coordinates and all studies; create AutoDock4 maps only in validation.
+Check actual GPU execution, crystal recovery and the flexible-ligand workload;
+do not present AD4 scores/search budgets as interchangeable with Vina.
+The user subsequently authorized broader isolated pose-recovery/runtime/repeat
+assessment of the corrected candidate before adding an optional engine. Reuse
+four retained crystal controls, reject unvalidated macrocycle pseudoatoms, keep
+search/report energy semantics explicit, and document upstream corrections in
+the README. Do not install or enable the engine before assessment review.
+The user then explicitly authorized a full-workload isolated GPU timing run:
+both original compounds, all retained conformers/seeds, shared downstream stages
+and an AD4-labeled benchmark report. No preparation rerun, silent Vina-protocol
+authorization transfer, numerical-tolerance change or engine installation.
+
+User-authorized execution guidance (2026-10-15): Screen ligands exposes the
+application default, engine automatic and custom CPU counts with visible help.
+Retain the eight-thread Apple-Silicon Vina default, existing override priority,
+locked scientific settings and one active job. Thread choices affect new screens
+only; actual CPU/source remain recorded in docking manifests.
+
+Results-review correction (2026-10-15): ordinary cluster browsing now loads the
+exact representative's retained PLIP contacts and contacting residue sticks,
+not just its ligand. Compact 3D-only contact-type, master-contact, cartoon and
+label controls also travel into detached full PyMOL. Switching poses clears old
+contacts; paired review restores the previous cluster's geometry and type state.
+CPU-thread overrides and a bounded Apple-Silicon Vina default are execution
+settings recorded in per-run manifests, not a change to sampling or chemistry.
+Additional matched 12/8/10-thread timing is separate from scientific validation.
+
+Paired review correction (2026-10-06): schematic residue fragments use 70% of
+the ligand's 2D bond length, rather than a fixed undersized template. Click
+identities remain hash-verified; old report images are not rewritten on opening.
+Experimental coordinate views are explicitly distinguished from docking predictions; legacy
+diagrams without verified residue targets do not advertise those links.
+
+Existing results/report consistency correction (2026-10-05): preserve the top-20
+cluster landscape, population-scaled circles, top-three energy colors, and an
+independently identified actual closest experimental pose. Exact hash-verified
+2D source links carry those colors into embedded/detached review and comparison
+exports. Experimental coordinates remain distinct; prospective runs do not
+invent crystal RMSD. Calibration renders recall the selected model explicitly.
+
 Scope changes are governed by the
 [GUI idea backlog and implementation gate](gui-idea-backlog.md). New ideas are
 recorded without interrupting this plan unless they address a demonstrated
@@ -382,6 +509,45 @@ release claim instead of declaring success from mocks.
 
 ## Completion and handoff
 
+Linked 2D/3D review supports independent, mutually exclusive detachment: only
+one view leaves the workspace at a time. The 2D view offers fit and scrollable
+zoom from the retained high-resolution image; detaching 3D moves only the live
+viewport, not the companion diagram. User layout acceptance remains pending.
+
+Next user-designated linked-review enhancement (2026-10-04; not implemented):
+click a 2D contact residue to toggle its matching 3D side-chain highlight.
+Selections persist independently until clicked again, while both cameras/zoom
+stay unchanged. Renderer-provided click regions and exact source-to-receptor
+residue correspondence are prerequisites; related-PDB numbering is not itself
+a correspondence. Existing user representations and scientific inputs must
+remain unchanged. Detailed acceptance is recorded in `gui-idea-backlog.md`.
+
+As of 2026-10-04 the default 3D detach opens upstream PyMOL's full Qt interface
+around that same viewport and engine. Console, object controls, native menus,
+properties, and builder are available for exploratory review. Close or PyMOL
+quit returns the viewport; scientific protocol approval and files are unchanged.
+Real macOS validation: `validation/full_pymol_detach.py`; other OS acceptance
+remains outstanding. The previous viewport-only detach code is retained as a
+fallback, not an additional user-facing button.
+
+The full shell also has a collapsible Study evidence dock for existing pocket,
+experimental-ligand, compound, cluster, and exact-pose selections. It mirrors
+main-GUI selection and uses the same viewer/results callbacks; it has no approval
+or pipeline-start controls. Region/evidence navigation preserves the camera and
+does not activate the main window. Docked-pose handling retains the established
+receptor identity and materialization rules rather than bypassing them.
+
+Evidence review now has a shared optional Guide walkthrough and an on/off
+reported-residue highlight in the main GUI and full PyMOL. Turning it off removes
+only app-added sticks and its named selection, preserving previous user styling,
+colors and camera. The guide explains candidate scores, deposited ligands,
+obstruction limits, original-structure protein–ligand 2D contacts and explicit
+approval; it is not an automatic scientific decision. Decision figures are
+disabled while the region decision is pending or report figures are unavailable.
+The residue representation toggle does not leave an atom-selection overlay:
+temporary addressing selections are removed after showing sticks, without
+changing the user's own native PyMOL selections.
+
 The release gate is a coverage registry with no unexplained supported decision
 gaps, real chronological acceptance for all three routes, restartable decisions,
 CLI/GUI scientific equivalence, and usable reports/viewer layouts. A failed
@@ -394,8 +560,166 @@ of completed slices without rewriting historical test claims. Estimate work per
 slice after its baseline is measured; do not promise a completion date from the
 number of widgets involved.
 
+2026-10-14 finalization teaching correction: explanations are visible beside each
+existing option, using the available stage width rather than relying on hover.
+Modeless deeper guidance, explicit exploratory-control limitations and a draft
+workload multiplier help non-dockers understand consequences. Defaults and
+host/pipeline payloads remain unchanged; help never supplies approval authority.
+
 References: [Design philosophy](design-philosophy.md),
 [guided workflow](guided-workflow.md), [architecture](gui-architecture-plan.md),
 [implementation roadmap](gui-implementation-roadmap.md),
 [visual identity](gui-report-visual-identity-plan.md), and
 [data privacy](data-privacy.md).
+
+2026-10-04 linked-review completion: experimental Render 2D now opens the
+balanced, resizable paired window using the original source receptor and exact
+ligand. All XML contact residues are shown with independent sticks toggles;
+verified rendered labels center those residues without changing either zoom.
+The single borrowed engine restores the study scene on close. The optional
+obstruction Details… popup explains geometric thresholds and recorded distances.
+Native acceptance: `validation/paired_interaction_review.py`, including polling,
+click-twice toggling, resize, selection/camera restoration and unchanged study
+state. Older diagrams without hit metadata use residue buttons until rerendered.
+
+Interaction update requested 2026-10-04: a 2D residue/ligand click pans the 3D
+camera to that exact source identity, preserving rotation and zoom and leaving
+the 2D image unchanged. Residue checkboxes alone show/hide sticks. Centering a
+hidden residue does not silently turn it back on; checkbox toggles do not pan.
+
+2026-10-04 pocket-local correction: the paired view initially frames and centers
+the exact ligand plus the mapped contact residues, including contacts on other
+chains. It does not show the protein surface. The cartoon is available by default
+with an independent visibility checkbox. This
+one-time initial framing is distinct from subsequent zoom-preserving label
+clicks. Fresh experimental rendering shows non-modal activity and elapsed time;
+the pair opens only after its scientifically matched coordinates/diagram exist.
+
+P2Rank 2.6-alpha is now integrated as a visual-only local worker, not the
+production scientific detector. On
+the same retained 2R8N receptor it reproduces the stable 2.5.1 predictions exactly
+and exports per-pocket empty-space grid points. Its default morphological filling
+hits a non-convergence warning on this fixture; unfilled grids avoid that step.
+The preview represents sampled predicted space, not a certified closed cavity.
+Two-chain 3QBF also reproduces stable predictions and assigns the primary pocket
+across chains A and B. The worker explicitly disables BioJava CCD downloads and
+requires exact prediction-table parity before retaining hash-bound grids. Native
+acceptance (`validation/pocket_space_integration.py`) checks per-rank surface
+switching, palette, fixed camera, no dots, and removal of old residue surfaces.
+This is not a cofactor-handling validation; broader/larger-target validation and
+report migration remain open. Retained report figures are not silently rewritten.
+
+Paired-review correction: exact 3D residue picks toggle residue labels and clear
+temporary atom picks. Same-report PLIP contact lines use the established blue
+hydrogen-bond, green hydrophobic-contact and cyan stacking colors, with a visible
+key for additional contact types. Contact/residue/cartoon visibility controls do
+not pan or change zoom. Cached source atoms remove repeated whole-model scans;
+native two-chain validation records setup and first-visible-frame timings.
+
+2026-10-04 visibility refinement: pocket-space surfaces use an object-local
+1.4 Å rolling probe and quality 2 without editing the sampled grid, display
+radii, scores or boxes. Near/far clipping planes only expand when needed;
+rotation, pan and zoom remain fixed. The envelope is still an approximate
+visualization, not a measured cavity boundary. Native 2R8N and 3QBF checks
+verify deliberate slab clipping is corrected and scientific hashes stay fixed.
+Paired PLIP contacts now use substantial solid/dashed colored cylinders rather
+than device-dependent hairlines. Clicking a 3D legend type hides/restores only
+that type; the retained 2D diagram stays unchanged. The master contact gate
+preserves type choices. Shift/Ctrl group-selection gestures are suppressed
+only in the paired viewport; returning restores normal input and full PyMOL
+remains unrestricted.
+
+Current linked-review usability correction (2026-10-04): compact inline
+clickable contact key, boxed named ligand-centering heading, and larger
+foreground residue labels. These remain shared by deposited and docked-pose
+review; no new scientific interaction calculation or workflow branch.
+Implemented and verified on deposited MK1 evidence and an existing retained
+docked representative: inline type hyperlinks replace the button grid, the
+existing heading becomes a named ligand-centering button, and 22-point
+outlined labels float in front of interactive geometry. PyMOL's global
+foreground-label switch is explicitly saved/restored, while label styles are
+scoped to the borrowed receptor. Retained reports are not silently regenerated;
+older diagrams without verified hit regions still need renderer migration.
+Contact redraws explicitly replace CGO state 1; using PyMOL's default state 0
+appends invisible states and leaves the original complete contact set visible.
+
+2026-10-14 label discoverability correction: the paired experimental/docked
+review has a compact Residue labels checkbox beside the cartoon/contact switches.
+It labels visible exact contact residues or clears review-added labels. Individual
+3D picks remain label toggles and synchronize the checkbox; no camera, contact,
+2D diagram, source-coordinate or scientific-state change is introduced.
+
+2026-10-14 review/export completion: compact local PNG saving covers the customized
+live PyMOL view, original-resolution retained 2D diagram, clean 2D/3D panels,
+selected report figure and pocket plot. Full PyMOL uses the same native-view
+export. These are labeled presentation derivatives, not regenerated reports;
+retained scientific files, coordinates, contacts and authority stay unchanged.
+The user subsequently approved optional ray-traced 3D/paired PNGs alongside
+fast OpenGL export. Ray rendering uses the same live engine with explicit busy/
+cancel feedback and does not change docking, PLIP or source resolution policies.
+
+Paired-review refinement: verified residue-name targets have subtle boxed UI
+outlines over the detailed 2D diagram. Outline and mouse-hit geometry are
+shared at fit, zoom, centered gutters and high DPI; PNG/report bytes stay fixed.
+The compact contact key precedes the cartoon/contact master switches and a
+single-height residue checkbox row, freeing space for the PyMOL viewport.
+
+Managed starting scenes now widen the near/far slab around all enabled scene
+geometry, with a rotation-safe margin and explicit live-CGO box bounds. This
+also applies when opening the full PyMOL shell and paired ligand review; zoom,
+orientation, coordinates and retained files are unchanged. The selected box
+uses 0.22 Å cylinders instead of 0.35 Å, retaining the candidate color. Manual
+clipping remains available; no per-frame slab override or new setting is added.
+
+PDB evidence availability is distinct from evidence counts. The existing setup
+checkbox discloses internet and receptor-sequence lookup and supports local-only
+evidence review. Main/full PyMOL evidence panels persistently distinguish lookup
+off, lookup unavailable, incomplete retrieval and a completed search with no
+qualifying observations. Preparation artifacts are retained on lookup failure;
+no automatic retry or unrelated network request is introduced. This is not a
+global offline mode: input and chemical-definition downloads remain separate.
+
+2026-10-14 authoritative-progress correction: merged duplicate workspace show
+handlers so visible windows actually start/restart their one-second state poll.
+Phase changes and terminal results now update automatically; unchanged revisions
+only advance elapsed time and service health, not tables or molecular scenes.
+Preparation submission and native ray-export guards keep immediate feedback and
+the GUI event loop responsive. Verified with 134 regression tests, 13 native
+polling checks (including read-only observation of the user's completed study),
+and 126 experimental/docked paired-view checks. No scientific job was rerun.
+
+2026-10-15 screening-duration acceptance: Screen ligands retains total elapsed
+time after completion/failure and on reopen, derived read-only from durable job
+timestamps. It includes preparation, docking, analysis and reporting, not just
+engine search time. A separate serial execution benchmark uses exact retained
+2R8N inputs to compare shared-grid Vina with automatic/eight-thread allocation;
+no production sampling or protocol defaults change without measured evidence.
+
+2026-10-14 report-identity correction: shared report headings identify the
+deposited protein name/fragment, structure accession and source species instead
+of only the target filename. Local mmCIF/PDB annotations keep protein entities
+and their species linked and distinguish expression hosts. New GUI/CLI protocol
+records and manifests retain identity snapshots for portable reuse. Missing
+annotations are explicit; completed reports are not automatically replaced.
+
+2026-10-14 user-authorized priority change: after MOL import parity, add embedded
+SDF/MOL library review and explicit record selection to the screening step.
+Scientific-host parsing and local 2D depiction stay separate from the GUI runtime;
+reading/inspecting does not write study authority or start a calculation. Dock
+checkboxes, workload and launched subset share a hash-bound selection; source
+changes require rereview. Keep invalid rows visible, preserve original record/hash
+provenance, and retain the full selection ledger in screening inputs. CLI users
+may still screen all SDF/MOL compounds. The separately authorized 2026-10-17
+CSV/TSV/XLSX extension adds header/worksheet review: suggestions only prefill,
+**Use these columns** is required before compound parsing, and edits clear
+selection and workload. Exact file hashes, column positions and source rows
+remain bound to selection and verified again before materialization.
+
+2026-10-14 library-size/stability acceptance: paginate compound review (50 rows by
+default) without limiting the global selected subset. Keep bulk actions explicit
+across all pages and page navigation independent of selection. Cache reviewed
+binary molecules/2D images in bounded host memory; retain fresh full-hash checks
+for workload/run authority. Use stable visible-cell navigation and a paint-only
+preview to avoid focus/autoscroll jumps while cycling compounds. Native small/
+10,000-record validation verifies unchanged window geometry and both scroll
+positions, cross-page workload parity and no scientific-state or protocol writes.

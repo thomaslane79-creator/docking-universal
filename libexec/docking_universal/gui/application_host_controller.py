@@ -39,6 +39,14 @@ class ApplicationHostController:
     def start_preparation(self, payload, revision):
         return self._request("start_receptor_preparation", payload, revision)
 
+    def inspect_protocol_bundle(self, source):
+        return self._request("inspect_protocol_bundle", {"protocol_bundle": str(source)})["result"]["protocol"]
+
+    def import_protocol_bundle(self, source, reviewed_sha256, revision):
+        return self._request("import_protocol_bundle", {
+            "protocol_bundle": str(source), "reviewed_sha256": reviewed_sha256,
+        }, revision)
+
     def start_control_validation(self, payload, revision):
         return self._request("start_control_validation", payload, revision)
 
@@ -48,8 +56,27 @@ class ApplicationHostController:
     def start_finalization(self, payload, revision):
         return self._request("start_protocol_finalization", payload, revision)
 
-    def screening_plan(self, ligand_source):
-        response = self._request("screening_plan", {"ligand_source": ligand_source})
+    def inspect_ligand_library(self, ligand_source, column_mapping=None, sheet=None):
+        payload = {"ligand_source": ligand_source}
+        if column_mapping is not None:
+            payload['column_mapping'] = column_mapping
+        if sheet is not None:
+            payload['sheet'] = sheet
+        return self._request("inspect_ligand_library", payload)["result"]["library"]
+
+    def ligand_record_preview(self, ligand_source, fingerprint, record_id, column_mapping=None):
+        payload = {
+            "ligand_source": ligand_source, "fingerprint": fingerprint, "record_id": record_id,
+        }
+        if column_mapping is not None:
+            payload['column_mapping'] = column_mapping
+        return self._request("ligand_record_preview", payload)["result"]["preview"]
+
+    def screening_plan(self, ligand_source, ligand_selection=None):
+        payload = {"ligand_source": ligand_source}
+        if ligand_selection is not None:
+            payload["ligand_selection"] = ligand_selection
+        response = self._request("screening_plan", payload)
         return response["result"]["plan"]
 
     def start_screening(self, payload, revision):

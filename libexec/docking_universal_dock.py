@@ -9,6 +9,9 @@ directly while preserving the same command construction and artifacts.
 from __future__ import annotations
 
 import os
+import json
+import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -16,6 +19,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Mapping, Sequence, TextIO
+from uuid import uuid4
 
 
 USAGE = """Usage:
@@ -27,13 +31,16 @@ receptor, docking box, ligand input, and output directory. Headless sessions ask
 for exact paths. An SDF ligand input is prepared automatically.
 
 Options:
-  --engine NAME            vina or qvinaw (QuickVina-W)
+  --engine NAME            vina, qvinaw, or configured experimental adgpu (AD4)
+  --ad4-settings JSON      Explicit AD4 settings; never Vina search options
   --engine-command PATH    Explicit engine executable
   --engine-env NAME        Conda environment containing the engine
   --exhaustiveness N       Forwarded to the selected engine when provided
   --num-modes N            Maximum output poses requested from the engine
   --energy-range KCAL      Maximum energy range retained from the best pose
   --seed N                 Reproducible engine random seed
+  --cpu N                  CPU threads (0: automatic); overrides DOCKING_UNIVERSAL_CPU
+  --vina-backend MODE      auto (default), api, or cli; API reuses maps per batch
   --skip-existing          Preserve existing output files
   -h, --help               Show this help
 """
@@ -63,6 +70,10 @@ class DockOptions:
     skip_existing: bool = False
     engine_command: Path | None = None
     engine_env: str | None = None
+    cpu: str | None = None
+    cpu_source: str = "engine_default"
+    vina_backend: str | None = None
+    ad4_settings: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -103,6 +114,9 @@ def parse_arguments(arguments: Sequence[str]) -> DockOptions:
         "--num-modes": "num_modes",
         "--energy-range": "energy_range",
         "--seed": "seed",
+        "--cpu": "cpu",
+        "--vina-backend": "vina_backend",
+        "--ad4-settings": "ad4_settings",
     }
     path_fields = {"engine_command", "receptor", "ligand_dir", "config", "output_dir"}
     index = 0
@@ -122,6 +136,12 @@ def parse_arguments(arguments: Sequence[str]) -> DockOptions:
         value: str | Path = arguments[index + 1]
         if field in path_fields:
             value = Path(value)
+        elif field == 'ad4_settings':
+            try:
+                value = json.loads(value)
+                if not isinstance(value, dict):raise ValueError
+            except (ValueError,TypeError):
+                raise DockUsageError('ERROR: --ad4-settings requires a JSON object')
         setattr(options, field, value)
         index += 2
 
@@ -319,8 +339,10 @@ def validate_options(options: DockOptions, region_check: Path) -> None:
             "ERROR: prepared docking inputs are required. Run 'docking-universal prepare' first.\n"
             "Then prepare the compounds with 'docking-universal ligands' before running dock."
         )
-    if options.engine not in ("vina", "qvinaw"):
-        raise DockUsageError("ERROR: --engine must be vina or qvinaw (QuickVina-W)")
+    if options.engine not in ("vina", "qvinaw", "adgpu"):
+        raise DockUsageError("ERROR: --engine must be vina, qvinaw or configured experimental adgpu")
+    if options.engine != 'adgpu' and options.ad4_settings is not None:
+        raise DockUsageError('ERROR: AD4 settings cannot be applied to a Vina-family engine')
     if not options.receptor.is_file():
         raise DockRuntimeError(
             f"ERROR: prepared receptor not found: {options.receptor}. "
@@ -343,6 +365,17 @@ def validate_options(options: DockOptions, region_check: Path) -> None:
 def resolve_engine(options: DockOptions, environment: Mapping[str, str]) -> EngineInvocation:
     """Resolve an explicit, PATH, or Conda engine using the legacy precedence."""
 
+    if options.engine == 'adgpu':
+        from docking_universal.ad4_gpu import runtime_descriptor
+        try:
+            configured=runtime_descriptor(environment,allow_validation=True)
+        except (ValueError,OSError,KeyError) as error:
+            raise DockRuntimeError(str(error)) from None
+        if options.engine_command and options.engine_command.resolve()!=Path(configured['executable']):
+            raise DockRuntimeError('AD4 engine override differs from the configured tested build')
+        if options.engine_env:
+            raise DockUsageError('AD4 GPU uses its configured pinned executable, not a Vina Conda environment')
+        return EngineInvocation((configured['executable'],),'configured experimental AD4 GPU, patched 128-work-item build')
     explicit = options.engine_command
     if explicit is None:
         variable = (
@@ -381,6 +414,24 @@ def resolve_engine(options: DockOptions, environment: Mapping[str, str]) -> Engi
     conda = shutil.which("conda", path=environment.get("PATH"))
     if not conda:
         raise DockRuntimeError(f"ERROR: conda is required to use --engine-env {engine_env}")
+    if options.engine == 'vina' and engine_env == 'docking-universal-vina':
+        # Resolve the managed engine once, rather than paying `conda run`
+        # startup for every conformer. Custom environments retain their exact
+        # activation wrapper. Verify the direct executable before selecting it.
+        try:
+            located = subprocess.run([conda, 'run', '--no-capture-output', '-n', engine_env,
+                'python', '-c', 'import json,sys; print(json.dumps(sys.prefix))'],
+                text=True, capture_output=True, env=dict(environment), timeout=30)
+            prefix = Path(json.loads(located.stdout)) if located.returncode == 0 else None
+            binary = prefix / ('Scripts/vina.exe' if os.name == 'nt' else 'bin/vina') if prefix else None
+            if binary is not None and binary.is_file() and os.access(binary, os.X_OK):
+                checked = subprocess.run([str(binary), '--version'], text=True, capture_output=True,
+                                         env=dict(environment), timeout=10)
+                if checked.returncode == 0 and checked.stdout.strip() == 'AutoDock Vina v1.2.7':
+                    return EngineInvocation((str(binary.resolve()),),
+                                            f'conda environment {engine_env} (verified direct executable)')
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            pass  # Existing activation-based resolution remains authoritative.
     probe = subprocess.run(
         [conda, "run", "-n", engine_env, options.engine, "--version"],
         stdout=subprocess.DEVNULL,
@@ -408,7 +459,8 @@ def _engine_version(invocation: EngineInvocation, environment: Mapping[str, str]
     return next((line for line in completed.stdout.splitlines() if line.strip()), "unknown")
 
 
-def _write_manifest(options: DockOptions, invocation: EngineInvocation, version: str) -> None:
+def _write_manifest(options: DockOptions, invocation: EngineInvocation, version: str,
+                    execution: Mapping[str, str] | None = None) -> None:
     manifest_values = (
         ("engine", options.engine),
         ("engine_version", version),
@@ -422,6 +474,9 @@ def _write_manifest(options: DockOptions, invocation: EngineInvocation, version:
         ("num_modes", options.num_modes or "engine_default"),
         ("energy_range_kcal_per_mol", options.energy_range or "engine_default"),
         ("seed", options.seed or "engine_random"),
+        ("cpu", options.cpu if options.cpu is not None else "engine_default"),
+        ("cpu_source", options.cpu_source),
+        *((execution or {}).items()),
     )
     (options.output_dir / "run_manifest.tsv").write_text(
         "".join(f"{key}\t{value}\n" for key, value in manifest_values), encoding="utf-8"
@@ -445,10 +500,37 @@ def _engine_arguments(options: DockOptions, ligand: Path, output: Path) -> list[
         ("--num_modes", options.num_modes),
         ("--energy_range", options.energy_range),
         ("--seed", options.seed),
+        ("--cpu", options.cpu),
     ):
         if value is not None:
             arguments.extend((flag, value))
     return arguments
+
+
+def resolve_cpu(options: DockOptions, environment: Mapping[str, str]) -> None:
+    """Execution-only policy; explicit settings and saved box overrides win.
+
+    Eight threads beat automatic (12) on the retained M2 Max pilot. Do not
+    generalize that observation to other platforms or QuickVina-W.
+    """
+    value, source = options.cpu, "command_line"
+    if value is None:
+        value, source = environment.get("DOCKING_UNIVERSAL_CPU"), "environment"
+    if value is None and options.config:
+        for line in options.config.read_text(encoding="utf-8").splitlines():
+            match = re.fullmatch(r"\s*cpu\s*=\s*([^#]+?)(?:\s*#.*)?", line)
+            if match:
+                value, source = match.group(1).strip(), "config"
+    if value is None and options.engine == "vina" and platform.system() == "Darwin" and platform.machine() == "arm64":
+        value, source = str(min(8, os.cpu_count() or 1)), "apple_silicon_bounded_default"
+    if value is None:
+        return
+    try:
+        if int(value) < 0 or str(int(value)) != str(value).strip():
+            raise ValueError
+    except (TypeError, ValueError):
+        raise DockUsageError("ERROR: CPU threads must be a non-negative integer (0 means automatic)")
+    options.cpu, options.cpu_source = str(int(value)), source
 
 
 def run_docking(
@@ -460,8 +542,22 @@ def run_docking(
 ) -> DockBatchResult:
     """Run every prepared ligand, retaining successful jobs after failures."""
 
-    options.output_dir.mkdir(parents=True, exist_ok=True)
-    _write_manifest(options, invocation, _engine_version(invocation, environment))
+    if options.engine == 'adgpu':
+        from docking_universal.ad4_gpu import run_prepared_batch, Ad4Settings
+        try:
+            result=run_prepared_batch(options,invocation,environment,stdout,stderr)
+            _write_manifest(options,invocation,'AutoDock-GPU v1.6 patched OpenCL 128 (AD4)',
+                {'execution_backend':'ad4_gpu_opencl','scoring_function':'AD4',
+                 'ad4_settings_json':json.dumps(Ad4Settings(**(options.ad4_settings or {})).to_dict(),sort_keys=True),
+                 'seed':options.seed if options.seed is not None else 20260808,
+                 'cpu':'not applied (GPU)','cpu_source':'not used by AD4 GPU',
+                 'exhaustiveness':'not applicable','num_modes':'all LGA run winners',
+                 'energy_range_kcal_per_mol':'not applied; all LGA run winners retained'})
+        except (ValueError,OSError,KeyError) as error:
+            raise DockRuntimeError('AD4 GPU: '+str(error)) from None
+        _batch_summary(result,stdout)
+        return result
+    resolve_cpu(options, environment)
     ligands = sorted(
         ligand
         for ligand in options.ligand_dir.glob("*.pdbqt")
@@ -469,6 +565,45 @@ def run_docking(
     )
     if not ligands:
         raise DockRuntimeError(f"ERROR: no PDBQT ligands found in {options.ligand_dir}")
+
+    from docking_universal.vina_batch import UnsupportedBatch, parameters, runtime
+    mode = options.vina_backend or environment.get('DOCKING_UNIVERSAL_VINA_BACKEND', 'auto')
+    if mode not in ('auto', 'api', 'cli'):
+        raise DockUsageError('ERROR: --vina-backend must be auto, api or cli')
+    version = _engine_version(invocation, environment)
+    selected = None
+    execution = dict(execution_backend='cli', execution_backend_reason='explicit CLI' if mode == 'cli' else 'not Vina')
+    if mode != 'cli':
+        try:
+            if options.engine != 'vina':
+                raise UnsupportedBatch('API batches require Vina, not QuickVina-W')
+            if mode == 'auto':
+                pending = [ligand for ligand in ligands if not (
+                    options.skip_existing and
+                    (options.output_dir / (ligand.stem + '_vina.pdbqt')).is_file() and
+                    (options.output_dir / (ligand.stem + '_vina.pdbqt')).stat().st_size)]
+                if len(pending) < 2:
+                    raise UnsupportedBatch('fewer than two pending ligands; CLI avoids API batch setup')
+            params = parameters(options)
+            worker = Path(__file__).with_name('docking-universal-vina-batch.py')
+            prefix, info = runtime(invocation, version, environment, worker)
+            selected = (prefix, worker, params, info)
+            execution = dict(execution_backend='vina_python_batch', execution_backend_reason=mode,
+                             worker_python=info['python'], api_version=info['api_version'],
+                             api_module=info['module'], api_executable=info['executable'])
+        except UnsupportedBatch as exc:
+            if mode == 'api':
+                raise DockRuntimeError('ERROR: requested Vina API backend unavailable: ' + str(exc))
+            execution['execution_backend_reason'] = str(exc)
+            if options.engine == 'vina':
+                print('Vina execution: CLI — ' + str(exc), file=stdout, flush=True)
+    options.output_dir.mkdir(parents=True, exist_ok=True)
+    _write_manifest(options, invocation, version, execution)
+    if selected is not None:
+        print('Vina execution: persistent API batch (one seed, in-memory maps reused)', file=stdout, flush=True)
+        result = _run_api_batch(options, ligands, selected, environment, stdout)
+        _batch_summary(result, stdout)
+        return result
 
     successful = failed = skipped = 0
     for ligand in ligands:
@@ -504,11 +639,80 @@ def run_docking(
             continue
         successful += 1
 
-    print(f"Batch complete: {options.output_dir}", file=stdout)
-    print(f"Successful docking jobs: {successful}", file=stdout)
-    print(f"Failed docking jobs: {failed}", file=stdout)
-    print(f"Skipped existing jobs: {skipped}", file=stdout)
-    return DockBatchResult(options.output_dir, successful, failed, skipped)
+    result = DockBatchResult(options.output_dir, successful, failed, skipped)
+    _batch_summary(result, stdout)
+    return result
+
+
+def _batch_summary(result, stdout):
+    print(f"Batch complete: {result.output_dir}", file=stdout)
+    print(f"Successful docking jobs: {result.successful}", file=stdout)
+    print(f"Failed docking jobs: {result.failed}", file=stdout)
+    print(f"Skipped existing jobs: {result.skipped}", file=stdout)
+
+
+def _run_api_batch(options, ligands, selected, environment, stdout):
+    from docking_universal.vina_batch import digest, save
+    prefix, worker, params, info = selected
+    request = dict(request_id=str(uuid4()), parameters=params, output=str(options.output_dir.resolve()),
+                   receptor=str(options.receptor.resolve()), receptor_sha256=digest(options.receptor),
+                   config=str(options.config.resolve()), config_sha256=digest(options.config),
+                   skip_existing=options.skip_existing, runtime=info, jobs=[])
+    for ligand in ligands:
+        base = ligand.stem + '_vina'
+        request['jobs'].append(dict(ligand=str(ligand.resolve()), sha256=digest(ligand),
+            output=str((options.output_dir / (base + '.pdbqt')).resolve()),
+            log=str((options.output_dir / (base + '.log')).resolve())))
+    request_path = options.output_dir / 'batch_requests' / (request['request_id'] + '.json')
+    request_path.parent.mkdir(parents=True, exist_ok=True)
+    save(request_path, request)
+    save(options.output_dir / 'batch_request.json', request)
+    process = subprocess.Popen([*prefix, str(worker), '--request', str(request_path.resolve())],
+                               env=dict(environment), stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, text=True, bufsize=1)
+    try:
+        for line in process.stdout:
+            stdout.write(line)
+            stdout.flush()
+        returncode = process.wait()
+    except BaseException:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+        raise
+    finally:
+        process.stdout.close()
+    try:
+        record = json.loads((options.output_dir / 'batch_records' / (request['request_id'] + '.json')).read_text())
+        if record.get('request_id') != request['request_id']:
+            raise ValueError('worker record is not from this batch request')
+        if record['status'] not in ('completed', 'completed_with_failures'):
+            raise ValueError(record.get('error') or record['status'])
+        jobs = record['jobs']
+        if len(jobs) != len(ligands):
+            raise ValueError('incomplete ligand inventory')
+        for row, expected in zip(jobs, request['jobs']):
+            if row['ligand'] != expected['ligand'] or row['output'] != expected['output']:
+                raise ValueError('worker ligand/output identities do not match request')
+            if row['status'] == 'completed':
+                if digest(row['output']) != row['output_sha256']:
+                    raise ValueError('completed pose output changed')
+            elif row['status'] == 'skipped':
+                if not options.skip_existing or not Path(row['output']).stat().st_size:
+                    raise ValueError('invalid skipped output')
+            elif row['status'] != 'failed':
+                raise ValueError('nonterminal ligand result')
+        failed = sum(j['status'] == 'failed' for j in jobs)
+        if returncode != (1 if failed else 0):
+            raise ValueError(f'worker exited unexpectedly ({returncode})')
+        return DockBatchResult(options.output_dir, sum(j['status']=='completed' for j in jobs),
+                               failed, sum(j['status']=='skipped' for j in jobs))
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise DockRuntimeError('ERROR: Vina API batch stopped; successful outputs are retained; '
+                               'no automatic CLI retry: ' + str(exc))
 
 
 def main(arguments: Sequence[str] | None = None) -> int:

@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 import math
+import re
+import sys
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -870,7 +872,12 @@ def collect_pocket_evidence(
     provenance_path = (Path(boxes[0]).parent / "pocket_detection_provenance.json") if boxes else None
     provenance = json.loads(provenance_path.read_text()) if provenance_path and provenance_path.is_file() else {}
     pocket_engine = str(provenance.get("engine", "fpocket") or "fpocket").lower()
-    reference_chains = protein_chains(receptor_pdb.read_text(errors="replace"))
+    reference_text = receptor_pdb.read_text(errors="replace")
+    # The deposited input defines the reference; rediscovering that same entry
+    # must not inflate the independent related-structure evidence counts.
+    reference_entries = {line[62:66].strip().upper() for line in reference_text.splitlines()
+                         if line.startswith("HEADER") and re.fullmatch(r"[A-Za-z0-9]{4}", line[62:66].strip())}
+    reference_chains = protein_chains(reference_text)
     reference_identifiers_by_chain = protein_database_identifiers(
         receptor_pdb.read_text(errors="replace")
     )
@@ -881,13 +888,19 @@ def collect_pocket_evidence(
     sequence = "".join(item.one_letter for item in reference)
     identifiers = sequence_search(sequence, query_identity_cutoff, max_entries * 2, opener)
     entries = []
+    excluded_reference_entries = set()
     for identifier in identifiers:
         entry = identifier.split("_", 1)[0].upper()
+        if entry in reference_entries:
+            excluded_reference_entries.add(entry)
+            continue
         if entry not in entries:
             entries.append(entry)
         if len(entries) >= max_entries:
             break
-    print(f"  Verifying {len(entries)} candidate related PDB entr{'y' if len(entries) == 1 else 'ies'}...", flush=True)
+    # The GUI host owns stdout for framed JSON replies. Progress belongs on
+    # stderr (retained by the job log), never interleaved with host responses.
+    print(f"  Verifying {len(entries)} candidate related PDB entr{'y' if len(entries) == 1 else 'ies'}...", file=sys.stderr, flush=True)
     geometries = [
         (index, Path(box), *read_box_geometry(box))
         for index, box in enumerate(boxes, 1)
@@ -898,7 +911,8 @@ def collect_pocket_evidence(
         if pocket_file.is_file():
             pocket_atoms_by_number[pocket_number] = pdb_atom_coordinates(pocket_file)
     evidence = []
-    skipped = []
+    skipped = [{"entry": entry, "reason": "input reference structure; not independent supporting evidence"}
+               for entry in sorted(excluded_reference_entries)]
     ensemble_root = output_dir / "structural_ensemble"
     ensemble_sources = []
     ensemble_alignments = []
@@ -907,7 +921,7 @@ def collect_pocket_evidence(
     )
     downloaded_components = {}
     for index, entry in enumerate(entries, 1):
-        print(f"  Checking related structure {index}/{len(entries)}: {entry}", flush=True)
+        print(f"  Checking related structure {index}/{len(entries)}: {entry}", file=sys.stderr, flush=True)
         try:
             text = download_entry(entry, opener)
         except (OSError, urllib.error.URLError) as exc:
@@ -1110,6 +1124,8 @@ def collect_pocket_evidence(
         "query": {
             "reference_file": receptor_pdb.name,
             "reference_chain": reference_id,
+            "reference_pdb_entries": sorted(reference_entries),
+            "input_reference_entries_excluded": sorted(excluded_reference_entries),
             "reference_protein_identifiers": sorted(reference_identifiers),
             "sequence_length": len(sequence),
             "query_identity_cutoff": query_identity_cutoff,

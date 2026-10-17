@@ -78,6 +78,19 @@ class PreparationServiceTests(unittest.TestCase):
         self.assertEqual(plan.request.environment["MEEKO_ALLOW_BAD_RES"], "0")
         self.assertEqual(plan.request.environment["DOCKING_UNIVERSAL_REMOVAL_PROMPT"], "0")
 
+    def test_additional_prediction_keeps_exact_ligand_but_uses_whole_receptor_detector(self):
+        options = ReceptorPreparationOptions(self.input, self.root, "ligand", ligand_resname="LIG",
+            ligand_chain_id="B", ligand_residue_number="601", pocket_engine="p2rank",
+            predict_pockets_with_ligand=True)
+        plan = build_receptor_preparation_plan(self.executable, options)
+        self.assertEqual(options.site_mode, "ligand")
+        self.assertEqual(plan.request.environment["DOCKING_UNIVERSAL_SITE_MODE"], "pockets")
+        self.assertEqual(plan.request.environment["DOCKING_UNIVERSAL_POCKET_ENGINE"], "p2rank")
+        self.assertEqual(plan.request.environment["DOCKING_UNIVERSAL_LIGAND_RESSEQ"], "601")
+        with self.assertRaisesRegex(ValueError, "bound-ligand mode"):
+            build_receptor_preparation_plan(self.executable, ReceptorPreparationOptions(
+                self.input, self.root, "pockets", predict_pockets_with_ligand=True))
+
     def test_approved_component_library_is_passed_to_reduce2(self):
         library = self.root / "managed geostd"
         library.mkdir()

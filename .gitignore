@@ -8,6 +8,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 node_modules/
+/.benchmark-tools/
 /state/
 *_control/
 *_runs/
@@ -16,3 +17,12 @@ tests/output/*
 !tests/output/.gitkeep
 runs/*
 !runs/README.md
+
+# Local scientific studies, generated reports and downloaded/build artifacts.
+# Keep validation scripts and compact test fixtures versioned, not raw runs.
+/.docking-universal-state/
+/GUI Tests/
+/output/
+/tmp/
+/validation/runs/
+/tests/fixtures/*.xlsx.inspect.ndjson

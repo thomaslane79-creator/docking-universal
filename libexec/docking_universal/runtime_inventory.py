@@ -63,7 +63,7 @@ def discover_poseedit_runtime(
     assets = renderer_root / "assets"
     required_assets = (
         "interaction-drawer.js", "d3.min.js", "fraction.min.js",
-        "smiles-drawer.min.js", "pack-scene.js",
+        "smiles-drawer.min.js", "pack-scene.js", "residue-scale.js",
     )
     missing_assets = [name for name in required_assets if not (assets / name).is_file()]
     components = {

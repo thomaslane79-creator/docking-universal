@@ -28,6 +28,12 @@ test:
 	./tests/test_receptor_preparation_routes.sh
 	PYTHONPATH="$(CURDIR)/libexec$${PYTHONPATH:+:$$PYTHONPATH}" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_run_selection.py tests/test_guided_options.py tests/test_report_cavity.py tests/test_pdbfixer_preclean.py tests/test_ccd_audit.py tests/test_protonation_audit.py tests/test_protocol_types.py tests/test_protocol_region.py tests/test_protocol_finalization.py tests/test_protocol_finalization_integration.py tests/test_graphical_chooser.py tests/test_depict2d.py tests/test_retained_report_artifacts.py tests/test_process_runner.py tests/test_process_adapter.py tests/test_job_service.py tests/test_runtime_inventory.py tests/test_pymol_spike.py tests/test_pymol_adapter.py tests/test_viewer_contracts.py tests/test_state_transactions.py tests/test_application_host.py tests/test_host_client.py tests/test_application_host_controller.py tests/test_desktop_workspace.py tests/test_study_viewer.py tests/test_preparation_service.py tests/test_geostd_components.py tests/test_meeko_template_bridge.py tests/test_protocol_workflow.py tests/test_screening_service.py tests/test_screening_workflow.py tests/test_reuse_equivalence.py tests/test_dock_runner.py tests/test_pocket_evidence.py tests/test_pocket_review_service.py tests/test_structural_evidence.py tests/test_conformational_evidence.py tests/test_pocket_engines.py tests/test_p2rank_adapter.py tests/test_multisite_protocol.py tests/test_multisite_report_figures.py tests/test_application_contracts.py
 
+	PYTHONPATH="$(CURDIR)/libexec$${PYTHONPATH:+:$$PYTHONPATH}" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_evidence_interactions.py
+	PYTHONPATH="$(CURDIR)/libexec$${PYTHONPATH:+:$$PYTHONPATH}" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_control_site_review.py tests/test_reduce2_native_output.py
+	PYTHONPATH="$(CURDIR)/libexec$${PYTHONPATH:+:$$PYTHONPATH}" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_control_pose_landscape.py
+	PYTHONPATH="$(CURDIR)/libexec$${PYTHONPATH:+:$$PYTHONPATH}" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_mmff_variants.py
+	PYTHONPATH="$(CURDIR)/libexec$${PYTHONPATH:+:$$PYTHONPATH}" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_vina_batch.py tests/test_vina_execution_benchmark.py tests/test_vina_concurrency_benchmark.py
+
 test-integration:
 	./bin/docking-universal validate integration
 

@@ -8,7 +8,7 @@ if (!outputRoot || !assetsRoot) throw new Error('usage: build_page.mjs OUTPUT_RO
 fs.mkdirSync(outputRoot, {recursive: true});
 for (const name of [
   'interaction-drawer.js', 'd3.min.js', 'fraction.min.js',
-  'smiles-drawer.min.js', 'pack-scene.js',
+  'smiles-drawer.min.js', 'pack-scene.js', 'residue-scale.js',
 ]) {
   fs.copyFileSync(path.join(assetsRoot, name), path.join(outputRoot, name));
 }
@@ -49,10 +49,15 @@ html,body{margin:0;background:#fff;font-family:Arial,sans-serif}
 </style></head><body><div id="wrap"><svg id="draw-area"></svg><div id="legend"><span><i class="hbond"></i>Hydrogen bond</span><span><i class="hydro"></i>Hydrophobic contact</span><span id="pi-legend"><i class="pipi"></i>π–π stacking</span></div></div>
 <script src="d3.min.js"></script><script src="fraction.min.js"></script>
 <script src="smiles-drawer.min.js"></script><script src="interaction-drawer.js"></script>
-<script src="actual-pose-data.js"></script><script src="plip-conversion-data.js"></script><script src="hydrophobic-layout-data.js"></script><script src="pack-scene.js"></script><script>
+<script src="actual-pose-data.js"></script><script src="plip-conversion-data.js"></script><script src="hydrophobic-layout-data.js"></script><script src="residue-scale.js"></script><script src="pack-scene.js"></script><script>
 try {
   const scene = window.actualPoseScene.scene;
   const plip = window.plipConversion;
+  window.__contactLabels = ['hydrogenBonds', 'hydrophobicContacts', 'piStackings']
+    .flatMap(kind => plip[kind] || []).map(contact => ({
+      text: contact.residueName[0] + contact.residueName.slice(1).toLowerCase() + contact.residueNumber + contact.chain,
+      residue: {name: contact.residueName, number: contact.residueNumber, chain: contact.chain}
+    }));
   if (!(plip.piStackings || []).length) document.getElementById('pi-legend').remove();
   const templates = window.InteractionDrawerTemplates;
   const byAtom = Object.fromEntries(scene.structures[0].atoms.map(atom => [atom.id, atom]));
@@ -60,6 +65,7 @@ try {
   function addTemplate(name, label, center, contact, targetPicker) {
     const ligandAtomId = contact.ligandAtomId;
     const structure = structuredClone(templates[name].scene.structures[0]);
+    window.matchResidueBondScale(structure, scene.structures[0]);
     const sid = scene.structures.length;
     const idMap = new Map();
     structure.atoms.forEach((atom, index) => idMap.set(atom.id, 50000 + sid * 1000 + index));
@@ -131,6 +137,7 @@ try {
     const templateName=contact.residueName+'SIDECHAIN';
     if (!templates[templateName]) return;
     const structure=structuredClone(templates[templateName].scene.structures[0]);
+    window.matchResidueBondScale(structure, scene.structures[0]);
     const sid=scene.structures.length;
     const idMap=new Map();
     structure.atoms.forEach((atom,atomIndex)=>idMap.set(atom.id,80000+sid*1000+atomIndex));
@@ -196,7 +203,15 @@ try {
   scene.hydrophobicContacts=window.hydrophobicLayout.hydrophobicContacts;
   scene.annotations=window.hydrophobicLayout.annotations;
   window.packScene(scene);
-  const drawer = new window.InteractionDrawerClass('draw-area', {allowInteraction:false});
+  window.__expectedSceneCounts = Object.fromEntries(
+    ['structures','annotations','hydrophobicContacts','atomPairInteractions','piStackings']
+      .map(key => [key, (scene[key] || []).length]));
+  // Static diagrams never use circle representations. Their alternate-label
+  // placement can fail at larger fonts even though the actual drawing is valid.
+  const drawer = new window.InteractionDrawerClass('draw-area', {
+    allowInteraction:false, ...window.poseDiagramStyle,
+    allowedStructureRepresentations:{default:['default']}
+  });
   drawer.addByJSON(JSON.stringify({scene}));
   window.__sceneJson = drawer.getJson();
   window.__renderDone = true;

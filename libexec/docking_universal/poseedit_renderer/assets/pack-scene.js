@@ -1,7 +1,9 @@
 // Deterministic placement using padded atom labels, sampled bonds and contours.
 window.packScene = function(scene) {
   const context=document.createElement('canvas').getContext('2d');
-  context.font='6.5px Arial';
+  const textSize = window.poseDiagramStyle?.textSize || 6.5;
+  const textHeight = textSize + 3.5;
+  context.font=textSize+'px Arial';
   const textWidth=text=>context.measureText(text).width;
   const rect = (x,y,w,h)=>({l:x-w/2,r:x+w/2,t:y-h/2,b:y+h/2});
   const hit=(a,b)=>a.l<b.r && b.l<a.r && a.t<b.b && b.t<a.b;
@@ -13,7 +15,7 @@ window.packScene = function(scene) {
   function geometry(s) {
     const atoms=new Map(s.atoms.map(a=>[a.id,a]));
     return s.atoms.map(a=>rect(a.coordinates.x,a.coordinates.y,
-      a.label && a.element!=='C' ? Math.max(8,textWidth(a.label)+4):7,10)).concat(
+      a.label && a.element!=='C' ? Math.max(8,textWidth(a.label)+4):7,textHeight)).concat(
       s.bonds.flatMap(b=>line(atoms.get(b.from).coordinates,atoms.get(b.to).coordinates).map(pointBox)));
   }
   const contourBoxes=scene.hydrophobicContacts.flatMap(c=>c.controlPoints.slice(1).flatMap((p,i)=>line(c.controlPoints[i],p).map(pointBox)));
@@ -46,7 +48,7 @@ window.packScene = function(scene) {
         for(const p of route.filter(p=>Math.hypot(p.x-target.x,p.y-target.y)>(pi?25:13))) {
           if(boxes.some(o=>hit(pointBox(p),o)))collisions++;
         }
-        const labelObstacles=s.atoms.filter(a=>a.element==='R' && a.label).map(a=>rect(a.coordinates.x,a.coordinates.y,textWidth(a.label)+4,10));
+        const labelObstacles=s.atoms.filter(a=>a.element==='R' && a.label).map(a=>rect(a.coordinates.x,a.coordinates.y,textWidth(a.label)+4,textHeight));
         for(const p of route) if(labelObstacles.some(o=>hit(pointBox(p),o)))collisions++;
         // The first part of a ring-centroid connector necessarily traverses its own ring.
         for(const p of route.filter(p=>Math.hypot(p.x-source.x,p.y-source.y)>27)) {
@@ -65,7 +67,7 @@ window.packScene = function(scene) {
   placeResidues();
   const labelRecords=[];
   for(const a of scene.annotations) {
-    const origin={...a.coordinates},w=textWidth(a.label)+3,h=9;
+    const origin={...a.coordinates},w=textWidth(a.label)+3,h=textHeight;
     let best=null;
     const contour=scene.hydrophobicContacts.find(c=>c.id===a.additionalInformation.splineId);
     const cps=contour.controlPoints;

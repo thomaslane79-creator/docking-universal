@@ -120,6 +120,11 @@ class JobService:
             )
             state.jobs.append(job)
             state.current_stage = stage
+            if stage == 'screening':
+                # Previous results remain viewable, but their terminal status
+                # must not masquerade as completion of the new screen. Output
+                # registration replaces this status only after the worker ends.
+                state.workflow_data['latest_screening_status'] = 'running'
             state.completion_status = CompletionStatus.RUNNING
         log_directory = Path(request.log_directory)
         log_directory.mkdir(parents=True, exist_ok=True)

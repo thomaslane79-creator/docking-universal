@@ -133,6 +133,26 @@ if [ ! -x "$p2rank_target/prank" ] && [ ! -f "$p2rank_target/prank.bat" ]; then
   trap - EXIT HUP INT TERM
 fi
 
+printf '\nInstalling checksum-verified P2Rank 2.6-alpha visualization (stable prediction is unchanged)\n'
+p2rank_visual_target="$p2rank_parent/p2rank-2.6-alpha"
+if [ ! -x "$p2rank_visual_target/prank" ] && [ ! -f "$p2rank_visual_target/prank.bat" ]; then
+  p2rank_visual_archive=$(mktemp "${TMPDIR:-/tmp}/p2rank_visual.XXXXXX.tar.gz")
+  trap 'rm -f "$p2rank_visual_archive"' EXIT HUP INT TERM
+  run_with_retry "P2Rank alpha visualization download" \
+    curl -L --fail --show-error --output "$p2rank_visual_archive" \
+    https://github.com/rdk/p2rank/releases/download/2.6-alpha/p2rank_2.6-alpha.tar.gz
+  actual_sha=$(shasum -a 256 "$p2rank_visual_archive" | awk '{print $1}')
+  [ "$actual_sha" = d0284cf47e2605c21c6285b30076f33cb7e509359fb9ed4b1808c3274f6f2592 ] || {
+    printf 'Error: P2Rank visualization archive checksum mismatch.\n' >&2
+    exit 1
+  }
+  mkdir -p "$p2rank_visual_target"
+  tar -xzf "$p2rank_visual_archive" --strip-components=1 -C "$p2rank_visual_target"
+  chmod +x "$p2rank_visual_target/prank" 2>/dev/null || true
+  rm -f "$p2rank_visual_archive"
+  trap - EXIT HUP INT TERM
+fi
+
 printf '\nInstalling the Docking Universal command into the main environment\n'
 "$conda_command" run --no-capture-output -n docking-universal \
   make -C "$project_dir" install-conda

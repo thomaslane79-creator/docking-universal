@@ -6,6 +6,8 @@ import unittest
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
+from urllib.error import URLError
 
 from docking_universal.application import StudyController
 from docking_universal.host import CommandDispatcher
@@ -47,6 +49,9 @@ class ProtocolWorkflowTests(unittest.TestCase):
             + "printf 'RECEPTOR\\n' > \"$root/receptor/${name}.pdbqt\"\n"
             + "printf '%s\\n' \"${MEEKO_ADD_TEMPLATES:-}\" > \"$root/receptor/meeko-template-environment.txt\"\n"
             + "printf 'complete\\n' > \"$root/run.log\"\n"
+            # This is synthetic preparation, but even its retained report must
+            # identify the producing tool; never relax production provenance.
+            + "printf '{\"engine\":\"fpocket\",\"engine_version\":\"synthetic-test-fixture\"}\\n' > \"$root/cavity/pocket_detection_provenance.json\"\n"
             + "printf 'unchanged preliminary report\\n' > \"$root/preliminary-pocket-review.pdf\"\n"
             + "printf 'retained static image\\n' > \"$root/pocket-overview.png\"\n"
             + "printf 'retained report view\\n' > \"$root/cavity_selected_box.pse\"\n"
@@ -173,6 +178,81 @@ class ProtocolWorkflowTests(unittest.TestCase):
             artifact.kind == "pocket_evidence" for artifact in reviewed.artifacts
         ))
         runner.shutdown()
+
+    def test_local_only_preparation_never_invokes_public_evidence_collector(self):
+        runner = ProtocolWorkflowRunner(self.controller, self.executable())
+        try:
+            with patch.object(runner, '_collect_pdb_pocket_evidence') as collector:
+                runner.start_preparation(
+                    'workflow', {
+                        'input_pdb': str(self.input),
+                        'working_directory': str(self.root / 'local-work'),
+                        'site_mode': 'pockets', 'pdb_pocket_evidence': 'off',
+                    }, request_id='local-only',
+                    expected_revision=self.store.load('workflow').revision,
+                )
+                state = self.wait_for(lambda item: bool(item.pending_decisions))
+                collector.assert_not_called()
+            self.assertEqual(state.workflow_data['study_setup']['pdb_pocket_evidence'], 'off')
+            self.assertEqual(state.pending_decisions[0].kind, 'select_pockets')
+            self.assertEqual(state.jobs[0].status, JobStatus.COMPLETED)
+        finally:
+            runner.shutdown()
+
+    def test_offline_evidence_failure_preserves_preparation_and_region_decision(self):
+        executable = self.executable()
+        executable.write_text('\n'.join(
+            line for line in executable.read_text().splitlines()
+            if 'pdb_ligand_site_evidence.json' not in line
+        ) + '\n')
+        runner = ProtocolWorkflowRunner(self.controller, executable)
+        try:
+            with patch('docking_universal_pocket_evidence.collect_pocket_evidence',
+                       side_effect=URLError('offline test fixture')):
+                runner.start_preparation(
+                    'workflow', {
+                        'input_pdb': str(self.input),
+                        'working_directory': str(self.root / 'offline-work'),
+                        'site_mode': 'pockets', 'pdb_pocket_evidence': 'related-structures',
+                    }, request_id='offline-evidence',
+                    expected_revision=self.store.load('workflow').revision,
+                )
+                state = self.wait_for(lambda item: bool(item.pending_decisions))
+            lookup = state.workflow_data['pdb_pocket_evidence']
+            self.assertEqual(lookup['status'], 'unavailable')
+            self.assertIn('offline test fixture', lookup['detail'])
+            self.assertTrue(Path(lookup['record']).is_file())
+            self.assertEqual(state.pending_decisions[0].kind, 'select_pockets')
+            self.assertEqual(state.jobs[0].status, JobStatus.COMPLETED)
+            self.assertTrue(any(
+                item.kind == 'prepared_receptor_structure' and Path(item.path).is_file()
+                for item in state.artifacts
+            ))
+        finally:
+            runner.shutdown()
+
+    def test_partial_download_coverage_is_retained_for_gui_and_protocol(self):
+        root = self.root / 'partial-preparation'
+        evidence = root / 'cavity' / 'pdb_site_evidence'
+        evidence.mkdir(parents=True)
+        (evidence / 'pdb_ligand_site_evidence.json').write_text(json.dumps({
+            'status': 'completed', 'candidate_entries': ['1ABC', '2ABC'],
+            'evidence': [], 'skipped': [
+                {'entry': '1ABC', 'reason': 'download failed: offline'},
+                {'entry': '2ABC', 'reason': 'no qualifying alignment'},
+            ],
+        }))
+        runner = ProtocolWorkflowRunner(self.controller, self.executable())
+        try:
+            runner._collect_pdb_pocket_evidence('workflow', SimpleNamespace(
+                output_root=root, request=SimpleNamespace(command=['prepare', str(self.input)])))
+            lookup = self.store.load('workflow').workflow_data['pdb_pocket_evidence']
+            self.assertEqual(lookup['coverage']['failed_entry_count'], 1)
+            self.assertEqual(lookup['coverage']['candidate_entry_count'], 2)
+            from docking_universal.services.pdb_lookup_status import lookup_notice
+            self.assertIn('incomplete', lookup_notice(lookup)[0])
+        finally:
+            runner.shutdown()
 
     def test_reviewed_meeko_template_path_reaches_the_supervised_preparation(self):
         template = self.root / "reviewed-meeko-templates.json"

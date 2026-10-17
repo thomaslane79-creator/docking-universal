@@ -180,6 +180,27 @@ class JobServiceTests(unittest.TestCase):
         self.assertEqual(state.jobs[0].status, JobStatus.CANCELLED)
         self.assertEqual(state.completion_status, CompletionStatus.CANCELLED)
 
+    def test_new_screen_does_not_inherit_previous_completed_status(self):
+        self.controller.store.update('job-study', lambda state: state.workflow_data.update(
+            latest_screening_status='completed', latest_screening_output='/retained/previous-screen'))
+        cancel = threading.Event()
+        worker = threading.Thread(target=JobService(self.controller).run,
+            args=('job-study','screening',self.request('import time; time.sleep(2)','new-screen')),
+            kwargs={'cancel_event':cancel})
+        worker.start()
+        try:
+            deadline=time.monotonic()+2
+            while time.monotonic()<deadline:
+                state=self.controller.get_study('job-study')
+                if state.active_job:break
+                time.sleep(.01)
+            self.assertIsNotNone(state.active_job)
+            self.assertEqual(state.workflow_data['latest_screening_status'],'running')
+            self.assertEqual(state.workflow_data['latest_screening_output'],'/retained/previous-screen')
+        finally:
+            cancel.set();worker.join(3)
+        self.assertFalse(worker.is_alive())
+
     def test_complete_logs_are_registered_while_stage_is_running(self):
         cancel = threading.Event()
         worker = threading.Thread(

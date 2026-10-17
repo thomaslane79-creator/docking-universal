@@ -1,9 +1,11 @@
 import hashlib
 import json
+import os
 import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from docking_universal.application import StudyController
 from docking_universal.host import CommandDispatcher
@@ -65,9 +67,11 @@ class ScreeningWorkflowTests(unittest.TestCase):
         screen = executable_dir / "docking-universal-run.py"
         screen.write_text(
             "#!/usr/bin/env python3\n"
-            "import json,sys\nfrom pathlib import Path\n"
+            "import json,sys,os\nfrom pathlib import Path\n"
             "args=sys.argv[1:]; out=Path(args[args.index('--out')+1]); "
             "(out/'report').mkdir(parents=True); (out/'compounds/ligand').mkdir(parents=True); "
+            "(out/'launch_args.json').write_text(json.dumps(args)); "
+            "(out/'launch_cpu.json').write_text(json.dumps(os.environ.get('DOCKING_UNIVERSAL_CPU'))); "
             "(out/'study_manifest.json').write_text('{}\\n'); "
             "(out/'report/study_summary.json').write_text('{}\\n'); "
             "(out/'report/screen.pdf').write_bytes(b'%PDF-1.4\\n%%EOF\\n'); "
@@ -141,6 +145,83 @@ class ScreeningWorkflowTests(unittest.TestCase):
         self.assertEqual(state.workflow_data["latest_screening_status"], "completed")
         self.assertEqual(state.jobs[-1].stage, "screening")
         self.assertEqual(state.jobs[-1].status.value, "completed")
+        args = json.loads((self.root / "screen-out/launch_args.json").read_text())
+        self.assertEqual(args[args.index("--cluster-rmsd") + 1], "2.0")
+
+    def test_selected_library_snapshot_is_passed_to_the_worker_and_stale_input_is_rejected(self):
+        from rdkit import Chem
+        from docking_universal.services.ligand_library import inspect_ligand_library
+        with Chem.SDWriter(str(self.ligands)) as writer:
+            writer.write(Chem.MolFromSmiles('CCO'))
+            writer.write(Chem.MolFromSmiles('CCN'))
+        library = inspect_ligand_library(self.ligands)
+        selection = {'fingerprint': library['fingerprint'], 'record_ids': [library['records'][1]['record_id']]}
+        response = self.dispatcher.dispatch(Command(
+            'screen', 'session', 'selected-run', 'start_screening',
+            {'ligand_source': str(self.ligands), 'ligand_selection': selection,
+             'output_directory': str(self.root / 'selected-out'), 'exploratory_use_approved': True},
+            self.store.load('screen').revision))
+        self.assertEqual(response.status, 'applied', response.error)
+        self.wait_for(lambda state: state.workflow_data.get('latest_screening_status') == 'completed')
+        args = json.loads((self.root / 'selected-out/launch_args.json').read_text())
+        selected_path = Path(args[args.index('--ligand-selection') + 1])
+        self.assertEqual(json.loads(selected_path.read_text()), selection)
+        self.ligands.write_text(self.ligands.read_text() + '\n')
+        rejected = self.dispatcher.dispatch(Command(
+            'screen', 'session', 'stale-run', 'start_screening',
+            {'ligand_source': str(self.ligands), 'ligand_selection': selection,
+             'output_directory': str(self.root / 'never-started'), 'exploratory_use_approved': True},
+            self.store.load('screen').revision))
+        self.assertEqual(rejected.status, 'rejected')
+        self.assertIn('changed after review', rejected.error)
+        self.assertFalse((self.root / 'never-started').exists())
+
+    def test_host_screening_defaults_to_one_point_five_angstrom(self):
+        response = self.dispatcher.dispatch(Command(
+            "screen", "session", "screen-default", "start_screening",
+            {"ligand_source": str(self.ligands), "output_directory": str(self.root / "default-out"),
+             "exploratory_use_approved": True},
+            self.store.load("screen").revision,
+        ))
+        self.assertEqual(response.status, "applied")
+        self.wait_for(lambda state: state.workflow_data.get("latest_screening_status") == "completed")
+        args = json.loads((self.root / "default-out/launch_args.json").read_text())
+        self.assertEqual(args[args.index("--cluster-rmsd") + 1], "1.5")
+
+    def test_screening_cpu_override_is_child_only_and_default_inherits(self):
+        original_bundle = self.bundle.read_bytes()
+        with patch.dict(os.environ, {'DOCKING_UNIVERSAL_CPU': '10'}):
+            for index, cpu in enumerate((None, 0, 8, 12)):
+                output = self.root / f'cpu-{index}'
+                payload = {'ligand_source': str(self.ligands), 'output_directory': str(output),
+                           'exploratory_use_approved': True}
+                if cpu is not None:
+                    payload['cpu'] = cpu
+                response = self.dispatcher.dispatch(Command(
+                    'screen', 'session', f'cpu-{index}', 'start_screening', payload,
+                    self.store.load('screen').revision))
+                self.assertEqual(response.status, 'applied', response.error)
+                self.wait_for(lambda state: state.jobs[-1].request_id == f'cpu-{index}'
+                              and state.workflow_data.get('latest_screening_status') == 'completed'
+                              and state.jobs[-1].status.value == 'completed')
+                self.assertEqual(json.loads((output / 'launch_cpu.json').read_text()),
+                                 '10' if cpu is None else str(cpu))
+                self.assertEqual(os.environ['DOCKING_UNIVERSAL_CPU'], '10')
+        self.assertEqual(self.bundle.read_bytes(), original_bundle)
+
+    def test_invalid_screening_cpu_is_rejected_before_output_or_job(self):
+        original = self.store.path_for('screen').read_bytes()
+        for index, cpu in enumerate((-1, 1.5, True, '12', 1025)):
+            output = self.root / f'bad-cpu-{index}'
+            response = self.dispatcher.dispatch(Command(
+                'screen', 'session', f'bad-cpu-{index}', 'start_screening',
+                {'ligand_source': str(self.ligands), 'output_directory': str(output),
+                 'exploratory_use_approved': True, 'cpu': cpu},
+                self.store.load('screen').revision))
+            self.assertEqual(response.status, 'rejected')
+            self.assertIn('CPU threads', str(response.error))
+            self.assertFalse(output.exists())
+            self.assertEqual(self.store.path_for('screen').read_bytes(), original)
 
     def test_exact_pose_request_runs_serialized_worker_and_registers_result(self):
         from rdkit import Chem

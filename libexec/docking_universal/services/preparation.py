@@ -42,6 +42,7 @@ class ReceptorPreparationOptions:
     receptor_ph: float = 7.4
     reduce2: str = "auto"
     geostd_library: Path | None = None
+    predict_pockets_with_ligand: bool = False
 
     def validate(self) -> None:
         if (
@@ -53,6 +54,10 @@ class ReceptorPreparationOptions:
             )
         if self.site_mode not in {"ligand", "pockets"}:
             raise ValueError("GUI preparation requires an explicit ligand or pockets site mode")
+        if not isinstance(self.predict_pockets_with_ligand, bool):
+            raise ValueError("Predict pockets with ligand must be a boolean")
+        if self.predict_pockets_with_ligand and self.site_mode != "ligand":
+            raise ValueError("Additional pocket prediction requires selected bound-ligand mode")
         if self.site_mode == "ligand" and not self.ligand_resname:
             raise ValueError("Ligand mode requires an explicitly selected bound-ligand residue name")
         if self.site_mode == "ligand" and not all((
@@ -136,7 +141,9 @@ def build_receptor_preparation_plan(
     environment = dict(base_environment or os.environ)
     environment.update({
         "FEEDBACK_LEVEL": options.feedback_level,
-        "DOCKING_UNIVERSAL_SITE_MODE": options.site_mode,
+        # Predict on the prepared, ligand-removed receptor. The host retains
+        # the exact input-ligand box separately; it is not a predicted cavity.
+        "DOCKING_UNIVERSAL_SITE_MODE": "pockets" if options.predict_pockets_with_ligand else options.site_mode,
         "DOCKING_UNIVERSAL_CAVITY_MODE": str(options.cavity_mode),
         "DOCKING_UNIVERSAL_MAX_POCKETS": str(options.max_pockets),
         "DOCKING_UNIVERSAL_CENTER_MODE": options.center_mode,

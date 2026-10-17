@@ -317,8 +317,15 @@ class BridgeCore:
             for first, second in edges:
                 graphic.extend((cgo.VERTEX, *corners[first], cgo.VERTEX, *corners[second]))
             graphic.append(cgo.END)
-            self.cmd.delete(name)
-            self.cmd.load_cgo(graphic, name)
+            view = self.cmd.get_view()
+            auto_zoom = self.cmd.get_setting_int("auto_zoom")
+            try:
+                self.cmd.set("auto_zoom", 0)
+                self.cmd.delete(name)
+                self.cmd.load_cgo(graphic, name, zoom=0)
+            finally:
+                self.cmd.set("auto_zoom", auto_zoom)
+                self.cmd.set_view(view)
             self.boxes[name] = {
                 "center": center, "size": size, "color": color_name,
                 "replaces": source_object_name,

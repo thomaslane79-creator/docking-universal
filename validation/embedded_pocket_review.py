@@ -45,7 +45,7 @@ def main():
                              pos=plot.positions()[index].toPoint())
             check("P2 plot opens embedded engine", adapter.is_alive())
             check("matching table row selected", window.candidates.selectionModel().selectedRows()[0].row() == 1)
-            check("interactive tab active", window.review_tabs.currentIndex() == 1)
+            check("interactive surface active", window.review_tabs.currentWidget() is window.live_page)
             check("receptor loaded", adapter.cmd.count_atoms("polymer") > 0)
             QTest.qWait(100)
             geometries = []
@@ -69,6 +69,26 @@ def main():
                 compact.append([widget.width(), widget.height(), window.width(), window.height()])
             result["compact_candidate_geometries"] = compact
             check("compact candidate switches keep viewport geometry", all(g == compact[0] for g in compact))
+            window._select_plotted_candidate("P1")
+            window.pocket_evidence_panel.table.selectRow(0)
+            QTest.qWait(100)
+            evidence_switches = []
+            for row in (1, 0, 1, 0):
+                item = window.candidates.item(row, 0)
+                QTest.mouseClick(window.candidates.viewport(), QtCore.Qt.MouseButton.LeftButton,
+                                 pos=window.candidates.visualItemRect(item).center())
+                # Cross the one-second workspace poll; sub-second checks miss
+                # redundant table rebuilds that occur just after navigation.
+                QTest.qWait(1100)
+                evidence_switches.append([
+                    window.width(), window.height(), window.centralWidget().width(),
+                    widget.width(), widget.height(), window.pocket_evidence_dock.width(),
+                    window.pocket_evidence_panel.verticalScrollBar().value(),
+                    *[window.pocket_evidence_panel.table.columnWidth(i) for i in range(6)],
+                ])
+            result["evidence_switch_geometries"] = evidence_switches
+            check("evidence selection then table clicks keep layout",
+                  all(g == evidence_switches[0] for g in evidence_switches))
             observations = window.state.workflow_data["pocket_candidates"][0]["evidence"]["experimental_ligand_evidence"]["observations"]
             ligand = observations[0]["aligned_ligand_pdb"]
             # Exercise the previously broken first-open evidence route too.

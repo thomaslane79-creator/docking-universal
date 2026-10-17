@@ -28,16 +28,71 @@ def _sha256(path: Path) -> str:
 
 
 def ordered_pocket_boxes(cavity: Path | str) -> list[Path]:
+    cavity = Path(cavity)
+    retained_file = cavity / "selected_pocket_records.txt"
+    retained_numbers = set()
+    if retained_file.is_file():
+        for line in retained_file.read_text(errors="replace").splitlines():
+            fields = line.split("|", 2)
+            if len(fields) < 2:
+                continue
+            match = re.search(r"pocket(\d+)_atm\.pdb$", fields[1])
+            if match:
+                retained_numbers.add(int(match.group(1)))
     numbered = []
-    for path in Path(cavity).glob("*.conf"):
+    for path in cavity.glob("*.conf"):
         match = re.search(r"_pocket(\d+)\.conf$", path.name)
-        if match:
+        if match and (not retained_numbers or int(match.group(1)) in retained_numbers):
             numbered.append((int(match.group(1)), path))
     return [path for _, path in sorted(numbered, key=lambda item: (item[0], item[1].name))]
 
 
 def _safe_label(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._-") or "site"
+
+
+def input_ligand_candidate(target: str, cavity: Path, setup: dict[str, Any]) -> dict[str, Any]:
+    """Retain the exact input ligand independently of any detector or network.
+
+    Use the ligand-centroid 26 Å box policy, expanding individual axes if
+    needed to enclose a large ligand plus 4 Å. This is not cavity geometry.
+    """
+    source = Path(setup["input_pdb"])
+    identity = (setup["ligand_resname"], setup["ligand_chain_id"], str(setup["ligand_residue_number"]),
+                setup.get("ligand_insertion_code") or "")
+    altloc = setup.get("ligand_altloc") or ""
+    lines, coordinates = [], []
+    for line in source.read_text().splitlines():
+        if not line.startswith("HETATM") or (
+            line[17:20].strip(), line[21:22].strip() or "_", line[22:26].strip(), line[26:27].strip()
+        ) != identity:
+            continue
+        if line[16:17].strip() and line[16:17].strip() != altloc:
+            if not altloc:
+                raise ValueError("Choose one alternate location for the bound-ligand site")
+            continue
+        element = line[76:78].strip().upper() or line[12:16].strip().lstrip("0123456789")[:1].upper()
+        if element in {"H", "D"}:
+            continue
+        coordinates.append(tuple(float(line[start:start + 8]) for start in (30, 38, 46)))
+        lines.append(line)
+    if not coordinates:
+        raise ValueError("The exact selected input ligand is unavailable for bound-site review")
+    geometry = {}
+    for axis, values in zip("xyz", zip(*coordinates)):
+        center = sum(values) / len(values)
+        geometry[f"center_{axis}"] = center
+        geometry[f"size_{axis}"] = max(26., 2 * max(abs(value - center) for value in values) + 8.)
+    ligand_path = cavity / f"{target}_input_bound_ligand.pdb"
+    ligand_path.write_text("\n".join(lines) + "\nEND\n")
+    box = write_box_files(cavity / f"{target}_bound_ligand.conf", geometry)
+    return {"label": "B1", "path": box,
+            "description": f"input bound-ligand site: {identity[0]} {identity[1]}:{identity[2]}{identity[3]} (not a predicted pocket)",
+            "evidence": {"kind": "ligand_defined", "source": "input_bound_ligand", "automation_eligible": True,
+                         "input_structure_sha256": setup.get("input_structure_sha256"),
+                         "input_ligand_identity": dict(zip(("resname", "chain_id", "residue_number", "insertion_code"), identity)),
+                         "input_ligand_reference": str(ligand_path.resolve()),
+                         "evidence_role": "input site definition only; not independent supporting evidence"}}
 
 
 def _pocket_coordinate_paths(cavity: Path, label: str) -> list[Path]:
@@ -274,6 +329,7 @@ class PocketReviewInputs:
     boxes: tuple[Path, ...]
     pocket_evidence_record: Path | None = None
     review_scene: Path | None = None
+    bound_ligand_setup: dict[str, Any] | None = None
 
 
 class PocketReviewService:
@@ -315,10 +371,27 @@ class PocketReviewService:
             evidence,
             cavity,
         )
+        if inputs.bound_ligand_setup:
+            bound = input_ligand_candidate(inputs.target, cavity, inputs.bound_ligand_setup)
+            geometry = config_geometry(bound["path"])
+            # Do not resurrect the earlier duplicate-box bug. An effectively
+            # identical box keeps both provenance sources, not two options.
+            duplicate = next((item for item in mappings if all(
+                abs(config_geometry(item["path"])[key] - value) <= .5 for key, value in geometry.items()
+            )), None)
+            if duplicate:
+                duplicate["description"] += "; also the exact input bound-ligand site"
+                duplicate["evidence"]["input_bound_ligand"] = bound["evidence"]
+            else:
+                mappings.append(bound)
         if not mappings:
             raise ValueError("No selectable pocket candidates could be built from the retained artifacts")
 
         artifacts: list[ArtifactRecord] = []
+        if inputs.bound_ligand_setup:
+            ligand_path = cavity / f"{inputs.target}_input_bound_ligand.pdb"
+            artifacts.append(ArtifactRecord("input-bound-ligand", "bound_ligand", str(ligand_path.resolve()),
+                                            _sha256(ligand_path), "Exact input ligand retained without fitting"))
         candidates: list[PocketCandidate] = []
         for rank, item in enumerate(mappings, 1):
             path = Path(item["path"]).resolve()

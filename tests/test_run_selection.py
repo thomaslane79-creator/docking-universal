@@ -18,6 +18,47 @@ SPEC.loader.exec_module(RUNNER)
 
 
 class RunCommandSyntaxTests(unittest.TestCase):
+    def test_materialized_protocol_is_retained_without_copying_arbitrary_parents(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            extracted = root/'extracted'
+            protocol = extracted/'protocol/protocol.json'
+            protocol.parent.mkdir(parents=True)
+            protocol.write_text('{"engine":"adgpu"}')
+            (extracted/'.source_protocol_filename').write_text('selected.duprotocol')
+            (extracted/'bundle_manifest.json').write_text('{}')
+            (protocol.parent/'assets').mkdir()
+            (protocol.parent/'assets/receptor.pdbqt').write_text('retained input')
+            retained = RUNNER.retain_materialized_protocol(protocol, root/'study')
+            self.assertEqual(retained.read_bytes(), protocol.read_bytes())
+            self.assertEqual((retained.parent/'assets/receptor.pdbqt').read_text(), 'retained input')
+            self.assertEqual(RUNNER.protocol_source_filename(retained), 'selected.duprotocol')
+            raw = root/'arbitrary-parent/protocol.json';raw.parent.mkdir();raw.write_text('{}')
+            self.assertEqual(RUNNER.retain_materialized_protocol(raw,root/'other-study'),raw.resolve())
+            self.assertFalse((root/'other-study').exists())
+
+    def test_clustering_default_is_one_point_five_angstrom_and_override_is_preserved(self):
+        with patch.object(sys, "argv", ["docking-universal-run.py", "screen"]):
+            self.assertEqual(RUNNER.parse_args().cluster_rmsd, 1.5)
+        with patch.object(sys, "argv", ["docking-universal-run.py", "screen", "--cluster-rmsd", "2.0"]):
+            self.assertEqual(RUNNER.parse_args().cluster_rmsd, 2.0)
+
+    def test_low_level_screen_and_cluster_defaults_are_one_point_five_angstrom(self):
+        class ParserCaptured(Exception):
+            pass
+
+        def capture(parser, *args, **kwargs):
+            self.assertEqual(parser.get_default("cluster_rmsd"), 1.5)
+            raise ParserCaptured()
+
+        for script in ("docking-universal-screen.py", "docking-universal-cluster-poses.py"):
+            with self.subTest(script=script):
+                spec = importlib.util.spec_from_file_location("cluster_default_test", MODULE_PATH.with_name(script))
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                with patch.object(argparse.ArgumentParser, "parse_args", capture), self.assertRaises(ParserCaptured):
+                    module.main()
+
     def test_engine_option_distinguishes_omitted_from_explicit_request(self):
         with patch.object(sys, "argv", ["docking-universal-run.py", "screen"]):
             self.assertIsNone(RUNNER.parse_args().engine)

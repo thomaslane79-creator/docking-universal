@@ -39,6 +39,10 @@ def parse_file(path: Path):
             elif fields[:3] == ["REMARK", "VINA", "RESULT:"] and len(fields) >= 6:
                 affinity, rmsd_lower, rmsd_upper = fields[-3:]
                 score_format = "vina"
+            elif fields[:3] == ["REMARK", "AD4", "RESULT:"] and len(fields) == 4:
+                affinity = fields[3]
+                score_format = "ad4"
+                rmsd_lower = rmsd_upper = ""
             elif fields[:1] == ["ENDMDL"] and model is not None:
                 yield {
                     "file_path": str(path.resolve()),

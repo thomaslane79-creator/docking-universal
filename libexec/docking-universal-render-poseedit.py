@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from docking_universal.poseedit_renderer import LAYOUT_REVISION
 
 POLICY = "approved-poseedit-local-v1"
 
@@ -26,6 +27,8 @@ def main() -> int:
     parser.add_argument("--plip-xml", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--scale", type=int, choices=(1, 2, 3, 4), default=3)
+    parser.add_argument("--ligand-spacing", type=int, choices=(15, 20, 25, 30), default=15,
+                        help="2D layout spacing; retained 3D coordinates remain unchanged")
     parser.add_argument("--renderer-policy", default=POLICY)
     parser.add_argument("--ligand-id", default="UNL")
     parser.add_argument("--node", default=os.environ.get("DOCKING_UNIVERSAL_NODE", "node"))
@@ -49,7 +52,8 @@ def main() -> int:
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="du-poseedit-") as temporary:
         work = Path(temporary)
-        command(sys.executable, root / "ligand_scene.py", args.ligand, "--output", work / "actual-pose-base.json")
+        command(sys.executable, root / "ligand_scene.py", args.ligand, "--output", work / "actual-pose-base.json",
+                "--spacing", args.ligand_spacing)
         command(sys.executable, root / "plip_scene.py", "--report", args.plip_xml,
                 "--ligand", args.ligand, "--receptor", args.receptor,
                 "--output-root", work, "--ligand-id", args.ligand_id.split(":", 1)[0])
@@ -70,6 +74,8 @@ def main() -> int:
     manifest = {
         "schema_name": "docking-universal-poseedit-render", "schema_version": 1,
         "renderer_policy": POLICY, "network_used": False, "scale": args.scale,
+        "layout_revision": LAYOUT_REVISION,
+        "ligand_spacing": args.ligand_spacing,
         "ligand": str(args.ligand.resolve()), "receptor": str(args.receptor.resolve()),
         "plip_xml": str(args.plip_xml.resolve()), "collision_count": 0,
         "layout_failure_count": 0, "crop": crop,

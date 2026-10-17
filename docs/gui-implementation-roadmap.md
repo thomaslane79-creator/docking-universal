@@ -1,5 +1,56 @@
 # GUI implementation roadmap
 
+### Approved tabular compound import (2026-10-17)
+
+Implement the user's explicitly prioritized CSV/TSV/XLSX import through existing
+compound review. Auto-detection only prefills column dropdowns; **Use these
+columns** is required before compounds load. All headers are selectable, with
+optional name/ID and Excel worksheet choice. Changed mappings invalidate review
+and selection. Hash-bound approval, row diagnostics, subset materialization and
+unchanged SDF/MOL behavior are acceptance requirements; no docking is needed to
+validate this import feature.
+
+Implemented with 87 scientific/workflow and 121 GUI/host regression checks and
+22 real GUI/host/subset-materialization acceptance checks. See
+`docs/tabular-ligand-import-validation.md` for installation, source/installed
+acceptance, retained backups, format limits and cross-platform validation limits.
+
+### Site-first controls and optional bound-ligand prediction (2026-10-17)
+
+The initial source choice is labeled **Starting point for site review**, not
+site definition. It guides discovery without fixing the final docking location;
+users explicitly choose one or more regions after review, including other sites.
+
+The ligand-bound scientific pathway remains unchanged. Using the ligand's site
+and gathering other ligand evidence is the baseline; running P2Rank is optional
+additional site discovery within that same workflow, not a switch to an apo or
+ligand-free protocol. Only explicitly selected regions enter docking.
+Recommended options are labeled for users who do not know which analyses to
+choose; the user accepts recommendation labels without changing defaults or
+forcing redocking, network access, prediction or site approval.
+The visible setup uses independent checkboxes for redocking, related-PDB
+lookup and optional additional prediction. New structure versus saved-protocol
+reuse remains a source choice, not a list of every option combination.
+
+Keep related-PDB lookup available for all fresh preparation pathways, including
+known-ligand controls. Pause controls for explicit multi-region review before
+redocking; never transfer control authority to untested sites/states. Optional
+P2Rank prediction alongside an exact bound-ligand site uses the ligand-removed
+receptor and remains independent of online lookup. The input ligand is a site
+definition, not new supporting evidence. Acceptance and installation are recorded
+in `docs/site-first-ligand-evidence-validation.md`.
+
+### Interactive-only workspace (authorized 2026-10-17)
+
+Remove the static Decision figures browser and its zoom/full-screen/export
+controls. Keep pocket-score interaction, candidate approval, live PyMOL scenes,
+linked experimental/docked 2D/3D inspection and pose/cluster browsing. Scene
+discovery supports legacy report-asset mappings without decoding or displaying
+their PNGs. Static image entries no longer open from Study files; reports,
+scientific records and interactive sessions remain available. Report generation
+and persisted artifacts are unchanged. See the acceptance record under
+`validation/runs/gui-interactive-only-20261017/`.
+
 ### Scope-control rule (2026-09-24)
 
 New interface ideas go first to the

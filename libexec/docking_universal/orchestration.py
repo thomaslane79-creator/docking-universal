@@ -11,10 +11,11 @@ import os
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from .application import ActiveStageError, StudyController
 from .events import EventType
-from .models import ArtifactRecord, CompletionStatus, utc_now
+from .models import ArtifactRecord, CompletionStatus, ScientificAuthority, utc_now
 from .processes import ProcessRequest
 from .stage_feedback import control_feedback, finalization_feedback, screening_feedback
 from .protocol_finalization import FinalizationSettings, request_from_study, sha256
@@ -64,11 +65,13 @@ class ProtocolWorkflowRunner:
                 f"Study {study_id} changed from revision {expected_revision} to {state.revision}"
             )
         self._assert_no_active_stage()
+        if (state.workflow_data.get("study_setup") or {}).get("site_review_first"):
+            return self._start_reviewed_control(study_id, state, payload, request_id=request_id)
         if state.jobs or state.workflow_data.get("study_setup"):
             raise ActiveStageError("A known-ligand control requires a new study")
         allowed = {"input_structure", "output_directory", "ligand_resname", "ligand_chain_id",
                    "ligand_residue_number", "ligand_insertion_code", "engine", "control_tier",
-                   "geostd_library"}
+                   "geostd_library", "pdb_pocket_evidence", "pocket_engine", "predict_pockets_with_ligand"}
         allowed.add("meeko_template_file")
         unknown = set(payload) - allowed
         if unknown:
@@ -79,8 +82,10 @@ class ProtocolWorkflowRunner:
             raise ValueError("A control output directory is required")
         if not source.is_file() or source.suffix.lower() not in {".pdb", ".cif", ".mmcif"}:
             raise FileNotFoundError("A deposited PDB or mmCIF complex is required for control redocking")
-        if output.exists():
-            raise ValueError("Control output directory must not already exist")
+        if output.exists() and not output.is_dir():
+            raise ValueError("Control study output must be a directory")
+        if (output / "preparation").exists() or (output / "control").exists():
+            raise ValueError("Control study already contains preparation/control outputs; choose a new study folder")
         if payload.get("geostd_library"):
             geostd_library = Path(str(payload["geostd_library"])).resolve()
         else:
@@ -113,40 +118,64 @@ class ProtocolWorkflowRunner:
         script = self.preparation_executable.with_name("docking-universal-run.py")
         if not script.is_file():
             raise FileNotFoundError(f"Control workflow is missing: {script}")
-        # Legacy control scripts require PDB coordinates. Retain the original
-        # mmCIF and conversion metadata rather than changing the source silently.
-        normalized = normalize_structure_input(source, output.parent / f".{output.name}.inputs")
-        setup = {
-            "pathway": "control", "input_structure": str(source),
-            "input_pdb": str(normalized.engine_pdb_path),
-            "input_structure_format": normalized.source_format,
-            "structure_input_metadata": str(normalized.metadata_path),
-            "biological_assemblies": list(normalized.assemblies),
-            "working_directory": str(output), "site_mode": "ligand",
-            "ligand_resname": payload["ligand_resname"],
-            "ligand_chain_id": payload["ligand_chain_id"],
-            "ligand_residue_number": payload["ligand_residue_number"],
-            "engine": engine, "control_tier": tier,
-            "geostd_library": str(geostd_library),
-            "meeko_template_file": str(Path(payload["meeko_template_file"]).resolve())
-            if payload.get("meeko_template_file") else None,
-        }
-        retained, _ = self.controller.store.update(
-            study_id, lambda current: current.workflow_data.setdefault("study_setup", setup),
-            expected_revision=expected_revision,
+        return self.start_preparation(
+            study_id, {
+                "input_pdb": str(source), "working_directory": str(output / "preparation"),
+                "site_mode": "ligand", "ligand_resname": payload["ligand_resname"],
+                "ligand_chain_id": payload["ligand_chain_id"],
+                "ligand_residue_number": payload["ligand_residue_number"],
+                "feedback_level": "concise", "cavity_mode": 1, "max_pockets": 0,
+                "center_mode": "centroid", "centroid_mode": 1,
+                "pocket_engine": payload.get("pocket_engine", "p2rank"),
+                "predict_pockets_with_ligand": payload.get("predict_pockets_with_ligand", False),
+                "geostd_library": str(geostd_library),
+                "meeko_template_file": payload.get("meeko_template_file"),
+                "pdb_pocket_evidence": payload.get("pdb_pocket_evidence", "related-structures"),
+            }, request_id=request_id, expected_revision=expected_revision,
+            control_setup={"pathway": "control", "site_review_first": True,
+                           "engine": engine, "control_tier": tier,
+                           "control_output_directory": str(output / "control")},
         )
+
+    def _start_reviewed_control(self, study_id, state, payload, *, request_id):
+        """Continue only after an explicit region decision; never reprepare."""
+        from .services.control_review import reviewed_control_inputs
+        if payload:
+            raise ValueError("Reviewed control uses the retained setup; no replacement inputs/settings are accepted")
+        if state.workflow_data.get("latest_control_status"):
+            raise ActiveStageError("This control already has a retained result; review it before starting another study")
+        reviewed = reviewed_control_inputs(state)
+        setup = state.workflow_data["study_setup"]
+        output = Path(setup["control_output_directory"])
+        if output.exists():
+            raise ValueError("Control output already exists; completed/partial work is not overwritten")
+        script = self.preparation_executable.with_name("docking-universal-run.py")
+        record_path = output.parent / "reviewed_control_inputs.json"
+        record_path.write_text(json.dumps(reviewed, indent=2) + "\n")
+        def register(current):
+            current.workflow_data["control_site_review"] = {
+                "tested_box_label": reviewed["tested_box_label"],
+                "untested_box_labels": reviewed["untested_box_labels"],
+                "untested_receptor_states": reviewed["untested_receptor_states"],
+                "record": str(record_path), "record_sha256": sha256(record_path),
+                "status": "ready_for_control", "approval_id": reviewed["approval_id"],
+            }
+        retained, _ = self.controller.store.update(study_id, register, expected_revision=state.revision)
         process = ProcessRequest(
             command=(sys.executable, str(script), "control", "--complex",
-                     str(normalized.engine_pdb_path), "--control-ligand-id", ligand_id,
-                     "--out", str(output), "--engine", engine, "--control-tier", tier,
+                     reviewed["assets"]["source_pdb"]["path"], "--control-ligand-id", reviewed["ligand_id"],
+                     "--out", str(output), "--engine", setup["engine"], "--control-tier", setup["control_tier"],
+                     "--reviewed-control-inputs", str(record_path),
+                     "--reviewed-control-inputs-sha256", sha256(record_path),
                      "--non-interactive"),
             cwd=output.parent,
             environment={
                 **os.environ,
-                "DOCKING_UNIVERSAL_GEOSTD": str(geostd_library),
+                "DOCKING_UNIVERSAL_GEOSTD": setup["geostd_library"],
+                "DOCKING_UNIVERSAL_LOG_MODE": "file",
                 "MEEKO_ADD_TEMPLATES": (
-                    str(Path(payload["meeko_template_file"]).resolve())
-                    if payload.get("meeko_template_file") else ""
+                    str(Path(setup["meeko_template_file"]).resolve())
+                    if setup.get("meeko_template_file") else ""
                 ),
             },
             log_directory=output.parent / f".{output.name}.docking-universal-application-logs",
@@ -189,6 +218,13 @@ class ProtocolWorkflowRunner:
 
     def _register_control_outputs(self, study_id: str, output: Path, status: str) -> None:
         bundles = []
+        state = self.controller.get_study(study_id)
+        reviewed_scope = state.workflow_data.get("control_site_review")
+        reviewed = None
+        if reviewed_scope:
+            from .services.control_review import read_reviewed_control_inputs
+            reviewed = read_reviewed_control_inputs(reviewed_scope["record"],
+                                                    expected_sha256=reviewed_scope["record_sha256"])
         if status == "completed":
             for candidate in sorted(output.glob("*.duprotocol")):
                 try:
@@ -196,14 +232,24 @@ class ProtocolWorkflowRunner:
                 except ValueError:
                     continue
                 if protocol_type(record) == CONTROL_VALIDATED:
+                    if reviewed:
+                        locked = record.get("locked_inputs") or {}
+                        if (locked.get("receptor_sha256") != reviewed["assets"]["receptor_pdbqt"]["sha256"]
+                                or locked.get("box_sha256") != reviewed["assets"]["box"]["sha256"]
+                                or record.get("engine") != reviewed["engine"]):
+                            raise ValueError("Control output does not match the reviewed receptor, box and engine")
                     bundles.append(candidate)
         reports = sorted((output / "report").glob("*.pdf"))
         manifest = output / "study_manifest.json"
 
         def mutation(state) -> None:
+            scope = state.workflow_data.get("control_site_review")
+            extra_sites = bool(scope and (scope.get("untested_box_labels") or scope.get("untested_receptor_states")))
             known = {artifact.id for artifact in state.artifacts}
-            for kind, paths in (("protocol_bundle", bundles), ("final_report", reports),
-                                ("control_manifest", [manifest] if manifest.is_file() else [])):
+            for kind, paths in (("control_protocol_bundle" if extra_sites else "protocol_bundle", bundles),
+                                ("control_report" if extra_sites else "final_report", reports),
+                                ("control_manifest", [manifest] if manifest.is_file() else []),
+                                ("control_log", sorted(output.glob("control/run.log")))):
                 for path in paths:
                     digest = sha256(path)
                     identity = f"control-{kind}-{digest[:16]}"
@@ -219,6 +265,20 @@ class ProtocolWorkflowRunner:
                 "approved" if status == "completed" and bundles else
                 "not_approved" if status == "completed" else status
             )
+            if reviewed is not None:
+                state.scientific_authority = (
+                    ScientificAuthority.CONTROL_APPROVED if bundles and not extra_sites
+                    else ScientificAuthority.EXPLORATORY_NO_CONTROL
+                )
+            if scope is not None:
+                scope["status"] = state.workflow_data["latest_control_status"]
+                scope["all_selected_sites_validated"] = bool(bundles and not extra_sites)
+                scope["scope_warning"] = (
+                    "A passing control covers only " + str(scope["tested_box_label"])
+                    + "; untested sites/receptor states remain exploratory: "
+                    + ", ".join(scope["untested_box_labels"] + scope.get("untested_receptor_states", []))
+                    if extra_sites else "Control authority covers only its tested receptor, site, engine and settings."
+                )
             StudyController._event(
                 state, EventType.ARTIFACT_CREATED,
                 "Known-ligand control result retained",
@@ -237,6 +297,7 @@ class ProtocolWorkflowRunner:
         *,
         request_id: str,
         expected_revision: int,
+        control_setup: dict | None = None,
     ) -> dict[str, Any]:
         state = self.controller.get_study(study_id)
         prior = next((job for job in state.jobs if job.request_id == request_id), None)
@@ -265,6 +326,7 @@ class ProtocolWorkflowRunner:
             "meeko_template_file",
             "geostd_library",
             "pdb_pocket_evidence",
+            "predict_pockets_with_ligand",
         }
         unknown = set(payload) - allowed
         if unknown:
@@ -306,6 +368,7 @@ class ProtocolWorkflowRunner:
             "pdbfixer": options.pdbfixer,
             "preparation_backend": options.preparation_backend,
             "pocket_engine": options.pocket_engine,
+            "predict_pockets_with_ligand": options.predict_pockets_with_ligand,
             "meeko_templates": options.meeko_templates,
             "meeko_template_file": (
                 str(options.meeko_template_file.resolve()) if options.meeko_template_file else None
@@ -314,6 +377,8 @@ class ProtocolWorkflowRunner:
             "pdb_pocket_evidence": evidence_mode,
             "accepted_at_revision": state.revision,
         }
+        if control_setup:
+            setup_record.update(control_setup)
 
         def retain_setup(latest) -> None:
             existing = latest.workflow_data.get("study_setup")
@@ -327,6 +392,11 @@ class ProtocolWorkflowRunner:
                 )
             if not existing:
                 latest.workflow_data["study_setup"] = setup_record
+                if evidence_mode == "off":
+                    latest.workflow_data["pdb_pocket_evidence"] = {
+                        "mode": "off", "status": "disabled_by_user",
+                        "detail": "Public-PDB evidence lookup was disabled; local site review remains available.",
+                    }
 
         retained_state, _unused = self.controller.store.update(
             study_id, retain_setup, expected_revision=expected_revision,
@@ -410,6 +480,7 @@ class ProtocolWorkflowRunner:
             pdbfixer=str(setup.get("pdbfixer") or "auto"),
             preparation_backend=str(setup.get("preparation_backend") or "auto"),
             pocket_engine=str(setup.get("pocket_engine") or "auto"),
+            predict_pockets_with_ligand=setup.get("predict_pockets_with_ligand", False),
             meeko_templates=assignments,
             meeko_template_file=(Path(setup["meeko_template_file"])
                                  if setup.get("meeko_template_file") else None),
@@ -536,6 +607,7 @@ class ProtocolWorkflowRunner:
                 pdbfixer=str(setup.get("pdbfixer") or "auto"),
                 preparation_backend=str(setup.get("preparation_backend") or "auto"),
                 pocket_engine=str(setup.get("pocket_engine") or "auto"),
+                predict_pockets_with_ligand=setup.get("predict_pockets_with_ligand", False),
                 meeko_templates=assignment,
                 meeko_template_file=(Path(setup["meeko_template_file"])
                                      if setup.get("meeko_template_file") else None),
@@ -701,17 +773,20 @@ class ProtocolWorkflowRunner:
     def _collect_pdb_pocket_evidence(self, study_id: str, plan) -> None:
         """Run the public-PDB evidence stage omitted by the low-level bash preparer."""
         from docking_universal_pocket_evidence import collect_pocket_evidence
+        from .services.pdb_lookup_status import lookup_coverage
 
         cavity = plan.output_root / "cavity"
         evidence_root = cavity / "pdb_site_evidence"
         record = evidence_root / "pdb_ligand_site_evidence.json"
         status = "available"
         detail = None
+        coverage = {}
         if record.is_file():
             try:
                 retained = json.loads(record.read_text())
                 status = retained.get("status", status)
                 detail = retained.get("error")
+                coverage = lookup_coverage(retained)
             except (OSError, ValueError):
                 status = "unavailable"
                 detail = "Retained PDB evidence record could not be read"
@@ -721,6 +796,7 @@ class ProtocolWorkflowRunner:
                     Path(plan.request.command[1]), tuple(ordered_pocket_boxes(cavity)), evidence_root,
                 )
                 status = collected.get("status", "completed")
+                coverage = lookup_coverage(collected)
             except Exception as exc:  # Evidence informs review; it must not erase valid preparation.
                 status = "unavailable"
                 detail = str(exc)
@@ -737,6 +813,7 @@ class ProtocolWorkflowRunner:
             state.workflow_data["pdb_pocket_evidence"] = {
                 "mode": "related-structures", "status": status,
                 "record": str(record.resolve()), "detail": detail,
+                "coverage": coverage,
             }
             if record.is_file() and not any(item.id == "pdb-pocket-evidence" for item in state.artifacts):
                 state.artifacts.append(ArtifactRecord(
@@ -776,6 +853,7 @@ class ProtocolWorkflowRunner:
         allowed = {
             "output_directory", "engine", "ph", "conformers", "seed_count",
             "base_seed", "exhaustiveness", "num_modes", "energy_range",
+            "ad4_runs", "ad4_heuristic_cap",
             "exploratory_use_approved",
         }
         unknown = set(payload) - allowed
@@ -783,6 +861,15 @@ class ProtocolWorkflowRunner:
             raise ValueError(f"Unknown finalization options: {', '.join(sorted(unknown))}")
         if payload.get("exploratory_use_approved") is not True:
             raise ValueError("Finalization requires explicit exploratory-use approval")
+        setup = state.workflow_data.get("study_setup") or {}
+        if setup.get("site_review_first") and not state.workflow_data.get("latest_control_status"):
+            from .services.control_review import reviewed_control_inputs, NoControlSiteSelected
+            try:
+                reviewed_control_inputs(state)
+            except NoControlSiteSelected:
+                pass  # Explicit exploratory approval is required above.
+            else:
+                raise ValueError("Run the reviewed known-ligand control before finalizing its protocol")
         if not payload.get("output_directory"):
             raise ValueError("Final protocol output directory is required")
         settings = FinalizationSettings(
@@ -794,6 +881,8 @@ class ProtocolWorkflowRunner:
             exhaustiveness=int(payload.get("exhaustiveness", 16)),
             num_modes=int(payload.get("num_modes", 15)),
             energy_range=float(payload.get("energy_range", 8.0)),
+            ad4_runs=int(payload.get('ad4_runs',20)),
+            ad4_heuristic_cap=int(payload.get('ad4_heuristic_cap',12_000_000)),
         )
         request = request_from_study(
             state, settings, Path(str(payload["output_directory"])),
@@ -811,6 +900,8 @@ class ProtocolWorkflowRunner:
             "--base-seed", str(settings.base_seed), "--exhaustiveness", str(settings.exhaustiveness),
             "--num-modes", str(settings.num_modes), "--energy-range", str(settings.energy_range),
         )
+        if settings.engine == 'adgpu':
+            command += ('--ad4-runs',str(settings.ad4_runs),'--ad4-heuristic-cap',str(settings.ad4_heuristic_cap))
         process = ProcessRequest(
             command=command, cwd=paths.root.parent,
             log_directory=paths.root / ".docking-universal-application-logs",
@@ -860,7 +951,7 @@ class ProtocolWorkflowRunner:
             time.sleep(0.01)
         raise RuntimeError("Finalization worker did not persist its job start")
 
-    def screening_plan(self, study_id: str, ligand_source: Path | str) -> dict[str, Any]:
+    def screening_plan(self, study_id: str, ligand_source: Path | str, *, ligand_selection=None) -> dict[str, Any]:
         state = self.controller.get_study(study_id)
         protocol = next((
             artifact for artifact in state.artifacts if artifact.kind == "protocol_bundle"
@@ -869,6 +960,7 @@ class ProtocolWorkflowRunner:
             raise ValueError("Screening requires a completed reusable protocol bundle")
         return build_screening_plan(
             protocol.path, ligand_source, expected_protocol_sha256=protocol.sha256,
+            ligand_selection=ligand_selection,
         ).to_dict()
 
     def start_screening(
@@ -893,20 +985,27 @@ class ProtocolWorkflowRunner:
         allowed = {
             "ligand_source", "output_directory", "analysis", "representatives",
             "cluster_rmsd", "exploratory_use_approved", "stop_on_error",
+            "ligand_selection", "cpu",
         }
         unknown = set(payload) - allowed
         if unknown:
             raise ValueError(f"Unknown screening options: {', '.join(sorted(unknown))}")
+        cpu = payload.get('cpu')
+        if cpu is not None and (type(cpu) is not int or not 0 <= cpu <= 1024):
+            raise ValueError('CPU threads must be an integer from 0 to 1024 (0 means engine automatic)')
         if not payload.get("ligand_source") or not payload.get("output_directory"):
             raise ValueError("Screening requires ligand and output paths")
-        plan = self.screening_plan(study_id, Path(str(payload["ligand_source"])))
+        plan = self.screening_plan(study_id, Path(str(payload["ligand_source"])),
+                                   ligand_selection=payload.get("ligand_selection"))
+        if plan['engine'] == 'adgpu' and cpu is not None:
+            raise ValueError('CPU thread overrides do not apply to the experimental AD4 GPU engine')
         if plan["exploratory_authorization_required"] and payload.get("exploratory_use_approved") is not True:
             raise ValueError("Exploratory protocol screening requires explicit approval")
         analysis = str(payload.get("analysis", "representatives"))
         if analysis not in {"none", "summary", "representatives"}:
             raise ValueError("Screening analysis must be none, summary, or representatives")
         representatives = int(payload.get("representatives", 3))
-        cluster_rmsd = float(payload.get("cluster_rmsd", 2.0))
+        cluster_rmsd = float(payload.get("cluster_rmsd", 1.5))
         if representatives < 1 or cluster_rmsd <= 0:
             raise ValueError("Representatives and clustering RMSD must be positive")
         protocol = next(item for item in state.artifacts if item.kind == "protocol_bundle")
@@ -925,8 +1024,18 @@ class ProtocolWorkflowRunner:
             command.append("--accept-exploratory-protocol")
         if payload.get("stop_on_error") is True:
             command.append("--stop-on-error")
+        if payload.get("ligand_selection") is not None:
+            selection_root = output.parent / f".{output.name}.docking-universal-application-logs"
+            selection_root.mkdir(parents=True, exist_ok=True)
+            selection_path = selection_root / f"ligand-selection-{uuid4().hex}.json"
+            selection_path.write_text(json.dumps(payload["ligand_selection"], indent=2) + "\n")
+            command += ["--ligand-selection", str(selection_path)]
         process = ProcessRequest(
             command=tuple(command), cwd=output.parent,
+            # Isolated execution override: all nested docking children inherit
+            # it and record the resolved count/source in their run manifests.
+            # Never mutate the host environment or the reusable protocol.
+            environment={**os.environ, 'DOCKING_UNIVERSAL_CPU': str(cpu)} if cpu is not None else None,
             # The legacy screen runner requires a nonexistent output root for
             # a new study. Keep host-owned launch logs beside it so JobService
             # does not accidentally create the study directory first.
@@ -1066,20 +1175,37 @@ class ProtocolWorkflowRunner:
                 raise ActiveStageError(
                     f"Study {state.study_id} already has an active stage: {state.active_job.stage}"
                 )
+        # A terminal job/result can become visible just before its coordinator
+        # releases the serialized slot. Finish that short cleanup before a new
+        # request, never overlap scientific workers or join under their lock.
+        with self._guard:
+            finishing=list(self._threads.values())
+        for thread in finishing:
+            if thread is not threading.current_thread() and thread.is_alive():
+                thread.join(timeout=.5)
+                if thread.is_alive():
+                    raise ActiveStageError('The previous workflow is finishing its retained-output registration')
 
     def _start_review(self, study_id: str, output_root: Path) -> None:
         cavity = output_root / "cavity"
         boxes = tuple(ordered_pocket_boxes(cavity))
-        if not boxes:
+        state = self.controller.get_study(study_id)
+        setup = state.workflow_data.get("study_setup") or {}
+        if not boxes and not setup.get("predict_pockets_with_ligand"):
             raise FileNotFoundError(f"Preparation produced no retained docking boxes in {cavity}")
         evidence = cavity / "pdb_site_evidence" / "pdb_ligand_site_evidence.json"
         scenes = sorted(cavity.glob("*_all_retained_pockets_review.pml"))
+        if setup.get("predict_pockets_with_ligand"):
+            source = next((row for row in state.artifacts if row.kind == "normalized_receptor_input"), None)
+            if not source or sha256(Path(source.path)) != source.sha256 or Path(source.path) != Path(setup["input_pdb"]):
+                raise ValueError("Input structure changed before bound-ligand site review")
         PocketReviewService(self.controller).start(study_id, PocketReviewInputs(
             target=output_root.name.removesuffix("_receptor_prep"),
             cavity_directory=cavity,
             boxes=boxes,
             pocket_evidence_record=evidence if evidence.is_file() else None,
             review_scene=scenes[0] if scenes else None,
+            bound_ligand_setup=setup if setup.get("predict_pockets_with_ligand") else None,
         ))
 
     def _register_final_outputs(self, study_id: str, paths) -> None:

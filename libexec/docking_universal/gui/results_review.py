@@ -140,7 +140,7 @@ if QtWidgets is not None:
             self.sync_pose_button = QtWidgets.QPushButton("Show selected pose in PyMOL")
             self.sync_pose_button.setObjectName("sync_selected_pose_button")
             self.sync_pose_button.setEnabled(False)
-            self.open_diagram_button = QtWidgets.QPushButton("Open PLIP 2D full size")
+            self.open_diagram_button = QtWidgets.QPushButton("Open 2D/3D review")
             self.open_diagram_button.setObjectName("open_interaction_diagram_button")
             buttons.addWidget(self.open_report_button, 0, 0)
             buttons.addWidget(self.open_pose_session_button, 0, 1)

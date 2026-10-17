@@ -373,10 +373,13 @@ def run_tier(args, tier_name, cli, libexec, tier_root):
         }
         for label, record in selected.items():
             comparison = Path(record["summary"]).parent
+            summary = json.loads((comparison / "comparison_summary.json").read_text())
+            model = summary["top_score_model" if label == "top_ranked" else "best_rmsd_model"]
             run([
                 cli, "render3d", comparison / "crystal_pose_browser.pml",
                 "--out", visuals / f"{label}.png", "--session-out", visuals / f"{label}.pse",
                 "--pymol", args.pymol,
+                "--scene", f"pose_{int(model):03d}",
             ])
         top_comparison = Path(result["global_top_ranked_pose"]["summary"]).parent
         interactions = visuals / "top_ranked_interactions"
@@ -405,6 +408,7 @@ def run_tier(args, tier_name, cli, libexec, tier_root):
             cli, "render3d", pml,
             "--out", visuals / "top_ranked_interactions.png",
             "--session-out", visuals / "top_ranked_interactions.pse", "--pymol", args.pymol,
+            "--contact-residue-labels",
         ])
     result["wall_time_seconds"] = round(time.monotonic() - started, 1)
     protocol.write_text(json.dumps(result, indent=2) + "\n")

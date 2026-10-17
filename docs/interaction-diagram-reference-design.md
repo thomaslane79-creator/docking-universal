@@ -40,6 +40,14 @@ repository under the [data-privacy boundary](data-privacy.md).
 
 ## Layout contract
 
+Residue/backbone fragments use 70% of the ligand's median 2D bond length before
+packing. They remain smaller than the ligand without becoming miniature when
+ligand spacing is increased. This is schematic drawing scale only; retained 3D
+coordinates and PLIP measurements are unchanged.
+Atom-symbol text uses 10 drawing units (previously 8; originally 6.5), and bond
+strokes use 0.9 (previously 0.8; originally 0.65). Collision-aware packing uses
+the same text dimensions.
+
 Layout is deterministic for identical inputs. It begins with the ligand's 2D
 chemical depiction and uses the retained 3D pose to project the protein-facing
 direction of each contact. Full residue fragments are placed around the ligand;

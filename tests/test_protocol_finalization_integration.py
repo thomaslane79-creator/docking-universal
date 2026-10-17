@@ -81,6 +81,56 @@ class ProtocolFinalizationIntegrationTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
+    def test_ad4_protocol_locks_its_own_method_and_actual_grid(self):
+        from docking_universal.ad4_gpu import PINNED_ENGINE_SHA256
+        from docking_universal_bundle import reconcile_protocol_engine
+        self.settings = FinalizationSettings(engine='adgpu', conformers=1, seed_count=1)
+        self.protocol = self._protocol(self.regions)
+        self.assertEqual(self.protocol['parameters']['ad4']['lga_runs'], 20)
+        self.assertFalse(set(('exhaustiveness','num_modes','energy_range_kcal_per_mol')) & set(self.protocol['parameters']))
+        self.assertEqual(self.protocol['engine_implementation']['sha256'], PINNED_ENGINE_SHA256)
+        self.assertEqual(self.protocol['docking_regions'][0]['ad4_grid']['actual_size'], [20.25,22.5,24.0])
+        self.assertEqual(reconcile_protocol_engine(self.protocol), 'adgpu')
+        with self.assertRaises(ValueError): reconcile_protocol_engine(self.protocol, 'vina')
+        self.protocol['engine_implementation']['sha256'] = 'unvalidated-build'
+        with self.assertRaises(ValueError): reconcile_protocol_engine(self.protocol)
+
+    def test_real_ad4_protocol_report_states_the_actual_method_not_na_vina_fields(self):
+        self.settings = FinalizationSettings(engine='adgpu')
+        self.protocol = self._protocol(self.regions)
+        pdf = self._write_real_report()
+        text = self._normalized_pdf_strings(pdf)
+        for phrase in ('AutoDock-GPU', 'AD4', 'Genetic runs per repeat', 'Heuristic evaluation cap', 'actual AD4 grid'):
+            self.assertIn(phrase, text)
+        self.assertNotIn('Scoring function', text)  # belongs beside results, not protocol options
+        self.assertNotIn('Exhaustiveness', text)
+        self.assertIn('not Vina energies', text)
+        self.assertIn('no screening ligands have been docked', text)
+        self.assertNotIn('Ligand docking results', text)
+        for excluded in ('Population / max generations', 'Local iterations', 'Saved poses', 'Input limits'):
+            self.assertNotIn(excluded, text)
+
+    def test_real_vina_protocol_report_has_only_vina_controls_and_no_results(self):
+        text = self._normalized_pdf_strings(self._write_real_report())
+        for phrase in ('AutoDock Vina', 'Exhaustiveness', 'Modes per job', 'Energy range',
+                       'Starting shapes per chemical state', 'Independent repeats per shape',
+                       'Vina estimated binding energies', 'no screening ligands have been docked'):
+            self.assertIn(phrase, text)
+        for excluded in ('Genetic runs per repeat', 'Heuristic evaluation cap', 'actual AD4 grid',
+                         'Ligand docking results', 'Best docking score', 'Population / max generations'):
+            self.assertNotIn(excluded, text)
+
+    def test_protocol_only_reports_use_selected_prediction_not_first_box(self):
+        for engine in ('vina', 'adgpu'):
+            with self.subTest(engine=engine):
+                self.settings = FinalizationSettings(engine=engine)
+                self._write_cavity_diagnostics()
+                self.protocol = self._protocol([self.regions[1]])
+                text = self._normalized_pdf_strings(self._write_real_report())
+                self.assertIn('Selected fpocket score 0.7', text)
+                self.assertNotIn('Selected fpocket score 0.8', text)
+                self.assertIn('Box P2', text)
+
     def _box(self, number, center):
         path = self.cavity / f"target_pocket{number}.conf"
         path.write_text(
@@ -96,13 +146,13 @@ class ProtocolFinalizationIntegrationTests(unittest.TestCase):
             site_anchor="target_pocket1",
             evidence_basis="fpocket cavity analysis and user-reviewed docking boxes",
             created_utc="2026-09-12T12:00:00+00:00",
-            engine="vina",
+            engine=self.settings.engine,
             software={"docking_universal": "0.7.0", "python": "3.9.23"},
             region_definition="fpocket",
             fpocket_selection="reviewed",
             pocket_evidence={"mode": "off", "status": "not_requested"},
             selected_residues=[],
-            engine_selection={"selected_engine": "vina", "reason": "user selected"},
+            engine_selection={"selected_engine": self.settings.engine, "reason": "user selected"},
             parameters=self.settings.protocol_parameters(),
             receptor_pdbqt=self.receptor_pdbqt,
             receptor_pdb=self.receptor_pdb,
@@ -214,7 +264,17 @@ class ProtocolFinalizationIntegrationTests(unittest.TestCase):
     def test_mmcif_protocol_is_written_before_report_generation(self):
         source_dir = self.preparation / "source"
         source_dir.mkdir()
-        (source_dir / "structure.cif").write_text("data_TEST\n")
+        (source_dir / "structure.cif").write_text("""data_TEST
+_entry.id TEST
+_entity.id 1
+_entity.pdbx_description 'Test protein'
+_entity_poly.entity_id 1
+_entity_poly.type 'polypeptide(L)'
+_entity_poly.pdbx_strand_id A
+_entity_src_gen.entity_id 1
+_entity_src_gen.pdbx_gene_src_scientific_name 'Homo sapiens'
+_entity_src_gen.pdbx_host_org_scientific_name 'Escherichia coli'
+""")
         (source_dir / "structure-input.json").write_text(json.dumps({
             "source_format": "mmcif",
             "assemblies": [{"id": "1", "oligomeric_details": "dimeric"}],
@@ -233,6 +293,9 @@ class ProtocolFinalizationIntegrationTests(unittest.TestCase):
                 protocol_path = self.study / "target_site-guided-exploratory_vina_protocol.json"
                 retained = json.loads(protocol_path.read_text())
                 self.assertEqual(retained["coordinate_source"]["evidence"]["assemblies"][0]["id"], "1")
+                self.assertEqual(retained["target_identity"]["proteins"][0]["source_species"], ["Homo sapiens"])
+                summary = json.loads((self.report_dir / "study_summary.json").read_text())
+                self.assertEqual(summary["target_identity"], retained["target_identity"])
                 Path(command[command.index("--out") + 1]).write_bytes(b"%PDF-1.4\n%%EOF\n")
 
         def bundle_writer(_protocol, _root, output):
@@ -245,6 +308,41 @@ class ProtocolFinalizationIntegrationTests(unittest.TestCase):
                 command_runner=run, bundle_writer=bundle_writer,
             )
         self.assertTrue(outputs.report.is_file())
+
+    def test_protein_identity_is_visible_in_real_pdf_and_survives_bundle_round_trip(self):
+        identity = {"structure_id": "TEST", "proteins": [{"entity_id": "1",
+                    "name": "Test protein & partner", "chains": ["A"],
+                    "source_species": ["Homo sapiens"], "expression_hosts": ["Escherichia coli"]}]}
+        self.protocol["target_identity"] = identity
+        report = self._write_real_report()
+        text = self._normalized_pdf_strings(report)
+        self.assertIn("Target: Test protein & partner", text)
+        self.assertIn("Source species: Homo sapiens", text)
+        self.assertNotIn("Source species: Escherichia coli", text)
+        outputs = publish_final_outputs(
+            self.study / "identity_protocol.json", self.protocol, report,
+            self.study / "identity.duprotocol", self.study, create_bundle,
+        )
+        extracted = extract_bundle(outputs.bundle)
+        self.assertEqual(json.loads(extracted.read_text())["target_identity"], identity)
+
+    def test_numeric_pocket_scores_survive_bundle_without_original_preparation(self):
+        self._write_cavity_diagnostics()
+        protocol = self._protocol(self.regions)
+        self.assertEqual(protocol['docking_regions'][0]['pocket_prediction']['score'],.8)
+        self.assertEqual(protocol['docking_regions'][1]['pocket_prediction']['score'],.7)
+        protocol['pocket_detection'] = {'engine':'fpocket'}
+        path=self.study/'score_protocol.json';path.write_text(json.dumps(protocol))
+        bundle=create_bundle(path,self.study,self.study/'scores.duprotocol',additional_roots=[self.cavity])
+        extracted=extract_bundle(bundle)
+        packaged=json.loads(extracted.read_text())
+        for box in self.boxes: box.unlink()
+        (self.cavity/'pocket_selection_diagnostics.tsv').unlink()
+        report=load_script('portable_score_report',REPORT_SCRIPT)
+        cavity=report.inherited_protocol_cavity_record(packaged,extracted)
+        self.assertEqual(cavity['selected']['rank_score'],.8)
+        with zipfile.ZipFile(bundle) as archive:
+            self.assertTrue(any('pocket_selection_diagnostics.tsv' in name for name in archive.namelist()))
 
     def test_finalization_uses_retained_preparation_without_running_it_again(self):
         report = self.report_dir / "report.pdf"
@@ -412,7 +510,7 @@ class ProtocolFinalizationIntegrationTests(unittest.TestCase):
             "Reusable Exploratory Protocol Report",
             "Configured docking protocol",
             "Exploratory pocket configuration",
-            "not evaluated by bound-ligand control",
+            "not evaluated by a bound-ligand pose-recovery control",
             "Reproducibility, software, and references",
         ):
             self.assertIn(expected, text)

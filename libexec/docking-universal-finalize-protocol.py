@@ -16,7 +16,9 @@ def main() -> int:
     parser.add_argument("--state-root", type=Path, required=True)
     parser.add_argument("--study-id", required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--engine", choices=("vina", "qvinaw"), default="vina")
+    parser.add_argument("--engine", choices=("vina", "qvinaw", "adgpu"), default="vina")
+    parser.add_argument("--ad4-runs", type=int, default=20)
+    parser.add_argument("--ad4-heuristic-cap", type=int, default=12_000_000)
     parser.add_argument("--ph", type=float, default=7.4)
     parser.add_argument("--conformers", type=int, default=3)
     parser.add_argument("--seeds", type=int, default=5)
@@ -31,6 +33,7 @@ def main() -> int:
         seed_count=args.seeds, base_seed=args.base_seed,
         exhaustiveness=args.exhaustiveness, num_modes=args.num_modes,
         energy_range=args.energy_range,
+        ad4_runs=args.ad4_runs, ad4_heuristic_cap=args.ad4_heuristic_cap,
     )
     request = request_from_study(
         state, settings, args.output, exploratory_use_approved=True,

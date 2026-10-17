@@ -112,8 +112,10 @@ def _executable(path: Path | None) -> bool:
 
 
 def validate_and_resolve(options: LigandOptions, environment: Mapping[str, str]) -> None:
-    if options.target_engines not in ("vina", "qvinaw"):
-        raise LigandUsageError("ERROR: --target-engines must be vina or qvinaw (QuickVina-W)")
+    if options.target_engines not in ("vina", "qvinaw", "adgpu"):
+        raise LigandUsageError("ERROR: --target-engines must be vina, qvinaw or experimental adgpu")
+    if options.target_engines == 'adgpu' and options.backend not in ('auto','meeko'):
+        raise LigandUsageError('Experimental AD4 requires mapped Meeko ligand preparation')
     if options.geometry_mode not in ("optimize", "preserve"):
         raise LigandUsageError("ERROR: --geometry-mode must be optimize or preserve")
     if options.charge_model not in ("gasteiger", "espaloma", "zero"):
@@ -206,6 +208,11 @@ def prepare_ligands(
             prepared = temp_root / f"{compound_id}_opt.pdbqt"
             output_pdbqt = output_dir / f"{compound_id}.pdbqt"
             name = _compound_name(record, options.name_field, compound_id).replace("\n", "")
+            if options.target_engines == 'adgpu':
+                from rdkit import Chem
+                molecule=next((m for m in Chem.SDMolSupplier(str(record)) if m),None)
+                if molecule is None or any(len(ring)>=8 for ring in molecule.GetRingInfo().AtomRings()):
+                    raise LigandUsageError('Experimental AD4 does not support macrocycles or unreadable chemistry; no rigid-ring conversion was performed')
             smiles_run = subprocess.run(
                 [str(options.obabel), str(record), "-osmi"], text=True,
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=dict(environment)

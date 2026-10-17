@@ -11,6 +11,7 @@ from docking_universal.services.pocket_review import (
     PocketReviewInputs,
     PocketReviewService,
     build_labeled_candidate_mappings,
+    input_ligand_candidate,
 )
 from docking_universal.state import JsonStudyStore
 
@@ -117,6 +118,48 @@ class PocketReviewServiceTests(unittest.TestCase):
             review_scene=self.scene,
         )
 
+    def bound_setup(self, x=40.):
+        source = self.root / "input.pdb"
+        source.write_text("".join(
+            f"HETATM{i:5d}  C{i:<2} LIG B 601    {x + i:8.3f}{0:8.3f}{0:8.3f}  1.00 20.00           C\n"
+            for i in range(1, 7)) +
+            "HETATM   10  C1  LIG C 601     -90.000   0.000   0.000  1.00 20.00           C\n")
+        return {"input_pdb": str(source), "ligand_resname": "LIG", "ligand_chain_id": "B",
+                "ligand_residue_number": "601", "predict_pockets_with_ligand": True}
+
+    def test_offline_bound_site_survives_prediction_without_an_invented_score(self):
+        from dataclasses import replace
+        inputs = replace(self.inputs(), pocket_evidence_record=None, bound_ligand_setup=self.bound_setup())
+        PocketReviewService(self.controller).start("real-review", inputs)
+        state = self.store.load("real-review")
+        bound = next(row for row in state.workflow_data["pocket_candidates"] if row["id"] == "B1")
+        self.assertEqual(bound["evidence"]["geometry"]["center_x"], 43.5)
+        self.assertNotIn("score", bound["evidence"])
+        self.assertNotIn("detector", bound["evidence"])
+        self.assertEqual(bound["evidence"]["source"], "input_bound_ligand")
+        self.assertNotIn("experimental_ligand_evidence", bound["evidence"])
+        self.assertIn("not independent", bound["evidence"]["evidence_role"])
+        self.assertTrue(any(a.kind == "bound_ligand" and Path(a.path).is_file() for a in state.artifacts))
+
+    def test_bound_candidate_does_not_duplicate_an_identical_predicted_box(self):
+        from dataclasses import replace
+        setup = self.bound_setup(x=-3.5)
+        inputs = replace(self.inputs(), pocket_evidence_record=None, bound_ligand_setup=setup)
+        PocketReviewService(self.controller).start("real-review", inputs)
+        state = self.store.load("real-review")
+        self.assertNotIn("B1", [row["id"] for row in state.workflow_data["pocket_candidates"]])
+        p1 = next(row for row in state.workflow_data["pocket_candidates"] if row["id"] == "P1")
+        self.assertEqual(p1["evidence"]["input_bound_ligand"]["source"], "input_bound_ligand")
+
+    def test_large_input_ligand_box_expands_and_missing_exact_instance_is_refused(self):
+        setup = self.bound_setup()
+        path = Path(setup["input_pdb"])
+        path.write_text(path.read_text().replace("  46.000", "  90.000"))
+        item = input_ligand_candidate("target", self.cavity, setup)
+        self.assertGreater(__import__('docking_universal_box_candidates').config_geometry(item['path'])['size_x'], 26.)
+        with self.assertRaisesRegex(ValueError, "exact selected"):
+            input_ligand_candidate("target", self.cavity, dict(setup, ligand_chain_id="X"))
+
     def test_real_artifacts_become_persisted_candidates_and_review_evidence(self):
         decision = PocketReviewService(self.controller).start("real-review", self.inputs())
         self.assertEqual([option.value for option in decision.options], ["P1", "P2", "P1/P2", "L1"])
@@ -138,6 +181,17 @@ class PocketReviewServiceTests(unittest.TestCase):
         self.assertEqual(experimental["evidence_class_counts"], {"close_structural_homolog": 1})
         self.assertEqual(experimental["minimum_ca_rmsd_angstrom"], 0.72)
         self.assertTrue(Path(experimental["observations"][0]["aligned_ligand_pdb"]).is_file())
+
+    def test_stale_unselected_pocket_config_is_not_presented_as_candidate(self):
+        (self.cavity / "target_pocket4.conf").write_text(
+            "center_x = 1\ncenter_y = 1\ncenter_z = 1\nsize_x = 26\nsize_y = 26\nsize_z = 26\n"
+        )
+        (self.cavity / "selected_pocket_records.txt").write_text(
+            "2.0|frozen_pockets/pocket1_atm.pdb|0|0|0|2.0\n"
+            "1.0|frozen_pockets/pocket4_atm.pdb|1|1|1|1.0\n"
+        )
+        mappings = build_labeled_candidate_mappings("target", list(self.boxes) + [self.cavity / "target_pocket4.conf"], self.evidence, self.cavity)
+        self.assertEqual([item["label"] for item in mappings if item["label"] in {"P1", "P2", "P3", "P4"}], ["P1", "P4"])
 
     def test_cli_and_service_use_identical_candidate_builder(self):
         shared = build_labeled_candidate_mappings("target", list(self.boxes), self.evidence, self.cavity)

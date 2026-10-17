@@ -599,6 +599,9 @@ def write_ligand_guided_pdf(out, protocol, figure):
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import inch
     from reportlab.platypus import Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    from html import escape
+    from docking_universal.services.protein_identity import target_identity_text
+    target_display, source_species = target_identity_text(protocol.get("target_identity") or {}, protocol["target"])
 
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name="TitleDU", parent=styles["Title"], fontSize=20, leading=23, alignment=TA_CENTER, spaceAfter=4))
@@ -612,7 +615,8 @@ def write_ligand_guided_pdf(out, protocol, figure):
     box = protocol["docking_box"]
     provenance = [
         ["Protocol provenance", "Recorded value"],
-        ["Target", protocol["target"]], ["Protocol filename", protocol["bundle_file_name"]],
+        ["Target", escape(target_display)], ["Source species", escape(source_species)],
+        ["Protocol filename", protocol["bundle_file_name"]],
         ["Protocol type", protocol_type_label(protocol["protocol_type"])],
         ["Evidence basis", protocol["evidence_basis"]], ["Screening authority", "User-confirmed exploratory use"],
         ["Created", protocol["created_utc"][:10]], ["Protein preparation", protocol["receptor_preparation_summary"]],
@@ -646,6 +650,8 @@ def write_ligand_guided_pdf(out, protocol, figure):
     story = [
         P("Docking Universal - Protocol Development Report", "TitleDU"),
         P(f"Ligand-guided exploratory protocol | Version {package_version()}", "SubtitleDU"),
+        P("Target: " + escape(target_display)),
+        P("Source species: " + escape(source_species)),
         P("1. Protocol definition", "SectionDU"),
         P(f"This protocol defines a reusable docking configuration for {protocol['target']} using the coordinates of {protocol['site_anchor']} in the selected structure to position the search region. {protocol['site_anchor']} served only as a structural reference for site selection; no retrospective redocking or pose-recovery evaluation was performed. Accordingly, this is a ligand-informed exploratory screening configuration and does not claim target-specific pose-recovery validation."),
         report_table(Table, TableStyle, Paragraph, provenance, [2.15*inch, 4.2*inch], styles, colors),
@@ -1204,6 +1210,8 @@ def main():
             "user_approved_removed_components": removed_components,
             "receptor_modification_warning": modification_warning,
     }
+    from docking_universal.services.protein_identity import read_protein_identity
+    identity_source = prep_root / "source" / "structure.cif"
     protocol = build_protocol_record(ProtocolRecordInputs(
         protocol_type=kind, target=target,
         site_anchor=ligand["resname"] if ligand else Path(selected_box).stem,
@@ -1221,6 +1229,7 @@ def main():
         receptor_preparation_summary=preparation_summary(prep_root),
         cavity_score_threshold_used=score_threshold_used,
         pocket_review_scene=pocket_review_scene, bundle_file_name=bundle_name,
+        target_identity=read_protein_identity(identity_source if identity_source.is_file() else local_structure),
     ))
     protocol_path = study / f"{base}_protocol.json"
     write_protocol_record(protocol_path, protocol)

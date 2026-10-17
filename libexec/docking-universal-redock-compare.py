@@ -34,6 +34,8 @@ def parse_scores(path):
             fields = line.split()
             if len(fields) >= 3:
                 scores[model or 1] = float(fields[2])
+        elif line.startswith("REMARK AD4 RESULT:"):
+            scores[model or 1] = float(line.split()[3])
     return scores
 
 
@@ -91,7 +93,7 @@ def write_overlay_pml(output_dir, rmsd):
     pml_path = output_dir / "crystal_vs_top_pose.pml"
     lines = [
         "# Crystallographic ligand versus top-scoring redocked pose",
-        "# Green carbon: crystal pose; gray carbon: docked pose",
+        "# Magenta carbon: crystal; red carbon: this run's lowest-energy pose (not global cluster rank)",
         f"# Symmetry-aware in-place heavy-atom RMSD: {rmsd:.3f} A",
         "reinitialize",
         f"cd {output_dir}",
@@ -105,10 +107,10 @@ def write_overlay_pml(output_dir, rmsd):
         "color gray60, nearby_residues",
         "hide sticks, (nearby_residues and hydro and neighbor elem C)",
         "show sticks, crystal_ligand",
-        "color green, crystal_ligand and elem C",
+        "color magenta, crystal_ligand and elem C",
         "util.cnc crystal_ligand",
         "show sticks, docked_ligand",
-        "color gray70, docked_ligand and elem C",
+        "color red, docked_ligand and elem C",
         "util.cnc docked_ligand",
         "set stick_radius, 0.18",
         "bg_color white",
@@ -133,7 +135,8 @@ def write_all_poses_pml(output_dir, rows, top_index, best_rmsd_index):
     ]
     lines = [
         "# Crystallographic ligand versus every redocked pose",
-        "# Green carbon: crystal pose; gray carbon: top-score pose; magenta carbon: best-RMSD pose",
+        "# Magenta: crystal; red: this run's lowest-energy pose; green: local closest when distinct; other poses gray",
+        "# Local diagnostic only; final report assigns colors by global cluster energy rank.",
         "# Every pose is an individually toggleable object in the docked_poses group.",
         "reinitialize",
         f"cd {output_dir}",
@@ -162,17 +165,17 @@ def write_all_poses_pml(output_dir, rows, top_index, best_rmsd_index):
         "color slate, receptor and polymer.protein",
         "set cartoon_transparency, 0.65, receptor",
         "show sticks, crystal_ligand",
-        "color green, crystal_ligand and elem C",
+        "color magenta, crystal_ligand and elem C",
         "util.cnc crystal_ligand",
     ])
 
     for index, object_name in enumerate(object_names):
         if index == top_index:
-            color = "gray70"
+            color = "red"
         elif index == best_rmsd_index:
-            color = "magenta"
+            color = "green"
         else:
-            color = carbon_colors[index % len(carbon_colors)]
+            color = "gray70"
         lines.extend([
             f"show sticks, {object_name}",
             f"color {color}, {object_name} and elem C",
@@ -196,6 +199,8 @@ def write_pose_browser_pml(output_dir, rows, top_index, best_rmsd_index, contact
     pml_path = output_dir / "crystal_pose_browser.pml"
     lines = [
         "# Scene-based crystallographic-ligand/redocked-pose browser",
+        "# Local diagnostic: magenta crystal; red lowest energy; green local closest if distinct; gray other poses.",
+        "# Final reports use global cluster ranks, which are not known at this per-run stage.",
         f"# Each scene shows one pose and receptor residues within {contact_cutoff:.1f} A.",
         "# Use the PyMOL scene buttons or type: scene next / scene previous",
         "reinitialize",
@@ -207,7 +212,7 @@ def write_pose_browser_pml(output_dir, rows, top_index, best_rmsd_index, contact
         "color slate, receptor and polymer.protein",
         "set cartoon_transparency, 0.70, receptor",
         "show sticks, crystal_ligand",
-        "color green, crystal_ligand and elem C",
+        "color magenta, crystal_ligand and elem C",
         "util.cnc crystal_ligand",
         "set stick_radius, 0.17",
         "bg_color white",
@@ -248,7 +253,7 @@ def write_pose_browser_pml(output_dir, rows, top_index, best_rmsd_index, contact
             f"Pose {model} | {status_text} | Energy {score_text} kcal/mol | "
             f"RMSD {rmsd_text} A"
         )
-        carbon_color = "gray70" if index == top_index else "magenta" if index == best_rmsd_index else "cyan"
+        carbon_color = "red" if index == top_index else "green" if index == best_rmsd_index else "gray70"
 
         lines.extend([
             f"load pose_{model:03d}.sdf, {pose_object}",

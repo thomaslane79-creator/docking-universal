@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -33,7 +32,13 @@ def main() -> int:
                 "runtime": {
                     "python_executable": str(Path(sys.executable).resolve()),
                     "python_version": ".".join(str(value) for value in sys.version_info[:3]),
-                    "conda_environment": os.environ.get("CONDA_DEFAULT_ENV"),
+                    # A directly launched interpreter can inherit the terminal's
+                    # Conda label. Report the environment actually serving jobs.
+                    "conda_environment": (
+                        Path(sys.prefix).name
+                        if (Path(sys.prefix) / "conda-meta").is_dir() else None
+                    ),
+                    "python_prefix": sys.prefix,
                 },
             }), flush=True)
             serve_json_lines(dispatcher, sys.stdin, sys.stdout)

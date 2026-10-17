@@ -1,5 +1,6 @@
 const { chromium } = require('playwright');
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 
 (async () => {
   const outputRoot = process.argv[2];
@@ -20,6 +21,12 @@ const fs = require('node:fs');
   await page.waitForTimeout(1000);
   console.log(await page.evaluate(() => ({done: window.__renderDone, error: window.__renderError})));
   const sceneJson = await page.evaluate(() => window.__sceneJson);
+  const expectedCounts = await page.evaluate(() => window.__expectedSceneCounts);
+  const renderedScene = sceneJson && JSON.parse(sceneJson).scene;
+  if (!renderedScene || !expectedCounts || Object.entries(expectedCounts).some(
+      ([key,count]) => (renderedScene[key] || []).length !== count)) {
+    throw new Error('Incomplete interaction diagram: renderer did not preserve every structure, contact, and annotation');
+  }
   const packingAudit=await page.evaluate(()=>window.__packingAudit);
   fs.writeFileSync(`${outputFile}.packing-audit.json`,JSON.stringify(packingAudit,null,2));
   if (sceneJson) fs.writeFileSync(`${outputFile}.scene.json`, sceneJson + '\n');
@@ -77,6 +84,27 @@ const fs = require('node:fs');
   });
   fs.writeFileSync(`${outputFile}.crop-audit.json`, JSON.stringify(crop, null, 2) + '\n');
   await page.screenshot({path: outputFile, clip:{x:crop.x,y:crop.y,width:crop.width,height:crop.height}});
+  const links = await page.evaluate(crop => {
+    const regions = [];
+    for (const node of document.querySelectorAll('#draw-area text')) {
+      const style = getComputedStyle(node);
+      if (style.display === 'none' || style.visibility === 'hidden' || node.closest('[id*="_dbg"],[id*="_sc"]')) continue;
+      const box = node.getBoundingClientRect();
+      if (!box.width || !box.height) continue;
+      const left = Math.max(crop.x, box.left - 2), top = Math.max(crop.y, box.top - 2);
+      const right = Math.min(crop.x + crop.width, box.right + 2);
+      const bottom = Math.min(crop.y + crop.height, box.bottom + 2);
+      if (right <= left || bottom <= top) continue;
+      for (const contact of window.__contactLabels || []) {
+        if (node.textContent.trim() === contact.text) regions.push({residue: contact.residue,
+          rect: [(left-crop.x)/crop.width, (top-crop.y)/crop.height, (right-left)/crop.width, (bottom-top)/crop.height]});
+      }
+    }
+    return {regions, report: window.plipConversion.source.plipReport};
+  }, crop);
+  const sha = path => crypto.createHash('sha256').update(fs.readFileSync(path)).digest('hex');
+  fs.writeFileSync(`${outputFile}.hit-regions.json`, JSON.stringify({schema:1,
+    image_sha256:sha(outputFile), plip_sha256:sha(links.report), regions:links.regions}, null, 2));
   await browser.close();
 })().catch((error) => {
   console.error(error);

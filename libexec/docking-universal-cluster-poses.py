@@ -6,7 +6,7 @@ Scientific method
 Poses are compared by symmetry-aware heavy-atom RMSD without coordinate fitting,
 because every pose already shares the receptor coordinate frame. Chemical states
 are clustered separately. RDKit Butina clustering uses a configurable RMSD cutoff
-(2.0 A by default). The representative is the lowest-energy member of a cluster;
+(1.5 A by default). The representative is the lowest-energy member of a cluster;
 the default selected outputs are the three lowest-energy distinct clusters.
 
 This is consensus organization, not validation. Cluster population and seed
@@ -20,6 +20,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from docking_universal.pose_visuals import RANK_COLORS
 from collections import defaultdict
 from pathlib import Path
 
@@ -35,6 +36,8 @@ def parse_scores(path):
             scores[model or 1] = float(line.split()[3])
         elif line.startswith("REMARK minimizedAffinity"):
             scores[model or 1] = float(line.split()[2])
+        elif line.startswith("REMARK AD4 RESULT:"):
+            scores[model or 1] = float(line.split()[3])
     return scores
 
 
@@ -137,7 +140,7 @@ def write_browser(output, receptor, selected, cutoff):
             f"hide sticks, ({site} and hydro and neighbor elem C)",
             f"label {site} and name CA, \"%s%s/%s\" % (resn,resi,chain)",
             f"show sticks, {obj}",
-            f"color gray70, {obj} and elem C",
+            f"color {RANK_COLORS[rank-1] if rank <= 3 else 'gray70'}, {obj} and elem C",
             f"util.cnc {obj}",
             f"pseudoatom {label}, selection={obj}, label=\"{display}\"",
             f"hide nonbonded, {label}",
@@ -166,7 +169,7 @@ def write_browser(output, receptor, selected, cutoff):
     return pml
 
 
-def write_representative_pml(cluster_dir, cluster, cutoff):
+def write_representative_pml(cluster_dir, cluster, cutoff, rank=None):
     """Write a standalone scene for one cluster representative."""
     pose = cluster["representative"]
     lines = [
@@ -181,7 +184,7 @@ def write_representative_pml(cluster_dir, cluster, cutoff):
         "show sticks, site", "color skyblue, site and elem C", "util.cnc site",
         "hide sticks, (site and hydro and neighbor elem C)",
         "label site and name CA, \"%s%s/%s\" % (resn,resi,chain)",
-        "show sticks, representative", "color gray70, representative and elem C",
+        "show sticks, representative", f"color {RANK_COLORS[rank-1] if rank and rank <= 3 else 'gray70'}, representative and elem C",
         "util.cnc representative", "set stick_radius, 0.18",
         "bg_color white", "set label_color, black", "set label_outline_color, white",
         f"pseudoatom information, selection=representative, label=\"Cluster {cluster['cluster_id']} | Energy {pose['energy']:.3f} kcal/mol | Seeds {cluster['seed_support']} | Poses {cluster['pose_count']}\"",
@@ -258,9 +261,9 @@ def main():
   cluster size nor docking energy proves that a binding mode is correct.
 
 Typical cutoff choices:
-  1.0 A  strict; separates modest pose differences
-  1.5 A  moderately strict
-  2.0 A  default binding-mode grouping
+  1.0 A  strict, separates modest pose differences
+  1.5 A  default; moderately strict
+  2.0 A  broader binding-mode grouping
   2.5-3.0 A broad; may merge meaningfully different poses
 
 Representatives are the lowest-energy members of distinct clusters. Seed and
@@ -271,10 +274,10 @@ conformer support are reported separately as measures of search repeatability.
     source.add_argument("--comparison-root", type=Path, help="existing redocking comparison tree containing typed pose SDFs")
     source.add_argument("--docking-root", type=Path, help="raw cross-seed docking tree to export and cluster")
     parser.add_argument("--ligand-work", type=Path, help="typed per-conformer SDF directory; required with --docking-root")
-    parser.add_argument("--engine", choices=("vina", "qvinaw"), default="vina", help="Vina-family output suffix to parse")
+    parser.add_argument("--engine", choices=("vina", "qvinaw", "adgpu"), default="vina", help="Engine-specific output suffix; AD4 energies remain distinct")
     parser.add_argument("--receptor", required=True, type=Path, help="fixed receptor-frame PDB used for nearby residues and scenes")
     parser.add_argument("--out", required=True, type=Path, help="cluster tables, all-pose SDF, representatives, and PyMOL scripts")
-    parser.add_argument("--cluster-rmsd", type=float, default=2.0, help="symmetry-aware no-fit heavy-atom RMSD cutoff in A (default: 2.0)")
+    parser.add_argument("--cluster-rmsd", type=float, default=1.5, help="symmetry-aware no-fit heavy-atom RMSD cutoff in A (default: 1.5)")
     parser.add_argument("--representatives", type=int, default=3, help="number of lowest-energy distinct clusters selected (default: 3)")
     parser.add_argument("--contact-cutoff", type=float, default=5.0, help="receptor neighborhood shown around representatives in A (default: 5.0)")
     parser.add_argument("--mk-export", default="mk_export.py", help="Meeko PDBQT-to-SDF pose exporter")
@@ -380,7 +383,7 @@ conformer support are reported separately as measures of search repeatability.
         all_writer.write(molecule)
     all_writer.close()
 
-    for cluster in selected:
+    for rank, cluster in enumerate(selected, 1):
         cluster_dir = output / f"cluster_{cluster['cluster_id']:03d}"
         cluster_dir.mkdir(exist_ok=True)
         molecule = Chem.Mol(cluster["representative"]["molecule"])
@@ -391,7 +394,7 @@ conformer support are reported separately as measures of search repeatability.
         set_ligand_pdb_info(molecule)
         Chem.MolToPDBFile(molecule, str(cluster_dir / "representative.pdb"))
         write_complex(args.receptor.expanduser().resolve(), cluster_dir / "representative.pdb", cluster_dir / "complex.pdb")
-        write_representative_pml(cluster_dir, cluster, args.contact_cutoff)
+        write_representative_pml(cluster_dir, cluster, args.contact_cutoff, rank=rank)
         metadata = {key: value for key, value in cluster.items() if key not in {"representative", "member_indices"}}
         metadata["representative"] = {
             key: str(value) if isinstance(value, Path) else value

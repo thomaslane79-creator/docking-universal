@@ -24,6 +24,70 @@ REPORT = load("docking_universal_pdf_report", "libexec/docking-universal-pdf-rep
 
 
 class RetainedReportArtifactTests(unittest.TestCase):
+    def test_scoring_function_is_immediately_after_the_best_result_not_in_protocol_options(self):
+        result={'name':'Ligand','status':'COMPLETED','best_energy_kcal_per_mol':'-6.02',
+                'top_cluster':'3','top_cluster_population':'2','cluster_count':3}
+        for engine, name in (('adgpu','AD4'),('vina','Vina'),('qvinaw','Vina')):
+            rows = REPORT.single_compound_summary_rows(result,engine)
+            best = rows.index(['Best retained docking score','-6.02 kcal/mol'])
+            self.assertEqual(rows[best+1],['Scoring function',name])
+            self.assertNotIn('Scoring function',str(REPORT.protocol_summary_rows(engine,{},{})))
+        self.assertEqual(REPORT.scoring_function_label(None),'Not recorded')
+        self.assertEqual(REPORT.scoring_function_label('unrecorded'),'Not recorded')
+
+    def test_protocol_summary_contains_only_user_selectable_options(self):
+        configured = {'ph':7.4, 'charge_model':'gasteiger', 'forcefield':'mmff94',
+            'conformers_per_state':3, 'seeds':[11,22,33,44,55], 'ensemble_seed':11,
+            'ad4':{'lga_runs':20,'heuristic_cap':12000000,'autostop':True,
+                   'population':150,'generations':42000,'local_iterations':300},
+            'private_future_setting':'DO_NOT_DUMP'}
+        rows = REPORT.protocol_summary_rows('adgpu',{},configured)
+        text = str(rows)
+        self.assertEqual(len(rows),8)
+        self.assertEqual([row[0] for row in rows[1:]], ['Docking program','Ligand preparation pH',
+            'Starting shapes per chemical state','Independent repeats per shape','Starting random seed',
+            'Genetic runs per repeat','Heuristic evaluation cap'])
+        self.assertIn(['Independent repeats per shape',5],rows)
+        for internal in ('Protocol basis','forcefield','gasteiger','Saved poses','autostop','grid','Population','42000','Local iterations','Input limits','DO_NOT_DUMP'):
+            self.assertNotIn(internal,text)
+        self.assertEqual(configured['ad4']['population'],150)
+
+    def test_vina_protocol_summary_preserves_actual_effort_and_output_settings(self):
+        rows = REPORT.protocol_summary_rows('vina',{'exhaustiveness':'32'},
+            {'exhaustiveness':16,'num_modes':15,'energy_range_kcal_per_mol':8,'seeds':[1,2]})
+        self.assertIn(['Exhaustiveness','32'],rows)
+        self.assertIn(['Modes per job',15],rows)
+        self.assertIn(['Energy range','8 kcal/mol'],rows)
+        self.assertNotIn('Genetic runs',str(rows))
+
+    def test_unobserved_future_engine_version_is_not_a_claimed_version_difference(self):
+        comparison = REPORT.compare_scientific_versions({'engine_version':'recorded when screening runs'},
+            {'engine_version':'AutoDock-GPU v1.6'}, 'AutoDock-GPU')
+        self.assertEqual(next(row['status'] for row in comparison['entries'] if row['software']=='AutoDock-GPU'),'NOT VERIFIED')
+
+    def test_approved_layout_retries_supported_spacing_without_changing_contacts(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);interactions=root/'interactions';interactions.mkdir()
+            (interactions/'report.xml').write_text('<report/>')
+            (interactions/'complex_protonated.pdb').write_text('RECEPTOR')
+            ligand=root/'ligand.sdf';ligand.write_text('LIGAND')
+            output=interactions/'diagram.png';calls=[]
+            runtime={'status':'available','components':{'node':{'path':'node'},'chrome':{'path':'chrome'}}}
+            def render(command, **kwargs):
+                calls.append(command)
+                if len(calls)==1:
+                    return SimpleNamespace(returncode=1,stdout='',stderr='collision-free unambiguous layout')
+                output.write_bytes(b'checked-image')
+                output.with_suffix('.manifest.json').write_text(json.dumps({'renderer_policy':'approved-poseedit-local-v1'}))
+                return SimpleNamespace(returncode=0,stdout='',stderr='')
+            with patch('docking_universal.runtime_inventory.discover_poseedit_runtime',return_value=runtime), patch.object(FIGURES.subprocess,'run',side_effect=render):
+                self.assertTrue(FIGURES.render_poseedit_plip2d(interactions,ligand,output))
+            self.assertEqual(len(calls),2)
+            self.assertEqual(calls[1][-2:],['--ligand-spacing','20'])
+            self.assertEqual((interactions/'report.xml').read_text(),'<report/>')
+            self.assertTrue((interactions/'plip2d.approved-spacing-15.log').is_file())
+
     def test_screen_report_can_reconstruct_the_locked_protocol_pocket(self):
         cavity = REPORT.inherited_protocol_cavity_record({
             "pocket_detection": {"engine": "p2rank"},
@@ -161,6 +225,20 @@ class RetainedReportArtifactTests(unittest.TestCase):
                 selected = FIGURES.ensure_control_clusters(control, control / "protocol.json")
         self.assertEqual(selected, analysis)
         run.assert_not_called()
+
+    def test_new_control_clusters_use_one_point_five_angstrom_not_recovery_threshold(self):
+        with tempfile.TemporaryDirectory() as directory:
+            control = Path(directory)
+            receptor = control / "receptor.pdb"
+            receptor.write_text("ATOM\n")
+            protocol = control / "protocol.json"
+            protocol.write_text(json.dumps({"locked_inputs": {"receptor": str(receptor.with_suffix('.pdbqt'))},
+                                            "acceptance": {"threshold_angstrom": 2.0}}))
+            with patch.object(FIGURES.subprocess, "run") as run:
+                run.return_value.returncode = 0
+                FIGURES.ensure_control_clusters(control, protocol)
+            command = run.call_args.args[0]
+            self.assertEqual(command[command.index("--cluster-rmsd") + 1], "1.5")
 
     def test_only_nonempty_cluster_results_mark_a_study_as_docked(self):
         with tempfile.TemporaryDirectory() as directory:

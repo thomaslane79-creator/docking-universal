@@ -9,7 +9,7 @@ It selects and records one of three honest workflow states:
 * exploratory: ligand-free or otherwise uncalibrated docking, explicitly marked
   as exploratory and never promoted to approved by this command.
 
-The command accepts one SDF, a multi-record SDF, or a directory of SDF files.
+The command accepts one MOL, a single/multi-record SDF, or a directory of either.
 Every compound receives a stable folder, independent ensemble, replicated
 docking, clustering, representative analysis, and report entry.
 """
@@ -43,6 +43,7 @@ from docking_universal_bundle import (
     protocol_type,
     protocol_type_label,
     reconcile_protocol_engine,
+    sha256,
 )
 from docking_universal_pocket_review import (
     choose_prepared_box,
@@ -53,6 +54,8 @@ from docking_universal_pocket_review import (
 )
 from docking_universal_pocket_evidence import collect_pocket_evidence, summarize_pocket_evidence
 from docking_universal_process import run_checked
+from docking_universal.screening_progress import write_screening_progress
+from docking_universal.reporting import scoring_function_label, protocol_summary_rows, compound_overview_rows
 
 
 STATUSES = {
@@ -461,7 +464,7 @@ def choose_path_graphically(prompt, folder=False, sdf=False):
         if folder:
             command.append("--directory")
         if sdf:
-            command.extend(["--file-filter=SDF files | *.sdf", "--file-filter=All files | *"])
+            command.extend(["--file-filter=Ligand files | *.sdf *.mol *.SDF *.MOL", "--file-filter=All files | *"])
         result = subprocess.run(command, text=True, capture_output=True, check=False)
         if result.returncode != 0:
             if result.returncode == 1:
@@ -478,7 +481,7 @@ def choose_path_graphically(prompt, folder=False, sdf=False):
             if folder:
                 selected_text = filedialog.askdirectory(title=prompt, mustexist=True)
             else:
-                filetypes = [("SDF files", "*.sdf"), ("All files", "*")] if sdf else [("All files", "*")]
+                filetypes = [("Ligand files (SDF/MOL)", "*.sdf *.mol *.SDF *.MOL"), ("All files", "*")] if sdf else [("All files", "*")]
                 selected_text = filedialog.askopenfilename(title=prompt, filetypes=filetypes)
         finally:
             root.destroy()
@@ -500,46 +503,51 @@ def choose_file_with_finder():
 
 
 def choose_sdf_with_finder():
-    """Open the native macOS file chooser for one SDF ligand file."""
-    selected = choose_path_graphically("Choose the compound SDF file", sdf=True)
-    if selected.suffix.lower() != ".sdf":
-        raise SystemExit(f"Selected ligand file must end in .sdf: {selected}")
+    """Compatibility entry point for the native SDF/MOL ligand chooser."""
+    selected = choose_path_graphically("Choose the compound SDF or MOL file", sdf=True)
+    if selected.suffix.lower() not in {".sdf", ".mol"}:
+        raise SystemExit(f"Selected ligand file must end in .sdf or .mol: {selected}")
 
-    print(f"Selected compound SDF: {selected}")
+    print(f"Selected compound file: {selected}")
     return selected
 
 
 def choose_ligand_source():
-    """Choose one SDF graphically or enter a portable file/directory path."""
+    """Choose one SDF/MOL graphically or enter a portable file/directory path."""
     graphical_available = graphical_chooser_available()
     print("Choose the compound input:")
     if graphical_available:
-        print("  1) Choose an SDF file graphically")
-        print("  2) Enter an exact SDF file path")
-        print("  3) Enter an SDF directory path for batch docking")
+        print("  1) Choose an SDF or MOL file graphically")
+        print("  2) Enter an exact SDF or MOL file path")
+        print("  3) Enter an SDF/MOL directory path for batch docking")
     else:
-        print("  1) Enter an exact SDF file path")
-        print("  2) Enter an SDF directory path for batch docking")
+        print("  1) Enter an exact SDF or MOL file path")
+        print("  2) Enter an SDF/MOL directory path for batch docking")
     choice = input("Select [1]: ").strip() or "1"
     if graphical_available and choice == "1":
         return choose_sdf_with_finder()
     file_choice = "2" if graphical_available else "1"
     directory_choice = "3" if graphical_available else "2"
     if choice == file_choice:
-        value = input("Exact compound SDF path: ").strip()
+        value = input("Exact compound SDF or MOL path: ").strip()
         if not value:
-            raise SystemExit("No compound SDF path entered")
+            raise SystemExit("No compound file path entered")
         selected = Path(value).expanduser().resolve()
-        if not selected.is_file() or selected.suffix.lower() != ".sdf":
-            raise SystemExit(f"Selected ligand input is not a readable SDF file: {selected}")
+        if not selected.is_file() or selected.suffix.lower() not in {".sdf", ".mol"}:
+            raise SystemExit(f"Selected ligand input is not a readable SDF or MOL file: {selected}")
         return selected
     if choice == directory_choice:
-        value = input("Directory containing SDF files: ").strip()
+        value = input("Directory containing SDF or MOL files: ").strip()
         if not value:
-            raise SystemExit("No SDF directory path entered")
+            raise SystemExit("No ligand directory path entered")
         selected = Path(value).expanduser().resolve()
-        if not selected.is_dir() or not any(selected.glob("*.sdf")):
-            raise SystemExit(f"No readable .sdf files found in directory: {selected}")
+        from docking_universal.services.ligand_input import ligand_input_files
+        try:
+            ligand_input_files(selected)
+        except (FileNotFoundError, ValueError) as exc:
+            raise SystemExit(str(exc)) from None
+        if not selected.is_dir():
+            raise SystemExit(f"Ligand directory does not exist: {selected}")
         return selected
     valid = "1, 2, or 3" if graphical_available else "1 or 2"
     raise SystemExit(f"Invalid compound input selection; choose {valid}")
@@ -579,6 +587,29 @@ def protocol_source_filename(path):
         if recorded:
             return Path(recorded).name
     return path.name
+
+
+def retain_materialized_protocol(path, study, *, allow_verified_existing=False):
+    """Keep a verified bundle's relative inputs after temporary files are purged.
+
+    Raw JSON protocols keep their existing source-relative interpretation. Only
+    the bounded, extracted bundle tree is copied, never an arbitrary parent.
+    """
+    path = Path(path).resolve()
+    marker = path.parent.parent / '.source_protocol_filename'
+    manifest = path.parent.parent / 'bundle_manifest.json'
+    if not marker.is_file() or not manifest.is_file():
+        return path
+    destination = Path(study) / 'inputs' / 'locked_protocol'
+    if destination.exists() and not allow_verified_existing:
+        raise ValueError('Retained protocol destination already exists')
+    if not destination.exists():
+        shutil.copytree(path.parent, destination)
+    for source in path.parent.rglob('*'):
+        if source.is_file() and sha256(source) != sha256(destination / source.relative_to(path.parent)):
+            raise ValueError('Retained protocol copy failed verification')
+    (destination.parent / '.source_protocol_filename').write_text(marker.read_text())
+    return destination / path.name
 
 
 def offer_protocol_control(reason):
@@ -912,32 +943,47 @@ def require_complex_path(value, project, destination, non_interactive=False, all
     return replacement_path
 
 
-def split_compounds(source, destination):
+def split_compounds(source, destination, selection=None):
     """Write exactly one typed SDF per compound with collision-safe stable IDs."""
     from rdkit import Chem
     from rdkit.Chem import rdMolDescriptors
 
     source = source.expanduser().resolve()
-    paths = sorted(source.glob("*.sdf")) if source.is_dir() else [source]
-    if not paths or any(not path.is_file() for path in paths):
-        raise SystemExit(f"No readable SDF input found at {source}")
+    from docking_universal.services.ligand_input import ligand_input_files, read_ligand_molecules
+    try:
+        paths = ligand_input_files(source)
+    except (FileNotFoundError, ValueError) as exc:
+        raise SystemExit(str(exc)) from None
+    selected_rows = None
+    if selection is not None:
+        from docking_universal.services.ligand_library import selected_library_records
+        try:
+            reviewed_library, selected = selected_library_records(source, selection)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from None
+        selected_rows = {}
+        for row, molecule in selected:
+            selected_rows.setdefault(Path(row["source"]), []).append((row, molecule))
+        paths = list(selected_rows)
     destination.mkdir(parents=True, exist_ok=True)
     compounds = []
     used = set()
     for path in paths:
-        molecules = [molecule for molecule in Chem.SDMolSupplier(str(path), removeHs=False) if molecule]
+        source_rows = None
+        if selected_rows is not None:
+            source_rows = selected_rows[path]
+            molecules = [molecule for _row, molecule in source_rows]
+        try:
+            if source_rows is None:
+                molecules = read_ligand_molecules(path)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from None
         if not molecules:
             raise SystemExit(f"No readable molecules in {path}")
         for index, molecule in enumerate(molecules, start=1):
             raw_name = molecule.GetProp("_Name").strip() if molecule.HasProp("_Name") else ""
-            property_name = molecule.GetProp("Name").strip() if molecule.HasProp("Name") else ""
-            descriptive_stem = re.sub(r"(?i)_pubchem(?:_?\d+)?$", "", path.stem)
-            filename_name = descriptive_stem.replace("_", " ").strip().title()
-            compound_name = (
-                raw_name if raw_name and not raw_name.isdigit()
-                else property_name
-                or (filename_name if filename_name and not filename_name.isdigit() else raw_name)
-            )
+            from docking_universal.services.compound_identity import compound_display_name
+            compound_name = compound_display_name(molecule, path, len(compounds) + 1)
             base = safe_id(
                 raw_name or compound_name
                 or (path.stem if len(molecules) == 1 else f"{path.stem}_{index}")
@@ -965,13 +1011,28 @@ def split_compounds(source, destination):
                 "heavy_atoms": molecule.GetNumHeavyAtoms(),
                 "isomeric_smiles": Chem.MolToSmiles(Chem.RemoveHs(molecule), isomericSmiles=True),
             })
+            if source_rows is not None:
+                row = source_rows[index - 1][0]
+                compounds[-1].update(source_record=row["source_record"],
+                                     source_sha256=row["source_sha256"], record_id=row["record_id"])
+                for key in ('source_row', 'source_sheet', 'source_smiles'):
+                    if key in row:
+                        compounds[-1][key] = row[key]
+                if 'column_mapping' in reviewed_library:
+                    compounds[-1]['column_mapping'] = reviewed_library['column_mapping']
+    if selection is not None:
+        selected_ids = set(selection["record_ids"])
+        for row in reviewed_library["records"]:
+            row["selected_for_docking"] = row["record_id"] in selected_ids
+        (destination.parent / "ligand_library_review.json").write_text(
+            json.dumps(reviewed_library, indent=2) + "\n")
     return compounds
 
 
 def report_compound_library(compounds, output):
-    """Show and retain every compound accepted from the supplied SDF input."""
+    """Show and retain every compound accepted from the supplied library."""
     print("\nCompound library inventory")
-    print("  Each readable SDF record is treated as one compound and receives an isolated result folder.")
+    print("  Each accepted molecule is one compound with an isolated result folder; reviewed tables retain original row/column provenance.")
     for index, compound in enumerate(compounds, start=1):
         smiles = compound["isomeric_smiles"]
         display_smiles = smiles if len(smiles) <= 72 else smiles[:69] + "..."
@@ -1193,12 +1254,18 @@ def write_reports(study, manifest, compounds):
         SITE_GUIDED_EXPLORATORY: "Site-guided exploratory protocol; pose-recovery performance was not evaluated",
     }.get(selected_protocol_type, "Exploratory study; pose-recovery performance was not evaluated")
     rows = []
+    protocol = read_json(Path(str(manifest.get('approved_protocol',''))).expanduser()) or {}
+    engine = protocol.get('engine') or manifest.get('configured_engine')
     for compound in compounds:
         compound_dir = study / "compounds" / compound["compound_id"]
         screen_manifest = compound_dir / "screen_manifest.json"
         clusters = read_cluster_rows(compound_dir)
         retained_screen_manifest = read_json(screen_manifest) or {}
         selected = [row for row in clusters if row.get("selected") == "yes"]
+        def energy_key(row):
+            try: return float(row.get('best_energy_kcal_per_mol','inf'))
+            except (ValueError,TypeError): return float('inf')
+        best = min(clusters,key=energy_key) if clusters else {}
         failure = compound_dir / "failure.json"
         if compound.get("run_status"):
             status = compound["run_status"]
@@ -1213,8 +1280,10 @@ def write_reports(study, manifest, compounds):
             "compound_id": compound["compound_id"], "compound_name": compound["compound_name"],
             "status": status, "cluster_count": len(clusters), "selected_representatives": len(selected),
             "docking_site_count": retained_screen_manifest.get("docking_site_count", 1),
-            "best_cluster_energy_kcal_per_mol": selected[0].get("best_energy_kcal_per_mol", "") if selected else "",
-            "best_cluster_seed_support": selected[0].get("seed_support", "") if selected else "",
+            "best_cluster_energy_kcal_per_mol": best.get("best_energy_kcal_per_mol", ""),
+            "best_cluster_seed_support": best.get("seed_support", ""),
+            "top_cluster_id": best.get('cluster_id',''),
+            "scoring_function": scoring_function_label(retained_screen_manifest.get('engine') or engine),
             "warning": warning,
         })
     report_dir = study / "report"
@@ -1246,21 +1315,33 @@ def write_reports(study, manifest, compounds):
         lines += [f"> **Receptor-model warning:** {removal_warning}", ""]
     if manifest["study_status"] == "EXPLORATORY_NO_CONTROL":
         lines += ["> **Exploratory result:** no approved bound-ligand pose-recovery control was available. Generated poses and scores are hypotheses for structural review.", ""]
-    lines += ["## Compound results", "", "| Compound | Status | Clusters | Representatives | Best energy | Seed support |", "| --- | --- | ---: | ---: | ---: | ---: |"]
-    for row in rows:
+    configured = protocol.get('parameters') or manifest.get('configured_docking_parameters') or {}
+    settings_rows = protocol_summary_rows(engine,{},configured) if engine in {'vina','qvinaw','adgpu'} else []
+    overview = compound_overview_rows([{
+        'name':row['compound_name'],'best_energy_kcal_per_mol':row['best_cluster_energy_kcal_per_mol'],
+        'scoring_function':row['scoring_function'],'top_cluster':row['top_cluster_id'],
+        'cluster_count':row['cluster_count'],'status':row['status'],
+    } for row in rows],engine)
+    def markdown_row(values):
+        return '| ' + ' | '.join(str(value).replace('|','\\|').replace('\n',' ') for value in values) + ' |'
+    if settings_rows:
+        lines += ['## Configured docking protocol','',markdown_row(settings_rows[0]),'| --- | --- |']
+        lines += [markdown_row(row) for row in settings_rows[1:]]
+        lines.append('')
+    lines += ["## Compound results", "",markdown_row(overview[0]),'| --- | ---: | --- | --- | ---: | --- |']
+    for row, display_row in zip(rows,overview[1:]):
         link = f"../compounds/{row['compound_id']}/pose_analysis/representative_browser.pse"
         display = f"[{row['compound_name']}]({link})" if row["status"] == "COMPLETED" else row["compound_name"]
-        lines.append(
-            f"| {display} | {row['status']} | {row['cluster_count']} | "
-            f"{row['selected_representatives']} | {row['best_cluster_energy_kcal_per_mol'] or 'NA'} | "
-            f"{row['best_cluster_seed_support'] or 'NA'} |"
-        )
+        lines.append(markdown_row([display,*display_row[1:]]))
     lines += ["", "## Interpretation", "", "Docking scores are ranking outputs, not measured binding free energies. Cluster and seed support describe convergence of the configured search. They do not establish biological activity or prospective pose correctness.", ""]
     markdown = "\n".join(lines)
     (report_dir / "study_report.md").write_text(markdown)
-    html_rows = "".join(
-        "<tr>" + "".join(f"<td>{html.escape(str(row[field]))}</td>" for field in fields) + "</tr>" for row in rows
-    )
+    html_rows = ''.join('<tr>'+''.join(f'<td>{html.escape(str(value))}</td>' for value in row)+'</tr>' for row in overview[1:])
+    configured_html = ('<h2>Configured docking protocol</h2><table><thead><tr>'
+        + ''.join(f'<th>{html.escape(str(value))}</th>' for value in settings_rows[0])
+        + '</tr></thead><tbody>'
+        + ''.join('<tr>'+''.join(f'<td>{html.escape(str(value))}</td>' for value in row)+'</tr>' for row in settings_rows[1:])
+        + '</tbody></table>') if settings_rows else ''
     warning_html = (
         f"<p><strong>{html.escape(protocol_type_label(selected_protocol_type))}:</strong> "
         "the recorded site and docking results remain exploratory because target-specific pose-recovery performance was not evaluated.</p>"
@@ -1268,7 +1349,13 @@ def write_reports(study, manifest, compounds):
     )
     if removal_warning:
         warning_html = f"<strong>Receptor-model warning:</strong> {html.escape(removal_warning)}"
-    document = f"""<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>{html.escape(manifest['study_name'])}</title><style>body{{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#18202a}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #ccd3da;padding:.55rem;text-align:left}}th{{background:#eef3f6}}code{{background:#eef3f6;padding:.15rem .3rem}}.note{{border-left:4px solid #b87900;padding:.8rem;background:#fff6df}}</style></head><body><h1>{html.escape(manifest['study_name'])}</h1><p>Scientific status: <code>{manifest['study_status']}</code><br>Completion status: <code>{manifest.get('completion_status', 'UNKNOWN')}</code></p><div class=\"note\">{warning_html or 'Target-specific protocol gate passed. This remains computational evidence, not experimental validation.'}</div><h2>Receptor preparation</h2><p>{html.escape(preparation_summary)}. PDBFixer is used only after strict Meeko rejects the filtered receptor.</p><h2>Compound summary</h2><table><thead><tr>{''.join(f'<th>{html.escape(field)}</th>' for field in fields)}</tr></thead><tbody>{html_rows}</tbody></table><h2>Scientific limits</h2><p>Scores are ranking outputs. Pose clustering and seed support describe search convergence and require structural and experimental interpretation.</p></body></html>"""
+    document = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>{html.escape(manifest['study_name'])}</title><style>body{{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#18202a}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #ccd3da;padding:.55rem;text-align:left}}th{{background:#eef3f6}}code{{background:#eef3f6;padding:.15rem .3rem}}.note{{border-left:4px solid #b87900;padding:.8rem;background:#fff6df}}</style></head>
+<body><h1>{html.escape(manifest['study_name'])}</h1><p>Scientific status: <code>{manifest['study_status']}</code><br>Completion status: <code>{manifest.get('completion_status','UNKNOWN')}</code></p>
+<div class="note">{warning_html or 'Target-specific protocol gate passed. This remains computational evidence, not experimental validation.'}</div>
+<h2>Receptor preparation</h2><p>{html.escape(preparation_summary)}. PDBFixer is used only after strict Meeko rejects the filtered receptor.</p>
+{configured_html}<h2>Compound summary</h2><table><thead><tr>{''.join(f'<th>{html.escape(field)}</th>' for field in overview[0])}</tr></thead><tbody>{html_rows}</tbody></table>
+<h2>Scientific limits</h2><p>Scores are ranking outputs. Pose clustering and seed support describe search convergence and require structural and experimental interpretation.</p></body></html>"""
     (report_dir / "index.html").write_text(document)
     write_run_details(study, manifest, compounds, report_dir)
     # PDF is a presentation artifact; keep it optional so core report generation
@@ -1319,6 +1406,8 @@ def parse_args():
     parser.add_argument("--out", type=Path)
     parser.add_argument("--name", help="study name")
     parser.add_argument("--complex", type=Path, help="raw bound complex or protein PDB")
+    parser.add_argument("--reviewed-control-inputs", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--reviewed-control-inputs-sha256", help=argparse.SUPPRESS)
     parser.add_argument(
         "--control-ligand-id", "--ligand-id", dest="control_ligand_id",
         help="exact RESNAME:CHAIN:RESNUM for a non-interactive bound-ligand control",
@@ -1326,11 +1415,12 @@ def parse_args():
     parser.add_argument("--download-pdb", action="store_true", help="allow non-interactive RCSB download when --complex is a four-character PDB ID")
     parser.add_argument("--protocol", type=Path)
     parser.add_argument("--accept-exploratory-protocol", action="store_true", help="explicitly authorize unattended reuse of an exploratory protocol")
-    parser.add_argument("--ligands", type=Path, help="single/multi-record SDF or directory of SDF files")
+    parser.add_argument("--ligands", type=Path, help="MOL/SDF, an SDF/MOL folder, or CSV/TSV/XLSX with approved --ligand-selection")
+    parser.add_argument("--ligand-selection", type=Path, help="reviewed hash-bound compound selection JSON")
     parser.add_argument("--receptor-pdb", type=Path)
     parser.add_argument("--receptor-pdbqt", type=Path)
     parser.add_argument("--box", type=Path)
-    parser.add_argument("--engine", choices=("vina", "qvinaw"), help="docking engine: Vina or QuickVina-W")
+    parser.add_argument("--engine", choices=("vina", "qvinaw", "adgpu"), help="docking engine; adgpu requires an explicitly configured experimental AD4 protocol")
     parser.add_argument("--control-tier", choices=("quick", "repeatability", "broader", "conformers", "robust"), default="quick")
     parser.add_argument("--seeds", type=int, default=5, help="exploratory independent seeds (default: 5)")
     parser.add_argument("--conformers", type=int, default=3, help="exploratory conformers per state (default: 3)")
@@ -1338,6 +1428,8 @@ def parse_args():
     parser.add_argument("--exhaustiveness", type=int, default=16, help="exploratory search effort (default: 16)")
     parser.add_argument("--num-modes", type=int, default=20)
     parser.add_argument("--energy-range", type=float, default=8.0)
+    parser.add_argument('--ad4-runs', type=int, default=20, help='AD4 genetic runs per independent repeat (not Vina modes)')
+    parser.add_argument('--ad4-heuristic-cap', type=int, default=12_000_000, help='AD4 heuristic evaluation cap (not Vina exhaustiveness)')
     parser.add_argument("--ph", type=float, default=7.4)
     parser.add_argument("--base-seed", type=int, default=20260808)
     parser.add_argument("--forcefield", choices=("mmff94", "mmff94s", "uff"), default="mmff94")
@@ -1346,7 +1438,7 @@ def parse_args():
     parser.add_argument("--charge-model", default="gasteiger")
     parser.add_argument("--analysis", choices=("none", "summary", "representatives"), default="representatives")
     parser.add_argument("--representatives", type=int, default=3)
-    parser.add_argument("--cluster-rmsd", type=float, default=2.0)
+    parser.add_argument("--cluster-rmsd", type=float, default=1.5, help="pose-clustering RMSD cutoff in A (default: 1.5)")
     parser.add_argument("--non-interactive", action="store_true")
     parser.add_argument("--no-visuals", action="store_true")
     parser.add_argument("--review-pockets", action="store_true", help="open the prepared exploratory cavity scene in PyMOL before docking")
@@ -1454,6 +1546,11 @@ def main():
         print(f"  Charge model: {locked_parameters.get('charge_model', 'NA')}")
     elif args.engine is None:
         args.engine = "vina"
+    if args.engine == 'adgpu':
+        if mode == 'control':
+            raise SystemExit('The experimental AD4 option is not enabled for the production control-calibration workflow; use an explicitly exploratory AD4 protocol. No Vina fallback was run.')
+        from docking_universal.ad4_gpu import runtime_descriptor
+        runtime_descriptor(allow_validation=os.environ.get('DOCKING_UNIVERSAL_ADGPU_VALIDATION') == '1')
     study_name = args.name or f"docking_universal_{mode}"
     default_control_output = mode == "control" and args.out is None
     output_parent = choose_output_parent() if args.out is None and not args.non_interactive else Path.cwd()
@@ -1484,6 +1581,8 @@ def main():
         print(f"Resuming reviewed PLANNED study in place: {study}")
         print("Existing preparation and cavity-review artifacts are retained; docking outputs will be added.")
     study.mkdir(parents=True, exist_ok=resume_planned)
+    if mode == 'screen':
+        write_screening_progress(study, 'input', 'Reading selected input compounds and verifying the locked protocol…')
 
     if mode == "control":
         complex_path = args.complex
@@ -1531,6 +1630,15 @@ def main():
         ]
         if args.control_ligand_id:
             command += ["--ligand-id", args.control_ligand_id]
+        reviewed_control = None
+        if args.reviewed_control_inputs:
+            from docking_universal.services.control_review import read_reviewed_control_inputs
+            reviewed_control = read_reviewed_control_inputs(args.reviewed_control_inputs,
+                complex_path=complex_path, ligand_id=args.control_ligand_id, engine=args.engine,
+                expected_sha256=args.reviewed_control_inputs_sha256)
+            command += ["--reviewed-inputs", args.reviewed_control_inputs]
+            if args.reviewed_control_inputs_sha256:
+                command += ["--reviewed-inputs-sha256", args.reviewed_control_inputs_sha256]
         if args.conformers_override:
             command += ["--conformers-override", args.conformers_override]
         if args.skip_tautomers:
@@ -1556,6 +1664,25 @@ def main():
             read_json(path) or {}
             for path in (study / "control").glob("**/protocol.json")
         ]
+        if reviewed_control:
+            # Publish only a site-scoped control. Additional selected regions
+            # remain review context and never enter its approved locked boxes.
+            tested_regions = [region for region in reviewed_control["selected_regions"]
+                              if region["box_label"] == reviewed_control["tested_box_label"]]
+            for path in (study / "control").glob("**/protocol.json"):
+                scoped = read_json(path) or {}
+                scoped["docking_regions"] = tested_regions
+                scoped["control_site_scope"] = {
+                    "tested_box_label": reviewed_control["tested_box_label"],
+                    "untested_box_labels": reviewed_control["untested_box_labels"],
+                    "untested_receptor_states": reviewed_control["untested_receptor_states"],
+                    "authority": "This control does not validate any additional selected site",
+                }
+                scoped["pdb_pocket_evidence"] = reviewed_control["pdb_pocket_evidence"]
+                detection = Path(reviewed_control["preparation_root"]) / "cavity/pocket_detection_provenance.json"
+                if detection.is_file():
+                    scoped["pocket_detection"] = read_json(detection) or {}
+                path.write_text(json.dumps(scoped, indent=2) + "\n")
         control_approved = any(protocol.get("unknown_docking_allowed") for protocol in completed_protocols)
         control_software = scientific_software_record()
         protocol_software = next(
@@ -1578,6 +1705,17 @@ def main():
             ),
             "scientific_software": control_software,
         }
+        if reviewed_control:
+            control_study_manifest["pdb_pocket_evidence"] = reviewed_control["pdb_pocket_evidence"]
+            control_study_manifest["selected_docking_regions"] = [
+                region for region in reviewed_control["selected_regions"]
+                if region["box_label"] == reviewed_control["tested_box_label"]]
+            control_study_manifest["control_site_scope"] = {
+                "tested_box_label": reviewed_control["tested_box_label"],
+                "untested_box_labels": reviewed_control["untested_box_labels"],
+                "untested_receptor_states": reviewed_control["untested_receptor_states"],
+                "authority": "Control applies only to the tested site; additional selected sites remain exploratory",
+            }
         (study / "study_manifest.json").write_text(json.dumps(control_study_manifest, indent=2) + "\n")
         report_dir = write_reports(study, control_study_manifest, [])
         approved_protocol_paths = [
@@ -1599,6 +1737,7 @@ def main():
                     f"{run_timestamp}.duprotocol"
                 ),
                 control_compound=control_compound,
+                additional_roots=(Path(reviewed_control["preparation_root"]),) if reviewed_control else (),
             )
             print(f"Portable approved protocol: {bundle}")
         print(f"Control study complete: {study}")
@@ -1646,10 +1785,17 @@ def main():
             ligands = choose_ligand_source()
         if not ligands:
             raise SystemExit("--ligands is required")
-        compounds = split_compounds(ligands, study / "inputs" / "compounds")
+        selection = None
+        if args.ligand_selection:
+            try:
+                selection = json.loads(args.ligand_selection.read_text())
+            except (OSError, ValueError) as exc:
+                raise SystemExit(f"Unable to read reviewed ligand selection: {exc}") from None
+        compounds = split_compounds(ligands, study / "inputs" / "compounds", selection=selection)
         report_compound_library(compounds, study / "inputs" / "compound_library_inventory.json")
 
     if mode == "screen":
+        args.protocol = retain_materialized_protocol(args.protocol, study)
         print("STAGE: validating the selected protocol and locked receptor/box before any compound is docked")
         protocol_check_command = [
             cli, "_screen-stage", "--protocol", args.protocol, "--ligand", compounds[0]["input"],
@@ -1788,6 +1934,7 @@ def main():
             "approved_protocol_file_name": approved_protocol_file_name,
             "protocol_type": selected_protocol_type,
             "protocol_evidence_basis": approved_record.get("evidence_basis"),
+            "related_site_control": approved_record.get("related_site_control", {}),
             "protocol_screening_authority": approved_record.get("screening_authority"),
             "protocol_receptor_preparation_summary": (
                 approved_record.get("receptor_preparation_summary")
@@ -1848,6 +1995,13 @@ def main():
     manifest["scientific_software"] = scientific_software_record(
         manifest.get("configured_engine_version", "not recorded")
     )
+    if mode == 'exploratory' and args.engine == 'adgpu':
+        from docking_universal.ad4_gpu import Ad4Settings
+        configured = manifest['configured_docking_parameters']
+        for key in ('exhaustiveness', 'num_modes', 'energy_range_kcal_per_mol'):
+            configured.pop(key)
+        configured['ad4'] = Ad4Settings(lga_runs=args.ad4_runs, heuristic_cap=args.ad4_heuristic_cap).to_dict()
+        configured['macrocycle_treatment'] = 'unsupported_experimental_ad4'
     (study / "study_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
     if args.pockets_only:
@@ -1871,6 +2025,10 @@ def main():
         print(f"\nCOMPOUND {index}/{len(compounds)}: {compound['compound_name']} ({compound['compound_id']})")
         print("  Next: independent conformers → ligand PDBQT → replicated rigid-receptor docking → clustering → reports")
         compound_dir = study / "compounds" / compound["compound_id"]
+        write_screening_progress(study, 'compound', 'Starting compound preparation…',
+                                 compound_id=compound['compound_id'],
+                                 compound_name=compound['compound_name'],
+                                 compound_index=index, compound_total=len(compounds), failed_compounds=failures)
         command = [
             cli, "_screen-stage", "--ligand", compound["input"], "--out", compound_dir,
             "--analysis", args.analysis, "--representatives", args.representatives,
@@ -1894,6 +2052,8 @@ def main():
             ]
             if args.skip_tautomers:
                 command.append("--skip-tautomers")
+            if args.engine == 'adgpu':
+                command += ['--ad4-runs', args.ad4_runs, '--ad4-heuristic-cap', args.ad4_heuristic_cap]
         try:
             run(command)
             compound["run_status"] = "COMPLETED"
@@ -1926,7 +2086,11 @@ def main():
     if completed_engine_version:
         manifest["scientific_software"]["engine_version"] = completed_engine_version
     (study / "study_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    write_screening_progress(study, 'report', 'Compound processing finished; generating library figures and the final report…',
+                             failed_compounds=failures)
     report_dir = write_reports(study, manifest, compounds)
+    write_screening_progress(study, 'finished', 'Report generation finished; checking and registering outputs…',
+                             failed_compounds=failures)
     print(f"\nStudy complete: {study}")
     print(f"Readable report: {report_dir / 'index.html'}")
     print(f"Machine summary: {report_dir / 'study_summary.json'}")

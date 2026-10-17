@@ -1,7 +1,9 @@
 import tempfile
 import unittest
 import sys
+import os
 from pathlib import Path
+from unittest.mock import patch
 
 from docking_universal.application import StudyController
 from docking_universal.gui.host_client import ApplicationHostClient, ApplicationHostError
@@ -47,6 +49,30 @@ class HostClientTests(unittest.TestCase):
         with self.assertRaisesRegex(ApplicationHostError, "not connected"):
             self.client.request("client-study", "snapshot")
 
+    def test_library_index_read_has_its_own_longer_timeout_without_changing_other_requests(self):
+        from io import StringIO
+        from types import SimpleNamespace
+        self.client.process = SimpleNamespace(poll=lambda: None, stdin=StringIO())
+        self.client.session_id = 'timeout-test'
+        try:
+            for operation, timeout in (('inspect_ligand_library', 120.0), ('snapshot', None)):
+                with patch.object(self.client, '_read_message', return_value={
+                    'status': 'applied', 'request_id': 'timeout-probe', 'result': {},
+                }) as read:
+                    self.client.request('client-study', operation, request_id='timeout-probe')
+                    read.assert_called_once_with(timeout_seconds=timeout)
+        finally:
+            self.client.process = None
+        self.assertEqual(self.client.timeout_seconds, 5.0)
+
+    def test_runtime_identity_ignores_the_launching_terminal_conda_label(self):
+        with patch.dict(os.environ, {"CONDA_DEFAULT_ENV": "wrong-terminal-environment"}):
+            self.client.start()
+        prefix = Path(sys.prefix)
+        expected = prefix.name if (prefix / "conda-meta").is_dir() else None
+        self.assertEqual(self.client.runtime["conda_environment"], expected)
+        self.assertEqual(self.client.runtime["python_prefix"], sys.prefix)
+
     def test_client_retains_explicit_scientific_host_interpreter(self):
         client = ApplicationHostClient(
             self.root / "runs", self.client.host_script,
@@ -56,6 +82,10 @@ class HostClientTests(unittest.TestCase):
         self.assertEqual(
             client._environment()["DOCKING_UNIVERSAL_PYTHON"], str(Path(sys.executable).resolve())
         )
+
+    def test_source_validation_cli_is_not_silently_replaced_by_installed_cli(self):
+        with patch.dict(os.environ, {'DOCKING_UNIVERSAL_CLI':'/validated/source/bin/docking-universal'}):
+            self.assertEqual(self.client._environment()['DOCKING_UNIVERSAL_CLI'], '/validated/source/bin/docking-universal')
 
     def test_failed_host_can_restart_against_the_same_persisted_study(self):
         first_session = self.client.start()

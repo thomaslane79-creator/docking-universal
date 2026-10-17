@@ -24,6 +24,22 @@ The default CCD lookup retains only a coordinate-free isomeric-SMILES graph: ele
 
 Calibration is lowest-complexity-first when guided mode is selected. A quick diagnostic directs the next test: adequate pose recovery with insufficient seed evidence extends repeatability at the same depth; inadequate sampling or ranking increases search depth; persistent failure expands independent conformers; the robust tier combines full conformer and seed coverage. Only the first passing tier in that recorded progression is described as the recommended efficient protocol. A manually selected tier is reported only as the tested passing or failing configuration.
 
+## Ligand conformer minimization: vacuum, not solution free energy
+
+Before docking, the current independent-ligand workflow minimizes embedded
+conformers with MMFF94 (or the configured MMFF94s/UFF alternative, with a recorded
+UFF fallback where applicable). These calculations use a vacuum-energy model:
+no water continuum or explicit solvent is included. Ranking these energies
+selects starting geometries within a chemical state; it does not estimate
+solution populations, protein-bound stability, or binding affinity. State
+enumeration at a specified pH is separate from the minimization environment.
+Vina/QuickVina subsequently search and score poses using their own docking model.
+
+Solvent-aware preparation remains an experimental opt-in candidate; see the
+[paired benchmark](conformer-ab-benchmark.md) for cost, controls and limitations.
+Changing to an AD4 or smina scoring workflow would require its own matched
+controls and would not by itself validate a different preparation method.
+
 ## 3. Ligand-centered mode
 
 When a detected ligand is selected as a site anchor, the workflow requires one exact deposited instance (residue name, author chain, residue number, insertion code, and alternate location where present). A residue name alone is rejected because repeated or symmetry-related copies must never be averaged into a box between sites. The selected instance's atom centroid becomes the localized docking-box center. Protein atoms within 12 Å of that ligand form a local structure for `fpocket`. Alpha spheres are retained when they overlap ligand van der Waals volume, subject to a default 10 Å centroid-distance filter and a −0.5 Å overlap margin. The generated 3D review exposes the retained receptor, surface context, selected ligand, and proposed box before approval. Related public-PDB ligand-site evidence is collected when that option is enabled for either predicted-pocket or ligand-guided site definition. The ligand is not docked unless the user separately chooses the bound-ligand control pathway.
@@ -62,6 +78,41 @@ The reference centroid is either the whole protein or the largest chain. Higher 
 The retrospective control removes the confirmed experimental ligand, prepares the ligand-free receptor, centers a box on the withheld ligand coordinates, and redocks independently generated ligand conformers with the selected engine. Docked poses are mapped back to typed chemistry and compared with the experimental pose using symmetry-aware heavy-atom RMSD in the receptor coordinate frame, without fitting the docked ligand onto the reference. A 2.0 Å threshold is reported by default but remains configurable.
 
 This tests pose recovery for a known ligand/site under the selected preparation and docking settings. It is separate from prospective compound docking and from ligand-free pocket ranking, and success on one complex does not validate a scoring function generally.
+
+The control figure has **one point per pose cluster**, displaying the top 20
+clusters ranked by their lowest binding energy, plus the actual globally
+lowest-RMSD evaluable pose at that pose's own binding energy, even if its
+cluster is outside the displayed set. No RMSD display cutoff is applied.
+Each cluster point gives the lowest binding energy and
+lowest experimental RMSD within its cluster, independently; these minima may
+come from different member poses. A cluster point is therefore not necessarily
+one realizable pose. The CSV retains all evaluable clusters, marks which were
+displayed, and retains both winning pose IDs, the RMSD of the
+lowest-energy pose, and the energy of the lowest-RMSD pose. Its JSON audit
+records the actual clustering cutoff and any exclusions. Clusters with
+unevaluable members are not claimed to have exact minima. All points are circles;
+circle size reflects the number of docked poses in the cluster, not different
+compounds. Red, blue, and gold identify the three lowest-energy clusters in
+order. A green circle outline identifies
+the actual globally lowest-RMSD evaluable pose. This additional circle represents
+one pose, not its cluster's population or the independent cluster minima.
+Its fill follows its cluster's top-three energy color, otherwise gray.
+In the 3D overlay, the actual globally closest ligand keeps its cluster's
+top-three energy color, otherwise green; the three
+lowest-energy cluster representatives are red, blue, and gold, and the
+experimental ligand is magenta. A pose serving both roles is shown once.
+Binding energy is on the x-axis and experimental RMSD on the y-axis.
+This summarizes **retained** output, not every intermediate
+pose considered by the engine. An all-pose plot is a separate diagnostic, not
+a replacement for the cluster figure. Legacy figures use the lowest-energy
+representatives of the top 20 clusters and plot those representatives' RMSDs,
+not each cluster's minimum RMSD.
+
+The pose-clustering cutoff and experimental-recovery threshold are distinct
+settings. The default is **1.5 Å for pose clustering**, also configurable
+via `--cluster-rmsd` or the GUI clustering cutoff. The **2.0 Å experimental
+recovery threshold** is unchanged. Existing results retain their recorded
+clustering cutoff; reclustering existing poses requires no new docking.
 
 The crystal ligand is withheld from docking input and used only as the RMSD reference. Authoritative CCD or supplied-SDF chemistry is converted to isomeric SMILES to discard all coordinates, followed by pH-dependent chemical-state enumeration and seeded independent conformer generation. Control evaluation reports sampling success (any pose within threshold), ranking success (the globally lowest-energy pose within threshold), and reproducibility across independent engine seeds. A crystal-coordinate local-refinement calculation is a biased diagnostic and cannot approve an unknown-docking protocol.
 

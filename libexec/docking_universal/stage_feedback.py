@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Optional
+from .screening_progress import read_screening_progress
 
 
 Feedback = tuple[str, str, Optional[int], Optional[int]]
@@ -40,14 +41,41 @@ def finalization_feedback(protocol: Path, report: Path, bundle: Path) -> Feedbac
 
 
 def screening_feedback(output: Path, total_docking_jobs: int) -> Feedback:
+    # These are advisory worker milestones, never a successful terminal status.
+    record = read_screening_progress(output)
+    completed = sum(1 for pattern in ('compounds/*/seed_*/docking/*_vina.pdbqt',
+                                     'compounds/*/site_*/seed_*/docking/*_vina.pdbqt')
+                    for path in output.glob(pattern) if _ready(path)) if output.is_dir() else 0
+    if record:
+        phase = record['phase']
+        message = record['message'][:600]
+        if phase == 'compound':
+            identifier = record.get('compound_id')
+            # Never follow an arbitrary worker-supplied path outside this run.
+            if (isinstance(identifier, str) and identifier not in ('', '.', '..')
+                    and Path(identifier).name == identifier
+                    and (output / 'compounds' / identifier).resolve().parent == (output / 'compounds').resolve()):
+                child = read_screening_progress(output / 'compounds' / identifier)
+                phase = child.get('phase', 'ligands')
+                message = child.get('message', message)[:600]
+            name = ' '.join(str(record.get('compound_name', identifier or 'compound')).split())[:120]
+            message = (f"Compound {record.get('compound_index', '?')}/{record.get('compound_total', '?')}: "
+                       f"{name} — {message}")
+        failures = record.get('failed_compounds', 0)
+        if isinstance(failures, int) and failures > 0:
+            message += f' {failures} earlier compound(s) failed; retained successes continue.'
+        if completed or phase == 'docking':
+            message += f' Docking output files written: {completed} (initial plan: {total_docking_jobs}).'
+        # State enumeration can change the actual job count. Do not turn the
+        # initial estimate or a finished per-compound phase into 100% completion.
+        if phase == 'docking' and 0 <= completed < total_docking_jobs:
+            return phase, message, completed, total_docking_jobs
+        return phase, message, None, None
     reports = output / "report"
     if any(_ready(path) for path in reports.glob("*.pdf")):
         return "report", "Screening report written; registering results…", None, None
-    completed = sum(
-        1 for path in output.glob("compounds/*/seed_*/docking/*_vina.pdbqt") if _ready(path)
-    ) if output.is_dir() else 0
     if total_docking_jobs > 0 and completed >= total_docking_jobs:
-        return "analysis", "Docking outputs ready; clustering poses and generating the report…", None, None
+        return "analysis", "Docking outputs reached the initial plan; additional states or analysis/reporting may still be running…", None, None
     if completed:
         return "docking", f"Docking outputs ready: {completed}/{total_docking_jobs}", completed, total_docking_jobs
     return "ligands", "Preparing ligand conformers and starting docking…", 0, total_docking_jobs

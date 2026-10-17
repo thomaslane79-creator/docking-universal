@@ -49,6 +49,7 @@ class ProtocolRecordInputs:
     bundle_file_name: str
     pocket_detection: Mapping[str, Any] | None = None
     receptor_state_sensitivity: Mapping[str, Any] | None = None
+    target_identity: Mapping[str, Any] | None = None
 
 
 def build_protocol_record(inputs: ProtocolRecordInputs) -> dict[str, Any]:
@@ -56,6 +57,9 @@ def build_protocol_record(inputs: ProtocolRecordInputs) -> dict[str, Any]:
     if not inputs.regions:
         raise ValueError("A protocol record requires at least one approved docking region")
     first = inputs.regions[0]
+    from .pocket_metadata import annotate_regions
+    detector = (inputs.pocket_detection or {}).get('engine')
+    regions = annotate_regions(inputs.regions,detector=detector)
     record = {
         "schema_name": "docking-universal-protocol",
         "schema_version": 1,
@@ -83,10 +87,10 @@ def build_protocol_record(inputs: ProtocolRecordInputs) -> dict[str, Any]:
             "receptor_pdb": str(inputs.receptor_pdb),
             "box": str(first["box"]),
             "box_sha256": first["box_sha256"],
-            "boxes": list(inputs.regions),
+            "boxes": regions,
         },
-        "docking_regions": list(inputs.regions),
-        "selectable_docking_boxes": list(inputs.selectable_boxes),
+        "docking_regions": regions,
+        "selectable_docking_boxes": annotate_regions(inputs.selectable_boxes,detector=detector),
         "docking_box": dict(inputs.docking_box),
         "receptor_preparation": dict(inputs.receptor_preparation),
         "receptor_preparation_summary": inputs.receptor_preparation_summary,
@@ -104,6 +108,20 @@ def build_protocol_record(inputs: ProtocolRecordInputs) -> dict[str, Any]:
         record["pocket_detection"] = dict(inputs.pocket_detection)
     if inputs.receptor_state_sensitivity:
         record["receptor_state_sensitivity"] = dict(inputs.receptor_state_sensitivity)
+    if inputs.target_identity:
+        record["target_identity"] = dict(inputs.target_identity)
+    if inputs.engine == 'adgpu':
+        from .ad4_gpu import grid_geometry, PINNED_ENGINE_SHA256, read_settings
+        read_settings(record['parameters'])
+        regions=[]
+        for region in record['locked_inputs']['boxes']:
+            region=dict(region)
+            region['ad4_grid']=grid_geometry(region['geometry'])
+            regions.append(region)
+        record['locked_inputs']['boxes']=regions
+        record['docking_regions']=regions
+        record['engine_implementation']={'sha256':PINNED_ENGINE_SHA256,'profile':'patched v1.6 Apple OpenCL 128-work-item',
+                                         'experimental':True,'scoring_function':'AD4'}
     return record
 
 
@@ -127,12 +145,18 @@ def build_site_guided_report_manifest(
         "created_utc": protocol["created_utc"],
         "target": protocol["target"],
         "target_source": str(source_structure),
+        "target_identity": dict(protocol.get("target_identity") or {}),
         "compound_count": 0,
         "cavity_score_threshold_used": protocol.get("cavity_score_threshold_used"),
         "protocol_type": protocol["protocol_type"],
         "protocol_validation_status": (
+            "Exploratory selected-site protocol; a separate control concerns only "
+            + str(protocol['related_site_control']['tested_box_label'])
+            + ". Untested sites/states are not control-validated."
+            if protocol.get('related_site_control') else
             "Site-guided exploratory protocol; not evaluated by bound-ligand control"
         ),
+        "related_site_control": dict(protocol.get('related_site_control') or {}),
         "region_definition": protocol["region_definition"],
         "fpocket_selection": protocol.get("fpocket_selection"),
         "pdb_pocket_evidence": protocol["pdb_pocket_evidence"],
@@ -223,10 +247,15 @@ class FinalizationSettings:
     exhaustiveness: int = 16
     num_modes: int = 15
     energy_range: float = 8.0
+    ad4_runs: int = 20
+    ad4_heuristic_cap: int = 12_000_000
 
     def validate(self) -> None:
-        if self.engine not in {"vina", "qvinaw"}:
-            raise ValueError("Protocol engine must be vina or qvinaw")
+        if self.engine not in {"vina", "qvinaw", "adgpu"}:
+            raise ValueError("Protocol engine must be vina, qvinaw or experimental adgpu")
+        if self.engine == 'adgpu':
+            from .ad4_gpu import Ad4Settings
+            Ad4Settings(lga_runs=self.ad4_runs,heuristic_cap=self.ad4_heuristic_cap).validate()
         if not all(math.isfinite(value) for value in (self.ph, self.energy_range)):
             raise ValueError("Protocol numeric settings must be finite")
         if not 0 < self.ph <= 14:
@@ -238,7 +267,7 @@ class FinalizationSettings:
 
     def protocol_parameters(self) -> dict[str, Any]:
         self.validate()
-        return {
+        parameters = {
             "ph": self.ph,
             "conformers_per_state": self.conformers,
             "ensemble_seed": self.base_seed,
@@ -254,6 +283,12 @@ class FinalizationSettings:
             "energy_range_kcal_per_mol": self.energy_range,
             "seeds": [self.base_seed + index for index in range(self.seed_count)],
         }
+        if self.engine == 'adgpu':
+            from .ad4_gpu import Ad4Settings
+            for key in ('exhaustiveness','num_modes','energy_range_kcal_per_mol'):parameters.pop(key)
+            parameters['macrocycle_treatment']='unsupported_experimental_ad4'
+            parameters['ad4']=Ad4Settings(lga_runs=self.ad4_runs,heuristic_cap=self.ad4_heuristic_cap).to_dict()
+        return parameters
 
 
 def selected_region_records(
@@ -268,6 +303,8 @@ def selected_region_records(
         str(Path(candidate["path"]).resolve()): str(candidate["label"])
         for candidate in candidates
     }
+    sources = {str(Path(candidate["path"]).resolve()): candidate.get("site_source")
+               for candidate in candidates if candidate.get("site_source")}
     records = []
     for index, value in enumerate(selected_boxes, 1):
         path = Path(value).resolve()
@@ -290,6 +327,8 @@ def selected_region_records(
                 else fallback_origin
             ),
         })
+        if str(path) in sources:
+            records[-1]["site_source"] = sources[str(path)]
     if not records:
         raise ValueError("Protocol finalization requires at least one approved docking region")
     return records
@@ -347,14 +386,10 @@ class ProtocolFinalizationRequest:
                 raise ValueError(f"Approved docking region has invalid geometry: {path}")
 
 
-def request_from_study(
-    state: StudyState,
-    settings: FinalizationSettings,
-    output_directory: Path | str,
-    *,
-    exploratory_use_approved: bool,
-) -> ProtocolFinalizationRequest:
-    """Build a finalization request only from persisted approved study state."""
+def approved_regions_from_study(state: StudyState):
+    """Resolve hash-verified region approval without granting docking authority."""
+    if any(item.kind == "select_pockets" for item in state.pending_decisions):
+        raise ValueError("Docking-site review must be approved before continuing")
     decisions = {decision.id: decision for decision in state.decisions}
     approval = next((
         item for item in reversed(state.approvals)
@@ -362,6 +397,8 @@ def request_from_study(
     ), None)
     if approval is None:
         raise ValueError("Protocol finalization requires an approved pocket decision")
+    if set(approval.selections) != set(state.selected_pocket_ids):
+        raise ValueError("Selected regions differ from the persisted scientific approval")
     artifacts = {artifact.id: artifact for artifact in state.artifacts}
     candidates = {item["id"]: item for item in state.workflow_data.get("pocket_candidates", [])}
     selected = []
@@ -372,7 +409,8 @@ def request_from_study(
             raise ValueError(f"Approved pocket has no registered docking box: {candidate_id}")
         artifact = artifacts[candidate["box_artifact_id"]]
         selected.append(Path(artifact.path))
-        labels.append({"label": candidate.get("label", candidate_id), "path": artifact.path})
+        labels.append({"label": candidate.get("label", candidate_id), "path": artifact.path,
+                       "site_source": (candidate.get("evidence") or {}).get("source")})
     regions = selected_region_records(selected, labels)
     approved_hashes = {
         item.get("id"): item.get("sha256") for item in approval.evidence.get("artifacts", [])
@@ -381,6 +419,18 @@ def request_from_study(
         artifact_id = candidates[candidate_id]["box_artifact_id"]
         if approved_hashes.get(artifact_id) != region["box_sha256"]:
             raise ValueError(f"Approved evidence hash is missing or changed for {candidate_id}")
+    return regions, approval
+
+
+def request_from_study(
+    state: StudyState,
+    settings: FinalizationSettings,
+    output_directory: Path | str,
+    *,
+    exploratory_use_approved: bool,
+) -> ProtocolFinalizationRequest:
+    """Build a finalization request only from persisted approved study state."""
+    regions, approval = approved_regions_from_study(state)
 
     def artifact_record(kind: str):
         record = next((item for item in state.artifacts if item.kind == kind), None)

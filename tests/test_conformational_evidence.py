@@ -89,6 +89,23 @@ class ConformationalEvidenceTests(unittest.TestCase):
             self.assertEqual(aggregate["known_ligand_occlusion_count"], 1)
             self.assertIn("consistent with side-chain occlusion", aggregate["accessibility_interpretation"])
 
+    def test_changed_conformation_without_ligand_overlap_is_not_obstruction(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.fixture(root)
+            ligand = root / "distant_ligand.pdb"
+            ligand.write_text(
+                f"HETATM    1  C1  LIG Z   1    {12.0:8.3f}{12.0:8.3f}{12.0:8.3f}  1.00 20.00           C\nEND\n"
+            )
+            record = derive_conformational_evidence(manifest, ligand_evidence=[{
+                "entry": "1LIG", "aligned_chain": "A", "source_ligand_id": "1LIG/LIG/Z/1",
+                "aligned_ligand_pdb": ligand.name,
+            }], ligand_evidence_root=root)
+            aggregate = record["residue_aggregates"][0]
+            self.assertEqual(aggregate["changed_conformation_count"], 2)
+            self.assertEqual(aggregate["known_ligand_occlusion_count"], 0)
+            self.assertEqual(record["rigid_docking_site_assessment"]["occluding_residues"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

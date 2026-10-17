@@ -34,6 +34,8 @@ class FakeCmd:
         self.deleted = []
         self.wizard = None
         self.colors = []
+        self.view = tuple(float(i) for i in range(18))
+        self.auto_zoom = 1
 
     def load(self, path, name=None):
         self.loaded.append((path, name))
@@ -73,8 +75,20 @@ class FakeCmd:
     def hide(self, _representation, _name):
         return None
 
-    def set(self, _setting, _value, _name):
+    def set(self, _setting, _value, _name=None):
+        if _setting == 'auto_zoom':
+            self.auto_zoom = _value
         return None
+
+    def get_setting_int(self, setting):
+        assert setting == 'auto_zoom'
+        return self.auto_zoom
+
+    def get_view(self):
+        return self.view
+
+    def set_view(self, view):
+        self.view = tuple(view)
 
     def get_names(self, kind):
         self.assert_kind = kind
@@ -89,8 +103,10 @@ class FakeCmd:
     def unpick(self):
         return None
 
-    def load_cgo(self, graphic, name):
+    def load_cgo(self, graphic, name, zoom=1):
         self.box = (name, graphic)
+        if zoom or self.auto_zoom:
+            self.view = tuple(value + 100 for value in self.view)
 
 
 class Response:
@@ -136,6 +152,15 @@ class PymolSpikeTests(unittest.TestCase):
         result = core.dispatch("show_box", {"name": "du_box", "center": [1, 2, 3], "size": [10, 12, 14]})
         self.assertEqual(result["center"], [1.0, 2.0, 3.0])
         self.assertEqual(result["size"], [10.0, 12.0, 14.0])
+
+    def test_box_switch_keeps_companion_camera_with_auto_zoom_enabled(self):
+        cmd = FakeCmd()
+        core = self.bridge.BridgeCore(cmd)
+        view = cmd.get_view()
+        for center in ([1, 2, 3], [40, 50, 60], [1, 2, 3]):
+            core.dispatch('show_box', {'name': 'du_box', 'center': center, 'size': [10, 12, 14]})
+            self.assertEqual(cmd.get_view(), view)
+            self.assertEqual(cmd.auto_zoom, 1)
 
     def test_pocket_loading_accepts_only_coordinate_files_and_known_colors(self):
         with tempfile.TemporaryDirectory() as directory:

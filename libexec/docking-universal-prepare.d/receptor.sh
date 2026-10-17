@@ -43,6 +43,9 @@ filter_receptor_input() {
       }
       next
     }
+    # Reduce2 boxes/translates models without crystal context. Preserve the
+    # deposited frame so prepared pockets and original-coordinate evidence agree.
+    /^(CRYST1|SCALE[123]|ORIGX[123])/ { print; next }
     /^ATOM  / { print; next }
     /^HETATM/ {
       resname=substr($0,18,3); gsub(/ /,"",resname)
@@ -516,7 +519,7 @@ run_safe_receptor_preparation_attempts() {
     MEEKO_SET_TEMPLATE="${MEEKO_SET_TEMPLATE:-}"
     MEEKO_TEMPLATE_ARGS=()
     [ -z "$MEEKO_SET_TEMPLATE" ] || MEEKO_TEMPLATE_ARGS=(--set_template "$MEEKO_SET_TEMPLATE")
-    local initial_input="$RECEPTOR_PDB"
+    local initial_input="$RECEPTOR_FILTERED_PDB"
     if [ -n "${DOCKING_UNIVERSAL_SOURCE_MMCIF:-}" ]; then
       if "$PYTHON_COMMAND" -c 'import prody' >/dev/null 2>&1; then
         initial_input="$NATIVE_RECEPTOR_INPUT"
@@ -536,7 +539,7 @@ run_safe_receptor_preparation_attempts() {
         echo "ERROR: CCTBX reduce2 could not produce a chemistry-preserving receptor; inspect $REDUCE2_AUDIT" >&2
         return 1
       else
-        log "CCTBX reduce2 was unavailable or failed; retaining its audit and continuing to the compatibility protonation route"
+        log "CCTBX reduce2 did not produce an accepted receptor; inspect $REDUCE2_AUDIT and $REDUCE2_LOG for the process/output or validation reason"
       fi
     fi
     if [ "$REDUCE2_USED" = "0" ] && { [ "$REDUCE2_AVAILABLE" = "0" ] || [ "$PROTONATION_MODE" = required ]; } && [ "$PROTONATION_MODE" != off ] && [ "$PROTONATION_AVAILABLE" = "1" ]; then
@@ -565,8 +568,8 @@ run_safe_receptor_preparation_attempts() {
         log "PDB2PQR/PROPKA was not adopted (status: $protonation_status); retaining the original filtered receptor and audit"
       fi
     elif [ "$REDUCE2_USED" = "0" ] && [ "$REDUCE2_AVAILABLE" = "1" ]; then
-      log "CCTBX reduce2 output was rejected by chemistry validation; retaining the original filtered receptor rather than substituting a second protonation engine"
-    elif [ "$PROTONATION_MODE" != off ]; then
+      log "No accepted CCTBX reduce2 model is available; retaining the original filtered receptor rather than substituting a second protonation engine (see $REDUCE2_AUDIT)"
+    elif [ "$REDUCE2_USED" = "0" ] && [ "$PROTONATION_MODE" != off ]; then
       log "PDB2PQR/PROPKA unavailable; retaining the original filtered receptor (set DOCKING_UNIVERSAL_PROTONATION=required to stop)"
     fi
     build_meeko_receptor_command "$PREP_RECEPTOR_BIN" "$initial_input" \
@@ -578,7 +581,7 @@ run_safe_receptor_preparation_attempts() {
     PREP_COMMAND=("${PREPARATION_COMMAND[@]}")
   fi
 
-  log "Preparing the filtered original receptor with $PREP_BACKEND; detailed output -> $RECEPTOR_BACKEND_LOG"
+  log "Preparing the selected audited receptor with $PREP_BACKEND (Reduce2 used: $REDUCE2_USED; PDB2PQR used: $PROTONATION_USED); detailed output -> $RECEPTOR_BACKEND_LOG"
   PREP_SUCCESS=0
   PREP_ROUTE=not_completed
   if run_logged_preparation_command "$RECEPTOR_BACKEND_LOG" "${PREP_COMMAND[@]}"; then

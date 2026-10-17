@@ -72,6 +72,7 @@ class CommandDispatcher:
         "start_control_validation",
         "start_pose_interaction",
         "cancel_active_job",
+        "import_protocol_bundle",
     }
 
     def __init__(
@@ -138,11 +139,43 @@ class CommandDispatcher:
         if command.operation == "snapshot":
             state = self.controller.get_study(command.study_id)
             return Response(command.request_id, "applied", state.revision, {"study": state.to_dict()})
+        if command.operation in {"inspect_ligand_library", "ligand_record_preview"}:
+            from .services.ligand_library import inspect_ligand_library, ligand_record_preview
+            state = self.controller.get_study(command.study_id)
+            source = str(command.payload.get("ligand_source", ""))
+            if command.operation == "inspect_ligand_library":
+                result = {"library": inspect_ligand_library(source, command.payload.get('column_mapping'),
+                                                           command.payload.get('sheet'))}
+            else:
+                result = {"preview": ligand_record_preview(source, command.payload.get("fingerprint"),
+                                                          command.payload.get("record_id"),
+                                                          command.payload.get('column_mapping'))}
+            return Response(command.request_id, "applied", state.revision, result)
+        if command.operation in {"inspect_protocol_bundle", "import_protocol_bundle"}:
+            from .services.protocol_import import inspect_protocol_bundle, import_protocol_bundle
+            allowed = {"protocol_bundle"} if command.operation == "inspect_protocol_bundle" else {"protocol_bundle", "reviewed_sha256"}
+            if set(command.payload) - allowed:
+                raise ValueError("Saved-protocol import does not allow settings or engine overrides")
+            source = str(command.payload.get("protocol_bundle", ""))
+            if command.operation == "inspect_protocol_bundle":
+                state = self.controller.get_study(command.study_id)
+                preview = inspect_protocol_bundle(source)
+                return Response(command.request_id, "applied", state.revision, {"protocol": preview})
+            if self.workflow_runner is not None:
+                self.workflow_runner._assert_no_active_stage()
+            elif any(state.active_job for state in self.controller.store.list_studies()):
+                raise RuntimeError("A scientific stage is active; wait before importing a protocol")
+            state = import_protocol_bundle(
+                self.controller, command.study_id, source, command.payload.get("reviewed_sha256"),
+                expected_revision=command.expected_revision, request_id=command.request_id,
+            )
+            return Response(command.request_id, "applied", state.revision, {"study": state.to_dict()})
         if command.operation == "screening_plan":
             if self.workflow_runner is None:
                 raise RuntimeError("Screening is not configured in this application host")
             result = self.workflow_runner.screening_plan(
                 command.study_id, Path(str(command.payload.get("ligand_source", ""))),
+                ligand_selection=command.payload.get("ligand_selection"),
             )
             state = self.controller.get_study(command.study_id)
             return Response(command.request_id, "applied", state.revision, {"plan": result})

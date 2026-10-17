@@ -77,6 +77,25 @@ class StructureInputTests(unittest.TestCase):
             self.assertEqual(result.engine_pdb_path, source.resolve())
             self.assertFalse(result.derived_for_legacy_engine)
 
+    def test_source_organism_categories_are_retained_for_reports(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "entry.cif"
+            source.write_text(MMCIF + """
+_entry.id TEST
+_struct.title 'Protein structure'
+loop_
+_entity_src_gen.entity_id
+_entity_src_gen.pdbx_gene_src_scientific_name
+_entity_src_gen.pdbx_host_org_scientific_name
+1 'Homo sapiens' 'Escherichia coli'
+""")
+            result = normalize_structure_input(source, root / "normalized")
+            metadata = json.loads(result.metadata_path.read_text())["deposited_metadata"]
+            self.assertEqual(metadata["entry"]["id"], ["TEST"])
+            self.assertEqual(metadata["entity_src_gen"]["pdbx_gene_src_scientific_name"], ["Homo sapiens"])
+            self.assertEqual(metadata["entity_src_gen"]["pdbx_host_org_scientific_name"], ["Escherichia coli"])
+
 
 if __name__ == "__main__":
     unittest.main()

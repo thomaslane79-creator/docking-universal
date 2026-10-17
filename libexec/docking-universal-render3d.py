@@ -23,6 +23,8 @@ def main():
     parser.add_argument("--pymol", default="pymol", help="PyMOL executable")
     parser.add_argument("--transparent", action="store_true", help="Use a transparent background")
     parser.add_argument("--session-out", type=Path, help="Also save a self-contained PyMOL .pse session")
+    parser.add_argument("--scene", help="Recall this exact retained scene before rendering")
+    parser.add_argument("--contact-residue-labels", action="store_true", help="Add spaced residue-name/number/chain callouts to a retained PLIP figure")
     args = parser.parse_args()
 
     source = args.input.expanduser().resolve()
@@ -61,6 +63,16 @@ def main():
             "cmd.set('sphere_scale', 0.35, 'structure and inorganic')",
             "cmd.orient('structure')",
             "cmd.zoom('structure', 4)",
+        ])
+    if args.scene:
+        commands.append(f"cmd.scene({args.scene!r}, 'recall', animate=0)")
+    if args.contact_residue_labels:
+        commands.extend([
+            "import sys, json",
+            f"sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})",
+            "from docking_universal.viewer.figure_labels import label_contact_residues",
+            "residue_callouts = label_contact_residues(cmd)",
+            f"open({str(output.with_suffix('.residue-labels.json'))!r}, 'w').write(json.dumps(residue_callouts, indent=2))",
         ])
     commands.extend([
         "cmd.bg_color('white')",

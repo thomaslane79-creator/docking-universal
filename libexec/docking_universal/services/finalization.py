@@ -115,7 +115,8 @@ def _all_candidate_regions(state: StudyState) -> list[dict]:
         if artifact is None or not Path(artifact.path).is_file():
             continue
         paths.append(Path(artifact.path))
-        labels.append({"label": candidate.get("label") or candidate.get("id"), "path": artifact.path})
+        labels.append({"label": candidate.get("label") or candidate.get("id"), "path": artifact.path,
+                       "site_source": (candidate.get("evidence") or {}).get("source")})
     return selected_region_records(paths, labels) if paths else []
 
 
@@ -193,7 +194,7 @@ def build_site_guided_protocol(
     }
     scene = next((item.path for item in state.artifacts if item.kind == "pymol_scene"), None)
     labels = [region["box_label"] for region in request.regions]
-    return build_protocol_record(ProtocolRecordInputs(
+    record = build_protocol_record(ProtocolRecordInputs(
         protocol_type="site-guided-exploratory",
         target=request.target,
         site_anchor=Path(str(request.regions[0]["box"])).stem,
@@ -223,6 +224,18 @@ def build_site_guided_protocol(
         pocket_detection=pocket_detection,
         receptor_state_sensitivity=state.workflow_data.get("receptor_state_sensitivity"),
     ))
+    scope = state.workflow_data.get("control_site_review")
+    if scope:
+        record["related_site_control"] = dict(scope)
+        record["evidence_basis"] += (
+            " A separate pose-recovery control concerns only " + str(scope["tested_box_label"])
+            + "; this selected-site protocol remains explicitly exploratory."
+        )
+    if any(region.get("site_source") == "input_bound_ligand" for region in request.regions):
+        record["evidence_basis"] += (
+            " B1 is defined by the exact input bound ligand, not a predicted pocket or new independent evidence."
+        )
+    return record
 
 
 def finalize_site_guided_protocol(
@@ -238,6 +251,8 @@ def finalize_site_guided_protocol(
     paths = finalization_paths(request)
     paths.report.parent.mkdir(parents=True, exist_ok=True)
     protocol = build_site_guided_protocol(state, request, libexec=libexec)
+    from .protein_identity import read_protein_identity
+    protocol["target_identity"] = read_protein_identity(request.source_structure)
     source_dir = request.preparation_root / "source"
     if (source_dir / "structure.cif").is_file():
         protocol["coordinate_source"] = {
@@ -246,6 +261,7 @@ def finalize_site_guided_protocol(
             "metadata": str(source_dir / "structure-input.json"),
             "evidence": json.loads((source_dir / "structure-input.json").read_text()),
         }
+        protocol["target_identity"] = read_protein_identity(source_dir / "structure.cif")
     manifest = build_site_guided_report_manifest(
         protocol, request.source_structure, _package_version(libexec), protocol["software"],
     )

@@ -6,6 +6,9 @@ from pathlib import Path
 from html import escape
 
 from docking_universal_bundle import build_receptor_modification_warning
+from docking_universal.reporting import (engine_display_name, scoring_function_label,
+    engine_parameter_rows, protocol_summary_rows, compound_overview_rows)
+from docking_universal.pocket_metadata import region_prediction
 
 def first(root, patterns):
     for pattern in patterns:
@@ -20,12 +23,107 @@ def read_json(path, default=None):
     except (OSError, ValueError, TypeError):
         return default or {}
 
+def report_target_identity(study, summary, protocol, protocol_path, receptor_source):
+    """Prefer a portable snapshot; otherwise read only this target's input."""
+    from docking_universal.services.protein_identity import read_protein_identity
+    for record in (protocol, summary):
+        if record.get("target_identity"):
+            return record["target_identity"]
+    coordinate = protocol.get("coordinate_source") or {}
+    evidence = coordinate.get("evidence") or {}
+    candidates = []
+    if coordinate.get("structure"):
+        path = Path(coordinate["structure"])
+        if not path.is_absolute() and protocol_path:
+            path = protocol_path.parent / path
+        # Never read a changed coordinate source as if it were the retained one.
+        expected = coordinate.get("structure_sha256")
+        if path.is_file() and (not expected or sha256(path) == expected):
+            candidates.append(path)
+    if not candidates and not coordinate:
+        if summary.get("target_source"):
+            source_path = Path(summary["target_source"])
+            candidates.append(source_path if source_path.is_absolute() else study / source_path)
+        if receptor_source:
+            receptor = Path(receptor_source)
+            source = receptor.parent.parent / "source" / "structure.cif"
+            if receptor.parent.name == "receptor":
+                candidates.append(source)
+            candidates.append(receptor.with_suffix(".pdb") if receptor.suffix == ".pdbqt" else receptor)
+        # receptor_source already identifies the chosen input. Do not scan for
+        # another protein or borrow identity from related-structure evidence.
+    for path in candidates:
+        identity = read_protein_identity(path, evidence=evidence)
+        if identity.get("proteins"):
+            return identity
+    return read_protein_identity(evidence=evidence)
+
+def control_landscape_description(panel, experimental_label):
+    """Describe actual retained plot scope, including older cluster-only assets."""
+    audit = read_json(Path(panel).with_suffix(".json")) if panel else {}
+    if audit.get("plot_scope") in {"all_retained_control_clusters_independent_minima",
+                                   "top20_control_clusters_independent_minima",
+                                   "top20_control_clusters_plus_global_lowest_rmsd_pose"}:
+        count = audit.get("plotted_count", "all evaluable")
+        cutoff = audit.get("cluster_rmsd_angstrom")
+        method = f" at a {cutoff:g} Å clustering cutoff" if isinstance(cutoff, (int, float)) else ""
+        exclusions = audit.get("excluded", [])
+        warning = " Clusters with unevaluable members were excluded; reasons are retained in the figure audit." if exclusions else ""
+        limited = audit.get("plot_scope") == "top20_control_clusters_independent_minima"
+        selection = (" Display is limited to the top 20 clusters by lowest energy; all evaluable clusters "
+                     "are retained in the CSV with their display status."
+                     if limited else " No top-cluster, energy or RMSD display cutoff is applied.")
+        if audit.get("plot_scope") == "top20_control_clusters_plus_global_lowest_rmsd_pose":
+            selection = (" Display includes the top 20 clusters by lowest energy plus the globally "
+                         "lowest-RMSD evaluable pose at its own binding energy, even if its cluster is not displayed; all evaluable clusters "
+                         "are retained in the CSV with their display status.")
+        if audit.get("highlight_style") == "energy_rank_colors":
+            markers = ("Circle size reflects the number of docked poses in the cluster, not distinct compounds. "
+                       "Red, blue, and gold identify the three lowest-energy clusters in order; "
+                       "other displayed clusters are gray. Color does not rank experimental RMSD.")
+            if audit.get("lowest_rmsd_highlight"):
+                markers += (" The green circle is one actual globally lowest-RMSD evaluable pose, not a cluster "
+                            "summary. Its coordinates are that pose's own energy and experimental RMSD; its size represents one pose. "
+                            "Its fill follows its cluster's top-three energy color, otherwise gray.")
+        else:
+            # Previously retained images still contain the old shape markers.
+            markers = ("Point size reflects cluster population. The red diamond marks the lowest-energy cluster "
+                       "and the blue star the lowest-RMSD displayed cluster, not necessarily among all clusters.")
+        return (f"{count} control pose clusters{method}. Each cluster point gives the lowest energy and lowest "
+                f"experimental {experimental_label} RMSD within that cluster, independently. These minima "
+                "may belong to different poses; the point is a cluster summary, not necessarily one pose. "
+                "RMSD is symmetry-aware heavy-atom distance in the receptor frame without fitting. "
+                + markers + selection + warning)
+    if audit.get("plot_scope") == "all_retained_control_poses":
+        count = audit.get("plotted_count", "all evaluable")
+        excluded = len(audit.get("excluded", []))
+        warning = f" {excluded} unevaluable records were excluded; reasons are retained in the figure audit." if excluded else ""
+        return (f"Docking score versus symmetry-aware, no-fit heavy-atom RMSD to experimental {experimental_label} "
+                f"for {count} retained poses in the receptor coordinate frame. Every gray point is one pose, "
+                "not a cluster representative. The red diamond marks the lowest score and the blue star "
+                "the closest-to-crystal pose, independently; neither score nor RMSD filtering is applied." + warning)
+    return (f"Control-cluster docking score versus symmetry-aware, no-fit heavy-atom RMSD to experimental {experimental_label} "
+            "in the receptor coordinate frame. This legacy figure shows lowest-energy representatives "
+            "of the top 20 clusters. Each plotted RMSD belongs to that energy representative, not "
+            "necessarily the cluster's minimum RMSD; closer-to-crystal poses can occur within the same cluster.")
+
 def sha256(path):
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+def control_overlay_description(panel):
+    audit = read_json(Path(panel).with_suffix(".manifest.json")) if panel else {}
+    if audit.get("poses"):
+        return ("Experimental ligand (magenta), the three lowest-energy cluster representatives "
+                "(red, blue, gold), and the actual globally lowest-RMSD pose, superimposed "
+                "in the receptor frame. The closest pose keeps its cluster's top-three energy color, "
+                "otherwise green. A pose serving both roles is shown once. "
+                "Receptor residues within 5 A of the displayed ligands are gray.")
+    return ("Experimental ligand (magenta), lowest-energy pose (red), and lowest-RMSD pose (blue) "
+            "superimposed in the receptor frame; receptor residues within 5 A of the displayed ligands are gray.")
 
 def package_version():
     script_dir = Path(__file__).resolve().parent
@@ -192,7 +290,7 @@ def compound_result_records(study, compounds, ligand_names):
         })
     return records
 
-def single_compound_summary_rows(result):
+def single_compound_summary_rows(result, engine=None):
     """Use one result-summary format in standalone and multi-ligand reports."""
     best_score = result["best_energy_kcal_per_mol"]
     rows = [
@@ -206,12 +304,10 @@ def single_compound_summary_rows(result):
         rows.append(["Docking sites evaluated", result.get("docking_site_count", 1)])
     rows += [
         ["Best retained docking score", f"{best_score} kcal/mol" if best_score != "Unavailable" else best_score],
+        ["Scoring function", scoring_function_label(engine)],
         ["Top-ranked cluster", result["top_cluster"]],
         ["Top-cluster population", result["top_cluster_population"]],
-        ["Independent-seed support", result["top_cluster_seed_support"]],
-        ["Conformer support", result["top_cluster_conformer_support"]],
-        ["Distinct retained clusters", result["cluster_count"] or "Unavailable"],
-        ["Selected representatives", result["selected_representatives"]],
+        ["Distinct pose clusters", result["cluster_count"] or "Unavailable"],
     ]
     return rows
 
@@ -241,6 +337,11 @@ def descriptive_report_name(target_name, ligand_names, summary):
 
 def discover_cavity_record(study):
     """Recover selected-cavity and docking-box evidence from retained files."""
+    summary = read_json(study / "report" / "study_summary.json")
+    review_only = summary.get('report_purpose') == 'pocket-review'
+    regions = summary.get('selected_docking_regions') or []
+    region = regions[0] if regions and not review_only else {}
+    locked_box = region.get('box') or summary.get('configured_locked_inputs', {}).get('box')
     selection = first(study, [
         "preparation/*_receptor_prep/cavity/pocket_selection_diagnostics.tsv",
         "**/cavity/pocket_selection_diagnostics.tsv",
@@ -249,8 +350,9 @@ def discover_cavity_record(study):
     # outside the study directory.  The locked box path is the authoritative
     # link to its corresponding fpocket diagnostics.
     if not selection:
-        summary = read_json(study / "report" / "study_summary.json")
-        box = Path(str(summary.get("configured_locked_inputs", {}).get("box", ""))).expanduser()
+        box = Path(str(locked_box or "")).expanduser()
+        if not box.is_absolute():
+            box = study / box
         candidate = box.parent / "pocket_selection_diagnostics.tsv"
         if candidate.is_file():
             selection = candidate
@@ -260,6 +362,8 @@ def discover_cavity_record(study):
         "compounds/*/seed_*/docking/run_manifest.tsv", "**/docking/run_manifest.tsv",
     ]))
     config = Path(manifest.get("config", "")).name
+    if not config and locked_box and not review_only:
+        config = Path(locked_box).name
     if not config:
         preparation_config = first(selection.parent, ["*_pocket*.conf"])
         config = preparation_config.name if preparation_config else ""
@@ -268,11 +372,19 @@ def discover_cavity_record(study):
     # `target_pocket1.conf` is the first generated output box, not necessarily
     # fpocket's source identifier (for example it can be made from pocket5).
     # Resolve it through the recorded selection order.
-    match = re.search(r"pocket(\d+)", config, re.I)
-    output_index = int(match.group(1)) if match else 1
+    match = re.search(r"_pocket(\d+)\.conf$", config, re.I)
+    output_index = int(match.group(1)) if match else None
     selected = next((row for row in rows if int(row.get("rank_order", 0) or 0) == output_index), {})
     selected_file = selected.get("pocket_file")
     engine_key = str(selected.get("pocket_engine", "fpocket") or "fpocket").lower()
+    if region and not selected:
+        prediction = region.get('pocket_prediction') or {}
+        detection = read_json(selection.parent / 'pocket_detection_provenance.json')
+        engine_key = str(prediction.get('detector') or detection.get('engine') or engine_key).lower()
+        selected = {'rank_score': 'Not retained'}
+        if str(region.get('box_label', '')).startswith(('L', 'B')):
+            selected = {'rank_score': 'Not applicable (ligand-defined region)',
+                        'probability': 'Not applicable (ligand-defined region)'}
     engine_name = "P2Rank" if engine_key == "p2rank" else "fpocket" if engine_key == "fpocket" else engine_key
     diagnostics = selection.parent / "pocket_diagnostics.tsv"
     diagnostic_rows = read_tsv_rows(diagnostics)
@@ -288,7 +400,7 @@ def discover_cavity_record(study):
         "pocket_engine": engine_key, "pocket_engine_name": engine_name,
     }
 
-def inherited_protocol_cavity_record(protocol):
+def inherited_protocol_cavity_record(protocol, protocol_path=None):
     """Build the report view of a pocket already locked into a protocol."""
     detection = protocol.get("pocket_detection") or {}
     regions = protocol.get("docking_regions") or []
@@ -298,9 +410,24 @@ def inherited_protocol_cavity_record(protocol):
     geometry = selected_region.get("geometry") or {}
     engine_key = str(detection.get("engine", "predicted-pocket") or "predicted-pocket").lower()
     engine_name = "P2Rank" if engine_key == "p2rank" else "fpocket" if engine_key == "fpocket" else engine_key
+    prediction = region_prediction(selected_region, base=Path(protocol_path).parent if protocol_path else None,
+                                   detector=engine_key)
+    if not prediction:
+        # Older portable protocols kept the exact original box/hash but did
+        # not embed its score. Recover only from that verified original box.
+        for candidate in protocol.get('selectable_docking_boxes') or []:
+            if (candidate.get('box_sha256') and candidate.get('box_sha256') == selected_region.get('box_sha256')
+                    and candidate.get('box_label') == selected_region.get('box_label')):
+                prediction = region_prediction(candidate, detector=engine_key)
+                if prediction: break
+    selected = {'rank_score':prediction.get('score','Not retained in this protocol'),
+                'probability':prediction.get('probability','Not retained in this protocol')}
+    if str(selected_region.get('box_label','')).startswith(('L', 'B')):
+        selected = {'rank_score':'Not applicable (ligand-defined region)',
+                    'probability':'Not applicable (ligand-defined region)'}
     return {
         "selection": Path("protocol"), "rows": [],
-        "selected": {"rank_score": "recorded in the protocol-selection report"},
+        "selected": selected,
         "detail": {}, "descriptors": {}, "config": selected_region.get("box_name", ""),
         "selected_file": selected_region.get("box_label", "P1"),
         "box_dimensions": [geometry.get(f"size_{axis}") for axis in "xyz"],
@@ -419,6 +546,7 @@ SCIENTIFIC_VERSION_LABELS = {
     "CCTBX": "cctbx_base",
     "AutoDock Vina": "engine_version",
     "QuickVina-W": "engine_version",
+    "AutoDock-GPU (AD4, experimental)": "engine_version",
 }
 
 SCIENTIFIC_SOFTWARE_KEYS = {
@@ -436,6 +564,7 @@ SCIENTIFIC_SOFTWARE_KEYS = {
     "PLIP": "plip",
     "AutoDock Vina": "engine_version",
     "QuickVina-W": "engine_version",
+    "AutoDock-GPU (AD4, experimental)": "engine_version",
 }
 
 
@@ -563,10 +692,6 @@ def selectable_box_inventory(summary, cavity):
 def includes_selectable_box_inventory(summary):
     """Only a pre-selection review report should present the box menu."""
     return summary.get("report_purpose") == "pocket-review"
-
-
-def engine_display_name(engine):
-    return "QuickVina-W" if str(engine).lower() == "qvinaw" else "AutoDock Vina"
 
 
 def retained_artifact_versions(study):
@@ -917,9 +1042,9 @@ def compare_scientific_versions(recorded, current, engine_name="AutoDock Vina"):
     for label, key in fields:
         control_version = str(recorded.get(key, "") or "")
         current_version = str(current.get(key, "") or "")
-        if not control_version or control_version in {"unknown", "not recorded", "not detected"}:
+        if not control_version or control_version in {"unknown", "not recorded", "not detected"} or control_version.startswith('recorded when'):
             status = "NOT VERIFIED"
-        elif not current_version or current_version in {"unknown", "not recorded", "not detected"}:
+        elif not current_version or current_version in {"unknown", "not recorded", "not detected"} or current_version.startswith('recorded when'):
             status = "NOT VERIFIED"
         else:
             status = "SAME" if control_version == current_version else "DIFFERENT"
@@ -967,11 +1092,15 @@ def reproducibility_record(protocol, study, control):
     if engine_source:
         engine_version += f" ({engine_source})"
     cavity_record = discover_cavity_record(study)
-    detector_key = str((cavity_record or {}).get("pocket_engine", "fpocket")).lower()
+    detector_key = str((protocol or {}).get('pocket_detection', {}).get('engine')
+                       or (cavity_record or {}).get("pocket_engine", "fpocket")).lower()
     detector_name = "P2Rank" if detector_key == "p2rank" else "fpocket"
     software = [
         {"role": "Scientific workflow", "software": "Docking Universal", "version": run_versions["docking_universal"]},
-        {"role": "Ligand-free cavity detection", "software": detector_name, "version": run_versions[detector_key]},
+        # Reuse does not rerun detection. Its version belongs to the locked
+        # protocol, not the current ligand-screening runtime.
+        {"role": "Ligand-free cavity detection", "software": detector_name,
+         "version": recorded.get(detector_key) or run_versions[detector_key]},
         {"role": "Docking scores and poses", "software": docking_engine_name, "version": engine_version},
         {"role": "Receptor and ligand parameterization", "software": "Meeko", "version": run_versions["meeko"]},
         {"role": "Linked-component receptor compatibility fallback", "software": "ADFRsuite", "version": adfrsuite_version(summary, receptor_preparation)},
@@ -1026,6 +1155,12 @@ def reproducibility_record(protocol, study, control):
             "citation": "Hassan NM, Alhossary AA, Mu Y, Kwoh CK. Protein-Ligand Blind Docking Using QuickVina-W With Inter-Process Spatio-Temporal Integration. Sci Rep. 2017;7:15451.",
             "url": "https://doi.org/10.1038/s41598-017-15571-7",
         })
+    elif engine == 'adgpu':
+        references = [reference for reference in references if 'AutoDock Vina' not in reference['citation']]
+        references.insert(0, {
+            'citation': 'Santos-Martins D, Solis-Vasquez L, Tillack AF, Sanner MF, Koch A, Forli S. Accelerating AutoDock4 with GPUs and Gradient-Based Local Search. J Chem Theory Comput. 2021;17:1060-1073.',
+            'url': 'https://doi.org/10.1021/acs.jctc.0c01006',
+        })
     return {
         "schema_name": "docking-universal-report-provenance", "schema_version": 1,
         "study": str(study), "control": str(control) if control else None,
@@ -1039,7 +1174,7 @@ def reproducibility_record(protocol, study, control):
             "interaction_detection": "PLIP rule-based calls; retained PLIP XML is authoritative",
             "interaction_diagram": figure_manifest.get("interaction_diagram_renderer", "native SDF plus PLIP XML"),
             "rmsd_and_clustering": clustering.get("method", "RDKit symmetry-aware heavy-atom CalcRMS without fitting; Butina clustering"),
-            "cluster_cutoff_angstrom": clustering.get("cluster_rmsd_angstrom", 2.0),
+            "cluster_cutoff_angstrom": clustering.get("cluster_rmsd_angstrom"),
             "single_cluster_policy": "Use the lowest-energy member as the sole representative",
             "receptor_preparation": receptor_preparation["path"],
         },
@@ -1102,7 +1237,7 @@ def retain_used_report_methods(provenance, cavity, has_docking):
 
     def reference_was_used(reference):
         citation = reference.get("citation", "")
-        if "AutoDock Vina" in citation or "QuickVina-W" in citation:
+        if "AutoDock Vina" in citation or "QuickVina-W" in citation or "Accelerating AutoDock4" in citation:
             return has_docking
         if "Fpocket" in citation:
             return bool(cavity) and cavity.get("pocket_engine") == "fpocket"
@@ -1177,11 +1312,12 @@ def reproducibility_summary(provenance, cavity, has_docking):
     sentences.append(f"Receptor preparation: {preparation['path']}.")
     if has_docking:
         cutoff = provenance["methods"]["cluster_cutoff_angstrom"]
+        clustering_text = f"at a {cutoff} A cutoff" if cutoff is not None else "with an unrecorded cutoff"
         sentences.append(
             f"{provenance['methods']['docking_scores_and_poses']} produced docking scores and poses. PLIP supplied rule-based "
             "protein-ligand interaction calls, with retained PLIP XML as the authoritative "
             "interaction record. RDKit supplied symmetry-aware heavy-atom RMSD calculations "
-            f"and Butina clustering at a {cutoff} A cutoff. PyMOL produced the molecular "
+            f"and Butina clustering {clustering_text}. PyMOL produced the molecular "
             "panels, and ReportLab assembled this PDF."
         )
     else:
@@ -1352,7 +1488,13 @@ def main():
         item.hAlign = "CENTER"
         return item
     def table(rows, widths, compact=False):
-        item = Table(rows, colWidths=widths, repeatRows=1, hAlign="CENTER")
+        body = ParagraphStyle('TableBodyDU', fontName='Helvetica', fontSize=7 if compact else 8,
+                              leading=8 if compact else 10)
+        heading = ParagraphStyle('TableHeaderDU', parent=body, fontName='Helvetica-Bold')
+        wrapped = [[Paragraph(escape(str(cell)).replace('\n','<br/>'), heading if index==0 else body)
+                    if isinstance(cell,(str,int,float)) else cell for cell in row]
+                   for index,row in enumerate(rows)]
+        item = Table(wrapped, colWidths=widths, repeatRows=1, hAlign="CENTER")
         item.setStyle(TableStyle([
             ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#d9e2f3")),
             ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
@@ -1394,6 +1536,8 @@ def main():
     if not receptor_source:
         receptor_source = summary.get("configured_locked_inputs", {}).get("receptor", "")
     title_manifest_path = first(args.study,["compounds/*/seed_*/docking/run_manifest.tsv","**/docking/run_manifest.tsv"])
+    score_engine = (protocol.get('engine') or summary.get('configured_engine')
+                    or read_key_value_tsv(title_manifest_path).get('engine'))
     if not receptor_source:
         receptor_source = read_key_value_tsv(title_manifest_path).get("receptor", "")
     if not receptor_source:
@@ -1403,6 +1547,9 @@ def main():
         prepared_receptor = first(args.study, ["preparation/*_receptor_prep/receptor/*.pdb", "**/*_receptor_prep/receptor/*.pdb"])
         receptor_source = str(prepared_receptor or "")
     target_name = Path(receptor_source).stem if receptor_source else "Unspecified target"
+    from docking_universal.services.protein_identity import target_identity_text
+    identity = report_target_identity(args.study, summary, protocol or {}, protocol_path, receptor_source)
+    target_display, source_species = target_identity_text(identity, target_name)
     if not ligand_names and summary.get("workflow") == "control" and args.control:
         control_values = read_key_value_tsv(args.control / "run_manifest.tsv")
         ligand_names = [control_values.get("ligand_id", "ligand").split(":", 1)[0]]
@@ -1415,26 +1562,38 @@ def main():
     # The control ligand belongs in the inherited-control section, not in the
     # screen's top-level target descriptor.
     if protocol and control_title_name and summary.get("workflow") == "control":
-        study_descriptor = f"Target: {target_name} | Ligand: {control_title_name}"
+        study_descriptor = f"Target: {target_display} | Ligand: {control_title_name}"
     elif protocol or workflow_is_exploratory:
         # Protocol, control, and exploratory pocket-selection sections are
         # target-level records.  A subsequently docked ligand is named only
         # within its own docking-results section.
-        study_descriptor = f"Target: {target_name}"
+        study_descriptor = f"Target: {target_display}"
     elif len(ligand_names) == 1:
-        study_descriptor = f"Target: {target_name} | Ligand: {ligand_names[0]}"
+        study_descriptor = f"Target: {target_display} | Ligand: {ligand_names[0]}"
     elif ligand_names:
-        study_descriptor = f"Target: {target_name} | Ligands: {len(ligand_names)} compounds"
+        study_descriptor = f"Target: {target_display} | Ligands: {len(ligand_names)} compounds"
     else:
-        study_descriptor = f"Target: {target_name}"
+        study_descriptor = f"Target: {target_display}"
 
     cavity = (
         discover_cavity_record(args.study)
         if workflow_is_exploratory or not protocol
-        else inherited_protocol_cavity_record(protocol)
-        if (protocol.get("pdb_pocket_evidence") or {}).get("status") == "completed"
-        else None
+        else inherited_protocol_cavity_record(protocol, protocol_path)
     )
+    if workflow_is_exploratory and not review_only and protocol:
+        locked_cavity = inherited_protocol_cavity_record(protocol, protocol_path)
+        if locked_cavity:
+            if cavity:
+                # Preserve local ranking/figure evidence, but describe the
+                # approved region rather than the first generated candidate.
+                same_config = cavity.get('config') == locked_cavity.get('config')
+                cavity.update({key: locked_cavity[key] for key in (
+                    'selected', 'config', 'box_dimensions',
+                    'box_center', 'pocket_engine', 'pocket_engine_name')})
+                if not same_config:
+                    cavity['selected_file'] = locked_cavity['selected_file']
+            else:
+                cavity = locked_cavity
     # Inventories and study manifests describe intended inputs, not completed
     # docking.  Require retained pose-cluster results before adding docking
     # sections to a preparation-only report.
@@ -1449,6 +1608,10 @@ def main():
         else "Docking Universal - Docking Study Report"
     )
     story = [Paragraph(f"{report_title}<br/><font size=\"12\">Report generator version {package_version()}</font>", styles["Title"])]
+    if study_descriptor:
+        story += [Paragraph(escape(study_descriptor), styles["Heading2"]),
+                  Paragraph("Source species: " + escape(source_species), styles["BodyText"]),
+                  Spacer(1,8)]
     coordinate_evidence = (protocol or {}).get("coordinate_source", {}).get("evidence", {})
     if coordinate_evidence:
         from xml.sax.saxutils import escape as escape_coordinate_text
@@ -1456,14 +1619,25 @@ def main():
         story.append(Paragraph("Deposited structure evidence", styles["Heading2"]))
         for line in evidence_lines(coordinate_evidence):
             story.append(Paragraph(escape_coordinate_text(line), styles["BodyText"]))
-    if study_descriptor:
-        story += [Paragraph(study_descriptor, styles["Heading2"]), Spacer(1,8)]
+    related_site_control = (protocol or {}).get("related_site_control") or summary.get("related_site_control") or {}
+    control_site_scope = (protocol or {}).get("control_site_scope") or summary.get("control_site_scope") or {}
+    if control_site_scope.get("untested_box_labels") or control_site_scope.get("untested_receptor_states"):
+        story += [Paragraph(
+            "Control scope: only " + escape(str(control_site_scope.get("tested_box_label", "the tested site")))
+            + " was tested. Additional selected sites or receptor states remain exploratory and are not authorized by this control.",
+            styles["BodyText"]), Spacer(1,8)]
     if cavity:
         status_text = (
             "Interpretive status: candidate-site evidence for user review; no docking site has been selected or approved"
             if review_only else
             "Interpretive status: exploratory site selection without a bound-ligand pose-recovery control"
         )
+        if related_site_control and not review_only:
+            status_text = (
+                "Interpretive status: exploratory selected-site protocol. A separate control concerns only "
+                + str(related_site_control["tested_box_label"])
+                + "; it does not validate all selected sites or receptor states."
+            )
         story += [Paragraph(status_text, styles["BodyText"]), Spacer(1,8)]
     # An exploratory report begins with the pocket configuration and its A/B
     # cavity figure.  A docking-at-a-glance table before that figure implies
@@ -1475,19 +1649,10 @@ def main():
     if has_docking and compounds:
         compound_results = compound_result_records(args.study, compounds, ligand_names)
         if len(compound_results) == 1:
-            at_a_glance = single_compound_summary_rows(compound_results[0])
+            at_a_glance = single_compound_summary_rows(compound_results[0], score_engine)
         else:
-            at_a_glance = [["Ligand", "Best docking score", "Top cluster", "Clusters", "Status"]]
-            for result in compound_results:
-                score = result["best_energy_kcal_per_mol"]
-                at_a_glance.append([
-                    result["name"],
-                    f"{score} kcal/mol" if score != "Unavailable" else score,
-                    result["top_cluster"],
-                    result["cluster_count"] or "Unavailable",
-                    result["status"],
-                ])
-            at_a_glance_widths = [2.2*inch, 1.4*inch, 1.05*inch, .85*inch, 1.2*inch]
+            at_a_glance = compound_overview_rows(compound_results, score_engine)
+            at_a_glance_widths = [2.0*inch, 1.25*inch, 1.05*inch, .75*inch, .65*inch, 1.0*inch]
             at_a_glance_note = (
                 "Each row is the best retained result for that ligand. Docking scores are "
                 "ranking estimates and are not cross-ligand binding-affinity measurements."
@@ -1503,19 +1668,35 @@ def main():
         manifest = read_key_value_tsv(manifest_path)
         configured = summary.get("configured_docking_parameters", {})
         locked = summary.get("configured_locked_inputs", {})
-        seed_count = len(list(args.study.glob("compounds/*/seed_*"))) or len(configured.get("seeds", []))
-        engine = manifest.get("engine") or summary.get("configured_engine", "NA")
-        engine = engine_display_name(engine)
+        seed_count = len(configured.get("seeds", [])) or len({path.name for path in args.study.glob("compounds/*/seed_*")})
+        engine_key = manifest.get("engine") or summary.get("configured_engine", "NA")
+        engine = engine_display_name(engine_key)
         engine_version = manifest.get("engine_version") or summary.get("configured_engine_version", "NA")
         receptor = manifest.get("receptor") or locked.get("receptor", "NA")
         docking_box = manifest.get("config") or locked.get("box", "NA")
         story += [Paragraph(f"{section_number}. Configured docking protocol",styles["Heading1"]),
-          Paragraph("This section records the settings used for this exploratory study. No target-specific bound-ligand pose-recovery control was available.",styles["BodyText"]),Spacer(1,6),
-          table([["Parameter","Configured value"],["Validation status",summary.get("protocol_validation_status", "Not evaluated by bound-ligand control")],["Engine",engine],["Engine version",engine_version],["Exhaustiveness",manifest.get("exhaustiveness") or configured.get("exhaustiveness","NA")],["Modes per job",manifest.get("num_modes") or configured.get("num_modes","NA")],["Energy range",f"{manifest.get('energy_range_kcal_per_mol') or configured.get('energy_range_kcal_per_mol','NA')} kcal/mol"],["Independent seeds",seed_count or "NA"],["Receptor",Path(receptor).name],["Docking box",Path(docking_box).name]], [2.55*inch,4.15*inch], compact=True),Spacer(1,10)]
+          Paragraph("Settings selected for this protocol.",styles["BodyText"]),Spacer(1,6),
+          table(protocol_summary_rows(engine_key,manifest,configured,
+              seed_count=seed_count or "not recorded"), [2.55*inch,4.15*inch], compact=True),
+          Spacer(1,10)]
+        if not has_docking:
+            if str(engine_key).lower() == 'adgpu':
+                engine_note = (
+                    'AD4 screening will use AutoDock-GPU with AD4 estimated binding energies in kcal/mol. '
+                    'These are not Vina energies and should not be compared directly with Vina results. '
+                    'The genetic-run count and evaluation cap control search effort; each genetic run retains one winner. '
+                    'Requested box dimensions and actual AD4 grid dimensions are recorded below.'
+                )
+            else:
+                engine_note = (
+                    f'{engine} screening will use Vina estimated binding energies in kcal/mol. '
+                    'Exhaustiveness controls search effort; the pose limit and energy window control saved alternatives. '
+                    'These energies should not be compared directly with AD4 results.'
+                )
+            story += [Paragraph(
+                'These settings are saved for later screening; no screening ligands have been docked in this step. '
+                + engine_note, styles['BodyText']), Spacer(1,8)]
         section_number += 1
-
-        if summary.get("bundle_file_name"):
-            story += [Paragraph("Reusable protocol: " + escape(summary["bundle_file_name"]), styles["BodyText"]), Spacer(1,6)]
 
     if cavity:
         selected = cavity["selected"]
@@ -1526,9 +1707,11 @@ def main():
         selected_region = selected_regions[0] if selected_regions else {}
         selected_geometry = selected_region.get("geometry") or {}
         definition_origin = str(selected_region.get("definition_origin", ""))
-        ligand_defined = definition_origin in {"same-protein-ligands", "include-homolog-ligands"}
+        input_ligand_defined = selected_region.get("site_source") == "input_bound_ligand"
+        ligand_defined = input_ligand_defined or definition_origin in {"same-protein-ligands", "include-homolog-ligands"}
         if ligand_defined:
             origin_text = (
+                "input bound ligand; site definition only, not independent supporting evidence" if input_ligand_defined else
                 "same-protein or exact-sequence ligand evidence"
                 if definition_origin == "same-protein-ligands"
                 else "user-approved same-protein, exact-sequence, and homolog ligand evidence"
@@ -1550,8 +1733,16 @@ def main():
              + (f"Automatic selection will use the top-ranked {pocket_engine} box. " if summary.get("fpocket_selection") == "automatic" else "Choose one or more boxes after review. ")
              + "This report does not authorize screening.")
             if review_only else
-            f"No bound-ligand pose-recovery control was available. In its place, this section records how {pocket_engine}-generated cavity hypotheses were filtered and which docking box was selected. The {pocket_engine} cavities shown in Figure 1 are reference evidence for review, not automatic proof of a binding site. This documents site selection, but it does not validate the biological site or the accuracy of docked poses."
+            f"No bound-ligand pose-recovery control was performed for this protocol. This section records how {pocket_engine}-generated cavity hypotheses were filtered and which docking region was selected. Predicted cavities are reference evidence for review, not automatic proof of a binding site. An input ligand can define a site but is not new independent supporting evidence. This documents site selection, but it does not validate the biological site or the accuracy of docked poses."
         )
+        if related_site_control and not review_only:
+            cavity_explanation = (
+                "Site selection and related-structure ligand evidence were reviewed before redocking. "
+                "A separate control concerns only " + str(related_site_control["tested_box_label"])
+                + " (recorded result: " + str(related_site_control.get("status", "not recorded")) + "). "
+                "This protocol retains the user's selected regions as explicitly exploratory; the control "
+                "does not validate additional sites, receptor states, or changed settings."
+            )
         cavity_threshold = summary.get("cavity_score_threshold_used", "not recorded")
         try:
             threshold_value = float(cavity_threshold)
@@ -1565,17 +1756,19 @@ def main():
             )
         configuration_rows = [
             ["Pocket configuration", "Recorded value"],
-            ["Interpretive status", "Pocket review only; not a protocol" if review_only else "Exploratory; not evaluated by a bound-ligand pose-recovery control"],
-            [f"Top {pocket_engine} score", selected.get("rank_score", selected.get("score", "NA"))],
+            ["Interpretive status", "Pocket review only; not a protocol" if review_only else
+             "Exploratory; a separate site-specific control does not validate this complete selection" if related_site_control else
+             "Exploratory; not evaluated by a bound-ligand pose-recovery control"],
+            [f"{'Top' if review_only else 'Selected'} {pocket_engine} score", selected.get("rank_score", selected.get("score", "Not retained"))],
         ]
         if cavity.get("pocket_engine") == "p2rank":
             configuration_rows.append([
-                "Top P2Rank probability", selected.get("probability", "NA"),
+                f"{'Top' if review_only else 'Selected'} P2Rank probability", selected.get("probability", "Not retained"),
             ])
         else:
             configuration_rows.extend([
                 ["fpocket eligibility threshold used", threshold_text],
-                ["Top-pocket druggability descriptor", descriptor.get("druggability_score", "NA")],
+                [f"{'Top' if review_only else 'Selected'}-pocket druggability descriptor", descriptor.get("druggability_score", "NA")],
             ])
         configuration_rows.append([
             "Selected docking region",
@@ -1587,6 +1780,14 @@ def main():
                 ["Docking-box center (A)", selected_center],
                 ["Docking-box dimensions (A)", selected_dimensions],
             ])
+            for index, region in enumerate(selected_regions,1):
+                grid = region.get('ad4_grid') or {}
+                if grid:
+                    dimensions = ' x '.join(str(value) for value in grid.get('actual_size', []))
+                    if index == 1:
+                        configuration_rows[-1][1] += '; actual AD4 grid: ' + dimensions
+                    else:
+                        configuration_rows.append([f"Site {index}: actual AD4 grid dimensions (A)",dimensions])
         story += [
             Paragraph(f"{section_number}. {cavity_heading}", styles["Heading1"]),
             Paragraph(
@@ -1963,28 +2164,12 @@ def main():
             if control_ligand_sdf
             else protocol.get("control_evidence", {}).get("compound", "unspecified ligand")
         )
-        approval_origin = "Approved during this run" if args.include_control_appendix else "Approved previously and reused for this run"
-        rows=[["Approved docking protocol","Selected value"],
-          ["Protocol file name", protocol_lookup_filename(args.study, args.control, protocol_path, summary)],
-          ["Approval provenance", approval_origin],
-          ["Control approval date (UTC)", protocol.get("created_utc", "not recorded by this older protocol")],
-          ["Prepared receptor", Path(locked_inputs.get("receptor", "NA")).name],
-          ["Locked docking box / pocket",Path(locked_inputs.get("box", "NA")).name],
-          ["Engine",protocol.get("engine","NA")],
-          ["Tier",protocol.get("calibration_tier","NA")],
-          ["Exhaustiveness",p.get("exhaustiveness","NA")],
-          ["Modes per job",p.get("num_modes","NA")],
-          ["Conformers per state",p.get("conformers_per_state","NA")],
-          ["Independent seeds",len(p.get("seeds",[]))],
-          ["Charge model",p.get("charge_model","NA")],
-          ["pH",p.get("ph","NA")],
-          ["Conformer force field",p.get("forcefield","mmff94")],
-          ["Tautomers enumerated",p.get("tautomers_enumerated",True)],
-          ["Conformer RMSD pruning",f"{p.get('rmsd_prune_angstrom',0.75)} A"]]
+        rows=protocol_summary_rows(protocol.get('engine'), {}, p)
         story += [
           Paragraph(f"{section_number}. Configured docking protocol", styles["Heading1"]),
-          Paragraph("This table identifies the reusable target-matched protocol, records whether it was approved during this run or reused from an earlier run, and lists its locked docking settings.", styles["BodyText"]), Spacer(1,6),
+          Paragraph("Key settings from the selected target-matched protocol.", styles["BodyText"]), Spacer(1,6),
           table(rows,[2.55*inch,4.15*inch], compact=True),
+          Spacer(1,8),
         ]
         if args.include_control_appendix:
             story += [PageBreak(),
@@ -1996,10 +2181,12 @@ def main():
         control_b=first(args.control,["report/control_panel_B_overlay.png","report/control_panel_B*.png","**/control_panel_B*.png"]) if args.control else None
         experimental_reference=first(args.control,["00_inputs/*_experimental.sdf","**/crystal_ligand.sdf"]) if args.control else None
         experimental_label=experimental_reference.stem.removesuffix("_experimental") if experimental_reference else "experimental ligand"
+        control_landscape=control_landscape_description(control_a, experimental_label)
+        control_overlay=control_overlay_description(control_b)
         # A continued screen carries the control result as compact provenance.
         # Repeating its figures is reserved for an explicitly requested appendix.
         if args.include_control_appendix and control_ab:
-            story += [KeepTogether([image(control_ab,7.0,4.1),Paragraph(f"<b>Figure {figure_number}. Retrospective control performance and pose recovery.</b> (A) Control-cluster docking score versus symmetry-aware, no-fit heavy-atom RMSD to experimental {experimental_label} in the receptor coordinate frame. (B) Experimental ligand (magenta), lowest-energy pose (red), and lowest-RMSD pose (blue) superimposed in that frame; receptor residues within 5 A of the displayed ligands are gray.",styles["SmallDU"])]),Spacer(1,8)]
+            story += [KeepTogether([image(control_ab,7.0,4.1),Paragraph(f"<b>Figure {figure_number}. Retrospective control performance and pose recovery.</b> (A) {control_landscape} (B) {control_overlay}",styles["SmallDU"])]),Spacer(1,8)]
             figure_number += 1
         elif control_ab:
             # Reused protocols retain the single approved A/B control figure
@@ -2008,12 +2195,12 @@ def main():
             story += [KeepTogether([
                 Paragraph("Control pose-recovery results", styles["Heading2"]),
                 image(control_ab,7.0,3.6),
-                Paragraph(f"<b>Figure {figure_number}. Retrospective control performance and pose recovery.</b> (A) Control-cluster docking score versus symmetry-aware, no-fit heavy-atom RMSD to experimental {experimental_label} in the receptor coordinate frame. (B) Experimental ligand (magenta), lowest-energy pose (red), and lowest-RMSD pose (blue) superimposed in that frame; receptor residues within 5 A of the displayed ligands are gray.",styles["SmallDU"]),
+                Paragraph(f"<b>Figure {figure_number}. Retrospective control performance and pose recovery.</b> (A) {control_landscape} (B) {control_overlay}",styles["SmallDU"]),
             ]), PageBreak()]
             figure_number += 1
         elif args.include_control_appendix:
-            if control_a: story += [Paragraph("Control Panel A - score and RMSD landscape",styles["CaptionDU"]),image(control_a),Spacer(1,5)]
-            if control_b: story += [KeepTogether([Paragraph("Control Panel B - superimposed experimental and redocked poses",styles["CaptionDU"]),image(control_b,7.0,3.8),Paragraph("Experimental ligand: magenta; lowest-energy docked pose: red; lowest-RMSD docked pose: blue. Nearby receptor residues are gray.",styles["SmallDU"])]),Spacer(1,5)]
+            if control_a: story += [Paragraph("Control Panel A - score and RMSD landscape",styles["CaptionDU"]),image(control_a),Paragraph(control_landscape,styles["SmallDU"]),Spacer(1,5)]
+            if control_b: story += [KeepTogether([Paragraph("Control Panel B - superimposed experimental and redocked poses",styles["CaptionDU"]),image(control_b,7.0,3.8),Paragraph(control_overlay,styles["SmallDU"])]),Spacer(1,5)]
             if not control_a and not control_b:
                 top_ranked_control = first(args.control, ["**/selected_visuals/top_ranked.png", "**/evidence/top_ranked.png"])
                 best_sampled_control = first(args.control, ["**/selected_visuals/best_sampled.png", "**/evidence/best_sampled.png"])
@@ -2040,6 +2227,20 @@ def main():
                     image(composite,6.8,2.45),
                     Paragraph(f"<b>Figure {figure_number}. SDF-aware PLIP interaction diagrams for control ligand {experimental_label}.</b> A is the experimental reference pose, B is the globally lowest-energy redocked pose, and C is the lowest-RMSD redocked pose. Ligand chemistry comes from the retained SDF files; interaction calls come from the retained PLIP XML.",styles["SmallDU"]), Spacer(1,6)]
                 figure_number += 1
+            additional_control_diagrams = [
+                args.control / "report" / f"control_energy_rank_{rank}_plip2d.png"
+                for rank in (2, 3)
+            ]
+            additional_control_diagrams = [path for path in additional_control_diagrams if path.is_file()]
+            if additional_control_diagrams:
+                additional = args.control / "report" / "control_additional_rank_interactions.png"
+                if combine_horizontal_diagrams([(None, path) for path in additional_control_diagrams], additional):
+                    ranks = ", ".join(path.name.split('_')[3] for path in additional_control_diagrams)
+                    story += [Paragraph("Additional energy-ranked control interactions", styles["Heading2"]),
+                              image(additional, 6.8, 2.45),
+                              Paragraph(f"<b>Figure {figure_number}.</b> Exact lowest-energy representatives of energy-ranked control clusters {ranks}, in that order. "
+                                        "Their linked 3D ligands use blue for rank 2 and gold for rank 3. The actual globally closest pose remains separately identified in the preceding control panels.", styles["SmallDU"]), Spacer(1,6)]
+                    figure_number += 1
             story.append(PageBreak())
         elif args.include_control_appendix:
             story.append(PageBreak())
@@ -2049,34 +2250,15 @@ def main():
         configured = summary.get("configured_docking_parameters", {})
         locked = summary.get("configured_locked_inputs", {})
         configured_seeds = configured.get("seeds", [])
-        seed_count = len(list(args.study.glob("compounds/*/seed_*"))) or len(configured_seeds)
+        seed_count = len(configured_seeds) or len({path.name for path in args.study.glob("compounds/*/seed_*")})
         engine = manifest.get("engine") or summary.get("configured_engine", "NA")
         engine_version = manifest.get("engine_version") or summary.get("configured_engine_version", "NA")
         validation_status = summary.get("protocol_validation_status", "Not evaluated by bound-ligand control")
         receptor = manifest.get("receptor") or locked.get("receptor", "NA")
         docking_box = manifest.get("config") or locked.get("box", "NA")
-        configured_rows = [["Parameter", "Configured value"]]
-        if summary.get("protocol_type"):
-            configured_rows += [
-                ["Protocol file name", summary.get("approved_protocol_file_name", "not recorded")],
-                ["Protocol type", {
-                    "control-validated": "Control-validated",
-                    "ligand-guided-exploratory": "Ligand-guided exploratory",
-                    "site-guided-exploratory": "Site-guided exploratory",
-                }.get(summary["protocol_type"], str(summary["protocol_type"]))],
-                ["Evidence basis", summary.get("protocol_evidence_basis", "not recorded")],
-                ["Screening authority", summary.get("protocol_screening_authority", "not recorded")],
-            ]
-        configured_rows += [
-            ["Validation status", validation_status], ["Engine", engine], ["Engine version", engine_version],
-            ["Exhaustiveness", manifest.get("exhaustiveness") or configured.get("exhaustiveness", "NA")],
-            ["Modes per job", manifest.get("num_modes") or configured.get("num_modes", "NA")],
-            ["Energy range", f"{manifest.get('energy_range_kcal_per_mol') or configured.get('energy_range_kcal_per_mol', 'NA')} kcal/mol"],
-            ["Independent seeds", seed_count or "NA"], ["Receptor", Path(receptor).name],
-            ["Docking box", Path(docking_box).name],
-        ]
+        configured_rows = protocol_summary_rows(engine,manifest,configured,seed_count=seed_count or "not recorded")
         story += [Paragraph(f"{section_number}. Configured docking protocol",styles["Heading1"]),
-          Paragraph("This section records the reusable protocol, its scientific evidence basis, and the locked settings selected for this study.",styles["BodyText"]),Spacer(1,6),
+          Paragraph("Key settings selected for this study.",styles["BodyText"]),Spacer(1,6),
           table(configured_rows, [2.55*inch,4.15*inch], compact=True),PageBreak()]
 
     # A control-only or protocol-only study has no prospective ligand result.
@@ -2126,10 +2308,10 @@ def main():
                 "Checked: software version comparison could not be fully verified."
             )
             story += [
-                Paragraph("Control-to-new-run software check", styles["Heading2"]),
+                Paragraph("Protocol-to-screen software check" if protocol.get('control_status')=='not_performed' else "Control-to-new-run software check", styles["Heading2"]),
                 Paragraph(f"<b>{verdict_text}</b>", styles["BodyText"]),
             ]
-            comparison_rows = [["Software", "Control", "New run", "Result"]]
+            comparison_rows = [["Software", "Protocol" if protocol.get('control_status')=='not_performed' else "Control", "New run", "Result"]]
             comparison_rows += [[entry["software"], entry["control_version"], entry["new_run_version"], entry["status"]] for entry in version_check["entries"]]
             story += [Spacer(1, 6), table(comparison_rows, [1.65*inch, 2.15*inch, 2.15*inch, 1.25*inch], compact=True), Spacer(1, 10)]
         story += [
@@ -2212,8 +2394,8 @@ def main():
             )
         else:
             scope_text = "Docking used the configured protocol shown above. No target-specific bound-ligand control was supplied, so pose-recovery performance for this target was not evaluated."
-        result_subject = (f"Target: {target_name} | Ligand: {name}" if protocol else f"Ligand: {name}") + site_suffix
-        story += [Paragraph(result_subject,styles["Heading2"]),Paragraph(scope_text + " More favorable docking scores are more negative; RMSD and cluster population are separate measures.",styles["BodyText"]),Spacer(1,6)]
+        result_subject = (f"Target: {target_display} | Ligand: {name}" if protocol else f"Ligand: {name}") + site_suffix
+        story += [Paragraph(escape(result_subject),styles["Heading2"]),Paragraph(scope_text + " More favorable docking scores are more negative; RMSD and cluster population are separate measures.",styles["BodyText"]),Spacer(1,6)]
         site_result = compound.get("_site_result")
         if site_number or (len(report_compounds) > 1 and cid in compound_results_by_id):
             ligand_result = dict(compound_results_by_id[cid])
@@ -2224,7 +2406,7 @@ def main():
             story += [
                 Paragraph("Summary of docking results", styles["Heading2"]),
                 table(
-                    single_compound_summary_rows(ligand_result),
+                    single_compound_summary_rows(ligand_result, score_engine),
                     [2.55*inch, 4.15*inch],
                     compact=True,
                 ),
@@ -2410,10 +2592,10 @@ def main():
             "Checked: software version comparison could not be fully verified."
         )
         story += [
-            Paragraph("Control-to-new-run software check", styles["Heading2"]),
+            Paragraph("Protocol-to-screen software check" if protocol.get('control_status')=='not_performed' else "Control-to-new-run software check", styles["Heading2"]),
             Paragraph(f"<b>{verdict_text}</b>", styles["BodyText"]),
         ]
-        comparison_rows = [["Software", "Control", "New run", "Result"]]
+        comparison_rows = [["Software", "Protocol" if protocol.get('control_status')=='not_performed' else "Control", "New run", "Result"]]
         comparison_rows += [[entry["software"], entry["control_version"], entry["new_run_version"], entry["status"]] for entry in version_check["entries"]]
         story += [Spacer(1,6), table(comparison_rows, [1.65*inch, 2.15*inch, 2.15*inch, 1.25*inch], compact=True), Spacer(1,10)]
     story += [

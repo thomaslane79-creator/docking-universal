@@ -1,5 +1,11 @@
 # Installation
 
+Vina 1.2.7's matching Python API is used for supported sequential persistent
+batches in its separate engine environment; the main scientific Python does not
+need to import it. Unsupported versions/configurations retain command-line
+execution with a recorded reason. See [execution settings and validation](docking-performance.md)
+for CPU/backend overrides, provenance and the limited scope of timing results.
+
 If GitHub is new to you, begin with the
 [GitHub essentials guide for Docking Universal](assets/github-essentials-for-docking-universal.pdf).
 It explains how to obtain and update the repository, record an exact software
@@ -14,6 +20,21 @@ Windows. The same upstream archive and prediction models are used on every
 platform; Unix launches `prank`, Windows launches `prank.bat`, and Java 17 or
 newer is required. The archive identity and SHA-256 are recorded in
 `dependencies/p2rank.json`. fpocket remains the supported fallback detector.
+
+The desktop additionally uses pinned P2Rank 2.6-alpha for **visualization only**
+(`dependencies/p2rank-visualization.json`; approximately 292 MB compressed).
+It is installed alongside 2.5.1, not in its place. A local asynchronous worker
+exports unfilled pocket-space points; its complete prediction table must exactly
+match the retained stable prediction table before a surface is shown. Receptor
+coordinates are not uploaded. BioJava component downloads are disabled for this
+visual-only run; changes affecting prediction parity cause visualization to fail
+closed. Surfaces are cached by receptor and prediction hashes. They approximate
+sampled predicted space, not an exact enclosed-cavity boundary or a volume
+measurement. Existing scientific predictions, boxes and report figures are
+unchanged. A failed visualization does not approve or alter a docking region.
+The display uses an object-local 1.4 Å rolling probe to smooth the grid envelope.
+Only clipping planes expand automatically; camera orientation and zoom stay
+fixed, and no grid points or scientific detector results are changed.
 
 ### Beginner route: no Git required
 
@@ -205,6 +226,25 @@ An earlier installed-copy problem prevented the PDBFixer helper from being found
 Meeko 0.7.1 is the primary preparation backend in the declared environment. Backend changes can affect atom typing, protonation, charge assignment, and therefore scientific results; Docking Universal records the backend and version used. The ADFRsuite route is a narrow compatibility fallback and must not be assumed scientifically equivalent to Meeko without target-specific review and control evidence.
 
 ## Verification performed
+
+### Optional experimental AD4 GPU engine
+
+Vina remains the default and the normal installer does not require a GPU.
+The optional AutoDock-GPU adapter shares the regular GUI, protocol and report
+pipeline, but needs a separately accepted native runtime. The current local
+acceptance covers only the pinned, patched Apple-Silicon OpenCL build; this does
+not install or certify a Windows/Linux GPU binary. Do not register an arbitrary
+upstream build as if it had passed the Mac checks.
+
+After an accepted runtime is configured, restart the desktop and choose
+**Finalize protocol → Docking program → AutoDock-GPU (AD4, experimental)**.
+Use its **?** button or **Settings guide…** for the offline learning explanation.
+An existing Vina protocol cannot switch engines; make an explicitly exploratory
+AD4 protocol. Supported inputs, runtime configuration and cross-platform plans
+are explained in the [AD4 guide](ad4-gpu-guide.md); the actual local deployment
+and recoverable backups are recorded in [integration acceptance](ad4-gpu-integration.md).
+
+### Existing representative-data checks
 
 The following checks passed in the declared scientific environment:
 

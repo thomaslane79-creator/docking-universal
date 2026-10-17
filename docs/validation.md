@@ -7,6 +7,7 @@ This page is the index for validation performed on Docking Universal. Each recor
 | Validation area | What was exercised | Result and detailed record |
 | --- | --- | --- |
 | Installed Conda command | `make install-conda`, command discovery outside the repository, CLI help, and installed integration validation | Passed; installed validation writes to caller-owned output and does not require a writable source checkout. |
+| Reduce2 native-format/frame correction (2026-10-17) | New PDB and mmCIF 2R8N preparation through the installed Reduce2/Meeko/P2Rank route with the bundled minimal restraints; original-frame evidence reassociation and cell-less translation rejection | Both routes pass without a backbone shift; [corrections, exact outcomes and authority limits](reduce2-frame-validation-2026-10-17.md). No docking or old-study migration. |
 | Automated regression suite | CLI checks plus Python unit/integration tests for workflow selection, guided options, reports, PDBFixer precleaning, CCD audit handling, pocket evidence, and multi-site protocols | Passed: 174 Python tests plus the maintained shell CLI and installation checks. |
 | Continuous integration | Shell/CLI checks on macOS and Ubuntu | Passed on both operating systems for the reconciled release branch. Windows is not a supported target in this release. |
 | Bound-ligand reference workflow | Public HIV-1 protease complex `1HVR` with inhibitor XK2, including preparation, control, docking, analysis, visualisation, and reports | Passed; details below. |

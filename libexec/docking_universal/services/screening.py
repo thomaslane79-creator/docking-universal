@@ -12,6 +12,7 @@ from typing import Any
 from docking_universal_bundle import CONTROL_VALIDATED, protocol_can_screen, protocol_type
 
 from ..models import ArtifactRecord
+from .ligand_input import ligand_input_files
 
 
 @dataclass(frozen=True)
@@ -68,20 +69,21 @@ def read_protocol_record(path: Path | str) -> dict[str, Any]:
 
 def count_ligands(source: Path | str) -> int:
     path = Path(source).resolve()
-    if path.is_dir():
-        files = sorted(item for item in path.glob("*.sdf") if item.is_file())
-    elif path.is_file() and path.suffix.lower() == ".sdf":
-        files = [path]
-    else:
-        raise FileNotFoundError(f"Ligand source must be an SDF file or directory: {path}")
+    files = ligand_input_files(path)
+    from .ligand_table import TABLE_SUFFIXES
+    if any(item.suffix.lower() in TABLE_SUFFIXES for item in files):
+        raise ValueError('Approve the table columns and select compounds using Read/select compounds before previewing or docking')
     count = 0
     for item in files:
         text = item.read_text(errors="replace")
+        if item.suffix.lower() == ".mol":
+            count += bool(text.strip())  # one molecule; chemistry is validated at launch
+            continue
         count += sum(1 for line in text.splitlines() if line.strip() == "$$$$")
         if "$$$$" not in text and text.strip():
             count += 1
     if count < 1:
-        raise ValueError("Ligand source contains no apparent SDF records")
+        raise ValueError("Ligand source contains no apparent SDF or MOL records")
     return count
 
 
@@ -135,6 +137,7 @@ def build_screening_plan(
     ligand_source: Path | str,
     *,
     expected_protocol_sha256: str | None = None,
+    ligand_selection: dict | None = None,
 ) -> ScreeningPlan:
     path = Path(protocol_path).resolve()
     if not path.is_file():
@@ -150,7 +153,12 @@ def build_screening_plan(
     ]
     if conformers < 1 or not seeds or not regions:
         raise ValueError("Protocol lacks complete conformer, seed, or docking-site settings")
-    compounds = count_ligands(ligand_source)
+    if ligand_selection is not None:
+        from .ligand_library import selected_library_records
+        _library, selected = selected_library_records(ligand_source, ligand_selection)
+        compounds = len(selected)
+    else:
+        compounds = count_ligands(ligand_source)
     sensitivity = protocol.get("receptor_state_sensitivity") or {}
     variants = sensitivity.get("variants") or {}
     affected_labels = set(map(str, sensitivity.get("affected_boxes") or ()))
@@ -186,6 +194,7 @@ def discover_screening_artifacts(output_root: Path | str) -> list[ArtifactRecord
     root = Path(output_root).resolve()
     patterns = (
         ("screening_study_manifest", "study_manifest.json"),
+        ("screening_ligand_selection", "inputs/ligand_library_review.json"),
         ("screening_report", "report/*.pdf"),
         ("screening_report_figure", "report/*.png"),
         ("screening_summary", "report/study_summary.json"),

@@ -18,6 +18,8 @@ def record(kind, serial, atom, residue, chain, number, x, element):
 
 path = sys.argv[1]
 with open(path, "w") as out:
+    out.write("CRYST1   46.711   46.711  100.708  90.00  90.00  90.00 P 41 21 2     8\n")
+    out.write("SCALE1      0.021408  0.000000  0.000000        0.00000\n")
     out.write("MODRES 1ABC CSO A   2  CYS  S-HYDROXYCYSTEINE\n")
     out.write("LINK         CA  ALA A   1                 C1  ADX A 101\n")
     out.write(record("ATOM", 1, "CA", "ALA", "A", 1, 0, "C"))
@@ -32,6 +34,8 @@ with open(path, "w") as out:
 PY
 
 filter_receptor_input "$tmp/input.pdb" "$tmp/filtered.pdb"
+
+diff <(grep -E '^(CRYST1|SCALE)' "$tmp/input.pdb") <(grep -E '^(CRYST1|SCALE)' "$tmp/filtered.pdb") || fail "deposited crystal/frame context changed"
 
 [ "$(grep -c '^ATOM  ' "$tmp/filtered.pdb")" -eq 2 ] || fail "ATOM/MODRES normalization changed"
 [ "$(grep -c '^HETATM' "$tmp/filtered.pdb")" -eq 4 ] || fail "linked-component/metal retention changed"

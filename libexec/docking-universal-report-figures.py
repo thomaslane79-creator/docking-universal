@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from docking_universal_box_candidates import config_geometry, grouped_fpocket_boxes
+from docking_universal.pose_visuals import cluster_color, write_pose_view
 
 
 TOP_COLORS = ("#d62728", "#1f77b4", "#d9a400")
@@ -1396,7 +1397,8 @@ def ensure_control_clusters(control, protocol_path):
     command = [
         sys.executable, str(script), "--comparison-root", str(protocol_path.parent),
         "--receptor", str(receptor), "--out", str(output),
-        "--cluster-rmsd", str(protocol.get("acceptance", {}).get("threshold_angstrom", 2.0)),
+        # Clustering granularity is not the experimental recovery threshold.
+        "--cluster-rmsd", "1.5",
         "--representatives", "20",
     ]
     result = subprocess.run(command, text=True, capture_output=True)
@@ -1433,6 +1435,21 @@ def read_molecule(path):
     if not path.is_file():
         return None
     return next((mol for mol in Chem.SDMolSupplier(str(path), removeHs=False) if mol), None)
+
+
+def same_retained_pose(first_path, second_path):
+    """Require matching chemistry and receptor-frame geometry, without fitting."""
+    from rdkit import Chem
+    try:
+        a, b = read_molecule(first_path), read_molecule(second_path)
+        if a is None or b is None:
+            return False
+        if Chem.MolToSmiles(Chem.RemoveHs(a)) != Chem.MolToSmiles(Chem.RemoveHs(b)):
+            return False
+        distance = rmsd_between(a, b)
+        return math.isfinite(distance) and distance < .001
+    except (OSError, RuntimeError, ValueError):
+        return False
 
 
 def retained_cluster_representatives(analysis):
@@ -1496,6 +1513,263 @@ def materialize_cluster_representatives(analysis, rows, report, compound_id):
     return paths
 
 
+def control_pose_points(analysis, reference):
+    """Evaluate every retained control pose, never just cluster representatives."""
+    import math
+    from rdkit import Chem
+
+    inventory = analysis / "pose_inventory.csv"
+    poses = analysis / "all_poses.sdf"
+    if not inventory.is_file() or not poses.is_file():
+        raise ValueError("All-pose control figure requires retained inventory and all_poses.sdf")
+    with inventory.open(newline="") as handle:
+        records = list(csv.DictReader(handle))
+    molecules = list(Chem.SDMolSupplier(str(poses), removeHs=False))
+    points, excluded, seen = [], [], set()
+    for row in records:
+        try:
+            pose_id = int(row["pose_id"])
+            if pose_id in seen:
+                raise ValueError(f"Duplicate retained pose ID: {pose_id}")
+            seen.add(pose_id)
+            if not 1 <= pose_id <= len(molecules) or molecules[pose_id - 1] is None:
+                raise ValueError("Unreadable or missing retained pose geometry")
+            score = float(row["energy_kcal_per_mol"])
+            rmsd = float(rmsd_between(reference, molecules[pose_id - 1]))
+            if not math.isfinite(score) or not math.isfinite(rmsd):
+                raise ValueError("Non-finite score or experimental RMSD")
+            points.append({"pose_id": pose_id, "cluster_id": row.get("cluster_id", ""),
+                           "seed": row.get("seed", ""), "conformer": row.get("conformer", ""),
+                           "model": row.get("model", ""), "energy_kcal_per_mol": score,
+                           "rmsd_angstrom": rmsd})
+        except (KeyError, TypeError, ValueError, RuntimeError) as error:
+            excluded.append({"pose_id": row.get("pose_id"), "cluster_id": row.get("cluster_id"), "reason": str(error)})
+    return points, {"inventory_count": len(records), "plotted_count": len(points), "excluded": excluded}
+
+
+def control_cluster_points(analysis, reference):
+    """One point per cluster: independent energy and crystal-RMSD minima.
+
+    A point summarizes a cluster, not necessarily one realizable pose. Retain
+    both winning pose IDs and each winner's other metric in the audit table.
+    """
+    from collections import defaultdict
+
+    poses, audit = control_pose_points(analysis, reference)
+    groups = defaultdict(list)
+    invalid_clusters = {str(row.get("cluster_id", "")) for row in audit["excluded"]}
+    for pose in poses:
+        try:
+            cid = int(pose["cluster_id"])
+            if cid < 1:
+                raise ValueError("Cluster ID must be positive")
+            groups[cid].append(pose)
+        except (TypeError, ValueError) as error:
+            audit["excluded"].append({"pose_id": pose["pose_id"], "cluster_id": pose["cluster_id"],
+                                      "reason": f"Invalid cluster assignment: {error}"})
+    points = []
+    for cid, members in groups.items():
+        # Missing members could contain either minimum. Do not falsely claim
+        # an exact cluster minimum from only its evaluable members.
+        if str(cid) in invalid_clusters:
+            continue
+        energy_pose = min(members, key=lambda pose: (pose["energy_kcal_per_mol"], pose["pose_id"]))
+        rmsd_pose = min(members, key=lambda pose: (pose["rmsd_angstrom"], pose["pose_id"]))
+        points.append({"cluster_id": cid, "pose_count": len(members),
+            "best_energy_kcal_per_mol": energy_pose["energy_kcal_per_mol"],
+            "rmsd_angstrom": rmsd_pose["rmsd_angstrom"],
+            "lowest_energy_pose_id": energy_pose["pose_id"],
+            "lowest_energy_pose_rmsd_angstrom": energy_pose["rmsd_angstrom"],
+            "lowest_rmsd_pose_id": rmsd_pose["pose_id"],
+            "lowest_rmsd_pose_energy_kcal_per_mol": rmsd_pose["energy_kcal_per_mol"],
+            "minima_from_same_pose": energy_pose["pose_id"] == rmsd_pose["pose_id"]})
+    points.sort(key=lambda point: (point["best_energy_kcal_per_mol"], point["cluster_id"]))
+    for rank, point in enumerate(points, 1):
+        point["energy_rank"] = rank
+    closest_pose = min(poses, key=lambda pose: (pose["rmsd_angstrom"], pose["energy_kcal_per_mol"], pose["pose_id"])) if poses else None
+    audit.update(closest_to_crystal_pose=closest_pose,
+                 evaluated_pose_count=len(poses), plotted_count=len(points),
+                 plotted_pose_count=sum(point["pose_count"] for point in points),
+                 excluded_cluster_ids=sorted(invalid_clusters),
+                 plot_scope="all_retained_control_clusters_independent_minima",
+                 point_meaning="one cluster; minimum energy and minimum experimental RMSD may come from different poses")
+    return points, audit
+
+
+def plot_control_clusters(analysis, output, reference_sdf, control_label):
+    """Plot cluster minima; leave all-pose plotting as a separate diagnostic."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    reference = read_molecule(reference_sdf)
+    if reference is None:
+        return False
+    try:
+        points, audit = control_cluster_points(analysis, reference)
+    except (ValueError, OSError) as error:
+        print(f"Report figure warning: {error}", file=sys.stderr)
+        return False
+    if not points:
+        return False
+    displayed = points[:20]  # Top twenty cluster summaries plus the actual closest pose.
+    closest_pose = audit["closest_to_crystal_pose"]
+    clustering = read_json(analysis / "clustering_manifest.json")
+    cutoff = clustering.get("cluster_rmsd_angstrom")
+    top = displayed[0]
+    displayed_ids = {point["cluster_id"] for point in displayed}
+    for point in points:
+        point["displayed_in_plot"] = point["cluster_id"] in displayed_ids
+    audit.update(reference=str(Path(reference_sdf).resolve()),
+        rmsd_method="symmetry-aware heavy-atom RMSD in receptor frame; no fitting",
+        cluster_rmsd_angstrom=cutoff, lowest_energy_cluster_id=top["cluster_id"],
+        closest_to_crystal_pose_id=closest_pose["pose_id"],
+        highlight_scope="three lowest-energy displayed clusters",
+        highlight_style="energy_rank_colors",
+        lowest_rmsd_highlight="green circle; actual globally lowest-RMSD evaluable pose at its own energy",
+        highlighted_cluster_ids=[point["cluster_id"] for point in displayed[:3]],
+        point_size="70 + 8 * pose_count; marker area in points squared",
+        all_evaluable_cluster_count=len(points),
+        all_evaluable_cluster_pose_count=audit["plotted_pose_count"],
+        plotted_count=len(displayed), plotted_pose_count=sum(point["pose_count"] for point in displayed),
+        plotted_cluster_ids=[point["cluster_id"] for point in displayed],
+        plot_scope="top20_control_clusters_plus_global_lowest_rmsd_pose",
+        selection="top 20 by lowest cluster energy, then cluster ID; plus actual globally lowest-RMSD evaluable pose",
+        csv_scope="all_evaluable_control_clusters",
+        score_cutoff=None, rmsd_cutoff=None, cluster_limit=20)
+    fig, ax = plt.subplots(figsize=(11, 6.5))
+    # Preserve the original cluster presentation: energy on x, RMSD on y,
+    # circle area tracks pose population, and only energy rank sets color.
+    xs = [point["best_energy_kcal_per_mol"] for point in displayed]
+    ys = [point["rmsd_angstrom"] for point in displayed]
+    colors = list(TOP_COLORS[:min(3, len(displayed))]) + ["#b8c0c8"] * max(0, len(displayed) - 3)
+    closest_fill = next((color for point, color in zip(displayed[:3], TOP_COLORS)
+                         if str(point["cluster_id"]) == str(closest_pose["cluster_id"])), "#b8c0c8")
+    audit["closest_pose_marker_fill"] = closest_fill
+    audit["closest_pose_marker_outline"] = "#008a45"
+    audit["closest_pose_marker_white_gap_points"] = 3.0
+    ax.scatter(xs, ys, s=[70 + 8 * point["pose_count"] for point in displayed],
+               c=colors, marker="o", edgecolor="black", linewidth=.7, alpha=.9)
+    # Unlike the synthetic cluster minima, this is one actual pose, including
+    # when its parent cluster is not displayed. Its one-pose circle size is 78.
+    # Marker diameters are in points, while scatter sizes are squared points.
+    # Account for both strokes so the visible gap is a full three points.
+    dot_diameter, dot_stroke, ring_stroke, white_gap = 78 ** .5, .7, 1.8, 3.0
+    ring_diameter = dot_diameter + dot_stroke + 2 * white_gap + ring_stroke
+    ax.scatter([closest_pose["energy_kcal_per_mol"]], [closest_pose["rmsd_angstrom"]],
+               s=ring_diameter ** 2, marker="o", facecolors="white", edgecolors="#008a45",
+               linewidths=ring_stroke, zorder=5)
+    ax.scatter([closest_pose["energy_kcal_per_mol"]], [closest_pose["rmsd_angstrom"]],
+               s=78, marker="o", facecolors=closest_fill, edgecolors="black", linewidths=dot_stroke, zorder=6)
+    ax.set_xlabel("Estimated binding energy (kcal/mol)", fontsize=13)
+    ax.set_ylabel("Experimental RMSD (Å)", fontsize=13)
+    ax.set_title(f"{control_label}: pose recovery", fontsize=16, pad=15)
+    x_range = xs + [closest_pose["energy_kcal_per_mol"]]
+    xpad, ypad = max(.15, (max(x_range) - min(x_range)) * .07), max(.25, max(ys) * .04)
+    ax.set_xlim(min(x_range) - xpad, max(x_range) + xpad)
+    ax.set_ylim(-ypad, max(ys) + ypad)
+    ax.set_yticks([tick for tick in ax.get_yticks() if tick >= 0])
+    ax.axhline(0, color=".45", linewidth=.8, zorder=0)
+    ax.grid(alpha=.2)
+    ax.set_axisbelow(True)
+    ax.tick_params(labelsize=12)
+    from matplotlib.lines import Line2D
+    handles = [Line2D([], [], marker="o", linestyle="none", markerfacecolor=color,
+                      markeredgecolor="black", markersize=8,
+                      label=f"#{rank}: C{point['cluster_id']}")
+               for rank, (point, color) in enumerate(zip(displayed[:3], TOP_COLORS), 1)]
+    handles.append(Line2D([], [], marker="o", linestyle="none", markerfacecolor="white",
+                          markeredgecolor="#008a45", markeredgewidth=ring_stroke,
+                          markersize=ring_diameter, label=f"Lowest RMSD pose: #{closest_pose['pose_id']}"))
+    legend_title = "Top 20 clusters by energy + globally lowest-RMSD pose"
+    if isinstance(cutoff, (int, float)):
+        legend_title += f" · {cutoff:g} Å clustering"
+    ax.legend(handles=handles,
+              loc="upper left", bbox_to_anchor=(0, -.18),
+              ncol=4, frameon=False, fontsize=11, title=legend_title, title_fontsize=11)
+    fig.text(.5, .075, "Cluster circle size = number of poses; green circle = one actual pose", ha="center", fontsize=11)
+    fig.subplots_adjust(left=.13, right=.97, top=.88, bottom=.32)
+    fig.text(.5, .02,
+             "Cluster circles: minimum energy and minimum experimental RMSD; these may come from different poses.\n"
+             "Green circle: globally lowest-RMSD pose, plotted at its own binding energy.",
+             ha="center", va="bottom", fontsize=11, color="#333333")
+    fig.savefig(output, dpi=240)
+    plt.close(fig)
+    with output.with_suffix(".csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(points[0]))
+        writer.writeheader()
+        writer.writerows(points)
+    output.with_suffix(".json").write_text(json.dumps(audit, indent=2) + "\n")
+    return True
+
+
+def plot_control_poses(analysis, output, reference_sdf, control_label):
+    """Full retained-pose landscape with independent sampling/ranking markers."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    reference = read_molecule(reference_sdf)
+    if reference is None:
+        return False
+    try:
+        points, audit = control_pose_points(analysis, reference)
+    except (ValueError, OSError) as error:
+        print(f"Report figure warning: {error}", file=sys.stderr)
+        return False
+    if not points:
+        return False
+    top = min(points, key=lambda point: point["energy_kcal_per_mol"])
+    best = min(points, key=lambda point: point["rmsd_angstrom"])
+    audit.update(plot_scope="all_retained_control_poses", reference=str(Path(reference_sdf).resolve()),
+                 rmsd_method="symmetry-aware heavy-atom RMSD in receptor frame; no fitting",
+                 lowest_score_pose_id=top["pose_id"], closest_to_crystal_pose_id=best["pose_id"],
+                 score_cutoff=None, rmsd_cutoff=None, cluster_limit=None)
+    fig, ax = plt.subplots(figsize=(11, 6.5))
+    ax.scatter([point["energy_kcal_per_mol"] for point in points],
+               [point["rmsd_angstrom"] for point in points],
+               s=22, c="#a1aab3", alpha=.5, edgecolor="none", label=f"All retained poses ({len(points)})")
+    ax.scatter(top["energy_kcal_per_mol"], top["rmsd_angstrom"], s=78, marker="o",
+               c="#d62728", edgecolor="black", zorder=4,
+               label=f"Lowest energy: {top['energy_kcal_per_mol']:.2f} kcal/mol; {top['rmsd_angstrom']:.2f} Å")
+    ax.scatter(best["energy_kcal_per_mol"], best["rmsd_angstrom"], s=(math.sqrt(78)+.7+6+1.8)**2,
+               facecolors="white", edgecolors="#008a45", linewidths=1.8, zorder=5)
+    ax.scatter(best["energy_kcal_per_mol"], best["rmsd_angstrom"], s=78,
+               c="#d62728" if best is top else "#b8c0c8", edgecolor="black", linewidth=.7, zorder=6)
+    from matplotlib.lines import Line2D
+    handles, labels = ax.get_legend_handles_labels()
+    handles.append(Line2D([], [], linestyle="none", marker="o", markerfacecolor="white",
+                          markeredgecolor="#008a45", markeredgewidth=1.8, markersize=12))
+    labels.append(f"Global lowest experimental RMSD: {best['rmsd_angstrom']:.2f} Å; {best['energy_kcal_per_mol']:.2f} kcal/mol")
+    ax.set_xlabel("Estimated binding energy (kcal/mol)", fontsize=13)
+    ax.set_ylabel(f"Experimental {control_label} heavy-atom RMSD (Å)\nReceptor frame; no fitting", fontsize=12)
+    ax.set_title(f"{control_label}: all-pose diagnostic", fontsize=16)
+    # Place the legend outside the data area so no pose is obscured by it.
+    ax.legend(handles, labels, loc="upper left", bbox_to_anchor=(0, -.17), frameon=False, fontsize=11)
+    x = [point["energy_kcal_per_mol"] for point in points]
+    y = [point["rmsd_angstrom"] for point in points]
+    xpad = max(.15, (max(x)-min(x))*.07)
+    ypad = max(.25, max(y)*.07)
+    ax.set_xlim(min(x)-xpad, max(x)+xpad)
+    ax.set_ylim(-ypad, max(y)+ypad)
+    ax.set_yticks([tick for tick in ax.get_yticks() if tick >= 0])
+    ax.axhline(0, color=".5", linewidth=.8, zorder=0)
+    ax.tick_params(labelsize=12)
+    ax.grid(alpha=.2)
+    if audit["excluded"]:
+        fig.text(.14, .015, f"{len(audit['excluded'])} unevaluable records excluded; reasons retained in figure audit.", fontsize=10)
+    fig.tight_layout(rect=[.08, .10, .99, .98])
+    fig.savefig(output, dpi=240)
+    plt.close(fig)
+    with output.with_suffix(".csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=[*points[0], "lowest_score", "closest_to_crystal"])
+        writer.writeheader()
+        for point in points:
+            writer.writerow(dict(point, lowest_score=point is top, closest_to_crystal=point is best))
+    output.with_suffix(".json").write_text(json.dumps(audit, indent=2) + "\n")
+    return True
+
+
 def plot_clusters(analysis, output, reference_sdf=None, control_label=None):
     """Plot retained pose clusters with score, population, and structural distance."""
     import math
@@ -1503,6 +1777,13 @@ def plot_clusters(analysis, output, reference_sdf=None, control_label=None):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.patches import FancyBboxPatch
+
+    if control_label:
+        # Never label distance from another docked pose as crystal recovery.
+        if not reference_sdf:
+            print("Report figure warning: experimental reference missing for control landscape", file=sys.stderr)
+            return False
+        return plot_control_clusters(analysis, output, reference_sdf, control_label)
 
     rows = cluster_rows(analysis)[:20]
     retained = retained_cluster_representatives(analysis)
@@ -1526,15 +1807,22 @@ def plot_clusters(analysis, output, reference_sdf=None, control_label=None):
         except (RuntimeError, ValueError):
             value = float("nan")
         rmsds.append(value)
-    finite = [value for value in rmsds if math.isfinite(value)]
-    replacement = sorted(finite)[len(finite) // 2] if finite else 0.0
-    rmsds = [value if math.isfinite(value) else replacement for value in rmsds]
+    # An unevaluable structural distance is unknown, not the median distance
+    # of other clusters. Never fabricate a point for a failed comparison.
+    evaluated = [(entry, energy, rmsd) for entry, energy, rmsd in zip(entries, energies, rmsds)
+                 if math.isfinite(energy) and math.isfinite(rmsd)]
+    excluded_count = len(entries) - len(evaluated)
+    if excluded_count:
+        print(f"Report figure warning: {excluded_count} cluster representatives have unevaluable score/RMSD", file=sys.stderr)
+    if not evaluated:
+        return False
+    entries, energies, rmsds = map(list, zip(*evaluated))
     sizes = [70 + int(row.get("pose_count", 1)) * 8 for row, _ in entries]
     colors = list(TOP_COLORS[:min(3, len(entries))]) + ["#b8c0c8"] * max(0, len(entries) - 3)
 
     fig, ax = plt.subplots(figsize=(11, 6.5))
     ax.scatter(energies, rmsds, s=sizes, c=colors, edgecolor="black", linewidth=0.7, alpha=0.9)
-    ax.set_xlabel("Best cluster docking score (kcal/mol)", fontsize=15)
+    ax.set_xlabel("Estimated binding energy (kcal/mol)", fontsize=15)
     if control_label:
         ax.set_ylabel(f"No-fit heavy-atom RMSD to experimental {control_label} (A)", fontsize=13)
         ax.set_title("Top 20 control pose clusters and experimental-pose recovery", fontsize=17)
@@ -1549,7 +1837,7 @@ def plot_clusters(analysis, output, reference_sdf=None, control_label=None):
         # figure is reduced into the PDF; the caption and in-plot legend state
         # the RMSD reference explicitly.
         ax.set_ylabel("No-fit heavy-atom RMSD from lowest-energy pose (A)", fontsize=13)
-        ax.set_title("Top 20 clusters: docking score, population, and structural distance", fontsize=17)
+        ax.set_title("Docked pose clusters", fontsize=17)
         ax.add_patch(FancyBboxPatch((.54, .015), .44, .28, transform=ax.transAxes, boxstyle="round,pad=.012", fc="white", ec="0.6", alpha=.95, zorder=5))
         ax.text(.95, .265, "Top clusters", transform=ax.transAxes, fontsize=12, va="top", ha="right", zorder=6)
         for y, index, color in zip((.215, .175, .135), range(min(3, len(entries))), TOP_COLORS):
@@ -2001,6 +2289,7 @@ def render_plip2d(interactions, ligand_sdf, output, runner, ligand_id=None):
 def render_poseedit_plip2d(interactions, ligand_sdf, output, ligand_id=None):
     """Prefer the approved local renderer without changing report composition."""
     from docking_universal.runtime_inventory import discover_poseedit_runtime
+    from docking_universal.poseedit_renderer import LAYOUT_REVISION
 
     report_xml = interactions / "report.xml"
     receptor = first(interactions, ["complex_protonated.pdb", "plipfixed*.pdb", "*.pdb"])
@@ -2016,6 +2305,7 @@ def render_poseedit_plip2d(interactions, ligand_sdf, output, ligand_id=None):
     existing = read_json(output.with_suffix(".manifest.json"))
     dependencies = (report_xml, ligand_sdf, receptor, renderer)
     if (output.is_file() and existing.get("renderer_policy") == "approved-poseedit-local-v1"
+            and existing.get("layout_revision") == LAYOUT_REVISION
             and output.stat().st_mtime >= max(path.stat().st_mtime for path in dependencies)):
         return True
     components = runtime["components"]
@@ -2029,6 +2319,22 @@ def render_poseedit_plip2d(interactions, ligand_sdf, output, ligand_id=None):
     if ligand_id:
         command.extend(("--ligand-id", str(ligand_id)))
     result = subprocess.run(command, text=True, capture_output=True)
+    base_command = list(command)
+    previous_spacing = 15
+    for spacing in (20, 25, 30):
+        if not result.returncode or 'collision-free unambiguous layout' not in result.stderr:
+            break
+        # A bounded display-only retry, not different PLIP calls or chemistry.
+        # Keep the failed attempt and its audits rather than hiding its failure.
+        (interactions / f'plip2d.approved-spacing-{previous_spacing}.log').write_text(
+            f'RETURN CODE: {result.returncode}\n{result.stdout}\n{result.stderr}')
+        for suffix in ('.collision-audit.json', '.packing-audit.json', '.crop-audit.json'):
+            audit = Path(str(output) + suffix)
+            if audit.is_file():
+                shutil.copy2(audit, Path(str(output) + f'.spacing-{previous_spacing}' + suffix))
+        command = base_command + ['--ligand-spacing', str(spacing)]
+        result = subprocess.run(command, text=True, capture_output=True)
+        previous_spacing = spacing
     (interactions / "plip2d.log").write_text(
         f"RENDERER: approved-poseedit-local-v1\nCOMMAND: {' '.join(command)}\n"
         f"RETURN CODE: {result.returncode}\n\nSTDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}\n"
@@ -2229,7 +2535,7 @@ def combine_cluster_snapshots(analysis, rows, output):
         canvas.paste(frame, (x, y))
         draw.text((x + 64, y + 56), panel_letters[index], fill=color, font=label_font)
         score = row.get("best_energy_kcal_per_mol", "NA")
-        caption = f"Energy rank {row.get('energy_rank', index + 1)} | Cluster {row.get('cluster_id', 'NA')} | Vina {score} kcal/mol"
+        caption = f"Energy rank {row.get('energy_rank', index + 1)} | Cluster {row.get('cluster_id', 'NA')} | Energy {score} kcal/mol"
         bounds = draw.textbbox((0, 0), caption, font=caption_font)
         draw.text((x + (cell_w - (bounds[2] - bounds[0])) / 2, y + image_h + 96), caption, fill=color, font=caption_font)
         sources.append(str(source.resolve()))
@@ -2288,22 +2594,101 @@ def build_control_figures(control, protocol_path, pymol, plip2d, plip):
     if not plot_clusters(analysis, panel_a, reference_sdf=reference, control_label=label):
         return []
 
-    top = Path(str(protocol.get("global_top_ranked_pose", {}).get("summary", ""))).parent / "top_score_pose.sdf"
-    best = Path(str(protocol.get("global_best_sampled_pose", {}).get("summary", ""))).parent / "best_rmsd_pose.sdf"
     receptor = analysis / "receptor.pdb"
     panel_b = report / "control_panel_B_overlay.png"
-    render_overlay(receptor, [reference, top, best], ["magenta", "red", "marine"], panel_b, report / "control_panel_B_overlay.pse", pymol)
+    ligands, colors, overlay_audit = control_overlay_poses(analysis, panel_a, report)
+    overlay_rendered = False
+    if ligands:
+        if render_overlay(receptor, [reference, *ligands], ["magenta", *colors], panel_b,
+                          report / "control_panel_B_overlay.pse", pymol):
+            overlay_rendered = True
+            panel_b.with_suffix(".manifest.json").write_text(json.dumps(overlay_audit, indent=2) + "\n")
     combined = report / "control_panels_AB.png"
-    if panel_b.is_file():
+    if overlay_rendered:
         combine_panels(panel_a, panel_b, combined, control=True)
-    outputs = [str(path) for path in (panel_a, panel_b, combined) if path.is_file()]
+    outputs = [str(panel_a)] + ([str(panel_b), str(combined)] if overlay_rendered and combined.is_file() else [])
     for label, interactions, ligand_sdf, ligand_id in ensure_control_interactions(control, protocol, protocol_path, plip):
         if not interactions or not ligand_sdf:
             continue
         diagram = report / f"control_{label}_plip2d.png"
+        # Source identity, not energy/rank coincidence, connects the diagram to
+        # the exact actual pose in the global landscape and 3D overlay.
+        identity = next((item for item, path in zip(overlay_audit.get("poses", []), ligands)
+                         if same_retained_pose(ligand_sdf, path)), None)
+        if label == "lowest_rmsd" and (not identity or identity["role"] != "global_lowest_rmsd"):
+            print("Report figure warning: retained lowest-RMSD interaction source does not match the global closest pose", file=sys.stderr)
+            continue
         if render_plip2d(interactions, ligand_sdf, diagram, plip2d, ligand_id=ligand_id):
+            color = "magenta" if label == "experimental" else identity["color"] if identity else "gray70"
+            title = {"experimental": "Experimental control ligand", "top_ranked": "Lowest-energy control pose",
+                     "lowest_rmsd": "Global lowest experimental-RMSD pose"}[label]
+            write_pose_view(diagram, ligand_sdf, receptor, interactions / "report.xml", title, color,
+                            coordinate_kind="experimental" if label == "experimental" else "docked",
+                            role=label, pose_id=identity["pose_id"] if identity else None)
+            outputs.append(str(diagram))
+    # Preserve the experimental/lowest-energy/closest A/B/C presentation, and
+    # also retain exact individual diagrams for every top-three representative.
+    with panel_a.with_suffix(".csv").open(newline="") as source:
+        selected_rows = list(csv.DictReader(source))[:3]
+    for rank, row in enumerate(selected_rows, 1):
+        cluster = analysis / f"cluster_{int(row['cluster_id']):03d}"
+        pose_id = int(row["lowest_energy_pose_id"])
+        ligand_sdf = report / f"control_overlay_pose_{pose_id:04d}.sdf"
+        if not same_retained_pose(cluster / "representative.sdf", ligand_sdf):
+            print(f"Report figure warning: control rank {rank} interaction complex does not match exact plot pose", file=sys.stderr)
+            continue
+        interactions = cluster / "interactions"
+        if not (interactions / "report.xml").is_file() and not interactions.exists() and plip and (cluster / "complex.pdb").is_file():
+            result = subprocess.run([
+                sys.executable, str(Path(__file__).with_name("docking-universal-interactions.py")),
+                str(cluster / "complex.pdb"), "--out-dir", str(interactions),
+                "--plip-command", str(plip), "--skip-native-visuals", "--typed-ligand-sdf", str(ligand_sdf),
+                "--ligand-resname", "UNL", "--ligand-chain", "Z", "--ligand-position", "1",
+            ], text=True, capture_output=True)
+            if result.returncode:
+                print(f"Report figure warning: control rank {rank} PLIP failed: {result.stderr.strip()}", file=sys.stderr)
+        diagram = report / f"control_energy_rank_{rank}_plip2d.png"
+        if (interactions / "report.xml").is_file() and render_plip2d(interactions, ligand_sdf, diagram, plip2d, ligand_id="UNL:Z:1"):
+            write_pose_view(diagram, ligand_sdf, receptor, interactions / "report.xml",
+                            f"Control energy rank {rank} · Cluster {row['cluster_id']}",
+                            ("red", "marine", "gold")[rank-1], role=f"energy_rank_{rank}", cluster_id=row["cluster_id"], pose_id=pose_id)
             outputs.append(str(diagram))
     return outputs
+
+
+def control_overlay_poses(analysis, panel_a, report):
+    """Closest ligand keeps its top-three cluster color, otherwise is green."""
+    from rdkit import Chem
+
+    audit = read_json(panel_a.with_suffix(".json"))
+    with panel_a.with_suffix(".csv").open(newline="") as handle:
+        rows = [row for row in csv.DictReader(handle) if row["displayed_in_plot"] == "True"]
+    selected = [{"pose_id": int(row["lowest_energy_pose_id"]), "cluster_id": int(row["cluster_id"]),
+                 "role": f"energy_rank_{rank}", "color": color}
+                for rank, (row, color) in enumerate(zip(rows[:3], ("red", "marine", "gold")), 1)]
+    closest = audit["closest_to_crystal_pose"]
+    closest_color = next((row["color"] for row in selected
+                          if str(row["cluster_id"]) == str(closest["cluster_id"])), "green")
+    # If the same actual pose serves both roles, show it only once.
+    selected = [row for row in selected if row["pose_id"] != closest["pose_id"]]
+    selected.append({"pose_id": closest["pose_id"], "cluster_id": closest["cluster_id"],
+                     "role": "global_lowest_rmsd", "color": closest_color})
+    molecules = list(Chem.SDMolSupplier(str(analysis / "all_poses.sdf"), removeHs=False))
+    paths = []
+    for row in selected:
+        molecule = molecules[row["pose_id"] - 1]
+        if molecule is None:
+            raise ValueError("Control overlay pose is unreadable")
+        path = report / f"control_overlay_pose_{row['pose_id']:04d}.sdf"
+        with Chem.SDWriter(str(path)) as writer:
+            writer.write(molecule)
+        paths.append(path)
+    return paths, [row["color"] for row in selected], {
+        "selection": "top three energy-ranked cluster representatives plus actual global lowest-RMSD pose",
+        "experimental_color": "magenta", "poses": selected,
+        "closest_ligand_color": closest_color,
+        "closest_to_crystal_pose": closest,
+    }
 
 
 def build_compound_figures(study, pymol, plip2d):

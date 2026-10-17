@@ -2,6 +2,7 @@
 """Scientific unit tests for PDB-derived fpocket evidence collection."""
 
 import importlib.util
+from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
 import sys
@@ -316,10 +317,15 @@ class PocketEvidenceTests(unittest.TestCase):
                     return FakeResponse(search)
                 return FakeResponse(candidate.encode())
 
-            record = EVIDENCE.collect_pocket_evidence(
-                receptor, boxes, root / "evidence", query_identity_cutoff=0.9,
-                max_entries=5, opener=opener,
-            )
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                record = EVIDENCE.collect_pocket_evidence(
+                    receptor, boxes, root / "evidence", query_identity_cutoff=0.9,
+                    max_entries=5, opener=opener,
+                )
+            self.assertEqual(stdout.getvalue(), "", "Evidence progress must not corrupt host JSON replies")
+            self.assertIn("Verifying 1 candidate", stderr.getvalue())
+            self.assertIn("Checking related structure 1/1", stderr.getvalue())
             self.assertEqual(record["selection_policy"], "evidence_only_user_decides")
             self.assertEqual(record["evidence"][0]["nearest_pocket"], 1)
             self.assertTrue(record["evidence"][0]["ligand_fully_inside_box"])
@@ -327,6 +333,7 @@ class PocketEvidenceTests(unittest.TestCase):
             aligned = root / "evidence" / record["evidence"][0]["aligned_ligand_pdb"]
             self.assertTrue(aligned.is_file())
             self.assertNotIn("selected_pocket", record)
+
             self.assertTrue((root / "evidence/pdb_ligand_site_evidence.json").is_file())
             self.assertTrue((root / "evidence/pdb_ligand_site_evidence.tsv").is_file())
             ensemble_path = root / "evidence" / record["structural_ensemble"]["manifest"]
@@ -345,6 +352,27 @@ class PocketEvidenceTests(unittest.TestCase):
             headings = (root / "evidence/pdb_ligand_site_evidence.tsv").read_text().splitlines()[0]
             self.assertIn("protein_identity_basis", headings)
             self.assertIn("shared_protein_identifiers", headings)
+
+    def test_input_pdb_entry_is_not_downloaded_or_counted_as_independent_evidence(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            receptor = root / "arbitrary-name.pdb"
+            receptor.write_text("HEADER".ljust(62) + "9XYZ\n" + protein())
+            requested = []
+            def opener(request, timeout=30):
+                requested.append(request.full_url)
+                if "search.rcsb.org" in request.full_url:
+                    return FakeResponse(json.dumps({"result_set": [{"identifier": "9XYZ_1"},
+                        {"identifier": "9XYZ_2"}]}).encode())
+                self.fail("The input reference must not be downloaded as new evidence")
+            record = EVIDENCE.collect_pocket_evidence(receptor, [], root / "evidence", opener=opener)
+            self.assertEqual(len(requested), 1)
+            self.assertEqual(record["candidate_entries"], [])
+            self.assertEqual(record["evidence"], [])
+            self.assertEqual(record["query"]["input_reference_entries_excluded"], ["9XYZ"])
+            self.assertIn("not independent", record["skipped"][0]["reason"])
+            ensemble = json.loads((root / "evidence" / record["structural_ensemble"]["manifest"]).read_text())
+            self.assertEqual(ensemble["sources"], [])
 
     def test_each_ligand_is_transformed_with_its_contacting_protein_chain(self):
         """Equivalent crystal copies must collapse onto one reference site."""

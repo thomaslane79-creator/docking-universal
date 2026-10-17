@@ -32,6 +32,7 @@ from docking_universal_bundle import (
     resolve_locked_path,
 )
 from docking_universal_process import run_checked
+from docking_universal.screening_progress import write_screening_progress
 
 
 def sha256(path):
@@ -52,7 +53,7 @@ def main():
     authority = parser.add_mutually_exclusive_group(required=True)
     authority.add_argument("--protocol", type=Path, help="reusable .duprotocol bundle or legacy protocol.json")
     authority.add_argument("--exploratory", action="store_true", help="explicitly run without an approved pose-recovery control")
-    parser.add_argument("--ligand", required=True, type=Path, help="one compound SDF with authoritative chemistry")
+    parser.add_argument("--ligand", required=True, type=Path, help="one compound SDF or MOL with authoritative chemistry")
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--receptor", type=Path, help="override stored receptor path; hash must still match")
     parser.add_argument("--receptor-pdb", type=Path, help="coordinate receptor used for clustering, PLIP, and PyMOL")
@@ -66,11 +67,13 @@ def main():
     parser.add_argument("--check-only", action="store_true", help="validate protocol, ligand, receptor, and box without docking")
     parser.add_argument("--analysis", choices=("none", "summary", "representatives"), default="representatives", help="none: docking only; summary: cluster tables; representatives: tables plus selected PLIP/PyMOL output (default)")
     parser.add_argument("--representatives", type=int, default=3, help="number of lowest-energy distinct pose clusters analyzed (default: 3)")
-    parser.add_argument("--cluster-rmsd", type=float, default=2.0, help="cross-run symmetry-aware no-fit heavy-atom RMSD cutoff in A")
+    parser.add_argument("--cluster-rmsd", type=float, default=1.5, help="cross-run symmetry-aware no-fit heavy-atom RMSD cutoff in A (default: 1.5)")
     parser.add_argument("--mk-export", default="mk_export.py")
     parser.add_argument("--pymol", default="pymol")
     parser.add_argument("--plip-command", default="plip")
-    parser.add_argument("--engine", choices=("vina", "qvinaw"), help="docking engine: Vina or QuickVina-W")
+    parser.add_argument("--engine", choices=("vina", "qvinaw", "adgpu"), help="docking engine; adgpu is an explicitly configured experimental AD4 method")
+    parser.add_argument("--ad4-runs", type=int, default=20)
+    parser.add_argument("--ad4-heuristic-cap", type=int, default=12_000_000)
     parser.add_argument("--seeds", type=int, default=5, help="exploratory independent seeds")
     parser.add_argument("--conformers", type=int, default=3, help="exploratory conformers per chemical state")
     parser.add_argument("--exhaustiveness", type=int, default=16, help="exploratory search effort")
@@ -89,10 +92,14 @@ def main():
         parser.error("ligand file does not exist")
 
     # The current protocol-transfer interface is intentionally one compound per
-    # SDF. Failing explicitly avoids silently screening only the first library
+    # SDF/MOL. Failing explicitly avoids silently screening only the first library
     # record; low-level commands remain available for uncalibrated batch work.
     from rdkit import Chem
-    molecule_count = sum(1 for molecule in Chem.SDMolSupplier(str(ligand), removeHs=False) if molecule)
+    from docking_universal.services.ligand_input import read_ligand_molecules
+    try:
+        molecule_count = len(read_ligand_molecules(ligand))
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
     if molecule_count != 1:
         raise SystemExit(f"--ligand must contain exactly one readable molecule; found {molecule_count}")
 
@@ -136,7 +143,7 @@ def main():
             engine = reconcile_protocol_engine(protocol, args.engine)
         except ValueError as exc:
             raise SystemExit(str(exc)) from None
-        expected_macrocycle = "flexible_meeko" if engine == "vina" else "rigid_conformer_ensemble"
+        expected_macrocycle = "unsupported_experimental_ad4" if engine == 'adgpu' else "flexible_meeko" if engine == "vina" else "rigid_conformer_ensemble"
         if protocol["parameters"].get("macrocycle_treatment") != expected_macrocycle:
             raise SystemExit("Protocol macrocycle treatment does not match the recorded engine")
         receptor = args.receptor.expanduser().resolve() if args.receptor else resolve_locked_path(
@@ -216,6 +223,25 @@ def main():
         protocol_path = None
         workflow_status = "EXPLORATORY_NO_CONTROL"
 
+    if engine == 'adgpu':
+        from docking_universal.ad4_gpu import Ad4Settings, read_settings, grid_geometry
+        if not args.protocol:
+            for key in ('exhaustiveness','num_modes','energy_range_kcal_per_mol'):parameters.pop(key)
+            parameters['macrocycle_treatment']='unsupported_experimental_ad4'
+            parameters['ad4']=Ad4Settings(lga_runs=args.ad4_runs,heuristic_cap=args.ad4_heuristic_cap).to_dict()
+        read_settings(parameters)
+        for region in boxes:
+            geometry={}
+            for line in Path(region['box']).read_text().splitlines():
+                line = line.split('#', 1)[0]
+                if '=' in line:
+                    key,value=map(str.strip,line.split('=',1))
+                    if key in {'center_'+a for a in 'xyz'}|{'size_'+a for a in 'xyz'}:geometry[key]=float(value)
+            actual=grid_geometry(geometry)
+            if args.protocol and region.get('ad4_grid')!=actual:
+                raise SystemExit('AD4 map extents differ from the locked protocol; create a new AD4 protocol')
+            region['ad4_grid']=actual
+
     if args.check_only:
         print("Input check: PASS")
         print(f"Engine: {engine}")
@@ -229,11 +255,14 @@ def main():
 
     out = args.out.expanduser().resolve()
     out.mkdir(parents=True, exist_ok=True)
+    def feedback(phase, message):
+        write_screening_progress(out, phase, message)
     project = Path(__file__).resolve().parent.parent
     cli = Path(os.environ.get("DOCKING_UNIVERSAL_CLI", project / "bin/docking-universal"))
     libexec = Path(os.environ.get("DOCKING_UNIVERSAL_LIBEXEC", project / "libexec"))
     # A 2D depiction documents the submitted chemical graph independently of
     # any docking pose. Its filename follows the authoritative input SDF.
+    feedback('depiction', 'Drawing the submitted molecule…')
     run([
         cli, "depict2d", ligand,
         "--out-dir", out / "depiction", "--format", "png",
@@ -258,8 +287,12 @@ def main():
     ]
     if parameters.get("tautomers_enumerated", True) is False:
         ensemble_command.append("--skip-tautomers")
+    state_label = ('protonation/tautomer states' if parameters.get('tautomers_enumerated', True)
+                   else 'protonation states (tautomer enumeration off)')
+    feedback('ligands', f"Preparing {state_label} at pH {parameters['ph']:g} and starting conformers…")
     run(ensemble_command)
     prep = out / "ligand_preparation"
+    feedback('ligand_atoms', 'Preparing ligand docking atoms and charges…')
     run([
         cli, "ligands", ensemble, "--out", prep,
         "--target-engines", engine, "--geometry-mode", "preserve",
@@ -277,14 +310,18 @@ def main():
                 cli, "dock", "--engine", engine,
                 "--receptor", receptor, "--ligands", prep / "pdbqt_ligands",
                 "--config", region["box"], "--out", docking,
-                "--exhaustiveness", parameters["exhaustiveness"],
-                "--num-modes", parameters["num_modes"],
-                "--energy-range", parameters["energy_range_kcal_per_mol"], "--seed", seed, "--skip-existing",
+                "--seed", seed, "--skip-existing",
             ]
+            if engine == 'adgpu':
+                command += ['--ad4-settings',json.dumps(parameters['ad4'])]
+            else:
+                command += ['--exhaustiveness',parameters['exhaustiveness'],'--num-modes',parameters['num_modes'],
+                            '--energy-range',parameters['energy_range_kcal_per_mol']]
             if args.engine_command:
                 command += ["--engine-command", args.engine_command]
             if args.engine_env:
                 command += ["--engine-env", args.engine_env]
+            feedback('docking', f'Docking site {site_number}/{len(boxes)}, repeat {seeds.index(seed) + 1}/{len(seeds)} (seed {seed})…')
             run(command)
             scores = docking.parent / "scores.csv"
             run([cli, "collect", docking, "--out", scores])
@@ -317,6 +354,8 @@ def main():
         "boxes": [{"site_number": site, "box": str(path)} for site, _, path in site_roots],
         "docking_site_count": len(boxes),
         "engine": engine,
+        **({'scoring_function':'AD4','ad4_settings':parameters['ad4'],
+            'ad4_grids':[region['ad4_grid'] for region in boxes]} if engine=='adgpu' else {}),
         "seeds": seeds,
         "ensemble_parameters": {
             "ph": parameters["ph"],
@@ -338,6 +377,7 @@ def main():
     if args.analysis != "none":
       for site_number, site_root, site_box in site_roots:
         analysis = site_root / "pose_analysis"
+        feedback('clustering', f'Grouping similar docked poses for site {site_number}/{len(boxes)}…')
         run([
             cli, "cluster-poses", "--docking-root", site_root,
             "--ligand-work", prep / "ligand_work", "--engine", engine,
@@ -346,6 +386,7 @@ def main():
             "--representatives", args.representatives, "--mk-export", args.mk_export,
         ])
         if args.analysis == "representatives":
+            feedback('visuals', f'Rendering representative 3D views for site {site_number}/{len(boxes)}…')
             run([
                 cli, "render3d", analysis / "representative_browser.pml",
                 "--out", analysis / "representative_browser.png",
@@ -354,11 +395,13 @@ def main():
             for cluster_dir in sorted(analysis.glob("cluster_*")):
                 if not cluster_dir.is_dir():
                     continue
+                feedback('visuals', f'Rendering site {site_number}, {cluster_dir.name}…')
                 run([
                     cli, "render3d", cluster_dir / "representative.pml",
                     "--out", cluster_dir / "representative.png",
                     "--session-out", cluster_dir / "representative.pse", "--pymol", args.pymol,
                 ])
+                feedback('interactions', f'Calculating PLIP contacts and drawing 2D interactions: site {site_number}, {cluster_dir.name}…')
                 run([
                     cli, "interactions", cluster_dir / "complex.pdb",
                     "--out-dir", cluster_dir / "interactions", "--plip-command", args.plip_command,
@@ -367,12 +410,15 @@ def main():
                 ])
                 interaction_scene = cluster_dir / "interactions" / "complex_plip_all_in_one.pml"
                 if interaction_scene.is_file():
+                    feedback('visuals', f'Rendering 3D contacts: site {site_number}, {cluster_dir.name}…')
                     run([
                         cli, "render3d", interaction_scene,
                         "--out", cluster_dir / "interactions" / "complex_plip_all_in_one.png",
                         "--session-out", cluster_dir / "interactions" / "complex_plip_all_in_one.pse",
+                        "--contact-residue-labels",
                         "--pymol", args.pymol,
                     ])
+    feedback('finished', 'Compound processing finished; advancing to the next compound or library report…')
     print(f"Unknown docking complete: {out}")
     print(f"Combined scores: {combined}")
 

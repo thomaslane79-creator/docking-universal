@@ -4,7 +4,7 @@
 
 Docking Universal provides fully guided, interactive docking workflows on Ubuntu and macOS, from selecting inputs through generating scientific PDF reports. It supports AutoDock Vina and QuickVina-W alongside established open-source tools for receptor and ligand preparation, site selection, docking, analysis, and visualization. Its central purpose is to gather and preserve the evidence needed for the user to make an informed, scientifically defensible docking decision.
 
-**A Vina-family engine performs the docking; Docking Universal manages and documents the surrounding workflow.**
+**A docking engine performs the search; Docking Universal manages and documents the surrounding workflow.** Vina remains the default; the optional experimental AD4 GPU integration is described below.
 
 ## What Docking Universal adds beyond Vina
 
@@ -36,6 +36,98 @@ When a reusable protocol is supplied, an explicit conflicting `--engine` request
 ```bash
 docking-universal dock --engine qvinaw --receptor receptor.pdbqt --ligands prepared_ligands --config box.conf --out results_qvinaw
 ```
+
+#### Experimental GPU assessment and upstream-code corrections
+
+AutoDock-GPU is an **optional experimental AD4 engine**, not GPU-enabled Vina.
+It uses AutoDock4 estimated binding energies and a genetic/local search. Its
+energies, rankings and poses need not match Vina. Vina remains the default and
+existing protocols keep their original engine and settings.
+
+In the GUI, a locally accepted runtime adds **AutoDock-GPU (AD4, experimental)**
+under **Finalize protocol → Docking program**. The adjacent explanation and
+**? / Settings guide…** provide an offline learning guide. See the detailed
+[AD4 learning guide](docs/ad4-gpu-guide.md) for scoring, search, settings,
+limitations and platform boundaries.
+
+Both methods report kcal/mol, but **their energy values are not interchangeable**:
+AD4 −9 versus Vina −8 does not prove stronger binding. AD4 includes electrostatic
+and approximate desolvation terms; this is not explicit-water simulation or a
+guarantee of better accuracy. Ligand starting-shape minimization still uses the
+separate vacuum MMFF94 model. The [official comparison warning](https://autodock-vina.readthedocs.io/en/latest/docking_flexible.html)
+explains why the two functions must not be combined into one hit ranking.
+
+This option has its own controls: 20 genetic runs per repeat by default, a
+12-million heuristic evaluation cap and convergence autostop. These are not
+Vina exhaustiveness or maximum modes. All run winners enter the same 1.5 Å
+clustering, PLIP, linked 2D/3D review and portrait-report pipeline used by other
+engines. Requested and actual AutoGrid extents are separately locked; a 26 Å
+box becomes 26.25 Å at the tested 0.375 Å grid spacing. CPU-thread controls do
+not apply to GPU search. Native outputs and build/input/map hashes are retained.
+
+The first accepted scope is dry rigid-receptor **exploratory** screening with
+ordinary supported ligand types. Macrocycles, metals and special parameters
+outside that scope stop explicitly; there is no silent Vina fallback. Production
+AD4 control calibration is not enabled. Vina control approval does not transfer
+to AD4, and selecting AD4 does not validate a new target or hits.
+
+The common engine integration is designed for macOS, Windows and Linux.
+**Only the pinned Apple-Silicon OpenCL build has been locally validated here.**
+Windows/Linux GPU binaries, drivers and full workflows still need native
+acceptance before activation; they are not claimed supported by the Mac tests.
+
+The tested candidate differs from pinned upstream v1.6 source
+(`e63e6f6280ebfad18caa3e8f48afdc269e79e063`):
+
+- **Force synchronization correction:** a local-memory barrier between
+  intermolecular and intramolecular force accumulation prevents overlapping
+  non-atomic writes and cross-worker atomic additions. Standard 128-work-item
+  same-seed repeat tests pass after this correction; this is not a claim that
+  the unmodified upstream release was reproducible on this Mac.
+- **Safety guard, not a repair:** an experimental Apple-GPU build with one
+  work-item per group is rejected before docking because it still fails our
+  reproducibility checks. Normal tested GPU groups use cooperating workers;
+  this setting does not mean one ligand, CPU thread or docking run.
+- **No energy-formula rewrite:** legacy CPU reporting uses rounded distance
+  tables and differs from continuous GPU search evaluation. Both are retained
+  with distinct meanings; old scores have not been changed to force agreement.
+
+Generated embedded kernel text is rebuilt from the corrected source. Profiling,
+tracing and energy-audit instrumentation are separate diagnostic builds, not
+additional production fixes. The limited local assessment is not general
+scientific validation. A Vina-validated protocol does not automatically
+authorize AD4 screening; controls and settings must identify their actual engine.
+The [exact local source patch](validation/patches/autodock-gpu-v1.6-local.patch)
+records both modifications. See the [correction and validation record](docs/autodock-gpu-numerical-validation.md)
+and [reproducibility investigation](docs/autodock-gpu-reproducibility.md) for
+source diffs, executable hashes, failed controls and limits.
+
+The earlier experimental GNINA Metal candidate also required isolated library-
+loading, bounded GPU-arena allocation and spline-pointer initialization repairs;
+its tree-gradient test stubs were replaced with real checks. It nevertheless
+**failed full docking acceptance and is not integrated**. Its separate [build/patch record](docs/apple-gpu-feasibility.md)
+must not be confused with the AutoDock-GPU candidate.
+
+The current [crystal-control assessment](docs/autodock-gpu-control-assessment.md)
+records search settings, ranking meanings, timing boundaries and unsupported
+inputs before any integration decision.
+The [full retained-workload timing](docs/docking-performance.md#full-retained-workload-apple-gpu-benchmark-2026-10-16)
+is completed with an explicitly labeled benchmark report. Its performance result
+does not establish AD4 scoring as more accurate than Vina. The subsequent
+[numerical cutoff investigation](docs/autodock-gpu-cutoff-resolution.md) explains
+the small failed reference comparison: the native kernel rounds a near-8 A pair
+to the strict cutoff while the double-precision reference includes it. Actual-
+kernel replay reproduces all retained coordinates/energies exactly; native-
+branch-conditioned reference checks retain every state and the original energy
+tolerances. This is a documented reference-boundary correction, not another
+production engine patch. KNI-577's outstanding numerical audit also passes.
+The [integration acceptance record](docs/ad4-gpu-integration.md) distinguishes
+numerical checks, the full GUI-to-report test, native PyMOL review, cancellation,
+installation and remaining unsupported scope. Historical benchmark PDFs retain
+their original point-in-time warnings; they are not rewritten as validation.
+The accepted optional engine is installed on the locally validated Mac. Restart
+the desktop application to load it, then choose it in **Finalize protocol →
+Docking program** for an AD4 exploratory protocol. Vina remains the default.
 
 ## Why I built it: a scientist's perspective
 
@@ -70,25 +162,69 @@ These are the three commands most users need. Each launches an interactive inter
 | Create a reusable Docking Universal protocol | `docking-universal create-protocol` | Evidence for one or more candidate docking regions, a preliminary review report, the user-selected region or regions, a final scientific protocol report, and a reusable `.duprotocol` bundle. |
 | Dock new compounds with a saved protocol | `docking-universal screen` | A complete screening report plus individual docking, clustering, 3D, and 2D interaction results for every compound. |
 
+### Import and select compounds
+
+The desktop accepts **SDF, MOL, CSV, TSV and XLSX** compound files. For a SMILES
+table, choose the worksheet (Excel), review the suggested **SMILES column** and
+optional **Name / ID column**, then click **Use these columns**. Both dropdowns
+list every header; automatic detection only prefills a suggestion, never grants
+approval. Changing a column clears the compound selection and requires approval
+again. Check the compounds to dock in the existing paginated review.
+
+Invalid rows stay visible but cannot be selected. Excel formulas are not
+evaluated or accepted as SMILES; supply literal text. Import preserves supplied
+chemistry and does not adjust it to the protocol pH. No Excel installation,
+network connection or new spreadsheet dependency is needed. Open tables
+individually; folder import remains SDF/MOL. See the
+[compound selection guide](docs/guided-workflow.md#choose-compounds-for-screening)
+for supported table layouts, limits and the explicit CLI selection route.
+
 ### Docking Universal protocol types
 
 | Protocol type | How the docking region is established | Evidence status |
 | --- | --- | --- |
 | **Control-validated** | A known bound ligand is redocked and must pass pose-recovery criteria. | Supports screening with target-specific control evidence. |
 | **Ligand-guided exploratory** | A ligand in the selected structure defines the region but is not redocked. | Explicitly exploratory. |
-| **Site-guided exploratory** | fpocket cavity analysis defines candidate regions; optional aligned ligands from qualifying related PDB structures provide independent site evidence, and the user may select one or multiple boxes. | Explicitly exploratory; related-structure evidence supports site review but is not a pose-recovery control. |
+| **Site-guided exploratory** | Pocket prediction (P2Rank primary; fpocket fallback) defines candidates; optional aligned ligands from qualifying related PDB structures provide independent site evidence, and the user may select one or multiple boxes. | Explicitly exploratory; related-structure evidence supports site review but is not a pose-recovery control. |
 
 ### Evidence-led docking-region decisions
+
+In the desktop workflow, a bound ligand does not prevent site discovery.
+**Starting point for site review** guides discovery; it does not lock the final
+docking location. One or more regions can be selected later, here or elsewhere.
+Keep **Selected bound ligand** to use its observed site, or check **Also run
+P2Rank to look for other pockets?** to run **P2Rank** (the primary
+predictor) on the ligand-removed prepared receptor. Choose one or more regions
+after reviewing the results. fpocket remains an explicitly selectable fallback;
+the older ligand-centered route uses it only for cavity context, not P2Rank
+prediction. Ligand-defined regions have no invented P2Rank score.
+Qualified related-structure ligand locations remain selectable boxes even
+when P2Rank is off; they can be chosen alone or together with the input site.
+Redocking, related-PDB lookup and additional prediction are independent
+checkboxes with recommendation labels, not combined configuration presets.
+Leave **Redock experimental ligand** unchecked to create an explicitly
+exploratory protocol; this preserves the selected ligand site.
+
+**Search related public PDB structures** is independent of these choices and
+available for ligand-bound and known-ligand-control preparation too. Uncheck it
+for local-only site review. The input ligand defines a possible site; it is not
+counted as new independent evidence. When the input PDB entry is recorded in its
+HEADER, that same entry is excluded from the related-entry evidence search.
+Unknown entry identities are not guessed from filenames. A known-ligand control
+pauses for site review before redocking and covers only its tested region,
+receptor, engine and settings. Additional selected sites remain exploratory.
+Saved protocols stay locked; adding sites requires a newly reviewed protocol.
+See the [site-discovery validation record](docs/site-first-ligand-evidence-validation.md).
 
 Choosing a docking box is a scientific decision, not merely a file-setting step. For site-guided protocol creation, Docking Universal can assemble several forms of evidence before asking the user to choose:
 
 | Evidence presented | What it contributes |
 | --- | --- |
-| **fpocket candidates** | Independent geometric cavity hypotheses with their original scores and ranked locations. |
+| **P2Rank / fallback fpocket candidates** | Predicted pocket hypotheses with their original detector-specific scores and ranked locations. P2Rank scores are not interchangeable with fpocket scores or docking energies. |
 | **RCSB PDB sequence and structure search** | Searches related protein entities using the selected receptor chain, then verifies sequence, coverage, C-alpha structural alignment, and physical ligand contact with the accepted source chain before transferring a deposited ligand. Failed or ambiguous chain assignments are excluded and recorded. |
 | **Deposited ligands from qualifying related PDB structures** | Experimentally observed ligand locations transformed into the selected receptor frame only after those sequence, structural-alignment, and ligand-contact checks. Exact-sequence and qualified related-sequence evidence remain distinguishable. |
-| **Agreement between ligand evidence and fpocket** | Directly shows when a predicted cavity corresponds to an experimentally occupied region. |
-| **Ligand evidence without an fpocket cavity** | Preserves an experimentally supported site as a separate selectable box instead of pretending that fpocket recovered it. |
+| **Agreement between ligand evidence and pocket prediction** | Directly shows when a predicted pocket corresponds to an experimentally occupied region. |
+| **Ligand evidence without a predicted pocket** | Preserves an experimentally supported site as a separate selectable box without inventing a detector score. |
 | **Bound-ligand pose-recovery control, when available** | Tests whether the complete target-specific protocol can reproducibly recover a known pose; this is stronger evidence than cavity or related-structure correspondence alone. |
 
 Before a site is approved, the workflow can generate a **Preliminary Pocket-Review Report (Not a Protocol)** containing the available evidence and every selectable box. The user may choose one or multiple regions, use the highest-ranked acceptable fpocket candidate automatically, or stop for further review. The final protocol report records the evidence available, the selected region geometry, whether the sources agreed, and exactly how the choice was made.
@@ -96,6 +232,13 @@ Before a site is approved, the workflow can generate a **Preliminary Pocket-Revi
 The workflow does not convert a cavity prediction or a related-structure ligand into a claim of biological validity. Missing, conflicting, partial, or excluded evidence is stated explicitly. The purpose is to give the user a transparent basis for a scientifically defensible choice—and to preserve that basis so the decision can later be inspected, challenged, or reproduced.
 
 A `.duprotocol` contains the prepared receptor, every selected docking box, settings, provenance, and supporting evidence. It can be saved, shared, and reused by another Docking Universal installation, but it is not a general protocol format for other docking software. Exploratory use remains identified as exploratory and requires explicit user authorization.
+
+In a fresh desktop study, choose **Study setup → Study source → Use a
+saved protocol**, review/import the verified bundle, then select compounds in
+**Screen ligands**. The application retains its own copy and reuses locked inputs
+and settings without repeating receptor preparation. Import does not grant new
+scientific approval or install missing engines. See the
+[saved-protocol reuse guide](docs/guided-workflow.md#reuse-a-saved-protocol-in-a-new-desktop-study).
 
 If a protocol contains more than one selected docking site, `docking-universal screen` runs the same ligand ensemble and locked settings independently at each site. Docking, scores, pose clusters, PLIP interactions, and PyMOL sessions remain separated and labeled by site; the final report summarizes the sites together without combining them into one oversized search box.
 
@@ -111,6 +254,14 @@ Prepared receptor and ligand PDBQT files are separate from Docking Universal `.d
 | --- | --- | --- |
 | Protein receptor and docking-site files | `docking-universal prepare-receptor protein.pdb` | Prepared receptor PDBQT, pocket/box files, and diagnostic logs. Model-changing removal requires review. |
 | One or more compounds | `docking-universal prepare-ligand compounds.sdf` | One prepared ligand PDBQT per compound with preparation metadata. |
+
+Receptor preparation accepts PDB and mmCIF. Reduce2 optimization is checked for
+heavy-atom identity and preservation of the coordinate frame used by pockets
+and experimental evidence; accepted native mmCIF output is retained alongside
+its engine-compatible PDB. A successful file conversion is not validation of
+the biological protonation state. The [native-output/frame correction record](docs/reduce2-frame-validation-2026-10-17.md)
+explains the safeguards, fallback policy and tests; existing protocols are not
+silently regenerated after preparation changes.
 
 Additional component commands can also be used independently in compatible workflows:
 

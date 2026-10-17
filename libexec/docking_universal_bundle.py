@@ -78,12 +78,17 @@ def protocol_can_screen(record):
 def reconcile_protocol_engine(record, requested=None):
     """Return the locked engine, rejecting an explicit contradictory request."""
     locked = str((record or {}).get("engine", "")).strip().lower()
-    if locked not in {"vina", "qvinaw"}:
+    if locked not in {"vina", "qvinaw", "adgpu"}:
         raise ValueError(f"protocol records an unsupported docking engine: {locked or 'missing'}")
     if requested and requested != locked:
         raise ValueError(
             f"protocol is locked to {locked}; requested --engine {requested} conflicts with the approved protocol"
         )
+    if locked == 'adgpu':
+        from docking_universal.ad4_gpu import read_settings, PINNED_ENGINE_SHA256
+        read_settings(record.get('parameters') or {})
+        if (record.get('engine_implementation') or {}).get('sha256') != PINNED_ENGINE_SHA256:
+            raise ValueError('AD4 protocol does not lock the tested patched engine build')
     return locked
 
 
@@ -124,6 +129,12 @@ def create_bundle(
     if not kind or not protocol_can_screen(protocol):
         raise ValueError("protocol is neither control-approved nor explicitly authorized for exploratory reuse")
     protocol["protocol_type"] = kind
+    from docking_universal.pocket_metadata import annotate_regions
+    detector = (protocol.get('pocket_detection') or {}).get('engine')
+    for owner,key in ((protocol,'docking_regions'),(protocol,'selectable_docking_boxes'),
+                      (protocol.get('locked_inputs',{}),'boxes')):
+        if key in owner:
+            owner[key] = annotate_regions(owner[key],base=protocol_path.parent,detector=detector)
     preparation = protocol.setdefault("receptor_preparation", {})
     if preparation.get("user_approved_component_removal") and not preparation.get("receptor_modification_warning"):
         preparation["receptor_modification_warning"] = build_receptor_modification_warning(
@@ -259,6 +270,8 @@ def create_bundle(
             "**/pdb_site_evidence/**/*.jsonl",
             "**/selected_visuals/*.png", "**/selected_visuals/**/*.png",
             "**/experimental_interactions.png", "**/comparison_summary.json",
+            "**/pocket_selection_diagnostics.tsv", "**/pocket_detection_provenance.json",
+            "**/p2rank_output/*predictions.csv",
         )
         seen = set()
         for search_root in search_roots:
@@ -271,8 +284,11 @@ def create_bundle(
                         (parent for parent in source.parents if parent.name == "structural_ensemble"),
                         None,
                     )
+                    pocket_record = (source.name in {'pocket_selection_diagnostics.tsv','pocket_detection_provenance.json'}
+                                     or source.name.endswith('_predictions.csv'))
                     destination = _copy(
                         source,
+                        evidence / 'pocket_detection' / (sha256(source)[:16]+'_'+source.name) if pocket_record else
                         evidence / "structural_ensemble" / source.relative_to(structural_root)
                         if structural_root else evidence / source.name,
                     )

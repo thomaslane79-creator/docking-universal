@@ -18,8 +18,8 @@ The user does not request a particular number of clusters. RDKit Butina clusteri
 | RMSD cutoff | Practical interpretation |
 | ---: | --- |
 | 1.0 Å | Strict; may separate modest variations of one mode |
-| 1.5 Å | Moderately strict |
-| 2.0 Å | Default; useful starting point for binding-mode grouping |
+| 1.5 Å | Default; moderately strict |
+| 2.0 Å | Broader grouping; may combine modest variations of one mode |
 | 2.5–3.0 Å | Broad; may combine scientifically distinct poses |
 
 Butina clustering is center-based. Membership does not require every pair of peripheral poses in a cluster to be within the cutoff of each other. Docking Universal records the cutoff and method in `clustering_manifest.json` so the result can be interpreted and reproduced.
@@ -27,6 +27,30 @@ Butina clustering is center-based. Membership does not require every pair of per
 ## Selecting representatives
 
 Each cluster representative is its lowest-energy member. Clusters are ranked by representative energy, and the three lowest-energy distinct clusters are analyzed by default.
+
+The prospective cluster graph displays the top 20 energy-ranked clusters, with
+the top three colored red, blue, and gold and the remainder gray. Experimental
+control graphs retain the top 20 cluster summaries and also include
+the actual globally lowest-RMSD evaluable pose at its own binding
+energy, even if its cluster is outside that set. This circle with a green outline
+represents one pose, not its cluster's population or independent minima.
+Its fill follows its cluster's top-three energy color, otherwise gray. The
+closest ligand also keeps its cluster's energy color in the 3D overlay, and is
+green only when its cluster is outside the top three.
+The same identities and ligand colors are used in the GUI's embedded/detached
+linked 2D/3D review and exported comparisons. Control diagrams include exact
+top-three representatives and the actual closest pose; the experimental
+reference is magenta in production views. Verified diagram/source hashes prevent
+an old image from linking to changed coordinates. Existing saved reports need
+regeneration from retained outputs; no redocking is necessary.
+Per-seed redocking browsers are explicitly local diagnostics (global cluster
+ranks do not exist yet at that stage), not substitutes for the final landscape.
+All points are circles;
+circle size indicates the number of docked poses in the cluster, not the number
+of different compounds. For experimental controls, a point combines the
+cluster's lowest binding energy and lowest experimental RMSD, which may belong
+to different member poses. This is distinct from the three representatives
+receiving detailed 3D and interaction analysis by default.
 
 Energy is kept separate from repeatability. Every cluster also reports:
 
@@ -59,7 +83,15 @@ Controls how many energy-ranked distinct clusters receive detailed output. The d
 
 ### `--cluster-rmsd A`
 
-Controls cluster granularity in angstroms. The default is 2.0 Å. Lower values create more narrowly defined clusters; higher values create fewer, broader clusters. Compare several cutoffs when scientific conclusions depend strongly on the exact grouping.
+Controls cluster granularity in angstroms. The CLI and GUI default is **1.5 Å**.
+It can also be set explicitly with `--cluster-rmsd 1.5`. Existing studies and
+saved user settings retain their selected cutoff rather than being silently
+rewritten. Lower values create more narrowly defined clusters; higher
+values create fewer, broader clusters. Compare several cutoffs when scientific
+conclusions depend strongly on the exact grouping.
+
+This clustering cutoff is separate from the **2.0 Å experimental-pose recovery
+threshold** used in retrospective controls; that recovery threshold is unchanged.
 
 ### `--contact-cutoff A`
 
@@ -81,7 +113,7 @@ Controls which receptor residues appear around a representative in the PyMOL sce
 - Docking energies are ranking scores, not measured binding free energies.
 - Repeated recovery across seeds describes search convergence, not biological correctness.
 - Clustering cannot repair incorrect protonation, receptor preparation, atom typing, or pocket selection.
-- A 2 Å cutoff is a conventional starting point, not a universal physical boundary.
+- The selected 1.5 Å clustering cutoff is a grouping choice, not a universal physical boundary.
 - Distinct interaction patterns may sometimes be useful even when geometric poses fall in the same broad cluster.
 
 The recommended review order is energy rank, seed/conformer support, geometry and clashes, interaction pattern, and finally the biological context of the target.

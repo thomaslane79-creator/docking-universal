@@ -79,6 +79,7 @@ class GuiFullJourneyTests(unittest.TestCase):
             "\"$root/cavity/pdb_site_evidence/structural_ensemble\"\n"
             "cp \"$1\" \"$root/receptor/${name}.pdb\"\nprintf 'RECEPTOR\\n' > \"$root/receptor/${name}.pdbqt\"\n"
             "printf 'complete\\n' > \"$root/run.log\"\nprintf 'report\\n' > \"$root/preliminary-pocket-review.pdf\"\n"
+            "printf '{\"engine\":\"fpocket\",\"engine_version\":\"synthetic-test-fixture\"}\\n' > \"$root/cavity/pocket_detection_provenance.json\"\n"
             "printf 'image\\n' > \"$root/pocket-overview.png\"\nprintf 'session\\n' > \"$root/cavity_selected_box.pse\"\n"
             "printf 'center_x = 1\\ncenter_y = 2\\ncenter_z = 3\\nsize_x = 20\\nsize_y = 20\\nsize_z = 20\\n' > \"$root/cavity/${name}_pocket1.conf\"\n"
             "printf 'ATOM      1  C   STP Z   1       1.000   2.000   3.000  1.00  1.00           C\\n' > \"$root/cavity/frozen_pockets/pocket1_atm.pdb\"\n"
@@ -95,10 +96,12 @@ class GuiFullJourneyTests(unittest.TestCase):
             "#!/usr/bin/env python3\nimport sys,json,zipfile\nfrom pathlib import Path\n"
             "a=sys.argv[1:]; o=Path(a[a.index('--out')+1]); "
             "\nif a[0]=='control':\n"
+            " reviewed=json.loads(Path(a[a.index('--reviewed-control-inputs')+1]).read_text())\n"
+            " assets=reviewed['assets']\n"
             " (o/'report').mkdir(parents=True)\n"
             " with zipfile.ZipFile(o/'target_control-validated.duprotocol','w') as z:\n"
             "  z.writestr('bundle_manifest.json',json.dumps({'protocol':'control/protocol.json'}))\n"
-            "  z.writestr('control/protocol.json',json.dumps({'schema_name':'docking-universal-protocol','protocol_type':'control-validated','unknown_docking_allowed':True,'control_status':'approved','engine':'vina','parameters':{'conformers_per_state':1,'seeds':[1]},'locked_inputs':{'box':'assets/box.conf'}}))\n"
+            "  z.writestr('control/protocol.json',json.dumps({'schema_name':'docking-universal-protocol','protocol_type':'control-validated','unknown_docking_allowed':True,'control_status':'approved','engine':'vina','parameters':{'conformers_per_state':1,'seeds':[1]},'locked_inputs':{'receptor_sha256':assets['receptor_pdbqt']['sha256'],'box_sha256':assets['box']['sha256'],'box':'assets/box.conf','boxes':[{'box':'assets/box.conf','box_label':'P1'}]}}))\n"
             " (o/'report/control.pdf').write_bytes(b'%PDF-1.4\\n%%EOF\\n')\n"
             " (o/'study_manifest.json').write_text('{\"study_status\":\"CONTROL_APPROVED\"}\\n')\n"
             " raise SystemExit(0)\n"
@@ -149,23 +152,19 @@ class GuiFullJourneyTests(unittest.TestCase):
         self.window.show()
         self.application.processEvents()
 
-    def test_gui_feedback_preserves_figure_zoom(self):
-        from docking_universal.gui.qt import QtGui
-
-        figure = self.root / "decision.png"
-        image = QtGui.QImage(80, 40, QtGui.QImage.Format.Format_RGB32)
-        image.fill(QtGui.QColor("white"))
-        self.assertTrue(image.save(str(figure)))
-        self.window.decision_figure_choice.addItem("Decision figure", str(figure))
-        self.window.decision_figure_choice.setCurrentIndex(
-            self.window.decision_figure_choice.count() - 1
-        )
-        self.window._show_selected_decision_figure()
-        loaded = self.window._decision_figure_pixmap
-        self.window._decision_figure_zoom = 1.75
-        self.window._show_selected_decision_figure()
-        self.assertIs(self.window._decision_figure_pixmap, loaded)
-        self.assertEqual(self.window._decision_figure_zoom, 1.75)
+    def test_gui_refresh_keeps_static_figures_out_of_workspace(self):
+        from docking_universal.models import ArtifactRecord
+        figure = self.root / 'decision.png'
+        figure.write_bytes(b'retained report panel')
+        self.store.update('journey', lambda state: state.artifacts.append(
+            ArtifactRecord('static-panel', 'final_report_figure', str(figure))))
+        before = self.store.path_for('journey').read_bytes()
+        self.window.refresh()
+        self.window.refresh()
+        self.assertEqual(self.window.review_tabs.count(), 1)
+        self.assertFalse(hasattr(self.window, 'decision_figure_view'))
+        self.assertEqual(before, self.store.path_for('journey').read_bytes())
+        self.assertEqual(figure.read_bytes(), b'retained report panel')
 
     def test_gui_shows_persisted_stage_feedback_after_refresh(self):
         def running(state):
@@ -215,7 +214,24 @@ class GuiFullJourneyTests(unittest.TestCase):
         self.window.detect_bound_ligands(quiet=True)
         self.assertEqual(self.window.study_setup_panel.ligand_identity()["resname"], "LIG")
         self.assertIn("control", self.window.start_preparation_button.text().lower())
-        self.window.start_preparation_button.click()
+        # The control executable is synthetic. Do not try to download a public
+        # definition for its fictional LIG component during a GUI journey test.
+        with patch.object(self.window, 'prepare_geostd_library', return_value=str(self.root)):
+            self.window.start_preparation_button.click()
+        self.wait_for(lambda state: bool(state.pending_decisions))
+        state = self.store.load('journey')
+        self.assertTrue(any(job.stage == 'preparation_and_pocket_detection' for job in state.jobs))
+        self.assertFalse(any(job.stage == 'control_validation' for job in state.jobs))
+        self.assertTrue(state.workflow_data['study_setup']['site_review_first'])
+        self.reopen()
+        self.window.candidates.selectRow(0)
+        self.window.rationale.setText('Reviewed site and related ligand evidence before redocking')
+        self.window.approve_button.click()
+        self.assertTrue(self.window.protocol_finalization_panel._control_mode)
+        self.assertTrue(self.window.finalize_button.isEnabled())
+        self.assertIn('reused', self.window.protocol_finalization_panel.introduction.text())
+        self.assertFalse(self.window.exploratory_approval.isChecked())
+        self.window.finalize_button.click()
         self.wait_for(lambda state: state.workflow_data.get("latest_control_status") == "approved")
         state = self.store.load("journey")
         self.assertEqual(state.workflow_data["study_setup"]["pathway"], "control")
@@ -293,6 +309,86 @@ class GuiFullJourneyTests(unittest.TestCase):
         self.assertTrue({
             "pocket_evidence", "final_report", "protocol_bundle", "screening_report",
         } <= kinds)
+
+    def _prepare_control_with_other_ligand_site(self):
+        import json
+        import shlex
+        from docking_universal_pocket_evidence import group_ligand_sites
+        template = self.root / 'remote-evidence'
+        template.mkdir()
+        (template / 'remote.pdb').write_text(''.join(
+            f'HETATM{i:5d}  C{i:<2} DRG Z 201    {40+i:8.3f}{2:8.3f}{3:8.3f}  1.00 20.00           C\n'
+            for i in range(1,7)))
+        evidence = {'status':'completed','pocket_engine':'fpocket','evidence':[
+            {'entry':'9XYZ','ligand':'DRG','source_ligand_id':'9XYZ/DRG/Z/201','ligand_chain':'Z',
+             'ligand_residue':'201','aligned_ligand_pdb':'remote.pdb','evidence_class':'exact_sequence_match',
+             'matched_cavity':None}]}
+        evidence['ligand_site_groups'] = group_ligand_sites(evidence, template)
+        (template / 'pdb_ligand_site_evidence.json').write_text(json.dumps(evidence))
+        self.preparation.write_text(self.preparation.read_text() +
+            f'cp {shlex.quote(str(template / "remote.pdb"))} "$root/cavity/pdb_site_evidence/remote.pdb"\n' +
+            f'cp {shlex.quote(str(template / "pdb_ligand_site_evidence.json"))} "$root/cavity/pdb_site_evidence/pdb_ligand_site_evidence.json"\n')
+        source = self.root / 'BoundMulti.pdb'
+        source.write_text(self.input.read_text() +
+            'HETATM    2  C1  LIG A 101       1.000   2.000   3.000  1.00 10.00           C\n')
+        self.window.study_setup_panel.redock_ligand.setChecked(True)
+        self.window.study_setup_panel.predict_with_ligand.setChecked(False)
+        self.window.input_pdb.setText(str(source))
+        self.window.output_directory.setText(str(self.root / 'multi-control'))
+        self.window.detect_bound_ligands(quiet=True)
+        with patch.object(self.window, 'prepare_geostd_library', return_value=str(self.root)):
+            self.window.start_preparation_button.click()
+        self.wait_for(lambda state: bool(state.pending_decisions))
+        self.assertEqual(self.window.candidates.rowCount(), 2)
+
+    def test_related_ligand_box_is_selectable_without_running_p2rank(self):
+        self._prepare_control_with_other_ligand_site()
+        state = self.store.load('journey')
+        self.assertFalse(state.workflow_data['study_setup']['predict_pockets_with_ligand'])
+        self.assertEqual(state.workflow_data['study_setup']['pdb_pocket_evidence'], 'related-structures')
+        other = next(row for row in state.workflow_data['pocket_candidates'] if row['id'] == 'L1')
+        self.assertEqual(other['evidence']['kind'], 'ligand_defined')
+        self.assertNotIn('score', other['evidence'])
+        self.assertIsNone(next(point[1] for point in self.window.pocket_score_plot.points if point[0] == 'L1'))
+        index = next(i for i in range(self.window.candidates.rowCount())
+                     if self.window.candidates.item(i, 0).text() == 'L1')
+        self.window.candidates.selectRow(index)
+        self.assertTrue(self.window.approve_button.isEnabled())
+        self.window.approve_button.click()
+        state = self.store.load('journey')
+        self.assertEqual(state.selected_pocket_ids, ['L1'])
+        self.assertFalse(any(job.stage == 'control_validation' for job in state.jobs))
+        self.assertFalse(self.window.protocol_finalization_panel._control_mode)
+        self.assertFalse(self.window.finalize_button.isEnabled())
+        self.reopen()
+        self.assertEqual(self.store.load('journey').selected_pocket_ids, ['L1'])
+        self.assertFalse(self.window.study_setup_panel.predict_with_ligand.isChecked())
+
+    def test_control_multisite_review_requires_exploratory_finalization(self):
+        from docking_universal.services.screening import read_protocol_record
+        self._prepare_control_with_other_ligand_site()
+        self.window.candidates.selectAll()
+        self.window.approve_button.click()
+        self.assertEqual(set(self.store.load('journey').selected_pocket_ids), {'P1','L1'})
+        self.assertIn('L1', self.window.protocol_finalization_panel.introduction.text())
+        self.window.finalize_button.click()
+        self.wait_for(lambda state: state.workflow_data.get('latest_control_status') == 'approved')
+        self.reopen()
+        self.assertFalse(self.window.protocol_finalization_panel._control_mode)
+        self.assertFalse(self.window.finalize_button.isEnabled())
+        self.assertFalse(any(a.kind == 'protocol_bundle' for a in self.store.load('journey').artifacts))
+        self.window.final_output_directory.setText(str(self.root / 'multi-final'))
+        self.window.exploratory_approval.setChecked(True)
+        self.window.finalize_button.click()
+        self.wait_for(lambda state: any(a.kind == 'protocol_bundle' for a in state.artifacts))
+        state = self.store.load('journey')
+        bundle = next(Path(a.path) for a in state.artifacts if a.kind == 'protocol_bundle')
+        record = read_protocol_record(bundle)
+        self.assertEqual(record['protocol_type'], 'site-guided-exploratory')
+        self.assertEqual(len(record['locked_inputs']['boxes']), 2)
+        self.assertFalse(record['unknown_docking_allowed'])
+        self.assertEqual(record['related_site_control']['untested_box_labels'], ['L1'])
+        self.assertIn('Protocol finalized', self.window.next_required_action.text())
 
     def test_mmcif_can_be_selected_detected_prepared_and_reopened(self):
         from tests.test_structure_input import MMCIF
