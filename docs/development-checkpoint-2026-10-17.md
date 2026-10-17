@@ -34,7 +34,11 @@ are not downloadable assets in this GitHub checkpoint.
 - Python syntax parsing passed for 331 source/test/validation files.
 - 87 focused scientific import, selection, screening and host checks passed.
 - 121 focused GUI, host, workflow and protocol-import checks passed.
-- Whitespace checks passed; the pending development files were checked for
+- Application/documentation whitespace checks passed. The saved upstream GPU
+  patch deliberately retains upstream context indentation/blank-line whitespace,
+  which produces Git whitespace warnings; those context lines are not rewritten
+  merely to silence warnings and potentially affect patch applicability.
+  The pending development files were checked for
   oversized additions and common private-key/API-token patterns with no findings.
   This is a bounded scan, not a guarantee of exhaustive security review.
 - The preceding installed tabular-import acceptance passed 22 real GUI/host/
