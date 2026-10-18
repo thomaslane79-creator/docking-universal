@@ -9,10 +9,7 @@ from pathlib import Path
 from typing import IO, Any
 from uuid import uuid4
 
-try:
-    import fcntl
-except ImportError:  # pragma: no cover - Windows packaging fallback
-    fcntl = None
+from .file_lock import acquire as acquire_file_lock, release as release_file_lock
 
 from .application import StudyController
 from .models import JobStatus, PocketCandidate, record_to_dict, utc_now
@@ -35,12 +32,14 @@ class ApplicationHostLease:
     def acquire(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         handle = self.path.open("a+")
-        if fcntl is not None:
-            try:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError as exc:
-                handle.close()
-                raise HostAlreadyRunning("Another Docking Universal application host owns this workspace") from exc
+        try:
+            acquire_file_lock(handle, blocking=False)
+        except BlockingIOError as exc:
+            handle.close()
+            raise HostAlreadyRunning("Another Docking Universal application host owns this workspace") from exc
+        except BaseException:
+            handle.close()
+            raise
         handle.seek(0)
         handle.truncate()
         handle.write(json.dumps({"pid": os.getpid(), "acquired_at": utc_now()}) + "\n")
@@ -50,8 +49,7 @@ class ApplicationHostLease:
     def release(self) -> None:
         if self.handle is None:
             return
-        if fcntl is not None:
-            fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
+        release_file_lock(self.handle)
         self.handle.close()
         self.handle = None
 

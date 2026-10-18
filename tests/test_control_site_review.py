@@ -20,7 +20,7 @@ from docking_universal.services.finalization import build_site_guided_protocol
 
 class ControlSiteReviewTests(unittest.TestCase):
     def setUp(self):
-        from test_protocol_workflow import ProtocolWorkflowTests
+        from tests.test_protocol_workflow import ProtocolWorkflowTests
         self.fixture = ProtocolWorkflowTests()
         self.fixture.setUp()
         self.addCleanup(self.fixture.tearDown)

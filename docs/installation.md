@@ -13,6 +13,11 @@ state for reproducibility, and report problems without exposing research data.
 
 ## Recommended Conda installation
 
+The current automated installer is Unix-based. Native Windows is a required
+port under development, **not** a currently complete installer and not a WSL
+substitution. See [cross-platform status and acceptance gates](cross-platform-compatibility.md)
+before assuming that all listed dependencies or engines install on Windows.
+
 On supported Apple-Silicon Macs, the installer now includes the embedded PyMOL
 runtime. `bash install.sh --with-gpu` additionally installs the pinned optional
 experimental AD4 GPU engine and AutoGrid (macOS 26.2+). Vina stays the default.

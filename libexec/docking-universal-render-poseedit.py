@@ -12,6 +12,7 @@ import sys
 import tempfile
 from pathlib import Path
 from docking_universal.poseedit_renderer import LAYOUT_REVISION
+from docking_universal.browser_runtime import find_chromium
 
 POLICY = "approved-poseedit-local-v1"
 
@@ -42,11 +43,9 @@ def main() -> int:
     node = shutil.which(args.node) or (Path(args.node) if Path(args.node).is_file() else None)
     if not node:
         raise FileNotFoundError("Node.js is required for the approved local renderer")
-    chrome_candidates = [args.chrome, shutil.which("google-chrome"), shutil.which("chromium"),
-                         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]
-    chrome = next((Path(item) for item in chrome_candidates if item and Path(item).is_file()), None)
+    chrome = find_chromium(args.chrome)
     if chrome is None:
-        raise FileNotFoundError("A local Chromium/Chrome executable is required for rendering")
+        raise FileNotFoundError("A local Chrome, Chromium or Microsoft Edge executable is required; check --chrome or DOCKING_UNIVERSAL_CHROME")
     root = Path(__file__).resolve().parent / "docking_universal" / "poseedit_renderer"
     output = args.output.expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)

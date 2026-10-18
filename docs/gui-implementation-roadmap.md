@@ -1,5 +1,14 @@
 # GUI implementation roadmap
 
+### Older-macOS and cross-platform compatibility (2026-10-18)
+
+User authorizes an older-target GPU build and Windows/Linux portability work.
+Build/test an isolated macOS 15 candidate without replacing accepted runtimes;
+separate deployment-target checks from actual OS/driver acceptance. Audit
+installation and dependency gaps and extend bounded native CI/compatibility
+documentation. Preserve scientific method/approval boundaries and distinguish
+WSL2 from native Windows support. No unrelated GUI features are in scope.
+
 ### Bounded Mac runtime packaging (2026-10-17)
 
 Close only the two clean-install gaps: a relocatable pinned embedded PyMOL

@@ -19,6 +19,7 @@ import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
+from .browser_runtime import find_chromium
 
 
 SCHEMA_NAME = "docking-universal-runtime-inventory"
@@ -38,14 +39,8 @@ def discover_poseedit_runtime(
         else which("node")
     )
     node = str(Path(node).resolve()) if node else None
-    explicit_chrome = values.get("DOCKING_UNIVERSAL_CHROME")
-    candidates = [explicit_chrome, which("google-chrome"), which("chromium"), which("chromium-browser")]
-    if platform.system() == "Darwin":
-        candidates.extend((
-            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-            "/Applications/Chromium.app/Contents/MacOS/Chromium",
-        ))
-    chrome = next((str(Path(item).resolve()) for item in candidates if item and Path(item).is_file()), None)
+    browser = find_chromium(environment=values, which=which, system=platform.system())
+    chrome = str(browser) if browser else None
     playwright = None
     playwright_detail = None
     if node:

@@ -2,6 +2,21 @@
 
 Status: active scope-control record, established 2026-09-24.
 
+### Older-macOS and cross-platform compatibility (authorized 2026-10-18)
+
+- User authorizes rebuilding the same patched GPU source for an older macOS
+  deployment target, and requires Windows/Linux compatibility as well.
+- Keep the accepted runtime and production installation unchanged while testing
+  a separate macOS 15 candidate. A lower build target is not older-OS/driver
+  acceptance. Preserve scientific settings, explicit engine choice and hashes.
+- Audit actual installer/dependency/platform gaps, add native CI where feasible,
+  and document CPU/viewer fallback paths. Never present simulated platform tests
+  as native GPU acceptance or transfer Apple GPU approval to CUDA/OpenCL builds.
+- User explicitly requires **native Windows**, not WSL2. The current pipeline
+  uses POSIX shell programs; audit native dependencies, add native Windows safety
+  and CI foundations, and record the remaining port milestones. Do not silently
+  substitute WSL or describe an unfinished installer as native support.
+
 ### Bounded Mac runtime packaging (authorized 2026-10-17)
 
 - Clean, isolated installation of checkpoint `24700aa` passes CLI/smoke/window

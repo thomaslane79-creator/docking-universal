@@ -50,6 +50,12 @@ AutoGrid. The usual installer also supplies embedded PyMOL on supported Macs.
 See [runtime packaging and validation](docs/mac-runtime-packaging.md); Vina
 remains the default, and no existing study is reapproved by installation.
 
+Older-macOS GPU compatibility and **native Windows** support are being validated
+separately from the existing Linux/Unix paths. WSL is not being substituted for
+the requested native Windows port. See the [compatibility status and remaining
+milestones](docs/cross-platform-compatibility.md); native safety tests are not a
+claim that the full Windows installation or GPU pipeline is already supported.
+
 In the GUI, a locally accepted runtime adds **AutoDock-GPU (AD4, experimental)**
 under **Finalize protocol → Docking program**. The adjacent explanation and
 **? / Settings guide…** provide an offline learning guide. See the detailed

@@ -11,10 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterator, TypeVar
 
-try:
-    import fcntl
-except ImportError:  # pragma: no cover - Windows packaging fallback
-    fcntl = None
+from .file_lock import acquire as acquire_file_lock, release as release_file_lock
 
 from .decisions import ApprovalRecord, DecisionOption, DecisionRequired, DecisionStatus
 from .events import EventType, WorkflowEvent
@@ -212,13 +209,11 @@ class JsonStudyStore:
         with thread_lock:
             lock_path = path.parent / ".application_state.lock"
             with lock_path.open("a+") as handle:
-                if fcntl is not None:
-                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+                acquire_file_lock(handle)
                 try:
                     yield
                 finally:
-                    if fcntl is not None:
-                        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                    release_file_lock(handle)
 
     @staticmethod
     def _read_revision(path: Path) -> int:

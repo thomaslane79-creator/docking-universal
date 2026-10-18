@@ -1,1 +1,4 @@
 *.pdf binary
+# Pinned runtime checksums and original third-party notices are byte identities.
+dependencies/runtime/** -text
+*.sh text eol=lf

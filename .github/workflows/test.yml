@@ -10,6 +10,7 @@ permissions:
 jobs:
   cli:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
@@ -37,3 +38,45 @@ jobs:
       - name: Run real-tool integration validation
         shell: bash -el {0}
         run: make test-integration
+
+  native-portability-foundations:
+    name: Native safety contracts (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, ubuntu-22.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Native process locks and atomic state transactions
+        # A native Windows interpreter, not Git Bash/WSL or a mocked platform.
+        # These are foundations only, not installation/GPU acceptance.
+        env:
+          PYTHONPATH: libexec
+        run: python -m unittest tests.test_file_lock tests.test_state_transactions tests.test_browser_runtime
+
+  older-macos-gpu-host-build:
+    name: Older macOS candidate host build (not GPU acceptance)
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Build unchanged patched kernels for macOS 15 and test native loading
+        run: python validation/build_adgpu_compatibility.py --out "${{ runner.temp }}/adgpu-compat"
+      - name: Retain build metadata and log only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: older-macos-gpu-host-build
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/adgpu-compat/build.json
+            ${{ runner.temp }}/adgpu-compat/build.log
+            ${{ runner.temp }}/adgpu-compat/native-help.log
