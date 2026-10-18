@@ -98,13 +98,17 @@ def main():
             python = prefix / "python.exe"
             probe = subprocess.run([str(args.conda), "run", "--no-capture-output", "--prefix", str(prefix), str(python), "-c",
                 "import json,sys,importlib.metadata as m; import rdkit,openbabel,pymol,pdbfixer,openmm,gemmi,prody,cairo,meeko,reportlab,molscrub,pdb2pqr,plip; "
-                "import mmtbx.command_line.reduce2; "
-                "print(json.dumps({'python':sys.version,'packages':{k:m.version(k) for k in ['rdkit','meeko','pdb2pqr','reportlab']}}))"],
+                "import mmtbx.programs.reduce2; "
+                "print('DOCKING_UNIVERSAL_PROBE='+json.dumps({'python':sys.version,'packages':{k:m.version(k) for k in ['rdkit','meeko','pdb2pqr','reportlab']}}))"],
                 env=environment, capture_output=True, text=True, encoding="utf-8", timeout=90)
             (out / "probe.stdout.json").write_text(probe.stdout, encoding="utf-8")
             (out / "probe.stderr.log").write_text(probe.stderr, encoding="utf-8")
             probe.check_returncode()
-            state.update(status="dependencies_installed", imports=json.loads(probe.stdout))
+            frames = [line.partition("=")[2] for line in probe.stdout.splitlines()
+                      if line.startswith("DOCKING_UNIVERSAL_PROBE=")]
+            if len(frames) != 1:
+                raise ValueError("Scientific import probe did not finish with its runtime identity")
+            state.update(status="dependencies_installed", imports=json.loads(frames[0]))
             state["conda_packages"] = []
             for path in sorted((prefix / "conda-meta").glob("*.json")):
                 package = json.loads(path.read_text(encoding="utf-8"))
