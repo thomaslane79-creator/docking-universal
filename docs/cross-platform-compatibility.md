@@ -228,22 +228,59 @@ its own explicit review, not an unrecorded package substitution.
 ### Native bootstrap under validation
 
 `install-windows.ps1` is a **development bootstrap, not the finished installer**.
-It requires native x64 Windows, Miniforge/Conda, a new destination directory and
-explicit `-AcceptDevelopmentPreview`. It creates two isolated Python 3.12
+It requires native x64 Windows, initial Internet access, a new destination
+directory and explicit preview approval, but no preinstalled Python, Conda or
+Git. The default now bootstraps a private Miniforge; this new path is under
+native acceptance. An explicitly supplied `-CondaExe` remains an expert option,
+not the default. It creates two isolated Python 3.12
 bootstrap environments (host and Qt6 desktop), copies application code/bundled
 assets only, and checksum-verifies the official Windows Vina 1.2.7 executable.
 These are not replacements for the pinned Python 3.9 scientific environment.
 No Bash, Git Bash, WSL, administrator access, global PATH changes or existing
 environment updates are used. Failed/old destinations are retained, not deleted.
 
+For an extracted source ZIP, double-click `install-windows.cmd` and confirm the
+development-preview notice. Its default target is
+`%LOCALAPPDATA%\DockingUniversalPreview`; an existing target is rejected rather
+than overwritten. This is not a signed, release-level scientific setup wizard.
+The `.cmd` starts built-in Windows PowerShell, not a preinstalled Python or Git.
+
+The private manager is the official
+[Miniforge 26.7.2-0 Windows x64 installer](https://github.com/conda-forge/miniforge/releases/tag/26.7.2-0),
+pinned in `dependencies/miniforge-windows.json`. Both the published checksum
+file and GitHub asset digest give SHA-256
+`71cf9519087be74fa53021219ff292beb2fc05fa49e0bb6eb0e0b6b14fccbaab`.
+The download is checked before execution and checked again at the Python
+handoff. A mismatch stops; the downloaded file is not executed. The manager,
+download/provenance/logs and package cache stay under the new installation's
+`.bootstrap` directory. Python's handoff accepts only that verified bootstrap,
+not arbitrary existing installation content. No automatic deletion/upgrade is
+performed after a failed setup.
+
+The upstream [Constructor installer options](https://conda.github.io/constructor/cli-options/)
+are used with `JustMe`, `RegisterPython=0`, `AddToPath=0`, `NoRegistry=1` and
+`NoShortcuts=1`. Setup does not request administrator privileges, initialize a
+shell profile, register a system Python or modify persistent PATH. Process-only
+Python/Conda settings are restored on exit. Corporate execution/download
+policies may still block an installation; setup does not disable them.
+
+Native acceptance masks Python/Conda from the actual installer child's PATH,
+checks discovery is absent, then exercises the real download/private install,
+public launchers, Qt/host and exact Vina repeats. It also checks persistent
+PATH/Python registration and fail-before-mutation on an existing destination.
+The test driver still runs on a hosted Windows Server 2022 runner: this is not
+a claim that a pristine consumer Windows 10/11 VM was tested. Scientific GUI,
+interactive PyMOL and GPU remain outside bootstrap acceptance.
+
 The preview exposes version, installation status, runtime inventory, desktop
 startup and prepared-input Vina CLI only. `check-install --full` **fails** because
 the scientific installation is unfinished. Unsupported workflow commands and
 GUI scientific-stage requests are rejected before registering a job or changing
 study state. Desktop defaults to a separate preview study root and no PyMOL
-backend; no native PyMOL/OpenGL acceptance is claimed. Native preparation,
-complete screening/reporting, dependency solving and native process-tree
-cancellation still require their own implementation/acceptance.
+backend; no native PyMOL/OpenGL acceptance is claimed. The separate scientific
+candidate and process-tree cancellation now pass their recorded gates above;
+shipping them through the owned installer and scientific desktop remains work
+to finish, not something this bootstrap silently enables.
 
 The host client now reads framed responses on a dedicated, session-owned thread
 rather than applying Unix pipe selection to Windows. Complete-frame timeouts

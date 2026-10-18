@@ -59,6 +59,13 @@ The opted-in native `install-windows.ps1` bootstrap is a development preview,
 not the finished scientific installer. It uses fresh isolated runtimes and
 rejects unported preparation/report stages. The Windows pipe-transport fix and
 native prefix handling are documented in the compatibility record above.
+The bootstrap's new default downloads a checksum-pinned private Miniforge, so
+preinstalled Python, Conda or Git is not required. This no-prerequisite path is
+under native acceptance. From an extracted source ZIP, `install-windows.cmd`
+offers an explicit preview confirmation; initial Internet access is required.
+The private manager does not register Python, create Miniforge shortcuts, add
+to PATH or update an existing environment. Full scientific-runtime packaging
+and desktop integration are still separate from this preview bootstrap.
 The scientific Windows port additionally audits a path-quoting repair to one
 Conda-forge OpenCL activation-script build, retaining the original scripts and
 hashes without modifying DLLs or scientific versions. Native process-tree

@@ -2,6 +2,20 @@
 
 Status: active scope-control record, established 2026-09-24.
 
+### No-prerequisite Windows installation (authorized 2026-10-18)
+
+- User requires installation for people with no preinstalled dependencies.
+  First remove the Python/Conda prerequisite: bootstrap a checksum-pinned,
+  application-owned Miniforge using Windows PowerShell alone. No Git, WSL,
+  administrator access, system Python registration, PATH changes or updates to
+  an existing environment. Keep an explicitly supplied Conda as an expert option.
+- Validate the real installer on native Windows with Python/Conda absent from
+  the child PATH, including Unicode/spaced destinations and existing-target
+  rejection. A hosted runner with a masked PATH is not a pristine consumer VM.
+- This is installer packaging, not new GUI/scientific behavior. The complete
+  owned scientific runtime and desktop/viewer integration remain explicit gates;
+  do not claim that bootstrapping Python makes all Windows features available.
+
 ### Older-macOS and cross-platform compatibility (authorized 2026-10-18)
 
 - User now requests the next scientific slice fully: native Windows dependency

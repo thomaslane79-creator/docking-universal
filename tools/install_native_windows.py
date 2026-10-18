@@ -14,6 +14,34 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def reserve_destination(destination: Path, conda: Path, *, owned_manager: bool,
+                        executing_python: Path | None = None, asset: dict | None = None) -> dict:
+    if not owned_manager:
+        destination.mkdir(parents=True, exist_ok=False)
+        return {"mode": "explicit_existing_conda"}
+    # Only the PowerShell-created bootstrap may precede Python's installer.
+    # Never make exist_ok=True a general way to overwrite an old installation.
+    if not destination.is_dir() or {p.name for p in destination.iterdir()} != {".bootstrap"}:
+        raise ValueError("Owned-manager handoff requires only its fresh bootstrap directory")
+    bootstrap = destination / ".bootstrap"
+    prefix = bootstrap / "manager"
+    if bootstrap.resolve().parent != destination.resolve() or prefix.resolve().parent != bootstrap.resolve():
+        raise ValueError("Private manager escaped its owned installation directory")
+    expected_conda = prefix / "Scripts/conda.exe"
+    expected_python = prefix / "python.exe"
+    if (conda.resolve() != expected_conda.resolve() or
+            (executing_python or Path(sys.executable)).resolve() != expected_python.resolve() or
+            not expected_conda.is_file() or not expected_python.is_file()):
+        raise ValueError("Owned-manager handoff requires its exact private Python/Conda")
+    asset = asset or json.loads((ROOT / "dependencies/miniforge-windows.json").read_text(encoding="utf-8"))
+    record = json.loads((bootstrap / "manager-status.json").read_text(encoding="utf-8"))
+    if record.get("status") != "installed" or record.get("asset") != asset or record.get("private_prefix") != ".bootstrap/manager":
+        raise ValueError("Private manager provenance is incomplete or changed")
+    if hashlib.sha256((bootstrap / asset["filename"]).read_bytes()).hexdigest() != asset["sha256"]:
+        raise ValueError("Private manager installer checksum mismatch")
+    return {"mode": "application_owned", "prefix": ".bootstrap/manager", "asset": asset}
+
+
 def copy_application(source: Path, target: Path) -> dict[str, str]:
     """Copy code/bundled assets only, never a checkout, studies or node_modules."""
     source = source.resolve()
@@ -47,15 +75,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--destination", required=True, type=Path)
     parser.add_argument("--conda", required=True, type=Path)
+    parser.add_argument("--owned-manager", action="store_true", help="Validated handoff from the fresh PowerShell bootstrap only")
     args = parser.parse_args()
     if platform.system() != "Windows" or platform.machine().lower() not in {"amd64", "x86_64"}:
         parser.error("This preview requires native x64 Windows, not an emulated platform")
     destination = args.destination.resolve()
     # A fresh directory is mandatory. Failed/old installs are inspectable and
     # never removed automatically; reruns use another destination.
-    destination.mkdir(parents=True, exist_ok=False)
+    manager = reserve_destination(destination, args.conda, owned_manager=args.owned_manager)
     record = {"status": "installing", "scope": "native Windows bootstrap only; scientific stages unfinished",
-              "system": platform.platform(), "steps": []}
+              "system": platform.platform(), "steps": [], "package_manager": manager}
     try:
         prefixes = {}
         with (destination / "bootstrap.log").open("w", encoding="utf-8") as log:

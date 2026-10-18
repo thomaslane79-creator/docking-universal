@@ -1,0 +1,13 @@
+{
+  "name": "Miniforge3",
+  "version": "26.7.2-0",
+  "platform": "Windows-x86_64",
+  "filename": "Miniforge3-26.7.2-0-Windows-x86_64.exe",
+  "url": "https://github.com/conda-forge/miniforge/releases/download/26.7.2-0/Miniforge3-26.7.2-0-Windows-x86_64.exe",
+  "sha256": "71cf9519087be74fa53021219ff292beb2fc05fa49e0bb6eb0e0b6b14fccbaab",
+  "checksum_url": "https://github.com/conda-forge/miniforge/releases/download/26.7.2-0/Miniforge3-26.7.2-0-Windows-x86_64.exe.sha256",
+  "source": "https://github.com/conda-forge/miniforge/releases/tag/26.7.2-0",
+  "license": "BSD-3-Clause",
+  "license_url": "https://github.com/conda-forge/miniforge/blob/26.7.2-0/LICENSE",
+  "scope": "Private package-manager bootstrap, not a scientific runtime or full Windows product acceptance"
+}

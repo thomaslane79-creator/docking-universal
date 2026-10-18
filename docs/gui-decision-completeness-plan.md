@@ -1,5 +1,13 @@
 # Complete interactive GUI workflow plan
 
+User installation requirement (2026-10-18): a first-time Windows user should not
+need Python, Conda, Git or the scientific programs already installed. Start by
+adding a pinned private Miniforge bootstrap invoked using Windows PowerShell,
+then integrate the separately validated scientific runtime. Preserve no-admin,
+no-PATH/no-system-Python-change and fresh-target safety. Test with hidden hosted
+dependencies; do not call that a pristine consumer Windows VM or enable the
+unfinished scientific desktop merely because downloads/installations succeed.
+
 Native Windows scientific candidate gate (2026-10-18): public PDB/mmCIF
 Reduce2/Meeko/P2Rank preparation, protocol PDF/bundle, synthetic-ligand Vina
 screening/clustering/PLIP and approved local 2D/3D/report outputs pass natively
