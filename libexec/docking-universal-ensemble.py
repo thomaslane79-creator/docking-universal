@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from docking_universal.tool_commands import locate_script_tool, script_command
 
 
 def first_molecule(path):
@@ -40,7 +41,7 @@ def main():
     source = args.template_sdf.expanduser().resolve()
     if not source.is_file():
         parser.error(f"template SDF not found: {source}")
-    scrub = shutil.which(args.scrub_command) if Path(args.scrub_command).name == args.scrub_command else args.scrub_command
+    scrub = locate_script_tool(args.scrub_command) if Path(args.scrub_command).name == args.scrub_command else args.scrub_command
     if not scrub or not Path(scrub).is_file():
         parser.error(f"MolScrub command not found: {args.scrub_command}")
 
@@ -67,7 +68,7 @@ def main():
 
     with tempfile.TemporaryDirectory(prefix="docking-universal-ensemble-") as tmp:
         states_path = Path(tmp) / "chemical_states.sdf"
-        command = [str(scrub), smiles, "-o", str(states_path), "--skip_gen3d", "--cpu", "1"]
+        command = script_command(scrub, smiles, "-o", states_path, "--skip_gen3d", "--cpu", "1")
         if args.ph_range:
             command += ["--ph_low", str(args.ph_range[0]), "--ph_high", str(args.ph_range[1])]
         else:

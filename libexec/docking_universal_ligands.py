@@ -16,6 +16,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Sequence, TextIO
+from docking_universal.tool_commands import locate_script_tool, script_command
 
 
 USAGE = """Usage:
@@ -127,13 +128,13 @@ def validate_and_resolve(options: LigandOptions, environment: Mapping[str, str])
         if options.prepare_ligand:
             options.backend = "meeko" if options.prepare_ligand.name == "mk_prepare_ligand.py" else "adfr"
         else:
-            meeko = shutil.which("mk_prepare_ligand.py", path=environment.get("PATH"))
+            meeko = locate_script_tool("mk_prepare_ligand.py", path=environment.get("PATH"))
             options.backend = "meeko" if meeko else "adfr"
             found = meeko or shutil.which("prepare_ligand", path=environment.get("PATH"))
             options.prepare_ligand = Path(found) if found else None
     elif not options.prepare_ligand:
         name = "mk_prepare_ligand.py" if options.backend == "meeko" else "prepare_ligand"
-        found = shutil.which(name, path=environment.get("PATH"))
+        found = locate_script_tool(name, path=environment.get("PATH"))
         options.prepare_ligand = Path(found) if found else None
     if not options.obabel:
         found = shutil.which("obabel", path=environment.get("PATH"))
@@ -250,7 +251,7 @@ def prepare_ligands(
                 ]
                 if options.target_engines == "qvinaw":
                     command.append("--rigid_macrocycles")
-                failed_stage = _run(command) != 0
+                failed_stage = _run(script_command(command[0], *command[1:])) != 0
                 warning = "Meeko ligand preparation"
             else:
                 failed_stage = _run(

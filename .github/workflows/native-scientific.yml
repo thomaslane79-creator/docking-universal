@@ -5,6 +5,10 @@ on:
     paths:
       - environment.yml
       - validation/native_windows_scientific.py
+      - validation/native_scientific_workflow.py
+      - validation/native_science_dispatch.py
+      - libexec/docking_universal/native_preparation.py
+      - libexec/docking_universal/tool_commands.py
       - .github/workflows/native-scientific.yml
   workflow_dispatch:
 
@@ -41,3 +45,16 @@ jobs:
             ${{ runner.temp }}/du-native-scientific/solve.stderr.log
             ${{ runner.temp }}/du-native-scientific/probe.stdout.json
             ${{ runner.temp }}/du-native-scientific/probe.stderr.log
+      - name: Rehearse native public receptor preparation through docking and reports
+        shell: powershell
+        run: |
+          $scientific = "$env:RUNNER_TEMP\du-native-scientific\Native scientific test\scientific"
+          & "$env:CONDA\Scripts\conda.exe" run --no-capture-output --prefix $scientific python validation/native_scientific_workflow.py --out "$env:RUNNER_TEMP\du-native-workflow"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Retain stage status only; all structures, reports and tool logs stay local
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-windows-scientific-workflow-status
+          retention-days: 7
+          path: ${{ runner.temp }}/du-native-workflow/summary.json

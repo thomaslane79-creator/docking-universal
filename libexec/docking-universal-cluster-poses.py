@@ -19,6 +19,7 @@ import json
 import re
 import shutil
 import subprocess
+from docking_universal.tool_commands import locate_script_tool, script_command
 import tempfile
 from docking_universal.pose_visuals import RANK_COLORS
 from collections import defaultdict
@@ -233,7 +234,7 @@ def load_from_docking(root, ligand_work, exporter, engine, export_root):
         if not source_sdf.is_file():
             raise SystemExit(f"No typed source SDF for {pdbqt.name}: {source_sdf}")
         destination = export_root / f"{seed_from_path(pdbqt)}_{ligand_id}.sdf"
-        result = subprocess.run([str(exporter), str(pdbqt), "-s", str(destination)], capture_output=True, text=True)
+        result = subprocess.run(script_command(exporter, pdbqt, "-s", destination), capture_output=True, text=True)
         if result.returncode or not destination.is_file():
             raise SystemExit(f"Meeko export failed for {pdbqt}: {result.stderr or result.stdout}")
         scores = parse_scores(pdbqt)
@@ -299,7 +300,7 @@ conformer support are reported separately as measures of search repeatability.
         if args.comparison_root:
             records = load_from_comparisons(args.comparison_root.expanduser().resolve())
         else:
-            exporter = shutil.which(args.mk_export) if Path(args.mk_export).name == args.mk_export else args.mk_export
+            exporter = locate_script_tool(args.mk_export) if Path(args.mk_export).name == args.mk_export else args.mk_export
             if not exporter or not Path(exporter).is_file():
                 parser.error(f"Meeko exporter not found: {args.mk_export}")
             records = load_from_docking(
