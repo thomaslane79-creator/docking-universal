@@ -92,12 +92,17 @@ Windows/Linux activation needs native build/driver, scoring, chemistry,
 repeatability, failure/cancellation and full-workflow acceptance on those systems.
 Existing non-GPU engine availability follows the normal platform support record.
 
-The optional runtime descriptor is separate from scientific protocols. Its
-default location is `~/.config/docking-universal/adgpu.json`; an explicit
-`DOCKING_UNIVERSAL_ADGPU_CONFIG` may select another descriptor. Runtime discovery
-checks the accepted executable hash and platform. The ordinary installer does
-not compile or automatically approve arbitrary GPU binaries. No GPU is required
-to use the normal Vina workflow or read an existing PDF.
+The optional runtime descriptor is separate from scientific protocols.
+`bash install.sh --with-gpu` installs the exact pinned build and AutoGrid on
+Apple-Silicon macOS 26.2+, recording its descriptor inside the scientific prefix
+at `share/docking-universal/adgpu/runtime.json`. An explicit
+`DOCKING_UNIVERSAL_ADGPU_CONFIG` takes precedence; the older
+`~/.config/docking-universal/adgpu.json` remains a compatibility fallback only
+when no prefix-local descriptor exists. Runtime discovery checks the accepted
+executable hash, platform, minimum OS and installed AutoGrid identity. Arbitrary
+rebuilt binaries are not automatically accepted. No GPU is required for the
+normal Vina workflow or reading an existing PDF. See
+[portable runtime installation and checks](mac-runtime-packaging.md).
 
 ## Corrections and validation record
 

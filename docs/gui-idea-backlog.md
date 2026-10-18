@@ -2,6 +2,25 @@
 
 Status: active scope-control record, established 2026-09-24.
 
+### Bounded Mac runtime packaging (authorized 2026-10-17)
+
+- Clean, isolated installation of checkpoint `24700aa` passes CLI/smoke/window
+  startup but lacks the embedded PyMOL runtime and optional accepted GPU setup.
+  User explicitly authorizes fixing these two installation gaps, without new
+  GUI features or scientific engine/settings changes.
+- Package the pinned embedded runtime relocatably and the exact accepted Apple
+  GPU executable plus AutoGrid, with hashes, source/license provenance and
+  prefix-local discovery. Keep Vina the default and GPU explicitly experimental.
+- Test in fresh environments without using the working custom PyMOL/GPU paths.
+  Do not change working environments, studies, scientific approval rules,
+  accepted GPU hash or unsupported-platform guards. No wholesale benchmark rerun.
+- Completed 2026-10-18: five fresh environments, public installer/CLI/smoke,
+  real embedded/full PyMOL detach/return and ray export, same-seed synthetic AD4
+  checks, and exact AutoGrid map-payload parity passed. All 697 protected working
+  files remain unchanged. No new GUI/scientific feature or method default.
+  See `docs/mac-runtime-packaging.md` for limits, source/licenses and retained
+  results, including the rejected initial synthetic test fixtures.
+
 ### Approved tabular compound import (2026-10-17)
 
 - User explicitly prioritizes CSV, TSV and XLSX SMILES import now. Reuse the

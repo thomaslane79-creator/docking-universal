@@ -15,6 +15,7 @@ import platform
 import re
 import shutil
 import subprocess
+import sys
 import xml.etree.ElementTree as ET
 
 
@@ -176,7 +177,13 @@ def assemble_results(native_root, template, output, settings):
 def runtime_descriptor(environment=None, *, allow_validation=False):
     """Only a locally configured, pinned, explicitly experimental installation."""
     environment=os.environ if environment is None else environment
-    path=Path(environment.get('DOCKING_UNIVERSAL_ADGPU_CONFIG',str(Path.home()/'.config/docking-universal/adgpu.json')))
+    if 'DOCKING_UNIVERSAL_ADGPU_CONFIG' in environment:
+        # An explicit missing override is intentional (including isolated tests):
+        # do not fall back to a different installation or HOME configuration.
+        path=Path(environment['DOCKING_UNIVERSAL_ADGPU_CONFIG'])
+    else:
+        local=Path(sys.prefix)/'share/docking-universal/adgpu/runtime.json'
+        path=local if local.is_file() else Path.home()/'.config/docking-universal/adgpu.json'
     if not path.is_file():raise ValueError("Experimental AD4 GPU is not configured; Vina has not been substituted")
     record=json.loads(path.read_text())
     if not isinstance(record, dict):
@@ -187,8 +194,16 @@ def runtime_descriptor(environment=None, *, allow_validation=False):
         raise ValueError("Experimental AD4 GPU has not passed local integration acceptance")
     engine=Path(record['executable']).expanduser().resolve()
     if platform.system()!='Darwin' or platform.machine()!='arm64':raise ValueError("This experimental AD4 build requires Apple-Silicon macOS")
+    version=platform.mac_ver()[0]
+    if not version or tuple(int(p) for p in version.split('.')[:2]) < (26,2):
+        raise ValueError('The pinned experimental AD4 build requires macOS 26.2 or newer')
     if not engine.is_file() or not os.access(engine,os.X_OK) or digest(engine)!=PINNED_ENGINE_SHA256:
         raise ValueError("Experimental AD4 executable differs from the tested patched 128-work-item build")
+    if record.get('autogrid_executable'):
+        autogrid=Path(record['autogrid_executable'])
+        if (not autogrid.is_file() or not os.access(autogrid,os.X_OK)
+                or digest(autogrid)!=record.get('autogrid_sha256')):
+            raise ValueError('Installed AutoGrid executable is missing or differs from its installation record')
     return {**record,'executable':str(engine)}
 
 
@@ -227,7 +242,8 @@ def run_prepared_batch(options, invocation, environment, stdout, stderr):
     geometry=grid_geometry(box,settings.grid_spacing)
     out=options.output_dir;out.mkdir(parents=True,exist_ok=True)
     maproot=out/'ad4_maps'
-    autogrid=environment.get('DOCKING_UNIVERSAL_AUTOGRID') or shutil.which('autogrid4',path=environment.get('PATH'))
+    autogrid=(environment.get('DOCKING_UNIVERSAL_AUTOGRID') or configured.get('autogrid_executable')
+              or shutil.which('autogrid4',path=environment.get('PATH')))
     if not autogrid or not Path(autogrid).is_file():raise DockRuntimeError('AutoGrid4 is required for AD4 maps; no Vina fallback was run')
     input_hashes={'receptor':digest(options.receptor),'box':digest(options.config),
                   **{'ligand:'+p.name:digest(p) for p in ligands}}

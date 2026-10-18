@@ -14,5 +14,10 @@ dependencies:
   - pillow
   - reportlab
   - pycairo
+  # ABI dependencies of the relocatable Apple-Silicon embedded PyMOL wheel.
+  # No Qt5 PyMOL package is installed into this Qt6 environment.
+  - glew=2.3.0
+  - freetype>=2.14
+  - libpng>=1.6
   - nodejs=22
   - pip

@@ -13,6 +13,11 @@ state for reproducibility, and report problems without exposing research data.
 
 ## Recommended Conda installation
 
+On supported Apple-Silicon Macs, the installer now includes the embedded PyMOL
+runtime. `bash install.sh --with-gpu` additionally installs the pinned optional
+experimental AD4 GPU engine and AutoGrid (macOS 26.2+). Vina stays the default.
+See [Mac runtime packaging, requirements and validation](mac-runtime-packaging.md).
+
 Docking Universal uses external scientific programs as composable stages. The repository's `environment.yml` contains the direct dependency set exercised on current Ubuntu and macOS GitHub runners. The 0.7.0 validation interface uses this declared environment; run integration or release validation on the intended workstation before production use because compiled scientific packages can differ across platforms.
 
 P2Rank 2.5.1 is the pinned primary pocket detector on macOS, Linux, and
@@ -235,6 +240,10 @@ pipeline, but needs a separately accepted native runtime. The current local
 acceptance covers only the pinned, patched Apple-Silicon OpenCL build; this does
 not install or certify a Windows/Linux GPU binary. Do not register an arbitrary
 upstream build as if it had passed the Mac checks.
+
+On Apple-Silicon macOS 26.2+, `bash install.sh --with-gpu` now installs that
+exact accepted build together with AutoGrid and a prefix-local descriptor.
+See [packaging and fresh-install validation](mac-runtime-packaging.md).
 
 After an accepted runtime is configured, restart the desktop and choose
 **Finalize protocol → Docking program → AutoDock-GPU (AD4, experimental)**.

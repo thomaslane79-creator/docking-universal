@@ -1,5 +1,19 @@
 # GUI implementation roadmap
 
+### Bounded Mac runtime packaging (2026-10-17)
+
+Close only the two clean-install gaps: a relocatable pinned embedded PyMOL
+runtime, and optional installation/discovery of the exact accepted Apple-Silicon
+GPU executable with AutoGrid. Use checksums and source/license provenance,
+prefix-local configuration, basic native viewer checks and a small GPU install
+acceptance check. Preserve scientific settings/guards, Vina defaults and the
+working installation; broader platform validation remains separate.
+
+Completed 2026-10-18 with an independent five-environment installation and native
+viewer/GPU checks; 697 protected working files unchanged. The GPU flag remains
+opt-in and limited to the accepted Apple-Silicon macOS 26.2+ binary. See
+`docs/mac-runtime-packaging.md` for source provenance, checks and limitations.
+
 ### Approved tabular compound import (2026-10-17)
 
 Implement the user's explicitly prioritized CSV/TSV/XLSX import through existing

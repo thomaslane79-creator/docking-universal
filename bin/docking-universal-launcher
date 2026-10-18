@@ -38,6 +38,12 @@ if [ "${1:-}" = "desktop" ]; then
     printf 'Error: scientific environment is unavailable: %s\n' "$scientific_environment" >&2
     exit 1
   }
+  # The GUI Python has its own prefix. Pass this installation's GPU descriptor
+  # explicitly rather than accidentally discovering another user's legacy setup.
+  if [ -z "${DOCKING_UNIVERSAL_ADGPU_CONFIG+x}" ] && \
+     [ -f "$scientific_prefix/share/docking-universal/adgpu/runtime.json" ]; then
+    export DOCKING_UNIVERSAL_ADGPU_CONFIG="$scientific_prefix/share/docking-universal/adgpu/runtime.json"
+  fi
   gui_python="$gui_prefix/bin/python"
   pymol_command="$pymol_prefix/bin/pymol"
   host_python="$scientific_prefix/bin/python"

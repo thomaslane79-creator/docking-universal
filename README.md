@@ -44,6 +44,12 @@ It uses AutoDock4 estimated binding energies and a genetic/local search. Its
 energies, rankings and poses need not match Vina. Vina remains the default and
 existing protocols keep their original engine and settings.
 
+For a fresh Apple-Silicon installation on macOS 26.2+, use
+`bash install.sh --with-gpu` to install the pinned experimental GPU build and
+AutoGrid. The usual installer also supplies embedded PyMOL on supported Macs.
+See [runtime packaging and validation](docs/mac-runtime-packaging.md); Vina
+remains the default, and no existing study is reapproved by installation.
+
 In the GUI, a locally accepted runtime adds **AutoDock-GPU (AD4, experimental)**
 under **Finalize protocol → Docking program**. The adjacent explanation and
 **? / Settings guide…** provide an offline learning guide. See the detailed

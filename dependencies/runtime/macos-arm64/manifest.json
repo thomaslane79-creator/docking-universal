@@ -1,0 +1,69 @@
+{
+  "schema": "docking-universal-mac-runtimes-v1",
+  "system": "Darwin",
+  "machine": "arm64",
+  "pymol": {
+    "wheel": "pymol-3.2.0a0-cp312-cp312-macosx_15_0_arm64.whl",
+    "python": "3.12",
+    "minimum_macos": "15.0",
+    "upstream_commit": "5e8bfca5a7f5dc4d5e7f84fa1d15af707cc86e69",
+    "upstream_url": "https://github.com/schrodinger/pymol-open-source",
+    "original_wheel_sha256": "b982c0dd7c7cc260bd909ec1e9f3111cb3c01e7138ab03e62c9e6b36714cfd26",
+    "change": "Relative LC_RPATH and ad-hoc signature only; regenerated wheel RECORD"
+  },
+  "gpu": {
+    "executable": "adgpu_guarded_128",
+    "minimum_macos": "26.2",
+    "upstream_commit": "e63e6f6280ebfad18caa3e8f48afdc269e79e063",
+    "upstream_url": "https://github.com/ccsb-scripps/AutoDock-GPU",
+    "changes": "Local-memory synchronization barrier and rejected Apple one-work-item configuration; see source/patch"
+  },
+  "autogrid": {
+    "executable": "autogrid4",
+    "version": "4.2.8",
+    "upstream_commit": "18879446506d1750510e26f8a5344b159533dbae",
+    "upstream_url": "https://github.com/ccsb-scripps/AutoGrid"
+  },
+  "files": {
+    "LICENSE-AutoDock-GPU": {
+      "sha256": "4efdbc005c9b557547d62fa9b9885a6837aca508414bcc7b4b93842ce31b6f66",
+      "bytes": 18381
+    },
+    "LICENSE-AutoDock-GPU-LGPL": {
+      "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551",
+      "bytes": 26530
+    },
+    "LICENSE-AutoGrid": {
+      "sha256": "231f7edcc7352d7734a96eef0b8030f77982678c516876fcb81e25b32d68564c",
+      "bytes": 18002
+    },
+    "LICENSE-PyMOL": {
+      "sha256": "a1fd32ff4f11d3b7eedd8dd4ecfcec1bd65374e16ee8a823899dc3c2be13d85e",
+      "bytes": 2268
+    },
+    "adgpu_guarded_128": {
+      "sha256": "062b5816f8342fa4c2150d65852e83f52940fe2f2cb603710e27527b33a9d02a",
+      "bytes": 551232
+    },
+    "autodock-gpu-source.tar.gz": {
+      "sha256": "d4ff09caa6ece75b7f48b994c86069d9db2685b129561374da59f04fb1145250",
+      "bytes": 18154794
+    },
+    "autogrid-source.tar.gz": {
+      "sha256": "d8c0225c65eb3b0fdc6ec142002ed239e7405ae0d5b08ce0c21a495ae99d5723",
+      "bytes": 289978
+    },
+    "autogrid4": {
+      "sha256": "fb5a49435121e6c1dc7d8572318ea7b90c1ab29f7c8496fc222ac077e7d89158",
+      "bytes": 145032
+    },
+    "pymol-3.2.0a0-cp312-cp312-macosx_15_0_arm64.whl": {
+      "sha256": "7fd69a588bc6969ff509a66495919ac758eb9b32707c9b219e9aad6030a0bfea",
+      "bytes": 7155505
+    },
+    "pymol-source.tar.gz": {
+      "sha256": "81053fb954161ac7c8b34be581b5d2d0ae01bdd1ba7150c8d8f4a9c6537680b0",
+      "bytes": 29289275
+    }
+  }
+}

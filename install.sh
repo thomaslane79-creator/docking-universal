@@ -9,19 +9,43 @@ usage() {
 Install Docking Universal and its five Conda environments.
 
 Usage:
-  ./install.sh
+  ./install.sh [--with-gpu]
 
 The installer creates missing environments, updates existing environments,
 installs the public command into the main environment, and verifies the full
 pipeline. It is safe to run again after updating the repository.
+
+Apple Silicon macOS 15+ also receives the pinned embedded PyMOL viewer.
+--with-gpu additionally installs the experimental accepted Apple OpenCL AD4
+engine and AutoGrid (macOS 26.2+). Vina remains the default. Other platforms
+retain the companion viewer; their GPU backends are not validated here.
 EOF
 }
 
-case "${1:-}" in
-  "") ;;
-  -h|--help) usage; exit 0 ;;
-  *) printf 'Unknown option: %s\n\n' "$1" >&2; usage >&2; exit 2 ;;
-esac
+with_gpu=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --with-gpu) with_gpu=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) printf 'Unknown option: %s\n\n' "$1" >&2; usage >&2; exit 2 ;;
+  esac
+  shift
+done
+
+embedded_mac=0
+if [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ]; then
+  mac_version=$(sw_vers -productVersion)
+  mac_major=${mac_version%%.*}
+  mac_minor=${mac_version#*.}; mac_minor=${mac_minor%%.*}
+  [ "$mac_major" -lt 15 ] || embedded_mac=1
+fi
+if [ "$with_gpu" -eq 1 ]; then
+  if [ "$embedded_mac" -ne 1 ] || [ "$mac_major" -lt 26 ] || \
+     { [ "$mac_major" -eq 26 ] && [ "$mac_minor" -lt 2 ]; }; then
+    printf 'Error: --with-gpu requires Apple-Silicon macOS 26.2+ for the pinned accepted build. No environments were changed.\n' >&2
+    exit 1
+  fi
+fi
 
 if ! command -v "$conda_command" >/dev/null 2>&1; then
   cat >&2 <<'EOF'
@@ -162,6 +186,24 @@ poseedit_root="$scientific_prefix/libexec/docking-universal/docking_universal/po
 run_with_retry "PoseEdit renderer dependency installation" \
   "$conda_command" run --no-capture-output -n docking-universal \
   npm install --prefix "$poseedit_root" --omit=dev --ignore-scripts
+
+if [ "$embedded_mac" -eq 1 ]; then
+  printf '\nInstalling relocatable embedded PyMOL (and optional GPU runtime)\n'
+  gui_prefix=$("$conda_command" run -n docking-universal-gui-next printenv CONDA_PREFIX)
+  if [ "$with_gpu" -eq 1 ]; then
+    "$conda_command" run --no-capture-output -n docking-universal \
+      python "$scientific_prefix/libexec/docking-universal/docking-universal-runtime-setup.py" \
+      --assets "$project_dir/dependencies/runtime/macos-arm64" \
+      --scientific-prefix "$scientific_prefix" --gui-prefix "$gui_prefix" --with-gpu
+  else
+    "$conda_command" run --no-capture-output -n docking-universal \
+      python "$scientific_prefix/libexec/docking-universal/docking-universal-runtime-setup.py" \
+      --assets "$project_dir/dependencies/runtime/macos-arm64" \
+      --scientific-prefix "$scientific_prefix" --gui-prefix "$gui_prefix"
+  fi
+else
+  printf '\nEmbedded Mac runtime not applicable; using the separate PyMOL companion.\n'
+fi
 
 printf '\nVerifying the complete pipeline installation\n'
 "$conda_command" run --no-capture-output -n docking-universal \

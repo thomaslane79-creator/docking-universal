@@ -129,6 +129,7 @@ custom_python="$work_dir/embedded python"
 cat > "$custom_python" <<'EOF'
 #!/usr/bin/env bash
 printf 'CUSTOM %s\n' "$*" >> "$BOOTSTRAP_TEST_LOG"
+printf 'GPU_CONFIG %s\n' "${DOCKING_UNIVERSAL_ADGPU_CONFIG:-}" >> "$BOOTSTRAP_TEST_LOG"
 EOF
 chmod +x "$custom_python"
 mkdir -p "$mock_scientific_prefix/share/docking-universal"
@@ -140,6 +141,23 @@ env PATH="$mock_bin:$PATH" BOOTSTRAP_TEST_STATE="$state_file" \
 grep -q "CUSTOM .*--viewer-backend embedded .*--host-python .*--help" "$log_file" \
   || fail "registered runtime did not default to embedded viewer"
 if grep -q 'run --no-capture-output' "$log_file"; then fail "registered runtime was wrapped in another environment"; fi
+
+# The Qt6 interpreter must receive the scientific prefix's descriptor, while an
+# explicit override (even an absent file) must remain authoritative.
+mkdir -p "$mock_scientific_prefix/share/docking-universal/adgpu"
+: > "$mock_scientific_prefix/share/docking-universal/adgpu/runtime.json"
+: > "$log_file"
+env -u DOCKING_UNIVERSAL_ADGPU_CONFIG PATH="$mock_bin:$PATH" BOOTSTRAP_TEST_STATE="$state_file" \
+  BOOTSTRAP_TEST_LOG="$log_file" DOCKING_UNIVERSAL_CONDA=conda \
+  "$mock_bin/docking-universal" desktop --help >/dev/null || fail "prefix GPU descriptor routing"
+grep -q "GPU_CONFIG $mock_scientific_prefix/share/docking-universal/adgpu/runtime.json" "$log_file" \
+  || fail "GUI did not receive this installation's GPU descriptor"
+: > "$log_file"
+env PATH="$mock_bin:$PATH" BOOTSTRAP_TEST_STATE="$state_file" \
+  BOOTSTRAP_TEST_LOG="$log_file" DOCKING_UNIVERSAL_CONDA=conda \
+  DOCKING_UNIVERSAL_ADGPU_CONFIG="$work_dir/explicit-absent.json" \
+  "$mock_bin/docking-universal" desktop --help >/dev/null || fail "explicit GPU descriptor routing"
+grep -q "GPU_CONFIG $work_dir/explicit-absent.json" "$log_file" || fail "explicit GPU override was replaced"
 rm "$mock_scientific_prefix/share/docking-universal/desktop-python"
 
 : > "$log_file"
@@ -220,5 +238,21 @@ env PATH="$mock_bin:$PATH" BOOTSTRAP_TEST_STATE="$state_file" \
   BOOTSTRAP_TEST_LOG="$log_file" DOCKING_UNIVERSAL_CONDA=conda \
   "$project_dir/start.sh" --help >/dev/null || fail "beginner launcher"
 grep -q 'run --no-capture-output -n docking-universal docking-universal run --help' "$log_file" || fail "launcher environment routing"
+
+# A GPU request must fail before any Conda invocation on unsupported platforms.
+cat > "$mock_bin/uname" <<'EOF'
+#!/usr/bin/env bash
+printf 'Linux\n'
+EOF
+chmod +x "$mock_bin/uname"
+: > "$log_file"
+if env PATH="$mock_bin:$PATH" BOOTSTRAP_TEST_STATE="$state_file" \
+  BOOTSTRAP_TEST_LOG="$log_file" DOCKING_UNIVERSAL_CONDA=conda \
+  "$project_dir/install.sh" --with-gpu > "$work_dir/unsupported-gpu.log" 2>&1; then
+  fail "unsupported GPU installation was allowed"
+fi
+grep -q 'requires Apple-Silicon macOS 26.2+' "$work_dir/unsupported-gpu.log" \
+  || fail "unsupported GPU explanation missing"
+[ ! -s "$log_file" ] || fail "unsupported GPU request changed Conda environments"
 
 printf 'PASS: Conda bootstrap installer checks\n'
