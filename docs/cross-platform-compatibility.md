@@ -35,6 +35,8 @@ older-macOS driver test. Build and comparison records remain local under
 
 CI separately builds and runs the help/loading check on `macos-15`, retaining
 build metadata/logs only. It does not label help output as GPU search acceptance.
+That native macOS 15 host-build/loading job passed in
+[compatibility CI run 39131637146](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39131637146).
 Before activation, the **exact intended distributed binary** must also undergo
 native older-OS GPU tests, method/input identity checks and repeatability/failure
 checks. A candidate rebuilt by a different toolchain is a different identity.
@@ -83,6 +85,14 @@ the primary detector. A missing optional fpocket fallback must be reported and
 must not silently replace P2Rank or block otherwise valid primary-detector use.
 Native package resolution and full installation acceptance remain work items.
 
+The official `vina_1.2.7_win.exe` is now checksum-pinned in
+`dependencies/vina-windows.json` (Apache-2.0 upstream license). A separate native
+Windows CI job downloads and verifies that exact executable, then exercises the
+existing Python docking adapter twice using synthetic prepared inputs, fixed
+seed and paths with spaces. It does not depend on WSL/Git Bash, does not add a
+half-working Windows installer, and does not upload structures or pose outputs.
+This tests the native CPU adapter, not preparation, the full GUI or GPU support.
+
 The audit script is `validation/audit_platform_dependencies.py`; the local record
 is `validation/runs/cross-platform-compatibility-20261018/dependency-builds.json`.
 It accesses public package metadata only and installs nothing.
@@ -94,6 +104,7 @@ It accesses public package metadata only and installs nothing.
 - Native Windows/Ubuntu 22.04/macOS 15 CI runs the standard-library-only locking,
   state-transaction and browser-discovery contracts. These are foundational
   tests, not a full native Windows scientific installation.
+  All three native jobs passed in CI run 39131637146.
 - The older-macOS job checks a real host build and executable loading. GPU
   kernels/driver correctness remain a separate acceptance gate.
 - CI uses standard public-repository runners, no paid GPU runner. Test logs/build

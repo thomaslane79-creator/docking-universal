@@ -80,3 +80,23 @@ jobs:
             ${{ runner.temp }}/adgpu-compat/build.json
             ${{ runner.temp }}/adgpu-compat/build.log
             ${{ runner.temp }}/adgpu-compat/native-help.log
+
+  native-windows-vina-adapter:
+    name: Native Windows prepared-input Vina adapter (not full app)
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Verify official binary and run synthetic same-seed adapter checks
+        run: python validation/native_windows_vina.py --out "${{ runner.temp }}/du-vina-native"
+      - name: Retain execution status only, not structures or docked poses
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-windows-vina-adapter-status
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/du-vina-native/summary.json
