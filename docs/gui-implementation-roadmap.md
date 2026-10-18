@@ -16,6 +16,11 @@ orchestration, then the full desktop/report journey and separate GPU acceptance.
 No full native Windows support or older-Mac GPU activation is claimed. Details:
 `docs/cross-platform-compatibility.md`.
 
+In progress: an isolated, explicitly opted-in Windows bootstrap and native
+desktop/host transport acceptance. Keep unsupported scientific stages disabled
+before any job/state mutation; use new preview prefixes rather than changing
+working Mac environments or implying that an empty-window check validates science.
+
 ### Bounded Mac runtime packaging (2026-10-17)
 
 Close only the two clean-install gaps: a relocatable pinned embedded PyMOL

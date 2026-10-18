@@ -1,0 +1,7 @@
+# Bootstrap/host transport acceptance only, not a scientific environment.
+# Keep separate from the validated Python 3.9 scientific installation.
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12

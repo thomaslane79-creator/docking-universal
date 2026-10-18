@@ -72,6 +72,47 @@ its own explicit review, not an unrecorded package substitution.
 
 ## Dependency audit
 
+### Native bootstrap under validation
+
+`install-windows.ps1` is a **development bootstrap, not the finished installer**.
+It requires native x64 Windows, Miniforge/Conda, a new destination directory and
+explicit `-AcceptDevelopmentPreview`. It creates two isolated Python 3.12
+bootstrap environments (host and Qt6 desktop), copies application code/bundled
+assets only, and checksum-verifies the official Windows Vina 1.2.7 executable.
+These are not replacements for the pinned Python 3.9 scientific environment.
+No Bash, Git Bash, WSL, administrator access, global PATH changes or existing
+environment updates are used. Failed/old destinations are retained, not deleted.
+
+The preview exposes version, installation status, runtime inventory, desktop
+startup and prepared-input Vina CLI only. `check-install --full` **fails** because
+the scientific installation is unfinished. Unsupported workflow commands and
+GUI scientific-stage requests are rejected before registering a job or changing
+study state. Desktop defaults to a separate preview study root and no PyMOL
+backend; no native PyMOL/OpenGL acceptance is claimed. Native preparation,
+complete screening/reporting, dependency solving and native process-tree
+cancellation still require their own implementation/acceptance.
+
+The host client now reads framed responses on a dedicated, session-owned thread
+rather than applying Unix pipe selection to Windows. Complete-frame timeouts
+also cover partial lines; malformed/oversized replies and timeouts close the
+session so a late acknowledgement cannot be used for another mutation. The
+reader is stopped/joined on normal shutdown/restart. Windows Python prefixes
+and DLL/executable directories are resolved using their native layout.
+UTF-8 is explicit for pipe messages, independent of the Windows console locale.
+
+CI tests both public PowerShell/CMD entry points, an actual Qt window connected
+to the installed host, Unicode/spaced paths, restart/lease release, rejection
+without state changes, and repeat docking through the **installed** dispatcher.
+Only status metadata is retained as an artifact, not screenshots, studies or
+pose files. Until a native run passes, these additions remain **unverified**.
+
+Example for developers only (fresh destination required):
+
+```powershell
+.\install-windows.ps1 -Destination "$env:LOCALAPPDATA\DockingUniversalNativePreview" -AcceptDevelopmentPreview
+& "$env:LOCALAPPDATA\DockingUniversalNativePreview\bin\docking-universal.ps1" desktop
+```
+
 The read-only official Conda-forge metadata audit on 2026-10-18 found no matching
 `win-64` builds for the currently pinned **Vina 1.2.7** and **fpocket 4.2.2**.
 All examined pinned versions had published Linux/macOS builds. Publication or

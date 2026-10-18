@@ -17,6 +17,9 @@ The current automated installer is Unix-based. Native Windows is a required
 port under development, **not** a currently complete installer and not a WSL
 substitution. See [cross-platform status and acceptance gates](cross-platform-compatibility.md)
 before assuming that all listed dependencies or engines install on Windows.
+An explicitly opted-in `install-windows.ps1` development bootstrap is being
+validated separately. It is not the finished scientific installer: preparation,
+full screening/reports and native PyMOL/GPU acceptance remain unfinished.
 
 On supported Apple-Silicon Macs, the installer now includes the embedded PyMOL
 runtime. `bash install.sh --with-gpu` additionally installs the pinned optional

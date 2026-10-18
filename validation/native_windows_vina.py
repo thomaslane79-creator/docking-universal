@@ -20,6 +20,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--out', required=True, type=Path)
+    parser.add_argument('--installed-entry', type=Path, help='test a staged native dispatcher instead of the source adapter')
+    parser.add_argument('--engine', type=Path, help='reuse an already installed, checksum-verified official executable')
     args = parser.parse_args()
     if platform.system() != 'Windows':
         parser.error('This validation must run natively on Windows, not a mocked platform or WSL')
@@ -29,11 +31,16 @@ def main():
              'scope': 'Synthetic prepared-input CPU adapter only; no native installer/preparation/GUI/GPU acceptance',
              'asset': asset, 'runs': []}
     try:
-        with urllib.request.urlopen(asset['url'], timeout=60) as response:
-            data = response.read()
+        if args.engine:
+            data = args.engine.read_bytes()
+        else:
+            with urllib.request.urlopen(asset['url'], timeout=60) as response:
+                data = response.read()
         if hashlib.sha256(data).hexdigest() != asset['sha256'] or data[:2] != b'MZ':
             raise ValueError('Official Windows Vina asset checksum/format mismatch')
-        executable = out / asset['filename']; executable.write_bytes(data)
+        executable = args.engine.resolve() if args.engine else out / asset['filename']
+        if not args.engine:
+            executable.write_bytes(data)
         version = subprocess.check_output([str(executable), '--version'], text=True, timeout=20).strip()
         if version != 'AutoDock Vina v1.2.7':
             raise ValueError('Native executable version does not match the pinned method')
@@ -52,8 +59,10 @@ def main():
         outputs = []
         for repeat in range(2):
             target = out / ('repeat ' + str(repeat))
-            command = [sys.executable, str(ROOT / 'libexec/docking_universal_dock.py'),
-                '--engine', 'vina', '--engine-command', str(executable), '--vina-backend', 'cli',
+            dispatcher = ([sys.executable, str(args.installed_entry), 'dock'] if args.installed_entry else
+                [sys.executable, str(ROOT / 'libexec/docking_universal_dock.py'),
+                 '--engine', 'vina', '--engine-command', str(executable), '--vina-backend', 'cli'])
+            command = [*dispatcher,
                 '--receptor', str(receptor), '--ligands', str(ligands), '--config', str(box), '--out', str(target),
                 '--seed', '41001', '--cpu', '1', '--exhaustiveness', '1', '--num-modes', '3']
             env = dict(os.environ, DOCKING_UNIVERSAL_PYTHON=sys.executable)
@@ -69,7 +78,8 @@ def main():
                 'output_sha256': hashlib.sha256(content).hexdigest()})
         if outputs[0] != outputs[1]:
             raise ValueError('Same-seed native CPU synthetic repeats differ')
-        state.update(status='passed', exact_same_seed_repeat=True, native_version=version)
+        state.update(status='passed', exact_same_seed_repeat=True, native_version=version,
+                     installed_dispatcher=bool(args.installed_entry))
     except BaseException as exc:
         state.update(status='failed', error=str(exc))
     (out / 'summary.json').write_text(json.dumps(state, indent=2) + '\n')

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -21,7 +22,11 @@ def main() -> int:
     store = JsonStudyStore(args.state_root)
     dispatcher = CommandDispatcher(
         StudyController(store), args.session_id,
-        preparation_executable=Path(__file__).with_name("docking-universal-prepare"),
+        # Native bootstrap intentionally cannot run the unported POSIX stages.
+        # Reject before registering a job, rather than invoking Bash or silently
+        # changing the preparation method to make Windows appear supported.
+        preparation_executable=(None if os.name == "nt" else
+                                Path(__file__).with_name("docking-universal-prepare")),
     )
     try:
         with ApplicationHostLease(args.state_root):
@@ -39,6 +44,7 @@ def main() -> int:
                         if (Path(sys.prefix) / "conda-meta").is_dir() else None
                     ),
                     "python_prefix": sys.prefix,
+                    "scientific_stages_supported": os.name != "nt",
                 },
             }), flush=True)
             serve_json_lines(dispatcher, sys.stdin, sys.stdout)

@@ -2,6 +2,7 @@ import tempfile
 import unittest
 import sys
 import os
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -96,6 +97,55 @@ class HostClientTests(unittest.TestCase):
         self.assertNotEqual(first_session, second_session)
         snapshot = self.client.request("client-study", "snapshot")
         self.assertEqual(snapshot["result"]["study"]["study_id"], "client-study")
+
+    def test_unicode_study_and_paths_round_trip_over_native_pipes(self):
+        client = ApplicationHostClient(self.root / "workspace Ω 日本語", self.client.host_script)
+        try:
+            client.start()
+            result = client.request("unicode-study", "create_study", {"name": "Protein Ω 日本語"})
+            self.assertEqual(result["result"]["study"]["name"], "Protein Ω 日本語")
+        finally:
+            client.close()
+
+    def failing_host(self, code):
+        script = self.root / "fake host.py"
+        script.write_text(code, encoding="utf-8")
+        return ApplicationHostClient(self.root / "failure workspace", script, timeout_seconds=0.2)
+
+    def test_partial_line_cannot_block_timeout_and_failed_start_is_cleaned_up(self):
+        client = self.failing_host("import sys,time\nsys.stdout.write('{');sys.stdout.flush();time.sleep(30)\n")
+        before = time.monotonic()
+        with self.assertRaisesRegex(ApplicationHostError, "Timed out"):
+            client.start()
+        self.assertLess(time.monotonic() - before, 9)
+        self.assertIsNone(client.process)
+        self.assertFalse(client.connected)
+        self.assertTrue(client._log.closed)
+        self.assertIsNone(client._reader)
+
+    def test_invalid_frames_close_the_session(self):
+        for content, expected in (("not-json", "invalid response"), ("[]", "must be an object"),
+                                  ("x" * 1_000_001, "oversized")):
+            with self.subTest(expected=expected):
+                client = self.failing_host("print(" + repr(content) + ", flush=True)\n")
+                with self.assertRaisesRegex(ApplicationHostError, expected):
+                    client.start()
+                self.assertIsNone(client.process)
+                self.assertTrue(client._log.closed)
+
+    def test_closed_stream_is_not_reported_as_a_timeout(self):
+        client = self.failing_host("pass\n")
+        with self.assertRaisesRegex(ApplicationHostError, "closed its response stream"):
+            client.start()
+        self.assertIsNone(client.process)
+
+    def test_restart_joins_the_old_reader_and_does_not_reuse_old_frames(self):
+        self.client.start()
+        old_reader = self.client._reader
+        self.client.restart()
+        self.assertFalse(old_reader.is_alive())
+        self.assertIsNot(old_reader, self.client._reader)
+        self.assertEqual(self.client.request("client-study", "snapshot")["status"], "applied")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,7 @@
+# Native desktop startup only: no embedded PyMOL or scientific-stage approval.
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12
+  - pyqt6

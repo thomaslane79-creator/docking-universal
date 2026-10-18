@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-import selectors
+import queue
 import subprocess
 import sys
 import threading
@@ -13,6 +13,7 @@ from typing import Any
 from uuid import uuid4
 
 from ..viewer.messages import Command
+from ..runtime_layout import prefix_for_python, executable_directories
 
 
 class ApplicationHostError(RuntimeError):
@@ -37,6 +38,9 @@ class ApplicationHostClient:
         self.runtime: dict[str, Any] = {}
         self._lock = threading.Lock()
         self._log = None
+        self._messages = None
+        self._reader = None
+        self._reader_stop = None
 
     @property
     def connected(self) -> bool:
@@ -59,13 +63,19 @@ class ApplicationHostClient:
         if not self.python_executable.is_file():
             raise FileNotFoundError(f"Application host Python is missing: {self.python_executable}")
         self.state_root.mkdir(parents=True, exist_ok=True)
-        self._log = (self.state_root / "application-host.stderr.log").open("a")
-        self.process = subprocess.Popen(
-            [str(self.python_executable), str(self.host_script), "--state-root", str(self.state_root)],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self._log, text=True, bufsize=1,
-            env=self._environment(), start_new_session=os.name != "nt",
-        )
-        ready = self._read_message()
+        self._log = (self.state_root / "application-host.stderr.log").open("a", encoding="utf-8")
+        try:
+            self.process = subprocess.Popen(
+                [str(self.python_executable), str(self.host_script), "--state-root", str(self.state_root)],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self._log,
+                text=True, encoding="utf-8", bufsize=1,
+                env=self._environment(), start_new_session=os.name != "nt",
+            )
+            self._start_reader()
+            ready = self._read_message()
+        except BaseException:
+            self.close()
+            raise
         if ready.get("type") != "ready" or not ready.get("session_id"):
             self.close()
             raise ApplicationHostError(f"Application host did not become ready: {ready}")
@@ -106,6 +116,7 @@ class ApplicationHostClient:
             response = self._read_message(timeout_seconds=max(120.0, self.timeout_seconds)
                                           if operation in {'inspect_ligand_library', 'inspect_protocol_bundle', 'import_protocol_bundle'} else None)
             if response.get("request_id") != command.request_id:
+                self.close()
                 raise ApplicationHostError("Application host returned a mismatched request ID")
             if response.get("status") not in {"applied", "replayed"}:
                 raise ApplicationHostError(str(response.get("error") or "Application host rejected the request"))
@@ -116,9 +127,16 @@ class ApplicationHostClient:
         self.process = None
         self.session_id = None
         self.runtime = {}
+        reader, stop = self._reader, self._reader_stop
+        self._reader = self._reader_stop = self._messages = None
+        if stop:
+            stop.set()
         if process:
             if process.stdin and not process.stdin.closed:
-                process.stdin.close()
+                try:
+                    process.stdin.close()
+                except OSError:
+                    pass  # A crashed host may already have closed its pipe.
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
@@ -128,30 +146,73 @@ class ApplicationHostClient:
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait()
-            if process.stdout:
+            if reader:
+                reader.join(timeout=2)
+            elif process.stdout:
                 process.stdout.close()
         if self._log and not self._log.closed:
             self._log.close()
 
+    def _start_reader(self) -> None:
+        # Windows select() only supports sockets, not subprocess pipes. One
+        # session-owned reader frames complete lines before waking the client;
+        # a partial line must not defeat the request timeout on any platform.
+        stream = self.process.stdout
+        messages = queue.Queue(maxsize=16)
+        stop = threading.Event()
+        self._messages, self._reader_stop = messages, stop
+
+        def deliver(value):
+            while not stop.is_set():
+                try:
+                    messages.put(value, timeout=0.1)
+                    return
+                except queue.Full:
+                    pass
+
+        def consume():
+            try:
+                while not stop.is_set():
+                    line = stream.readline(1_000_001)
+                    if not line:
+                        deliver(None)
+                        return
+                    if len(line.encode("utf-8")) > 1_000_000 or not line.endswith("\n"):
+                        deliver(ApplicationHostError("Application host emitted an oversized or incomplete response frame"))
+                        return
+                    deliver(line)
+            except (OSError, UnicodeError) as exc:
+                deliver(ApplicationHostError(f"Application host response stream failed: {exc}"))
+            finally:
+                stream.close()
+
+        self._reader = threading.Thread(target=consume, name="application-host-reader", daemon=True)
+        self._reader.start()
+
     def _read_message(self, timeout_seconds=None) -> dict[str, Any]:
-        if not self.process or not self.process.stdout:
+        if not self.process or self._messages is None:
             raise ApplicationHostError("Application host output is unavailable")
-        selector = selectors.DefaultSelector()
         try:
-            selector.register(self.process.stdout, selectors.EVENT_READ)
-            if not selector.select(self.timeout_seconds if timeout_seconds is None else timeout_seconds):
-                raise ApplicationHostError("Timed out waiting for the application host")
-            line = self.process.stdout.readline()
-        finally:
-            selector.close()
+            line = self._messages.get(timeout=self.timeout_seconds if timeout_seconds is None else timeout_seconds)
+        except queue.Empty as exc:
+            # Never reuse a timed-out session: a delayed reply could otherwise
+            # be mistaken for the acknowledgement of the next mutation.
+            self.close()
+            raise ApplicationHostError("Timed out waiting for the application host; reconnect before continuing") from exc
+        if isinstance(line, Exception):
+            self.close()
+            raise line
         if not line:
             code = self.process.poll()
+            self.close()
             raise ApplicationHostError(f"Application host closed its response stream (status {code})")
         try:
             value = json.loads(line)
         except json.JSONDecodeError as exc:
+            self.close()
             raise ApplicationHostError("Application host emitted an invalid response frame") from exc
         if not isinstance(value, dict):
+            self.close()
             raise ApplicationHostError("Application host response must be an object")
         return value
 
@@ -165,11 +226,12 @@ class ApplicationHostClient:
         # exact interpreter so `python3` resolution cannot escape to the OS or
         # back into the GUI environment.
         environment["DOCKING_UNIVERSAL_PYTHON"] = str(self.python_executable)
-        prefix = self.python_executable.parent.parent
-        scientific_cli = prefix / "bin" / ("docking-universal.exe" if os.name == "nt" else "docking-universal")
+        environment["PYTHONIOENCODING"] = "utf-8"
+        prefix = prefix_for_python(self.python_executable)
+        scientific_cli = prefix / ("Scripts/docking-universal.cmd" if os.name == "nt" else "bin/docking-universal")
         if scientific_cli.is_file() and not environment.get('DOCKING_UNIVERSAL_CLI'):
             environment["DOCKING_UNIVERSAL_CLI"] = str(scientific_cli)
-        runtime_paths = [self.python_executable.parent, prefix / "lib" / "jvm" / "bin"]
+        runtime_paths = executable_directories(prefix)
         environment["PATH"] = os.pathsep.join(
             [str(path) for path in runtime_paths if path.is_dir()]
             + [environment.get("PATH", "")]

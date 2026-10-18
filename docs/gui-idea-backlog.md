@@ -23,6 +23,11 @@ Status: active scope-control record, established 2026-09-24.
   installer/preparation/desktop/report acceptance remains unfinished; the older
   Mac GPU candidate is not activated without older-OS GPU acceptance. See
   `docs/cross-platform-compatibility.md` and CI runs 39131637146 / 39132054556.
+- Next bounded slice (user: keep going): native PowerShell/bootstrap entry
+  points, isolated preview runtimes, and the real desktop-to-host pipe transport.
+  Validate on native Windows, including Unicode/spaced paths and fail-before-
+  mutation for unported scientific stages. This is installer/transport work,
+  not a new GUI feature or authority to claim the complete scientific port.
 
 ### Bounded Mac runtime packaging (authorized 2026-10-17)
 

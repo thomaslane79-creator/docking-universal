@@ -57,7 +57,33 @@ jobs:
         # These are foundations only, not installation/GPU acceptance.
         env:
           PYTHONPATH: libexec
-        run: python -m unittest tests.test_file_lock tests.test_state_transactions tests.test_browser_runtime
+        run: python -m unittest tests.test_file_lock tests.test_state_transactions tests.test_browser_runtime tests.test_runtime_layout tests.test_host_client tests.test_native_entrypoint
+
+  native-windows-bootstrap:
+    name: Native Windows bootstrap and Qt host (not full scientific app)
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          activate-environment: ''
+          auto-activate: false
+          conda-remove-defaults: true
+      - name: Fresh native PowerShell bootstrap, actual Qt window, host and prepared Vina
+        shell: powershell
+        run: |
+          & "$env:CONDA\python.exe" validation/native_windows_bootstrap.py --out "$env:RUNNER_TEMP\du-native-bootstrap" --conda "$env:CONDA\Scripts\conda.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Retain status only, not screenshots, studies or docking outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-windows-bootstrap-status
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/du-native-bootstrap/summary.json
 
   older-macos-gpu-host-build:
     name: Older macOS candidate host build (not GPU acceptance)
