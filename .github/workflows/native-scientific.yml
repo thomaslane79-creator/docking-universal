@@ -39,3 +39,5 @@ jobs:
             ${{ runner.temp }}/du-native-scientific/summary.json
             ${{ runner.temp }}/du-native-scientific/solve.stdout.json
             ${{ runner.temp }}/du-native-scientific/solve.stderr.log
+            ${{ runner.temp }}/du-native-scientific/probe.stdout.json
+            ${{ runner.temp }}/du-native-scientific/probe.stderr.log

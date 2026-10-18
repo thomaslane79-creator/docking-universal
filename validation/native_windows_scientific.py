@@ -8,6 +8,7 @@ Dependency metadata/logs only are retained; no structures are read or uploaded.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -44,9 +45,12 @@ def main():
     environment.pop("PYTHONPATH", None)
     try:
         specification = scientific_specification((ROOT / "environment.yml").read_text(encoding="utf-8"))
+        state["source_environment_sha256"] = hashlib.sha256((ROOT / "environment.yml").read_bytes()).hexdigest()
         spec = out / "scientific-candidate.yml"
         spec.write_text(specification, encoding="utf-8")
-        prefix = out / "scientific runtime"
+        # Conda permits spaced ancestor paths, not a space in the environment
+        # leaf name. The public bootstrap likewise uses fixed host/gui leaves.
+        prefix = out / "Native scientific test" / "scientific"
         command = [str(args.conda), "env", "create", "--yes", "--prefix", str(prefix), "--file", str(spec)]
         plan = subprocess.run([*command, "--dry-run", "--json"], capture_output=True, text=True,
                               encoding="utf-8", env=environment, timeout=900)
@@ -65,15 +69,19 @@ def main():
                 subprocess.run(command, env=environment, stdout=stream, stderr=subprocess.STDOUT, check=True, timeout=1500)
             python = prefix / "python.exe"
             probe = subprocess.run([str(python), "-c",
-                "import json,sys,importlib.metadata as m; import rdkit,openbabel,pymol,pdbfixer,openmm,gemmi,prody,cairo,meeko,reportlab; "
+                "import json,sys,importlib.metadata as m; import rdkit,openbabel,pymol,pdbfixer,openmm,gemmi,prody,cairo,meeko,reportlab,molscrub,pdb2pqr,plip; "
+                "import mmtbx.command_line.reduce2; "
                 "print(json.dumps({'python':sys.version,'packages':{k:m.version(k) for k in ['rdkit','meeko','pdb2pqr','reportlab']}}))"],
-                env=environment, capture_output=True, text=True, encoding="utf-8", timeout=90, check=True)
+                env=environment, capture_output=True, text=True, encoding="utf-8", timeout=90)
+            (out / "probe.stdout.json").write_text(probe.stdout, encoding="utf-8")
+            (out / "probe.stderr.log").write_text(probe.stderr, encoding="utf-8")
+            probe.check_returncode()
             state.update(status="dependencies_installed", imports=json.loads(probe.stdout))
             state["conda_packages"] = [json.loads(path.read_text(encoding="utf-8"))
                                        for path in sorted((prefix / "conda-meta").glob("*.json"))]
     except Exception as exc:
         state.update(status="failed", error=str(exc))
-        for name in ("install.log",):
+        for name in ("install.log", "probe.stderr.log"):
             path = out / name
             if path.is_file():
                 state[name] = path.read_text(encoding="utf-8", errors="replace")[-5000:]

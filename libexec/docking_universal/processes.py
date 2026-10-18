@@ -76,6 +76,18 @@ class ProcessRunner:
         on_started: Callable[[int], None] | None = None,
         on_tick: Callable[[], None] | None = None,
     ) -> ProcessResult:
+        tree = None
+        if os.name == "nt":
+            from .windows_job import WindowsProcessTree
+            tree = WindowsProcessTree()
+        try:
+            return self._run(request, cancel_event=cancel_event, on_output=on_output,
+                             on_started=on_started, on_tick=on_tick, tree=tree)
+        finally:
+            if tree:
+                tree.close()
+
+    def _run(self, request, *, cancel_event, on_output, on_started, on_tick, tree):
         command = tuple(str(value) for value in request.command)
         if not command:
             raise ValueError("A process request requires a command")
@@ -87,22 +99,29 @@ class ProcessRunner:
         started = time.monotonic()
         output: dict[str, list[str]] = {"stdout": [], "stderr": []}
 
-        process = subprocess.Popen(
-            command,
-            cwd=Path(request.cwd) if request.cwd is not None else None,
-            env=dict(request.environment) if request.environment is not None else None,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-            start_new_session=os.name != "nt",
-        )
+        try:
+            spawn = tree.spawn if tree else subprocess.Popen
+            process = spawn(command,
+                cwd=Path(request.cwd) if request.cwd is not None else None,
+                env=dict(request.environment) if request.environment is not None else None,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                start_new_session=os.name != "nt",
+            )
+        except BaseException:
+            if tree:
+                tree.close()
+            raise
         if on_started:
             try:
                 on_started(process.pid)
             except Exception:
                 # A child without its durable process identity cannot safely be
                 # left running. Stop it before returning the tracking failure.
+                if tree:
+                    tree.close()
                 self._terminate(process, request.termination_grace_seconds)
                 process.communicate()
                 raise
@@ -126,25 +145,41 @@ class ProcessRunner:
 
         status = ProcessStatus.COMPLETED
         next_tick = 0.0
-        while process.poll() is None:
-            now = time.monotonic()
-            if on_tick is not None and now >= next_tick:
+        try:
+            while process.poll() is None:
+                now = time.monotonic()
+                if on_tick is not None and now >= next_tick:
+                    on_tick()
+                    next_tick = now + 0.5
+                if cancel_event and cancel_event.is_set():
+                    status = ProcessStatus.CANCELLED
+                    if tree:
+                        tree.close()
+                    self._terminate(process, request.termination_grace_seconds)
+                    break
+                if request.timeout_seconds is not None and time.monotonic() - started >= request.timeout_seconds:
+                    status = ProcessStatus.TIMED_OUT
+                    if tree:
+                        tree.close()
+                    self._terminate(process, request.termination_grace_seconds)
+                    break
+                time.sleep(0.02)
+            if on_tick is not None:
                 on_tick()
-                next_tick = now + 0.5
-            if cancel_event and cancel_event.is_set():
-                status = ProcessStatus.CANCELLED
-                self._terminate(process, request.termination_grace_seconds)
-                break
-            if request.timeout_seconds is not None and time.monotonic() - started >= request.timeout_seconds:
-                status = ProcessStatus.TIMED_OUT
-                self._terminate(process, request.termination_grace_seconds)
-                break
-            time.sleep(0.02)
-        if on_tick is not None:
-            on_tick()
-        returncode = process.wait()
-        for thread in threads:
-            thread.join()
+            returncode = process.wait()
+        except BaseException:
+            if tree:
+                tree.close()
+            self._terminate(process, request.termination_grace_seconds)
+            process.wait()
+            raise
+        finally:
+            if tree:
+                # Kill any grandchild that outlived a completed wrapper before
+                # joining readers; inherited pipes must not hang shutdown.
+                tree.close()
+            for thread in threads:
+                thread.join()
         if status is ProcessStatus.COMPLETED and returncode != 0:
             status = ProcessStatus.FAILED
         duration = time.monotonic() - started
