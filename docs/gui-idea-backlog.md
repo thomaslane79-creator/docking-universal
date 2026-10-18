@@ -10,6 +10,11 @@ Status: active scope-control record, established 2026-09-24.
   local-only structures and working Mac installation. Do not enable unported
   stages merely because the bootstrap opens a window, or silently replace
   missing scientific packages with different methods/versions.
+- Dependency gate passed natively at `c85b283` (CI 39152906751): unchanged
+  scientific pins install/import after the backed-up upstream activation-script
+  repair. Six Windows job-ownership tests also pass. The isolated shell-free
+  preparation/report candidate is now being checked through a real native
+  fixture workflow; it remains disconnected from desktop scientific controls.
 - User authorizes rebuilding the same patched GPU source for an older macOS
   deployment target, and requires Windows/Linux compatibility as well.
 - Keep the accepted runtime and production installation unchanged while testing

@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -24,7 +25,6 @@ sys.path.insert(0, str(ROOT / "libexec"))
 
 
 def pinned_p2rank(out):
-    record = json.loads((ROOT / "dependencies/p2rank.json").read_text(encoding="utf-8"))
     # This fixture gate is explicitly the installed primary 2.5.1 model, not
     # the separate alpha visualization model or a different pocket method.
     archive = out / "p2rank_2.5.1.tar.gz"
@@ -103,10 +103,20 @@ def main():
         os.environ.update(PYTHONUTF8="1", PYTHONIOENCODING="utf-8", DOCKING_UNIVERSAL_PYTHON=sys.executable,
                           DOCKING_UNIVERSAL_CLI=str(ROOT / "validation/native_science_dispatch.py"),
                           DOCKING_UNIVERSAL_LIBEXEC=str(ROOT / "libexec"), DOCKING_UNIVERSAL_CPU="2", DOCKING_UNIVERSAL_VINA_BACKEND="cli")
+        # Fresh, writable validation-only caches avoid home-directory writes
+        # and keep cache creation from looking like an unresponsive stage.
+        for key, folder in (("MPLCONFIGDIR", "matplotlib-cache"), ("XDG_CACHE_HOME", "cache")):
+            directory = out / folder
+            directory.mkdir()
+            os.environ[key] = str(directory)
         p2rank = args.p2rank or stage("pinned_p2rank_install", lambda: pinned_p2rank(out))
-        java = shutil.which("java")
-        if not java:
-            raise ValueError("Pinned Java 17 executable is unavailable")
+        from docking_universal.p2rank_runtime import prefix_java
+        java = prefix_java(prefix)
+        state["java_executable"] = str(java)
+        version = subprocess.run([str(java), "-version"], capture_output=True, text=True, encoding="utf-8", errors="replace")
+        state["java_version_probe"] = {"returncode": version.returncode, "text": (version.stdout + version.stderr).strip()[:1200]}
+        if version.returncode or not re.search(r'version "17[.\"]', version.stdout + version.stderr):
+            raise ValueError("The pinned Java 17 runtime did not start with its expected version")
         inputs = out / "Public inputs — native Unicode"
         inputs.mkdir()
         source = inputs / "2R8N.pdb"
@@ -145,6 +155,11 @@ def main():
             command_runner=lambda command: run("protocol_report", command)))
         if not outputs.report.read_bytes().startswith(b"%PDF-"):
             raise ValueError("Protocol renderer did not produce a PDF")
+        protocol_figures = json.loads((request.output_directory / "report/report_figure_manifest.json").read_text(encoding="utf-8"))["outputs"]
+        expected = {"cavity_panel_A_selection.png", "cavity_panel_B_structure.png", "cavity_selected_box.png", "cavity_panels_AB.png"}
+        if not expected.issubset({Path(path).name for path in protocol_figures}) or not all(Path(path).is_file() for path in protocol_figures):
+            raise ValueError("Protocol report is missing required rendered pocket panels")
+        state["protocol_figure_count"] = len(protocol_figures)
         from rdkit import Chem
         ligand = inputs / "synthetic_carbamate.sdf"
         molecule = Chem.MolFromSmiles("CCOC(=O)N1CCCCC1")
@@ -170,9 +185,33 @@ def main():
         pdfs = list((screen / "report").glob("*.pdf"))
         if summary.get("completion_status") != "COMPLETED" or not pdfs or not all(path.read_bytes().startswith(b"%PDF-") for path in pdfs):
             raise ValueError("The screen did not finish with its report")
+        figures = json.loads((screen / "report/report_figure_manifest.json").read_text(encoding="utf-8"))["outputs"]
+        interactions = list(screen.glob("compounds/*/pose_analysis/cluster_*/interactions"))
+        for directory in interactions:
+            for name in ("report.xml", "report.txt", "representative_plip2d.png", "complex_plip_all_in_one.png", "complex_plip_all_in_one.pse"):
+                path = directory / name
+                if not path.is_file() or not path.stat().st_size:
+                    raise ValueError(f"Required native interaction artifact missing: {name}")
+        if not interactions or len(figures) < 4 or not all(Path(path).is_file() for path in figures):
+            raise ValueError("Native screen is missing its cluster/structure/interaction panels")
+        state.update(screen_figure_count=len(figures), interaction_panel_count=len(interactions))
         state.update(status="passed", report_pdf_count=len(pdfs), scientific_accuracy_claim=False)
     except BaseException as exc:
         state.update(status="failed", error=str(exc), error_type=type(exc).__name__)
+        # Retain only recognized runtime exception lines and static helper
+        # statuses. Never export a scientific tool log, atom row, pose, XML,
+        # diagram, score table or its raw tail as a troubleshooting shortcut.
+        diagnostics = []
+        for path in out.rglob("*.log"):
+            for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                if re.match(r"^(?:ModuleNotFoundError|ImportError|OSError|FileNotFoundError|PermissionError|UnicodeEncodeError|UnicodeDecodeError|TypeError):|^Error: (?:Could not|Invalid|A JNI)|^Exception in thread|^java\.lang\.|^# There is insufficient memory", line):
+                    diagnostics.append({"log_name": path.name, "runtime_exception": line[:700]})
+        state["runtime_diagnostics"] = diagnostics[-10:]
+        state["preparation_attempts"] = []
+        for path in out.rglob("native-preparation.json"):
+            record = json.loads(path.read_text(encoding="utf-8"))
+            state["preparation_attempts"].append({"status": record.get("status"),
+                "steps": [{key: item.get(key) for key in ("step", "returncode", "accepted")} for item in record.get("attempts", [])]})
     save()
     print(json.dumps({key: state.get(key) for key in ("status", "error", "native_windows")}))
     return 0 if state["status"] == "passed" else 1

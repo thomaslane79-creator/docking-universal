@@ -12,6 +12,18 @@ import subprocess
 from typing import Mapping, Sequence
 
 
+def prefix_java(prefix: Path) -> Path:
+    """Select the Java installed in this scientific prefix, never system PATH."""
+    candidates = [prefix / relative for relative in (
+        "Library/lib/jvm/bin/java.exe", "Library/bin/java.exe", "Library/openjdk/bin/java.exe",
+        "lib/jvm/bin/java", "bin/java",
+    )]
+    found = [path.resolve() for path in candidates if path.is_file()]
+    if not found:
+        raise FileNotFoundError("Pinned Java executable was not found inside the scientific prefix")
+    return found[0]
+
+
 def java_invocation(installation: Path, java: Path, arguments: Sequence[str], *,
                     environment: Mapping[str, str] | None = None) -> tuple[tuple[str, ...], dict[str, str]]:
     installation, java = installation.resolve(), java.resolve()

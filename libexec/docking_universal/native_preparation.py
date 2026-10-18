@@ -95,6 +95,10 @@ def prepare_native_candidate(options: ReceptorPreparationOptions, *,
     def execute(name, command, required: Path | None = None):
         log("Running " + name)
         path = receptor / (name + ".process.log")
+        # A failed earlier attempt can leave a partial PDBQT. Retain it for
+        # diagnosis, but never let it satisfy another attempt's output guard.
+        if required is not None and required.exists():
+            required.rename(required.with_name(required.name + f".before-{name}"))
         with path.open("w", encoding="utf-8") as stream:
             result = runner(command, cwd=root, env=environment, stdout=stream,
                             stderr=subprocess.STDOUT, shell=False, check=False)
@@ -126,6 +130,13 @@ def prepare_native_candidate(options: ReceptorPreparationOptions, *,
         raise PreparationReviewRequired(message)
 
     try:
+        version_command, version_environment = java_invocation(p2rank, java, ["-v"], environment=environment)
+        environment.update(version_environment)
+        if not execute("p2rank_version", version_command):
+            raise RuntimeError("The explicit P2Rank runtime did not start")
+        version_text = (receptor / "p2rank_version.process.log").read_text(encoding="utf-8", errors="replace")
+        if not re.search(r"\bP2Rank\s+2\.5\.1\b", version_text):
+            raise ValueError("The native candidate requires primary P2Rank 2.5.1; no version substitution")
         normalized = normalize_structure_input(source, root / "source-input")
         from docking_universal_region import validate_protein_pdb
         validate_protein_pdb(normalized.engine_pdb_path)

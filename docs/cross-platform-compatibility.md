@@ -58,7 +58,13 @@ hash-guarded, backed-up quoting/synchronous-call repair in the fresh test prefix
 before installing the unchanged pip pins. It also handles an empty vendor
 directory. Unknown upstream script revisions stop for review. No OpenCL DLL,
 scientific package version, chemistry setting or engine is replaced. This repair
-and the subsequent imports are under native validation, not assumed successful.
+and the subsequent imports passed on native Windows Server 2022/x64 in
+[scientific dependency CI 39152906751](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39152906751)
+at `c85b283`. Python 3.9.23, RDKit 2023.09.6, Meeko 0.7.1, PDB2PQR 3.6.2,
+ReportLab 4.2.5 and the complete declared Conda stack installed/imported in a
+fresh spaced prefix. The first import probe incorrectly imported Reduce2's CLI,
+which exits after printing help; the accepted probe imports its program module.
+This is dependency acceptance, not a completed native scientific product.
 Source package SHA-256:
 `245bd150a9f0b922dc34f173027631a20f18b009604d827a796d792a79bac178`;
 [upstream feedstock revision](https://github.com/conda-forge/khronos-opencl-icd-loader-feedstock/tree/80ef539ea6232963e476eb9e616dd4a3379603dc),
@@ -67,13 +73,40 @@ Apache-2.0. Original scripts and before/after hashes remain in the test prefix.
 Native process ownership uses Windows kill-on-close job objects. A trusted,
 isolated Python wrapper joins the private job and closes its own job handle
 before starting a scientific command; the supervisor then owns its lifetime.
-No shell/process-name killing or private thread-resume APIs are used. The first
-four native tests passed: cancellation, timeout, owner crash and closed-owner
-rejection. Additional lifecycle/host checks remain under native CI. Jobs also
+No shell/process-name killing or private thread-resume APIs are used. All six
+native job tests passed at `285f859`: cancellation, timeout, owner crash,
+closed-owner rejection, normal-completion descendant cleanup and missing-owner
+refusal. The native safety job passed 55 tests, including real spaced-prefix
+activation-script execution, and the desktop host now uses the same ownership
+boundary. Jobs also
 cover descendants that inherit output pipes, so those pipes cannot keep a
 cancelled calculation alive indefinitely. This implements the documented
 [Windows job-object contract](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects),
 including [nested jobs](https://learn.microsoft.com/en-us/windows/win32/procthread/nested-jobs).
+
+The scientific candidate is deliberately not wired to the Windows desktop yet.
+`native_preparation.py` ports the established fixed-column component filter,
+native mmCIF projection, audited Reduce2, strict Meeko/conservative PDBFixer and
+direct Java/P2Rank 2.5.1 invocation. It requires fresh outputs, preserves failed
+partial artifacts and never lets them satisfy a subsequent attempt's guard.
+Unported ADFR/fpocket/ligand-only routes and deletion-permitting legacy retries
+stop explicitly instead of silently changing methods. The selected native
+route is not advertised as full compatibility for all preparation cases.
+
+Python scientific scripts on Windows are invoked with their explicit
+interpreter instead of relying on .PY file associations; .CMD/.BAT scientific
+commands are rejected rather than sending coordinate paths through a shell.
+Unix command invocation and scientific defaults remain unchanged.
+
+The public 2R8N PDB and locally generated equivalent mmCIF both complete the
+candidate preparation path on this Mac. A small synthetic-carbamate rehearsal
+also completes protocol PDF/bundle creation, pH-aware independent ligand states,
+Vina docking, 1.5 Å clustering, PLIP, 2D/3D panels and the screening PDF through
+the existing report pipeline. It explicitly uses one conformer/seed and
+exhaustiveness 1 **only as process acceptance**, not affinity/pose accuracy or a
+new default. Its native Windows counterpart is a separate gate. CI exports only
+dependency/stage metadata: no structure, pose, diagram, report or scientific
+tool log is uploaded.
 
 1. **Safety foundation:** real native inter-process workspace/state locking,
    atomic writes and ownership rejection. Previously, the missing `fcntl` import

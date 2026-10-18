@@ -64,6 +64,9 @@ Conda-forge OpenCL activation-script build, retaining the original scripts and
 hashes without modifying DLLs or scientific versions. Native process-tree
 cancellation uses owned Windows jobs; full scientific-stage acceptance remains
 separate. Details and current limits are in the same compatibility record.
+The pinned scientific stack now installs/imports on native Windows. A separate
+preparation-to-report rehearsal must also pass before scientific controls can be
+enabled; installation/import success alone is not full workflow acceptance.
 
 In the GUI, a locally accepted runtime adds **AutoDock-GPU (AD4, experimental)**
 under **Finalize protocol → Docking program**. The adjacent explanation and

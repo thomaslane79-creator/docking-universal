@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """CI-only native stage dispatcher; not installed or a scientific approval UI."""
 from pathlib import Path
 import subprocess

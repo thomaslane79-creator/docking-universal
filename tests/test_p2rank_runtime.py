@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from docking_universal.p2rank_runtime import java_invocation, run_p2rank
+from docking_universal.p2rank_runtime import java_invocation, run_p2rank, prefix_java
 
 
 class P2RankRuntimeTests(unittest.TestCase):
@@ -38,3 +38,12 @@ class P2RankRuntimeTests(unittest.TestCase):
         (self.root / "bin/p2rank.jar").unlink()
         with self.assertRaisesRegex(FileNotFoundError, "incomplete"):
             java_invocation(self.root, self.java, ["-v"])
+
+    def test_prefix_java_never_falls_back_to_an_unrelated_path_runtime(self):
+        with patch.dict(os.environ, {"PATH": str(self.root)}):
+            with self.assertRaises(FileNotFoundError):
+                prefix_java(self.root)
+        expected = self.root / "Library/lib/jvm/bin/java.exe"
+        expected.parent.mkdir(parents=True)
+        expected.touch()
+        self.assertEqual(prefix_java(self.root), expected.resolve())
