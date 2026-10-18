@@ -4,6 +4,12 @@ Status: active scope-control record, established 2026-09-24.
 
 ### Older-macOS and cross-platform compatibility (authorized 2026-10-18)
 
+- User now requests the next scientific slice fully: native Windows dependency
+  installation, receptor preparation, docking and reporting acceptance. Test the
+  pinned scientific stack first; preserve chemical methods, explicit approvals,
+  local-only structures and working Mac installation. Do not enable unported
+  stages merely because the bootstrap opens a window, or silently replace
+  missing scientific packages with different methods/versions.
 - User authorizes rebuilding the same patched GPU source for an older macOS
   deployment target, and requires Windows/Linux compatibility as well.
 - Keep the accepted runtime and production installation unchanged while testing

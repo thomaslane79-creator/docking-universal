@@ -22,6 +22,9 @@ desktop/host startup and installed Vina repeat acceptance (`252466b`, CI
 39137350895). All 37 native safety/transport tests pass on Windows/Linux/macOS.
 Next is the
 native scientific dependency/preparation port, not additional GUI controls.
+User explicitly requests this next slice fully, including downstream docking
+and report acceptance. Begin with a real native solve/install of the scientific
+pins, then port orchestration against the existing output/decision contracts.
 Keep unsupported scientific stages disabled
 before any job/state mutation; use new preview prefixes rather than changing
 working Mac environments or implying that an empty-window check validates science.

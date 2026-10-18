@@ -1,0 +1,41 @@
+name: native-windows-scientific
+
+on:
+  push:
+    paths:
+      - environment.yml
+      - validation/native_windows_scientific.py
+      - .github/workflows/native-scientific.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scientific-dependency-gate:
+    name: Native Windows pinned scientific dependencies (not full workflow)
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          activate-environment: ''
+          auto-activate: false
+          conda-remove-defaults: true
+      - name: Solve, install and import the unchanged scientific package pins
+        shell: powershell
+        run: |
+          & "$env:CONDA\python.exe" validation/native_windows_scientific.py --out "$env:RUNNER_TEMP\du-native-scientific" --conda "$env:CONDA\Scripts\conda.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Retain dependency metadata only; no structures or docking outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-windows-scientific-dependency-status
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/du-native-scientific/summary.json
+            ${{ runner.temp }}/du-native-scientific/solve.stdout.json
+            ${{ runner.temp }}/du-native-scientific/solve.stderr.log
