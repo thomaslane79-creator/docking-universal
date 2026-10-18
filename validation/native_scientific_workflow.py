@@ -109,6 +109,22 @@ def main():
             directory = out / folder
             directory.mkdir()
             os.environ[key] = str(directory)
+        if platform.system() == "Windows":
+            # Install only the existing pinned local renderer dependencies in
+            # this CI checkout. No browser download/lifecycle scripts, shell,
+            # coordinate submission, telemetry audit or scientific changes.
+            nodes = [parent / "node.exe" for parent in executable_directories(prefix, windows=True)]
+            node = next((path for path in nodes if path.is_file()), None)
+            npm_files = []
+            for record_path in (prefix / "conda-meta").glob("nodejs-*.json"):
+                record = json.loads(record_path.read_text(encoding="utf-8"))
+                npm_files.extend(prefix / name for name in record.get("files", []) if name.replace("\\", "/").endswith("/npm/bin/npm-cli.js"))
+            npm = next((path for path in npm_files if path.is_file()), None)
+            if node is None or npm is None:
+                raise ValueError("The declared Node/npm runtime could not be located inside its scientific prefix")
+            os.environ["DOCKING_UNIVERSAL_NODE"] = str(node)
+            stage("pinned_local_renderer_install", lambda: run("renderer_install", [node, npm, "ci", "--prefix",
+                ROOT / "libexec/docking_universal/poseedit_renderer", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"]))
         p2rank = args.p2rank or stage("pinned_p2rank_install", lambda: pinned_p2rank(out))
         from docking_universal.p2rank_runtime import prefix_java
         java = prefix_java(prefix)
@@ -193,6 +209,10 @@ def main():
                 path = directory / name
                 if not path.is_file() or not path.stat().st_size:
                     raise ValueError(f"Required native interaction artifact missing: {name}")
+            policy = json.loads((directory / "representative_plip2d.manifest.json").read_text(encoding="utf-8"))
+            state.setdefault("interaction_renderer_policies", []).append(policy.get("renderer_policy") or policy.get("schema_name"))
+            if platform.system() == "Windows" and policy.get("renderer_policy") != "approved-poseedit-local-v1":
+                raise ValueError("Native screen fell back from the approved local 2D renderer; not accepted as complete renderer validation")
         if not interactions or len(figures) < 4 or not all(Path(path).is_file() for path in figures):
             raise ValueError("Native screen is missing its cluster/structure/interaction panels")
         state.update(screen_figure_count=len(figures), interaction_panel_count=len(interactions))
@@ -203,11 +223,18 @@ def main():
         # statuses. Never export a scientific tool log, atom row, pose, XML,
         # diagram, score table or its raw tail as a troubleshooting shortcut.
         diagnostics = []
+        locations = []
         for path in out.rglob("*.log"):
             for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                location = re.match(r'\s*File "([^"]+)", line (\d+), in ([\w<>]+)', line)
+                if location:
+                    locations.append({"file": Path(location.group(1)).name, "line": int(location.group(2)), "function": location.group(3)})
                 if re.match(r"^(?:ModuleNotFoundError|ImportError|OSError|FileNotFoundError|PermissionError|UnicodeEncodeError|UnicodeDecodeError|TypeError):|^Error: (?:Could not|Invalid|A JNI)|^Exception in thread|^java\.lang\.|^# There is insufficient memory", line):
                     diagnostics.append({"log_name": path.name, "runtime_exception": line[:700]})
         state["runtime_diagnostics"] = diagnostics[-10:]
+        state["traceback_locations"] = locations[-12:]
+        state["screen_phases"] = [json.loads(path.read_text(encoding="utf-8")).get("phase")
+                                  for path in out.rglob("screening_progress.json")]
         state["preparation_attempts"] = []
         for path in out.rglob("native-preparation.json"):
             record = json.loads(path.read_text(encoding="utf-8"))

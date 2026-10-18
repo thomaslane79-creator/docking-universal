@@ -1,6 +1,8 @@
 const { chromium } = require('playwright');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
+const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 
 (async () => {
   const outputRoot = process.argv[2];
@@ -17,7 +19,7 @@ const crypto = require('node:crypto');
   const page = await browser.newPage({viewport: {width: 920, height: 620}, deviceScaleFactor});
   page.on('console', (message) => console.log(`browser:${message.type()}: ${message.text()}`));
   page.on('pageerror', (error) => console.error(`pageerror: ${error.stack || error}`));
-  await page.goto('file://' + outputRoot + '/actual.html');
+  await page.goto(pathToFileURL(path.join(outputRoot, 'actual.html')).href);
   await page.waitForTimeout(1000);
   console.log(await page.evaluate(() => ({done: window.__renderDone, error: window.__renderError})));
   const sceneJson = await page.evaluate(() => window.__sceneJson);

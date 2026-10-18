@@ -21,8 +21,13 @@ def locate_script_tool(name: str, *, path: str | None = None) -> str | None:
 
 
 def script_command(executable: str | Path, *arguments: str | Path) -> list[str]:
-    executable = Path(executable)
-    if os.name == "nt" and executable.suffix.lower() in {".bat", ".cmd"}:
+    original = str(executable)
+    if os.name != "nt":
+        # In particular keep './tool': removing './' would search PATH and
+        # could execute a different program instead of the explicitly chosen one.
+        return [original, *(str(value) for value in arguments)]
+    executable = Path(original)
+    if executable.suffix.lower() in {".bat", ".cmd"}:
         raise ValueError("Scientific commands must not pass coordinates through a Windows command shell")
-    prefix = [sys.executable, str(executable)] if os.name == "nt" and executable.suffix.lower() == ".py" else [str(executable)]
+    prefix = [sys.executable, original] if executable.suffix.lower() == ".py" else [original]
     return [*prefix, *(str(value) for value in arguments)]

@@ -10,6 +10,8 @@ on:
       - libexec/docking_universal/native_preparation.py
       - libexec/docking_universal/tool_commands.py
       - libexec/docking_universal/sdf_io.py
+      - tests/test_sdf_io.py
+      - libexec/docking_universal/poseedit_renderer/render.cjs
       - .github/workflows/native-scientific.yml
   workflow_dispatch:
 

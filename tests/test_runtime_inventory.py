@@ -9,6 +9,24 @@ from docking_universal import runtime_inventory
 
 
 class RuntimeInventoryTests(unittest.TestCase):
+    def test_prefix_inventory_is_read_only_and_reports_pip_override_without_conda_list(self):
+        with tempfile.TemporaryDirectory() as directory:
+            prefix = Path(directory)
+            records = prefix / "conda-meta"; records.mkdir()
+            (records / "python.json").write_text(json.dumps({"name": "python", "version": "3.9.23"}))
+            stale = records / "reportlab.json"
+            stale.write_text(json.dumps({"name": "reportlab", "version": "5.0.0", "channel": "conda-forge"}))
+            distribution = prefix / "lib/python3.9/site-packages/reportlab-4.2.5.dist-info"
+            distribution.mkdir(parents=True)
+            (distribution / "METADATA").write_text("Metadata-Version: 2.1\nName: reportlab\nVersion: 4.2.5\n")
+            before = stale.read_bytes()
+            with patch.object(runtime_inventory, "_conda_environments", return_value=({"test": str(prefix)}, None)):
+                with patch.object(runtime_inventory.subprocess, "run", side_effect=AssertionError("No package-manager list query")):
+                    packages, error = runtime_inventory._conda_packages("conda", "test")
+            self.assertIsNone(error)
+            self.assertEqual(packages["reportlab"]["version"], "4.2.5")
+            self.assertEqual(stale.read_bytes(), before)
+
     def test_missing_conda_is_unobserved_not_incompatible(self):
         inventory = runtime_inventory.collect_runtime_inventory(which=lambda _name: None)
         self.assertEqual(inventory["conda"]["status"], "absent")

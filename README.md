@@ -67,6 +67,10 @@ separate. Details and current limits are in the same compatibility record.
 The pinned scientific stack now installs/imports on native Windows. A separate
 preparation-to-report rehearsal must also pass before scientific controls can be
 enabled; installation/import success alone is not full workflow acceptance.
+Native compatibility corrections include explicit installation-owned Java,
+Unicode-safe RDKit streams and local Meeko export staging, and proper local
+browser file URLs. They preserve chemistry, coordinates and scientific defaults;
+the detailed acceptance boundaries remain in the compatibility record.
 
 In the GUI, a locally accepted runtime adds **AutoDock-GPU (AD4, experimental)**
 under **Finalize protocol → Docking program**. The adjacent explanation and

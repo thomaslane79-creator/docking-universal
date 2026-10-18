@@ -98,6 +98,44 @@ interpreter instead of relying on .PY file associations; .CMD/.BAT scientific
 commands are rejected rather than sending coordinate paths through a shell.
 Unix command invocation and scientific defaults remain unchanged.
 
+Native scientific CI at `e848732` additionally passes the real public PDB and
+mmCIF preparation paths and protocol PDF/portable bundle generation with four
+rendered pocket panels. The earlier PATH-selected Java failed at startup;
+the candidate now bypasses system/Conda command proxies, selects the real executable inside
+the scientific prefix and verifies Java 17/P2Rank 2.5.1 before calculation.
+The next boundary exposed pinned RDKit's narrow Windows filename API: writing
+an SDF under a Unicode directory failed. `sdf_io.py` uses Python-opened streams
+on Windows, preserving the existing RDKit reader/writer operations and options;
+Unix still calls the original filename APIs. Meeko export is staged locally and
+copied byte-for-byte because its own pinned writer has the same limitation.
+Native stream tests compare atoms, maps, hydrogens, standard SDF round-trip
+stereochemistry, coordinates and properties; no geometry optimization is added.
+
+Local parity against the established Bash route finds byte-identical prepared
+2R8N PDB/PDBQT. The candidate preserves the actual legacy box geometry and
+center precision rather than only the normalizer's rounded coordinates. A
+legacy ordinal overwrite that would assign one retained detector rank another
+pocket's box stops for review; it is not silently reproduced or fixed by
+changing an existing study. The working Unix preparation source is untouched.
+
+A later protection check found the pre-existing, stale Conda ReportLab 5.0.0
+record absent while the active pip-installed ReportLab 4.2.5 and all other
+protected installation/study files still matched. No package was installed or
+replaced to repair that record. Because Conda's pip reconciliation can remove
+stale metadata even during listing, runtime inventory now reads Conda JSON and
+Python distribution metadata directly, without importing scientific code or
+invoking `conda list`. A regression test verifies a pip override is reported
+while its stale Conda record remains byte-identical. The original 697-file guard
+therefore has one metadata-only exception; it must not be reported as entirely
+unchanged.
+
+The Windows renderer gate installs the already-pinned Playwright dependency
+with lifecycle scripts and audit submission disabled, uses local Chrome/Edge,
+and requires the approved renderer policy rather than treating any fallback
+PNG as full renderer acceptance. Browser navigation constructs a proper file
+URL (including Windows drive letters, spaces and Unicode) instead of string
+concatenation. Structures remain local throughout.
+
 The public 2R8N PDB and locally generated equivalent mmCIF both complete the
 candidate preparation path on this Mac. A small synthetic-carbamate rehearsal
 also completes protocol PDF/bundle creation, pH-aware independent ligand states,

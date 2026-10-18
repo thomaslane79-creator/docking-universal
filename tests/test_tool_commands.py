@@ -16,7 +16,7 @@ class NativeToolCommandTests(unittest.TestCase):
             # platform test; production uses the real native Path class.
             with patch("docking_universal.tool_commands.Path", HOST_PATH):
                 self.assertEqual(script_command("Scripts/meeko.py", "a & b — ligand.sdf"),
-                                 [sys.executable, str(HOST_PATH("Scripts/meeko.py")), "a & b — ligand.sdf"])
+                                 [sys.executable, "Scripts/meeko.py", "a & b — ligand.sdf"])
                 with self.assertRaises(ValueError):
                     script_command("tool.cmd", "coordinates.pdb")
                 self.assertEqual(script_command("tool.exe", "literal"), ["tool.exe", "literal"])
@@ -25,6 +25,7 @@ class NativeToolCommandTests(unittest.TestCase):
         with patch("docking_universal.tool_commands.os.name", "posix"):
             with patch("docking_universal.tool_commands.Path", HOST_PATH):
                 self.assertEqual(script_command("tool.py", "literal"), ["tool.py", "literal"])
+                self.assertEqual(script_command("./tool", "literal"), ["./tool", "literal"])
 
 
 if __name__ == "__main__":

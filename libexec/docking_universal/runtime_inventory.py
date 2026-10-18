@@ -13,6 +13,7 @@ import importlib.util
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -208,10 +209,47 @@ def _conda_environments(conda: str) -> tuple[dict[str, str], str | None]:
 
 
 def _conda_packages(conda: str, environment: str) -> tuple[dict[str, dict[str, str]], str | None]:
-    payload, error = _run_json((conda, "list", "-n", environment, "--json"))
+    prefixes, error = _conda_environments(conda)
     if error:
         return {}, error
-    return {str(item["name"]).lower(): item for item in payload}, None
+    prefix = prefixes.get(environment)
+    if not prefix:
+        return {}, "Environment prefix was not found"
+    return _prefix_packages(Path(prefix))
+
+
+def _prefix_packages(prefix: Path) -> tuple[dict[str, dict[str, str]], str | None]:
+    """Observe records directly: Conda's pip interop can remove stale records.
+
+    Reading dependency state must not invoke a package manager's reconciliation
+    logic. Distribution metadata is read without importing package code and
+    overrides a stale recorded version when pip has replaced that distribution.
+    """
+    canonical = lambda name: re.sub(r"[-_.]+", "-", str(name)).lower()
+    packages = {}
+    try:
+        metadata = prefix / "conda-meta"
+        if not metadata.is_dir():
+            return {}, "Conda prefix metadata is absent"
+        for path in sorted(metadata.glob("*.json")):
+            item = json.loads(path.read_text(encoding="utf-8"))
+            if item.get("name"):
+                packages[canonical(item["name"])] = {key: item.get(key, "") for key in ("name", "version", "channel", "build")}
+        python = packages.get("python", {}).get("version", "")
+        minor = ".".join(python.split(".")[:2])
+        sites = [prefix / "Lib/site-packages"]
+        if minor:
+            sites.append(prefix / f"lib/python{minor}/site-packages")
+        for distribution in importlib.metadata.distributions(path=[str(path) for path in sites if path.is_dir()]):
+            name, version = distribution.metadata.get("Name"), distribution.version
+            if not name:
+                continue
+            key = canonical(name)
+            if key not in packages or packages[key].get("version") != version:
+                packages[key] = {"name": name, "version": version, "channel": "Python distribution metadata", "build": ""}
+        return packages, None
+    except (OSError, ValueError) as exc:
+        return {}, "Unable to read runtime metadata: " + str(exc)
 
 
 def _first_package(packages: Mapping[str, Mapping[str, str]], names: Sequence[str]) -> Mapping[str, str] | None:
