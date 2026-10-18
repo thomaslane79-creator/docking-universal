@@ -11,6 +11,12 @@ def locate_script_tool(name: str, *, path: str | None = None) -> str | None:
     found = shutil.which(name, path=path)
     if found or os.name != "nt" or Path(name).name != name:
         return found
+    # Windows entry-point installers commonly strip '.py' (for example,
+    # Meeko supplies mk_export.exe instead of mk_export.py.exe).
+    if name.lower().endswith(".py"):
+        found = shutil.which(name[:-3], path=path)
+        if found:
+            return found
     # Some scientific wheels install a literal script rather than a PE entry
     # point. PATHEXT need not contain .PY; do not require global associations.
     for parent in (path or os.environ.get("PATH", "")).split(os.pathsep):
