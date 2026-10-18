@@ -86,6 +86,15 @@ def main():
         status["status"] = "passed"
     except Exception as exc:
         status.update(status="failed", error=str(exc))
+        # Installer logs contain dependency/setup diagnostics only: this occurs
+        # before any study or synthetic docking input is created. Keep this
+        # narrow, so later engine/desktop logs can never leak pose coordinates.
+        if not status["checks"]:
+            status["installer_diagnostics"] = {
+                path.name: path.read_text(encoding="utf-8", errors="replace")[-8000:]
+                for path in (out / "install.log", out / "Native Ω runtime with spaces/bootstrap.log")
+                if path.is_file()
+            }
     (out / "summary.json").write_text(json.dumps(status, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(status))
     return 0 if status["status"] == "passed" else 1

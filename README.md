@@ -55,6 +55,10 @@ separately from the existing Linux/Unix paths. WSL is not being substituted for
 the requested native Windows port. See the [compatibility status and remaining
 milestones](docs/cross-platform-compatibility.md); native safety tests are not a
 claim that the full Windows installation or GPU pipeline is already supported.
+The opted-in native `install-windows.ps1` bootstrap is a development preview,
+not the finished scientific installer. It uses fresh isolated runtimes and
+rejects unported preparation/report stages. The Windows pipe-transport fix and
+native prefix handling are documented in the compatibility record above.
 
 In the GUI, a locally accepted runtime adds **AutoDock-GPU (AD4, experimental)**
 under **Finalize protocol → Docking program**. The adjacent explanation and

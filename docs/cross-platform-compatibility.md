@@ -94,11 +94,13 @@ cancellation still require their own implementation/acceptance.
 
 The host client now reads framed responses on a dedicated, session-owned thread
 rather than applying Unix pipe selection to Windows. Complete-frame timeouts
-also cover partial lines; malformed/oversized replies and timeouts close the
+also cover partial lines; malformed/incomplete replies and timeouts close the
 session so a late acknowledgement cannot be used for another mutation. The
 reader is stopped/joined on normal shutdown/restart. Windows Python prefixes
 and DLL/executable directories are resolved using their native layout.
 UTF-8 is explicit for pipe messages, independent of the Windows console locale.
+Large library replies remain supported; the 1 MB command-size guard is not
+incorrectly applied to response indexes.
 
 CI tests both public PowerShell/CMD entry points, an actual Qt window connected
 to the installed host, Unicode/spaced paths, restart/lease release, rejection

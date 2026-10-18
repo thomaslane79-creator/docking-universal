@@ -124,14 +124,29 @@ class HostClientTests(unittest.TestCase):
         self.assertIsNone(client._reader)
 
     def test_invalid_frames_close_the_session(self):
-        for content, expected in (("not-json", "invalid response"), ("[]", "must be an object"),
-                                  ("x" * 1_000_001, "oversized")):
+        for content, expected in (("not-json", "invalid response"), ("[]", "must be an object")):
             with self.subTest(expected=expected):
                 client = self.failing_host("print(" + repr(content) + ", flush=True)\n")
                 with self.assertRaisesRegex(ApplicationHostError, expected):
                     client.start()
                 self.assertIsNone(client.process)
                 self.assertTrue(client._log.closed)
+
+    def test_large_library_response_is_not_subject_to_the_command_size_limit(self):
+        client = self.failing_host("import sys,json\nprint(json.dumps({'type':'ready', 'session_id':'large', "
+            "'runtime':{'python_executable':sys.executable}, 'library':'x'*(2*1024*1024)}),flush=True)\nsys.stdin.read()\n")
+        client.timeout_seconds = 3
+        try:
+            client.start()
+            self.assertTrue(client.connected)
+        finally:
+            client.close()
+
+    def test_eof_mid_frame_is_rejected(self):
+        client = self.failing_host("print('{}',end='',flush=True)\n")
+        with self.assertRaisesRegex(ApplicationHostError, "incomplete response"):
+            client.start()
+        self.assertIsNone(client.process)
 
     def test_closed_stream_is_not_reported_as_a_timeout(self):
         client = self.failing_host("pass\n")

@@ -58,6 +58,8 @@ class ApplicationHostClient:
     def start(self) -> str:
         if self.process and self.process.poll() is None:
             raise ApplicationHostError("Application host is already connected")
+        if self.process:
+            self.close()
         if not self.host_script.is_file():
             raise FileNotFoundError(f"Application host script is missing: {self.host_script}")
         if not self.python_executable.is_file():
@@ -109,8 +111,12 @@ class ApplicationHostClient:
                 study_id, self.session_id, request_id or f"request-{uuid4().hex}",
                 operation, payload or {}, expected_revision,
             )
-            self.process.stdin.write(json.dumps(command.to_dict(), sort_keys=True) + "\n")
-            self.process.stdin.flush()
+            try:
+                self.process.stdin.write(json.dumps(command.to_dict(), sort_keys=True) + "\n")
+                self.process.stdin.flush()
+            except OSError as exc:
+                self.close()
+                raise ApplicationHostError("Application host command stream closed; reconnect before continuing") from exc
             # Indexing a large local library is asynchronous in the GUI and may
             # legitimately exceed the ordinary short command-response timeout.
             response = self._read_message(timeout_seconds=max(120.0, self.timeout_seconds)
@@ -173,12 +179,14 @@ class ApplicationHostClient:
         def consume():
             try:
                 while not stop.is_set():
-                    line = stream.readline(1_000_001)
+                    # Replies can legitimately contain a large compound-library
+                    # index. Do not apply the host's 1 MB *command* limit here.
+                    line = stream.readline()
                     if not line:
                         deliver(None)
                         return
-                    if len(line.encode("utf-8")) > 1_000_000 or not line.endswith("\n"):
-                        deliver(ApplicationHostError("Application host emitted an oversized or incomplete response frame"))
+                    if not line.endswith("\n"):
+                        deliver(ApplicationHostError("Application host emitted an incomplete response frame"))
                         return
                     deliver(line)
             except (OSError, UnicodeError) as exc:
