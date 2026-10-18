@@ -13,11 +13,12 @@ import subprocess
 import tempfile
 from pathlib import Path
 from docking_universal.tool_commands import locate_script_tool, script_command
+from docking_universal.sdf_io import read_sdf, sdf_writer
 
 
 def first_molecule(path):
     from rdkit import Chem
-    return next((m for m in Chem.SDMolSupplier(str(path), removeHs=False) if m), None)
+    return next((m for m in read_sdf(path, removeHs=False) if m), None)
 
 
 def main():
@@ -78,12 +79,12 @@ def main():
         result = subprocess.run(command, capture_output=True, text=True)
         if result.returncode != 0 or not states_path.is_file():
             raise SystemExit(f"MolScrub chemical-state enumeration failed: {result.stderr or result.stdout}")
-        states = [m for m in Chem.SDMolSupplier(str(states_path), removeHs=False) if m]
+        states = [m for m in read_sdf(states_path, removeHs=False) if m]
 
     if not states:
         raise SystemExit("MolScrub produced no readable chemical states")
 
-    writer = Chem.SDWriter(str(output))
+    writer = sdf_writer(output)
     records = []
     for state_index, state in enumerate(states, start=1):
         state = Chem.AddHs(Chem.RemoveHs(state))

@@ -164,7 +164,8 @@ def main():
         ligand = inputs / "synthetic_carbamate.sdf"
         molecule = Chem.MolFromSmiles("CCOC(=O)N1CCCCC1")
         molecule.SetProp("_Name", "Synthetic carbamate process fixture")
-        with Chem.SDWriter(str(ligand)) as writer:
+        from docking_universal.sdf_io import sdf_writer
+        with sdf_writer(ligand) as writer:
             writer.write(molecule)
         if args.vina:
             engine = args.vina.resolve()

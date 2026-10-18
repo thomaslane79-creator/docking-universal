@@ -3,6 +3,9 @@ import math
 import argparse
 import xml.etree.ElementTree as ET
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from docking_universal.sdf_io import read_sdf
 
 import numpy as np
 from rdkit import Chem
@@ -25,7 +28,7 @@ def coord(node, tag):
     return tuple(float(block.findtext(axis)) for axis in ('x', 'y', 'z'))
 
 
-mol = next(item for item in Chem.SDMolSupplier(str(LIGAND), removeHs=False) if item)
+mol = next(item for item in read_sdf(LIGAND, removeHs=False) if item)
 conf = mol.GetConformer()
 ligand_xyz = {
     atom.GetIdx(): tuple(conf.GetAtomPosition(atom.GetIdx()))

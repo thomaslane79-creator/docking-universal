@@ -1,6 +1,7 @@
 """Shared ligand-source policy for GUI planning and scientific import."""
 
 from pathlib import Path
+from ..sdf_io import read_sdf
 
 
 from .ligand_table import TABLE_SUFFIXES
@@ -32,7 +33,7 @@ def read_ligand_molecules(source):
     if path.suffix.lower() not in LIGAND_SUFFIXES:
         raise ValueError(f"Ligand input must be an SDF or MOL file: {path}")
     try:
-        records = list(Chem.SDMolSupplier(str(path), removeHs=False))
+        records = list(read_sdf(path, removeHs=False))
     except (OSError, RuntimeError, ValueError) as exc:
         raise ValueError(f"Unable to read ligand input {path}: {exc}") from None
     if path.suffix.lower() == ".mol" and (len(records) != 1 or records[0] is None):

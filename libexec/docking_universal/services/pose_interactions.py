@@ -7,6 +7,7 @@ import hashlib
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from ..sdf_io import read_sdf, sdf_writer, write_pdb
 from typing import Sequence
 
 
@@ -208,16 +209,16 @@ def materialize_pose_interaction_inputs(
                 return record, cache
         except (OSError, json.JSONDecodeError):
             pass
-    molecules = list(Chem.SDMolSupplier(str(pose_source), removeHs=False))
+    molecules = list(read_sdf(pose_source, removeHs=False))
     if pose_id > len(molecules) or molecules[pose_id - 1] is None:
         raise ValueError(f"Pose {pose_id} cannot be decoded from {pose_source}")
     molecule = Chem.Mol(molecules[pose_id - 1])
     molecule.SetProp("_Name", f"pose_{pose_id:04d}")
-    writer = Chem.SDWriter(str(cache / "pose.sdf"))
+    writer = sdf_writer(cache / "pose.sdf")
     writer.write(molecule)
     writer.close()
     _set_ligand_pdb_info(molecule)
-    Chem.MolToPDBFile(molecule, str(cache / "pose.pdb"))
+    write_pdb(molecule, cache / "pose.pdb")
     _write_complex(receptor, cache / "pose.pdb", cache / "complex.pdb")
     manifest.write_text(json.dumps(provenance, indent=2) + "\n")
     return record, cache

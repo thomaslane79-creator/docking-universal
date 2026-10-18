@@ -1,5 +1,6 @@
 """Local, exact-instance interaction diagrams for deposited ligand evidence."""
 from pathlib import Path
+from ..sdf_io import read_sdf, sdf_writer
 import hashlib
 import json
 from ..poseedit_renderer import LAYOUT_REVISION
@@ -79,7 +80,7 @@ def materialize_inputs(record):
     if any(line[16:17].strip() for line in selected):
         raise ValueError("This ligand has alternate conformations; an exact altloc must be resolved before 2D analysis")
     raw = Chem.MolFromPDBBlock("\n".join(selected) + "\nEND\n", removeHs=True, sanitize=False)
-    templates = Chem.SDMolSupplier(record["chemistry"], removeHs=True)
+    templates = read_sdf(record["chemistry"], removeHs=True)
     template = next((item for item in templates if item is not None), None)
     if raw is None or template is None:
         raise ValueError("The retained ligand coordinates or CCD chemistry could not be read")
@@ -88,7 +89,7 @@ def materialize_inputs(record):
         raise ValueError("Deposited ligand atoms do not match CCD chemistry; interaction rendering stopped")
     typed = AllChem.AssignBondOrdersFromTemplate(template, raw)
     Chem.AssignStereochemistryFrom3D(typed)
-    writer = Chem.SDWriter(str(cache / "ligand.sdf"))
+    writer = sdf_writer(cache / "ligand.sdf")
     writer.write(typed)
     writer.close()
     # Reidentify only the chosen ligand to reuse the validated single-site PLIP path.
@@ -111,7 +112,7 @@ def render_contact_summary(cache):
     from collections import Counter
     import textwrap
     cache = Path(cache)
-    mol = next(item for item in Chem.SDMolSupplier(str(cache / "ligand.sdf")) if item)
+    mol = next(item for item in read_sdf(cache / "ligand.sdf") if item)
     rdDepictor.Compute2DCoords(mol)
     contacts = Counter()
     root = ET.parse(cache / "plip" / "report.xml").getroot()

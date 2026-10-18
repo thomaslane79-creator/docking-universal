@@ -1,6 +1,9 @@
 import json
 import argparse
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from docking_universal.sdf_io import read_sdf
 
 from rdkit import Chem
 from rdkit.Chem import rdDepictor
@@ -13,7 +16,7 @@ args = parser.parse_args()
 POSE = args.pose
 OUTPUT = args.output
 
-mol = Chem.SDMolSupplier(str(POSE), removeHs=False)[0]
+mol = next(iter(read_sdf(POSE, removeHs=False)), None)
 if mol is None:
     raise SystemExit(f'RDKit could not read {POSE}')
 source = mol.GetConformer()

@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections import defaultdict
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -27,6 +28,50 @@ from .services.structure_input import normalize_structure_input
 
 class PreparationReviewRequired(RuntimeError):
     """An explicit chemical decision is required; no deletion is authorized."""
+
+
+def retain_exact_selected_boxes(cavity: Path, target: str) -> None:
+    """Match actual legacy engine boxes without reproducing rank collisions.
+
+    The normalizer writes every detector-rank config. Bash then overwrites
+    ordinal 1..N with full-precision centers and fixed 26 Å boxes. A retained
+    rank above N keeps its normalized geometry (including adaptive dimensions).
+    If an ordinal overwrite would give a selected rank another pocket's box,
+    stop rather than silently carry that identity error into the native port.
+    """
+    from docking_universal_region import write_box_files
+    records = []
+    for line in (cavity / "selected_pocket_records.txt").read_text(encoding="utf-8").splitlines():
+        fields = line.split("|")
+        if len(fields) != 6:
+            raise ValueError("Invalid retained pocket record")
+        match = re.fullmatch(r"pocket(\d+)_atm\.pdb", Path(fields[1]).name)
+        if not match:
+            raise ValueError("Retained pocket lost its detector rank identity")
+        config = cavity / f"{target}_pocket{int(match.group(1))}.conf"
+        values = {key.strip(): float(value.strip()) for text in config.read_text(encoding="utf-8").splitlines()
+                  if "=" in text for key, value in [text.split("=", 1)]}
+        centers = list(map(float, fields[2:5]))
+        if not all(math.isfinite(value) for value in centers):
+            raise ValueError("Non-finite retained pocket center")
+        if any(not math.isfinite(values[f"size_{axis}"]) or values[f"size_{axis}"] <= 0 for axis in "xyz"):
+            raise ValueError("Invalid retained box dimensions")
+        records.append((int(match.group(1)), config, centers, values))
+    planned = []
+    for rank, config, centers, values in records:
+        if rank <= len(records):
+            if records[rank - 1][0] != rank:
+                raise ValueError("Legacy ordinal finalization collides with a retained detector rank; box identity requires review")
+            geometry = {**dict(zip((f"center_{axis}" for axis in "xyz"), centers)),
+                        **{f"size_{axis}": 26.0 for axis in "xyz"}}
+        else:
+            geometry = values
+        planned.append((config, geometry))
+    for config, geometry in planned:
+        write_box_files(config, geometry)
+        # PDB visual coordinates remain at PDB's intrinsic 0.001 Å precision;
+        # engine config must preserve the original prediction's finer center.
+        config.write_text("".join(f"{key} = {value}\n" for key, value in geometry.items()), encoding="utf-8")
 
 
 def meeko_command(source: Path, prefix: Path, pdbqt: Path, *, templates="",
@@ -67,6 +112,10 @@ def prepare_native_candidate(options: ReceptorPreparationOptions, *,
         raise ValueError("Pinned Meeko is unavailable in this scientific Python")
     if options.protonation == "required":
         raise ValueError("The explicit PDB2PQR-required route is not enabled in this native candidate")
+    if not importlib.util.find_spec("mmtbx"):
+        raise ValueError("The native candidate requires CCTBX; the unavailable-Reduce2/PDB2PQR fallback is not silently selected")
+    if float(os.environ.get("BOX_SIZE", "26.0")) != 26.0:
+        raise ValueError("Custom legacy box sizes require separate native acceptance")
     libexec = (libexec or Path(__file__).resolve().parents[1]).resolve()
     source = options.input_pdb.resolve()
     canonical = _canonical_name(source)
@@ -183,6 +232,11 @@ def prepare_native_candidate(options: ReceptorPreparationOptions, *,
         templates = options.meeko_template_file
         if templates:
             shutil.copyfile(templates, receptor / "meeko_additional_templates.json")
+            for original, retained in (("meeko-ptm-template-audit.json", "meeko_ptm_template_audit.json"),
+                                       ("meeko-ptm-template-approval.json", "meeko_ptm_template_approval.json")):
+                evidence = templates.parent / original
+                if evidence.is_file():
+                    shutil.copyfile(evidence, receptor / retained)
         if not execute("ccd_audit", [sys.executable, str(libexec / "docking-universal-ccd-audit.py"),
                        str(normalized.engine_pdb_path), str(pdbqt), str(receptor / "receptor_backend.process.log"),
                        route, str(receptor / "ccd_modification_audit.json"), str(receptor / "ccd_modification_audit.tsv"),
@@ -207,9 +261,10 @@ def prepare_native_candidate(options: ReceptorPreparationOptions, *,
         from .p2rank_adapter import materialize_p2rank_candidates
         materialize_p2rank_candidates(predictions[0], pdb, cavity, canonical,
                                       maximum_pockets=options.max_pockets, p2rank_version="2.5.1")
+        retain_exact_selected_boxes(cavity, canonical)
         retain_status("prepared", route=route, reduce2_used=reduce_used,
                       retained_linked_components=linked, deposited_disulfide_templates=disulfide_templates(normalized.engine_pdb_path),
-                      box_policy="shared P2Rank candidate normalizer; no site approval or docking")
+                      box_policy="shared P2Rank eligibility and actual legacy engine geometry; retained-rank collisions stop for review; no site approval or docking")
         log("Native receptor and pocket candidate preparation completed; site review remains required")
         return root
     except PreparationReviewRequired:

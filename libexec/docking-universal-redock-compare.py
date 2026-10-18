@@ -11,12 +11,13 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
+from docking_universal.sdf_io import read_sdf, sdf_writer, write_pdb, read_pdb
 
 
 def first_sdf_molecule(path, remove_hs=False):
     from rdkit import Chem
 
-    return next((mol for mol in Chem.SDMolSupplier(str(path), removeHs=remove_hs) if mol), None)
+    return next((mol for mol in read_sdf(path, removeHs=remove_hs) if mol), None)
 
 
 def parse_scores(path):
@@ -353,7 +354,7 @@ def main():
         raise SystemExit("reference SDF could not be read by RDKit")
     template = Chem.RemoveHs(template_full)
 
-    crystal_raw = Chem.MolFromPDBFile(
+    crystal_raw = read_pdb(
         str(args.crystal_ligand.expanduser().resolve()), removeHs=True, sanitize=False
     )
     if crystal_raw is None:
@@ -364,7 +365,7 @@ def main():
     except (RuntimeError, ValueError) as exc:
         raise SystemExit(f"could not map SDF chemistry onto crystallographic coordinates: {exc}") from exc
 
-    poses = [Chem.RemoveHs(mol) for mol in Chem.SDMolSupplier(str(exported_sdf), removeHs=False) if mol]
+    poses = [Chem.RemoveHs(mol) for mol in read_sdf(exported_sdf, removeHs=False) if mol]
     if not poses:
         raise SystemExit("Meeko exported no readable docked poses")
 
@@ -384,10 +385,10 @@ def main():
 
         set_ligand_pdb_info(pose)
         pose_path = output_dir / f"pose_{index:03d}.pdb"
-        Chem.MolToPDBFile(pose, str(pose_path))
+        write_pdb(pose, pose_path)
         pose_paths.append(pose_path)
         pose_sdf_path = output_dir / f"pose_{index:03d}.sdf"
-        pose_writer = Chem.SDWriter(str(pose_sdf_path))
+        pose_writer = sdf_writer(pose_sdf_path)
         pose_writer.write(pose)
         pose_writer.close()
         pose_sdf_paths.append(pose_sdf_path)
@@ -417,7 +418,7 @@ def main():
     shutil.copy2(args.receptor_pdb, receptor_copy)
     shutil.copy2(args.crystal_ligand, crystal_copy)
     crystal.SetProp("_Name", "crystal_ligand")
-    crystal_writer = Chem.SDWriter(str(crystal_sdf))
+    crystal_writer = sdf_writer(crystal_sdf)
     crystal_writer.write(crystal)
     crystal_writer.close()
     shutil.copy2(pose_paths[top_index], top_pose_copy)

@@ -16,10 +16,12 @@ support are reported but do not prove a pose is correct.
 import argparse
 import csv
 import json
+import os
 import re
 import shutil
 import subprocess
 from docking_universal.tool_commands import locate_script_tool, script_command
+from docking_universal.sdf_io import read_sdf, sdf_writer, write_pdb
 import tempfile
 from docking_universal.pose_visuals import RANK_COLORS
 from collections import defaultdict
@@ -210,7 +212,7 @@ def load_from_comparisons(root):
             for row in csv.DictReader(handle):
                 model = int(row["model"])
                 pose_path = comparison / f"pose_{model:03d}.sdf"
-                molecule = next((m for m in Chem.SDMolSupplier(str(pose_path), removeHs=True) if m), None)
+                molecule = next((m for m in read_sdf(pose_path, removeHs=True) if m), None)
                 if molecule is None or not row.get("affinity_kcal_per_mol"):
                     continue
                 records.append({
@@ -234,13 +236,25 @@ def load_from_docking(root, ligand_work, exporter, engine, export_root):
         if not source_sdf.is_file():
             raise SystemExit(f"No typed source SDF for {pdbqt.name}: {source_sdf}")
         destination = export_root / f"{seed_from_path(pdbqt)}_{ligand_id}.sdf"
-        result = subprocess.run(script_command(exporter, pdbqt, "-s", destination), capture_output=True, text=True)
+        if os.name == "nt":
+            # Meeko's pinned exporter also creates an RDKit writer internally.
+            # Keep its file boundary local/ASCII, then copy the exact output;
+            # no molecule, geometry or score is transformed by this staging.
+            with tempfile.TemporaryDirectory(prefix="du-meeko-export-") as temporary:
+                staged_input = Path(temporary) / "input.pdbqt"
+                staged_output = Path(temporary) / "output.sdf"
+                shutil.copyfile(pdbqt, staged_input)
+                result = subprocess.run(script_command(exporter, staged_input, "-s", staged_output), capture_output=True, text=True)
+                if result.returncode == 0 and staged_output.is_file():
+                    shutil.copyfile(staged_output, destination)
+        else:
+            result = subprocess.run(script_command(exporter, pdbqt, "-s", destination), capture_output=True, text=True)
         if result.returncode or not destination.is_file():
             raise SystemExit(f"Meeko export failed for {pdbqt}: {result.stderr or result.stdout}")
         scores = parse_scores(pdbqt)
-        source = next((m for m in Chem.SDMolSupplier(str(source_sdf), removeHs=False) if m), None)
+        source = next((m for m in read_sdf(source_sdf, removeHs=False) if m), None)
         state = source.GetIntProp("DockingUniversal_State") if source and source.HasProp("DockingUniversal_State") else 1
-        for model, molecule in enumerate(Chem.SDMolSupplier(str(destination), removeHs=True), start=1):
+        for model, molecule in enumerate(read_sdf(destination, removeHs=True), start=1):
             if molecule is None or model not in scores:
                 continue
             records.append({
@@ -375,7 +389,7 @@ conformer support are reported separately as measures of search repeatability.
                 "selected": "yes" if cluster["cluster_id"] in selected_ids else "no",
             })
 
-    all_writer = Chem.SDWriter(str(output / "all_poses.sdf"))
+    all_writer = sdf_writer(output / "all_poses.sdf")
     for index, record in enumerate(records, start=1):
         molecule = Chem.Mol(record["molecule"])
         molecule.SetProp("_Name", f"pose_{index:04d}")
@@ -389,11 +403,11 @@ conformer support are reported separately as measures of search repeatability.
         cluster_dir.mkdir(exist_ok=True)
         molecule = Chem.Mol(cluster["representative"]["molecule"])
         molecule.SetProp("_Name", f"cluster_{cluster['cluster_id']:03d}_representative")
-        writer = Chem.SDWriter(str(cluster_dir / "representative.sdf"))
+        writer = sdf_writer(cluster_dir / "representative.sdf")
         writer.write(molecule)
         writer.close()
         set_ligand_pdb_info(molecule)
-        Chem.MolToPDBFile(molecule, str(cluster_dir / "representative.pdb"))
+        write_pdb(molecule, cluster_dir / "representative.pdb")
         write_complex(args.receptor.expanduser().resolve(), cluster_dir / "representative.pdb", cluster_dir / "complex.pdb")
         write_representative_pml(cluster_dir, cluster, args.contact_cutoff, rank=rank)
         metadata = {key: value for key, value in cluster.items() if key not in {"representative", "member_indices"}}

@@ -17,6 +17,7 @@ import subprocess
 import urllib.error
 import urllib.request
 from pathlib import Path
+from docking_universal.sdf_io import read_sdf, sdf_writer, read_pdb
 
 
 def fetch_bytes(url):
@@ -34,7 +35,7 @@ def element_counts(molecule):
 def read_first_sdf(path):
     from rdkit import Chem
 
-    return next((mol for mol in Chem.SDMolSupplier(str(path), removeHs=False) if mol), None)
+    return next((mol for mol in read_sdf(path, removeHs=False) if mol), None)
 
 
 def main():
@@ -126,7 +127,7 @@ def main():
     from rdkit import Chem
     from rdkit.Chem import AllChem
 
-    crystal_raw = Chem.MolFromPDBFile(str(ligand_pdb), removeHs=True, sanitize=False)
+    crystal_raw = read_pdb(ligand_pdb, removeHs=True, sanitize=False)
     if crystal_raw is None:
         raise SystemExit("RDKit could not read the bound-ligand PDB coordinates")
     crystal_elements = element_counts(crystal_raw)
@@ -168,7 +169,7 @@ def main():
         typed_crystal.SetProp("_Name", f"{resname}_experimental")
         typed_crystal.SetProp("DockingUniversal_LigandID", args.ligand_id)
         typed_crystal.SetProp("DockingUniversal_ChemistrySource", template_source)
-        writer = Chem.SDWriter(str(output))
+        writer = sdf_writer(output)
         writer.write(typed_crystal)
         writer.close()
         manifest["chemistry_status"] = "verified_coordinate_free_identity_mapping"

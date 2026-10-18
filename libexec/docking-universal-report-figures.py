@@ -9,6 +9,7 @@ import math
 import os
 import shutil
 import subprocess
+from docking_universal.sdf_io import read_sdf, sdf_writer, read_mol
 import sys
 from pathlib import Path
 
@@ -786,7 +787,7 @@ def render_ligand_identity(image_path, ligand_sdf, ligand_id):
         from rdkit import Chem
         from rdkit.Chem import Draw
         from rdkit.Chem import rdDepictor
-        molecule = Chem.MolFromMolFile(str(ligand_sdf), removeHs=True)
+        molecule = read_mol(ligand_sdf, removeHs=True)
         if molecule is None:
             return False
         # CCD ideal SDFs can retain nonplanar coordinates. Generate a fresh
@@ -1434,7 +1435,7 @@ def read_molecule(path):
     path = Path(path)
     if not path.is_file():
         return None
-    return next((mol for mol in Chem.SDMolSupplier(str(path), removeHs=False) if mol), None)
+    return next((mol for mol in read_sdf(path, removeHs=False) if mol), None)
 
 
 def same_retained_pose(first_path, second_path):
@@ -1474,7 +1475,7 @@ def retained_cluster_representatives(analysis):
         previous = best_by_cluster.get(cluster_id)
         if previous is None or energy < previous[0]:
             best_by_cluster[cluster_id] = (energy, pose_id)
-    molecules = list(Chem.SDMolSupplier(str(all_poses_path), removeHs=False))
+    molecules = list(read_sdf(all_poses_path, removeHs=False))
     for cluster_id, (_, pose_id) in best_by_cluster.items():
         if 1 <= pose_id <= len(molecules) and molecules[pose_id - 1] is not None:
             representatives[cluster_id] = molecules[pose_id - 1]
@@ -1506,7 +1507,7 @@ def materialize_cluster_representatives(analysis, rows, report, compound_id):
         if molecule is None:
             continue
         destination = report / f"{compound_id}_cluster_{cluster_id:03d}_representative.sdf"
-        writer = Chem.SDWriter(str(destination))
+        writer = sdf_writer(destination)
         writer.write(molecule)
         writer.close()
         paths.append(destination)
@@ -1524,7 +1525,7 @@ def control_pose_points(analysis, reference):
         raise ValueError("All-pose control figure requires retained inventory and all_poses.sdf")
     with inventory.open(newline="") as handle:
         records = list(csv.DictReader(handle))
-    molecules = list(Chem.SDMolSupplier(str(poses), removeHs=False))
+    molecules = list(read_sdf(poses, removeHs=False))
     points, excluded, seen = [], [], set()
     for row in records:
         try:
@@ -2043,7 +2044,7 @@ def render_sdf_plip2d(interactions, ligand_sdf, output, ligand_id=None):
     except (ET.ParseError, OSError, StopIteration):
         return False
 
-    molecule = next((mol for mol in Chem.SDMolSupplier(str(ligand_sdf), removeHs=False) if mol), None)
+    molecule = next((mol for mol in read_sdf(ligand_sdf, removeHs=False) if mol), None)
     if molecule is None or molecule.GetNumConformers() == 0:
         return False
     heavy_indices = [atom.GetIdx() for atom in molecule.GetAtoms() if atom.GetAtomicNum() > 1]
@@ -2673,14 +2674,14 @@ def control_overlay_poses(analysis, panel_a, report):
     selected = [row for row in selected if row["pose_id"] != closest["pose_id"]]
     selected.append({"pose_id": closest["pose_id"], "cluster_id": closest["cluster_id"],
                      "role": "global_lowest_rmsd", "color": closest_color})
-    molecules = list(Chem.SDMolSupplier(str(analysis / "all_poses.sdf"), removeHs=False))
+    molecules = list(read_sdf(analysis / "all_poses.sdf", removeHs=False))
     paths = []
     for row in selected:
         molecule = molecules[row["pose_id"] - 1]
         if molecule is None:
             raise ValueError("Control overlay pose is unreadable")
         path = report / f"control_overlay_pose_{row['pose_id']:04d}.sdf"
-        with Chem.SDWriter(str(path)) as writer:
+        with sdf_writer(path) as writer:
             writer.write(molecule)
         paths.append(path)
     return paths, [row["color"] for row in selected], {

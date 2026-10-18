@@ -9,6 +9,7 @@ on:
       - validation/native_science_dispatch.py
       - libexec/docking_universal/native_preparation.py
       - libexec/docking_universal/tool_commands.py
+      - libexec/docking_universal/sdf_io.py
       - .github/workflows/native-scientific.yml
   workflow_dispatch:
 
@@ -49,6 +50,9 @@ jobs:
         shell: powershell
         run: |
           $scientific = "$env:RUNNER_TEMP\du-native-scientific\Native scientific test\scientific"
+          $env:PYTHONPATH = "$env:GITHUB_WORKSPACE\libexec"
+          & "$env:CONDA\Scripts\conda.exe" run --no-capture-output --prefix $scientific python -m unittest tests.test_sdf_io
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & "$env:CONDA\Scripts\conda.exe" run --no-capture-output --prefix $scientific python validation/native_scientific_workflow.py --out "$env:RUNNER_TEMP\du-native-workflow"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Retain stage status only; all structures, reports and tool logs stay local

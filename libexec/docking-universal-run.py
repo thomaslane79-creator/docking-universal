@@ -24,6 +24,7 @@ import platform
 import re
 import shutil
 import subprocess
+from docking_universal.sdf_io import sdf_writer
 import sys
 import urllib.error
 import urllib.request
@@ -998,7 +999,7 @@ def split_compounds(source, destination, selection=None):
             molecule.SetProp("_Name", compound_name or identifier)
             molecule.SetProp("DockingUniversal_CompoundName", compound_name or identifier)
             molecule.SetProp("DockingUniversal_CompoundID", identifier)
-            writer = Chem.SDWriter(str(output))
+            writer = sdf_writer(output)
             writer.write(molecule)
             writer.close()
             compounds.append({

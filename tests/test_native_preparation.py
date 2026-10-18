@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libexec"))
-from docking_universal.native_preparation import meeko_command, prepare_native_candidate, PreparationReviewRequired
+from docking_universal.native_preparation import meeko_command, prepare_native_candidate, PreparationReviewRequired, retain_exact_selected_boxes
 from docking_universal.services.preparation import ReceptorPreparationOptions
 
 
@@ -67,6 +67,28 @@ class NativePreparationTests(unittest.TestCase):
             self.assertEqual(fixture.read_bytes(), before)
             self.assertFalse(any("--allow_bad_res" in command for command in calls))
             self.assertFalse(any("predict" in command for command in calls))
+
+    def test_box_center_precision_and_nonsequential_detector_identity(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cavity = Path(temporary)
+            text = "center_x = 40.018\ncenter_y = 34.735\ncenter_z = -6.211\nsize_x = 26\nsize_y = 26\nsize_z = 26\n"
+            config = cavity / "target_pocket1.conf"
+            config.write_text(text)
+            fourth = cavity / "target_pocket4.conf"
+            fourth.write_text(text.replace("size_y = 26", "size_y = 27.948"))
+            records = cavity / "selected_pocket_records.txt"
+            records.write_text("2.4|pocket1_atm.pdb|40.0182|34.7353|-6.2114|2.4\n1.1|pocket4_atm.pdb|40.0182|34.7353|-6.2114|1.1\n")
+            retain_exact_selected_boxes(cavity, "target")
+            self.assertIn("center_x = 40.0182", config.read_text())
+            self.assertIn("size_y = 27.948", fourth.read_text())
+            self.assertFalse((cavity / "target_pocket2.conf").exists())
+            self.assertTrue((cavity / "target_pocket4_box.pdb").exists())
+            (cavity / "target_pocket3.conf").write_text(text)
+            records.write_text(records.read_text().replace("1.1|pocket4", "1.2|pocket3_atm.pdb|40|34|-6|1.2\n1.1|pocket4"))
+            before = config.read_bytes()
+            with self.assertRaisesRegex(ValueError, "collides"):
+                retain_exact_selected_boxes(cavity, "target")
+            self.assertEqual(config.read_bytes(), before)
 
 
 if __name__ == "__main__":

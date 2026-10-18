@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Sequence, TextIO
 from docking_universal.tool_commands import locate_script_tool, script_command
+from docking_universal.sdf_io import read_sdf
 
 
 USAGE = """Usage:
@@ -211,7 +212,7 @@ def prepare_ligands(
             name = _compound_name(record, options.name_field, compound_id).replace("\n", "")
             if options.target_engines == 'adgpu':
                 from rdkit import Chem
-                molecule=next((m for m in Chem.SDMolSupplier(str(record)) if m),None)
+                molecule=next((m for m in read_sdf(record) if m),None)
                 if molecule is None or any(len(ring)>=8 for ring in molecule.GetRingInfo().AtomRings()):
                     raise LigandUsageError('Experimental AD4 does not support macrocycles or unreadable chemistry; no rigid-ring conversion was performed')
             smiles_run = subprocess.run(

@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from docking_universal.sdf_io import read_sdf, WINDOWS
 
 
 def rdkit_molecule(path: Path):
@@ -17,9 +18,9 @@ def rdkit_molecule(path: Path):
 
     suffix = path.suffix.lower()
     if suffix == ".sdf":
-        return next((mol for mol in Chem.SDMolSupplier(str(path), removeHs=False) if mol), None)
+        return next((mol for mol in read_sdf(path, removeHs=False) if mol), None)
     if suffix in {".mol", ".mdl"}:
-        return Chem.MolFromMolFile(str(path), removeHs=False)
+        return Chem.MolFromMolBlock(path.read_text(encoding="utf-8"), removeHs=False) if WINDOWS else Chem.MolFromMolFile(str(path), removeHs=False)
     if suffix == ".mol2":
         return Chem.MolFromMol2File(str(path), removeHs=False)
     if suffix == ".pdb":
@@ -42,7 +43,7 @@ def draw_with_rdkit(source: Path, output: Path, width: int, height: int, legend:
             shutil.copy2(source, safe_source)
             result = subprocess.run(["obabel", str(safe_source), "-O", converted.name], capture_output=True, text=True)
             if result.returncode == 0:
-                molecule = next((mol for mol in Chem.SDMolSupplier(converted.name, removeHs=False) if mol), None)
+                molecule = next((mol for mol in read_sdf(converted.name, removeHs=False) if mol), None)
     if molecule is None:
         raise ValueError("coordinate file could not be parsed; install Open Babel for format conversion")
 
