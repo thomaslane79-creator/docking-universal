@@ -52,8 +52,9 @@ class ApplicationHostClient:
 
     def restart(self) -> str:
         """Replace a failed host without changing persisted study state."""
-        self.close()
-        return self.start()
+        with self._lock:
+            self.close()
+            return self.start()
 
     def start(self) -> str:
         if self.process and self.process.poll() is None:
@@ -133,10 +134,15 @@ class ApplicationHostClient:
         self.process = None
         self.session_id = None
         self.runtime = {}
-        reader, stop = self._reader, self._reader_stop
+        reader, stop, messages = self._reader, self._reader_stop, self._messages
         self._reader = self._reader_stop = self._messages = None
         if stop:
             stop.set()
+        if messages is not None:
+            try:
+                messages.put_nowait(None)
+            except queue.Full:
+                pass
         if process:
             if process.stdin and not process.stdin.closed:
                 try:
@@ -198,29 +204,35 @@ class ApplicationHostClient:
         self._reader.start()
 
     def _read_message(self, timeout_seconds=None) -> dict[str, Any]:
-        if not self.process or self._messages is None:
+        process, messages = self.process, self._messages
+        if not process or messages is None:
             raise ApplicationHostError("Application host output is unavailable")
+        def disconnect():
+            # An older request interrupted by close must never tear down a new
+            # session opened by another UI action.
+            if self.process is process:
+                self.close()
         try:
-            line = self._messages.get(timeout=self.timeout_seconds if timeout_seconds is None else timeout_seconds)
+            line = messages.get(timeout=self.timeout_seconds if timeout_seconds is None else timeout_seconds)
         except queue.Empty as exc:
             # Never reuse a timed-out session: a delayed reply could otherwise
             # be mistaken for the acknowledgement of the next mutation.
-            self.close()
+            disconnect()
             raise ApplicationHostError("Timed out waiting for the application host; reconnect before continuing") from exc
         if isinstance(line, Exception):
-            self.close()
+            disconnect()
             raise line
         if not line:
-            code = self.process.poll()
-            self.close()
+            code = process.poll()
+            disconnect()
             raise ApplicationHostError(f"Application host closed its response stream (status {code})")
         try:
             value = json.loads(line)
         except json.JSONDecodeError as exc:
-            self.close()
+            disconnect()
             raise ApplicationHostError("Application host emitted an invalid response frame") from exc
         if not isinstance(value, dict):
-            self.close()
+            disconnect()
             raise ApplicationHostError("Application host response must be an object")
         return value
 

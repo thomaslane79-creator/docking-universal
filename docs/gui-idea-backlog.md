@@ -28,6 +28,12 @@ Status: active scope-control record, established 2026-09-24.
   Validate on native Windows, including Unicode/spaced paths and fail-before-
   mutation for unported scientific stages. This is installer/transport work,
   not a new GUI feature or authority to claim the complete scientific port.
+- Native bootstrap acceptance passed (Windows Server 2022/x64, checkpoint
+  `252466b`, run 39136914638): fresh PowerShell installation, public launchers,
+  actual Qt/host startup, Unicode host/state round trip, fail-before-mutation,
+  restart/lease cleanup and identical installed Vina repeats. It is still a
+  development preview with scientific orchestration disabled, not full native
+  preparation/report/PyMOL/GPU support. Preserve the explicit remaining gates.
 
 ### Bounded Mac runtime packaging (authorized 2026-10-17)
 

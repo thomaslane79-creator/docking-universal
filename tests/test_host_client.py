@@ -148,6 +148,40 @@ class HostClientTests(unittest.TestCase):
             client.start()
         self.assertIsNone(client.process)
 
+    def test_request_timeout_disconnects_and_cannot_consume_a_late_reply(self):
+        client = self.failing_host("import sys,json\nprint(json.dumps({'type':'ready','session_id':'late',"
+            "'runtime':{'python_executable':sys.executable}}),flush=True)\n"
+            "sys.stdin.readline()\nsys.stdout.write('{');sys.stdout.flush()\nsys.stdin.read()\n")
+        try:
+            client.start()
+            reader = client._reader
+            with self.assertRaisesRegex(ApplicationHostError, "Timed out"):
+                client.request("client-study", "snapshot")
+            self.assertFalse(client.connected)
+            self.assertFalse(reader.is_alive())
+            with self.assertRaisesRegex(ApplicationHostError, "not connected"):
+                client.request("client-study", "snapshot")
+        finally:
+            client.close()
+
+    def test_external_close_wakes_a_waiting_reader(self):
+        import threading
+        client = self.failing_host("import sys,json\nprint(json.dumps({'type':'ready','session_id':'close',"
+            "'runtime':{'python_executable':sys.executable}}),flush=True)\nsys.stdin.read()\n")
+        client.start()
+        errors = []
+        def read():
+            try:
+                client._read_message(timeout_seconds=30)
+            except ApplicationHostError as exc:
+                errors.append(str(exc))
+        thread = threading.Thread(target=read)
+        thread.start()
+        client.close()
+        thread.join(timeout=2)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(len(errors), 1)
+
     def test_closed_stream_is_not_reported_as_a_timeout(self):
         client = self.failing_host("pass\n")
         with self.assertRaisesRegex(ApplicationHostError, "closed its response stream"):

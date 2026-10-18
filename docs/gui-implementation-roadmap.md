@@ -16,8 +16,11 @@ orchestration, then the full desktop/report journey and separate GPU acceptance.
 No full native Windows support or older-Mac GPU activation is claimed. Details:
 `docs/cross-platform-compatibility.md`.
 
-In progress: an isolated, explicitly opted-in Windows bootstrap and native
-desktop/host transport acceptance. Keep unsupported scientific stages disabled
+An isolated, explicitly opted-in Windows bootstrap passed native Windows
+desktop/host startup and installed Vina repeat acceptance (`252466b`, CI
+39136914638). Host shutdown hardening retains regression coverage. Next is the
+native scientific dependency/preparation port, not additional GUI controls.
+Keep unsupported scientific stages disabled
 before any job/state mutation; use new preview prefixes rather than changing
 working Mac environments or implying that an empty-window check validates science.
 

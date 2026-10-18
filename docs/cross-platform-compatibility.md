@@ -11,7 +11,7 @@ scientific defaults remain unchanged while the port is developed.
 | Apple Silicon, current Mac | Fresh installer, embedded/full PyMOL and accepted AD4 build tested | Identical results on all Apple GPUs/drivers |
 | macOS 15 candidate GPU host | Same patched source compiled with minimum target 15.0; kernel unchanged; two synthetic repeats exactly match the accepted build on the current Mac | Older-OS native GPU execution and scientific acceptance; candidate is not activated |
 | Linux | Existing Unix installer/environment and CI path; restored a failing test import | Complete release-level desktop/GPU acceptance across distributions |
-| Native Windows | Native process locks, atomic-state/browser-discovery contracts and synthetic prepared-input Vina CPU adapter tests passed on Windows Server 2022/x64; native Python, not WSL/Git Bash | Complete native installer, preparation/docking/report journey, embedded PyMOL or GPU acceptance |
+| Native Windows | Safety contracts, fresh preview bootstrap, actual Qt desktop/host startup and installed prepared-input Vina repeats passed on Windows Server 2022/x64; native Python/PowerShell, not WSL/Git Bash | Complete scientific installer, preparation/screening/report journey, native PyMOL or GPU acceptance |
 
 The minimum operating-system field in an executable is a build setting, not a
 proof of driver compatibility. The accepted Mac GPU runtime still requires
@@ -106,7 +106,23 @@ CI tests both public PowerShell/CMD entry points, an actual Qt window connected
 to the installed host, Unicode/spaced paths, restart/lease release, rejection
 without state changes, and repeat docking through the **installed** dispatcher.
 Only status metadata is retained as an artifact, not screenshots, studies or
-pose files. Until a native run passes, these additions remain **unverified**.
+pose files. This bootstrap acceptance **passed** on Windows Server 2022/x64 in
+[run 39136914638, native bootstrap job](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39136914638/job/117703179381),
+at source checkpoint `252466b`. All six checks passed. Bootstrap/runtime and
+study paths include Unicode; the Vina fixture's input/output paths include
+spaces. Unicode coordinate-file paths, interactive PyMOL/OpenGL, consumer
+Windows variants and full scientific journeys are not established by this test.
+Both installed-dispatcher Vina runs retained three finite-energy poses, with
+identical output SHA-256
+`9f7a5658d234c5b934c44ff89c985ea429fca29cfe9d044db4ca24ecc8383103`.
+
+The first two native bootstrap attempts failed during Conda environment
+creation and were not counted as acceptance. The completed fresh run follows
+explicit UTF-8 setup and native path derivation instead of parsing console text;
+the installation script restores the caller's environment on exit. Existing or
+failed destinations are still refused rather than silently overwritten/restarted.
+Later host-shutdown safeguards also have local regression coverage and must
+retain native CI coverage before this development slice is finalized.
 
 Example for developers only (fresh destination required):
 
