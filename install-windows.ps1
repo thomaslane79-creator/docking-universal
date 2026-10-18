@@ -20,9 +20,26 @@ $CondaExe = (Resolve-Path -LiteralPath $CondaExe).Path
 if ([IO.Path]::GetExtension($CondaExe) -ne '.exe') {
     throw 'Pass the native conda.exe, not a .bat or shell function.'
 }
-$base = (& $CondaExe info --base | Out-String).Trim()
-if ($LASTEXITCODE -ne 0) { throw 'Conda could not report its native base directory.' }
+# Full Miniforge/Anaconda places conda.exe in Scripts. Derive this as a native
+# path instead of decoding console text (which can corrupt Unicode user names).
+$base = Split-Path -Parent (Split-Path -Parent $CondaExe)
 $python = Join-Path $base 'python.exe'
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { throw 'Native Conda Python was not found.' }
-& $python (Join-Path $PSScriptRoot 'tools/install_native_windows.py') --destination $Destination --conda $CondaExe
-if ($LASTEXITCODE -ne 0) { throw 'Native bootstrap failed. Inspect bootstrap-status.json in the destination; partial files were retained.' }
+$saved = @{}
+foreach ($key in @('PYTHONHOME', 'PYTHONPATH', 'PYTHONUTF8', 'PYTHONIOENCODING')) {
+    $saved[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
+}
+try {
+    Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+    Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+    # Conda's redirected plan/error output must support non-ASCII destinations
+    # even on a Windows console whose legacy code page cannot represent them.
+    $env:PYTHONUTF8 = '1'
+    $env:PYTHONIOENCODING = 'utf-8'
+    & $python (Join-Path $PSScriptRoot 'tools/install_native_windows.py') --destination $Destination --conda $CondaExe
+    if ($LASTEXITCODE -ne 0) { throw 'Native bootstrap failed. Inspect bootstrap-status.json in the destination; partial files were retained.' }
+} finally {
+    foreach ($key in $saved.Keys) {
+        [Environment]::SetEnvironmentVariable($key, $saved[$key], 'Process')
+    }
+}
