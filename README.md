@@ -59,6 +59,11 @@ The opted-in native `install-windows.ps1` bootstrap is a development preview,
 not the finished scientific installer. It uses fresh isolated runtimes and
 rejects unported preparation/report stages. The Windows pipe-transport fix and
 native prefix handling are documented in the compatibility record above.
+The scientific Windows port additionally audits a path-quoting repair to one
+Conda-forge OpenCL activation-script build, retaining the original scripts and
+hashes without modifying DLLs or scientific versions. Native process-tree
+cancellation uses owned Windows jobs; full scientific-stage acceptance remains
+separate. Details and current limits are in the same compatibility record.
 
 In the GUI, a locally accepted runtime adds **AutoDock-GPU (AD4, experimental)**
 under **Finalize protocol → Docking program**. The adjacent explanation and

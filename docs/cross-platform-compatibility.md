@@ -43,6 +43,38 @@ checks. A candidate rebuilt by a different toolchain is a different identity.
 
 ## Native Windows work, staged honestly
 
+### Scientific port continuation (2026-10-18)
+
+The user requests the next dependency/preparation/docking/report slice fully.
+Fresh native scientific tests preserve every scientific pin in `environment.yml`;
+only Unix installer tooling (`make`) and the unavailable optional fpocket build
+are explicitly omitted. Missing fpocket must not silently change the detector.
+All Windows GUI scientific stages remain disabled until real workflow acceptance.
+
+The scientific package set **solves on Windows**. Its first actual installation
+then failed in Conda-forge's `khronos-opencl-icd-loader=2024.10.24=hfd05255_2`
+activation scripts with a spaced prefix. `windows_activation.py` applies a
+hash-guarded, backed-up quoting/synchronous-call repair in the fresh test prefix,
+before installing the unchanged pip pins. It also handles an empty vendor
+directory. Unknown upstream script revisions stop for review. No OpenCL DLL,
+scientific package version, chemistry setting or engine is replaced. This repair
+and the subsequent imports are under native validation, not assumed successful.
+Source package SHA-256:
+`245bd150a9f0b922dc34f173027631a20f18b009604d827a796d792a79bac178`;
+[upstream feedstock revision](https://github.com/conda-forge/khronos-opencl-icd-loader-feedstock/tree/80ef539ea6232963e476eb9e616dd4a3379603dc),
+Apache-2.0. Original scripts and before/after hashes remain in the test prefix.
+
+Native process ownership uses Windows kill-on-close job objects. A trusted,
+isolated Python wrapper joins the private job and closes its own job handle
+before starting a scientific command; the supervisor then owns its lifetime.
+No shell/process-name killing or private thread-resume APIs are used. The first
+four native tests passed: cancellation, timeout, owner crash and closed-owner
+rejection. Additional lifecycle/host checks remain under native CI. Jobs also
+cover descendants that inherit output pipes, so those pipes cannot keep a
+cancelled calculation alive indefinitely. This implements the documented
+[Windows job-object contract](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects),
+including [nested jobs](https://learn.microsoft.com/en-us/windows/win32/procthread/nested-jobs).
+
 1. **Safety foundation:** real native inter-process workspace/state locking,
    atomic writes and ownership rejection. Previously, the missing `fcntl` import
    caused process locking to be silently skipped on Windows; that is corrected

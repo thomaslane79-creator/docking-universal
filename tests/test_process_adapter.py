@@ -49,7 +49,7 @@ class ProcessAdapterTests(unittest.TestCase):
     def test_cancellation_terminates_process_and_retains_partial_output(self):
         with tempfile.TemporaryDirectory() as directory:
             cancel = threading.Event()
-            timer = threading.Timer(0.15, cancel.set)
+            timer = threading.Timer(5, cancel.set)
             timer.start()
             try:
                 result = ProcessRunner().run(
@@ -66,6 +66,7 @@ class ProcessAdapterTests(unittest.TestCase):
                         check=False,
                     ),
                     cancel_event=cancel,
+                    on_output=lambda event: cancel.set() if "started" in event.text else None,
                 )
             finally:
                 timer.cancel()

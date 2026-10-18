@@ -21,3 +21,12 @@ class NativeScientificSpecificationTests(unittest.TestCase):
     def test_changed_omission_requires_review_not_silent_filtering(self):
         with self.assertRaisesRegex(ValueError, "review"):
             MODULE.scientific_specification("dependencies:\n  - fpocket=5\n")
+
+    def test_two_phase_install_preserves_exact_pip_requirements(self):
+        original = MODULE.scientific_specification((ROOT / "environment.yml").read_text(encoding="utf-8"))
+        conda, requirements = MODULE.split_pip_phase(original)
+        self.assertEqual(requirements, ["meeko==0.7.1", "pdb2pqr==3.6.2", "reportlab==4.2.5"])
+        self.assertIn("  - pip\n", conda)
+        self.assertNotIn("  - pip:", conda)
+        with self.assertRaisesRegex(ValueError, "review"):
+            MODULE.split_pip_phase("dependencies:\n")

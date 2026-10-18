@@ -57,7 +57,7 @@ jobs:
         # These are foundations only, not installation/GPU acceptance.
         env:
           PYTHONPATH: libexec
-        run: python -m unittest tests.test_file_lock tests.test_state_transactions tests.test_browser_runtime tests.test_runtime_layout tests.test_host_client tests.test_native_entrypoint tests.test_windows_job
+        run: python -m unittest tests.test_file_lock tests.test_state_transactions tests.test_browser_runtime tests.test_runtime_layout tests.test_host_client tests.test_native_entrypoint tests.test_windows_job tests.test_windows_activation tests.test_process_adapter tests.test_native_scientific
 
   native-windows-bootstrap:
     name: Native Windows bootstrap and Qt host (not full scientific app)

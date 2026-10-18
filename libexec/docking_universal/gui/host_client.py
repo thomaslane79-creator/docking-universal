@@ -41,6 +41,7 @@ class ApplicationHostClient:
         self._messages = None
         self._reader = None
         self._reader_stop = None
+        self._process_tree = None
 
     @property
     def connected(self) -> bool:
@@ -68,7 +69,11 @@ class ApplicationHostClient:
         self.state_root.mkdir(parents=True, exist_ok=True)
         self._log = (self.state_root / "application-host.stderr.log").open("a", encoding="utf-8")
         try:
-            self.process = subprocess.Popen(
+            if os.name == "nt":
+                from ..windows_job import WindowsProcessTree
+                self._process_tree = WindowsProcessTree()
+            spawn = self._process_tree.spawn if self._process_tree else subprocess.Popen
+            self.process = spawn(
                 [str(self.python_executable), str(self.host_script), "--state-root", str(self.state_root)],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self._log,
                 text=True, encoding="utf-8", bufsize=1,
@@ -132,6 +137,7 @@ class ApplicationHostClient:
     def close(self) -> None:
         process = self.process
         self.process = None
+        tree, self._process_tree = self._process_tree, None
         self.session_id = None
         self.runtime = {}
         reader, stop, messages = self._reader, self._reader_stop, self._messages
@@ -152,16 +158,22 @@ class ApplicationHostClient:
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
+                if tree:
+                    tree.close()
                 process.terminate()
                 try:
                     process.wait(timeout=2)
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait()
+            if tree:
+                tree.close()
             if reader:
                 reader.join(timeout=2)
             elif process.stdout:
                 process.stdout.close()
+        if tree:
+            tree.close()
         if self._log and not self._log.closed:
             self._log.close()
 

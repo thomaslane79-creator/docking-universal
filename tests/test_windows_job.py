@@ -105,3 +105,25 @@ class WindowsJobTests(unittest.TestCase):
         owner.close()
         with self.assertRaisesRegex(RuntimeError, "closed"):
             owner.spawn([sys.executable, "-c", "raise SystemExit(99)"])
+
+    def test_normal_wrapper_completion_reaps_a_lingering_child(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            command = self.fixture(root)
+            parent = root / "parent.py"
+            parent.write_text(parent.read_text(encoding="utf-8").replace("time.sleep(60)", "raise SystemExit(0)"), encoding="utf-8")
+            result = ProcessRunner().run(ProcessRequest(command, root, "normal", timeout_seconds=8))
+            self.assertEqual(result.status, ProcessStatus.COMPLETED)
+            self.wait_gone(int((root / "leaf.pid").read_text()))
+            self.assertLess(result.duration_seconds, 6)
+
+    def test_missing_owner_refuses_to_execute_the_command(self):
+        from docking_universal.windows_job import WindowsProcessTree
+        owner = WindowsProcessTree()
+        name = owner.name
+        owner.close()
+        script = Path(__file__).parents[1] / "libexec/docking_universal/windows_job.py"
+        result = subprocess.run([sys.executable, "-I", "-S", str(script), "--job", name, "--",
+                                 sys.executable, "-c", "print('must-not-run')"], capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 125)
+        self.assertNotIn("must-not-run", result.stdout)
