@@ -18,7 +18,9 @@ No full native Windows support or older-Mac GPU activation is claimed. Details:
 
 An isolated, explicitly opted-in Windows bootstrap passed native Windows
 desktop/host startup and installed Vina repeat acceptance (`252466b`, CI
-39136914638). Host shutdown hardening retains regression coverage. Next is the
+39136914638), repeated with final host-shutdown hardening at `1f1b582` (CI
+39137350895). All 37 native safety/transport tests pass on Windows/Linux/macOS.
+Next is the
 native scientific dependency/preparation port, not additional GUI controls.
 Keep unsupported scientific stages disabled
 before any job/state mutation; use new preview prefixes rather than changing

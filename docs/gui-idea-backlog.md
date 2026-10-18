@@ -34,6 +34,12 @@ Status: active scope-control record, established 2026-09-24.
   restart/lease cleanup and identical installed Vina repeats. It is still a
   development preview with scientific orchestration disabled, not full native
   preparation/report/PyMOL/GPU support. Preserve the explicit remaining gates.
+- Final bootstrap/shutdown checkpoint `1f1b582` repeats that native acceptance
+  successfully (CI 39137350895), with 37 native safety/transport contracts on
+  Windows, Ubuntu and macOS 15; local main/Qt suites pass 599/109 tests. The
+  working installation and all 697 protected files remain unchanged. Next:
+  native scientific dependencies/preparation, full workflow/report acceptance,
+  native process-tree cancellation, then separate PyMOL/GPU validation.
 
 ### Bounded Mac runtime packaging (authorized 2026-10-17)
 

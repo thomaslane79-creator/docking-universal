@@ -121,15 +121,28 @@ creation and were not counted as acceptance. The completed fresh run follows
 explicit UTF-8 setup and native path derivation instead of parsing console text;
 the installation script restores the caller's environment on exit. Existing or
 failed destinations are still refused rather than silently overwritten/restarted.
-Later host-shutdown safeguards also have local regression coverage and must
-retain native CI coverage before this development slice is finalized.
+Final source checkpoint `1f1b582` repeated the complete bootstrap acceptance
+successfully in
+[run 39137350895](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39137350895/job/117704472636),
+including the later host-shutdown safeguards. All 37 safety/transport/entry-point
+tests passed natively on each of Windows, Ubuntu and macOS 15. Local `make test`
+passed 599 Python tests plus the shell checks; the separate Qt/workspace suite
+passed 109 tests (some transport cases overlap). All 697 protected working
+installation/configuration/study files remain hash-identical. These source
+changes are on the existing feature branch, not installed into the working Mac
+app or merged to main. The broader Mac/Linux real-tool jobs in that final CI
+run were still running when this bounded bootstrap milestone was recorded;
+native bootstrap success is not a claim that those jobs already completed.
 
 Example for developers only (fresh destination required):
 
 ```powershell
-.\install-windows.ps1 -Destination "$env:LOCALAPPDATA\DockingUniversalNativePreview" -AcceptDevelopmentPreview
-& "$env:LOCALAPPDATA\DockingUniversalNativePreview\bin\docking-universal.ps1" desktop
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install-windows.ps1 -Destination "$env:LOCALAPPDATA\DockingUniversalNativePreview" -AcceptDevelopmentPreview
+& "$env:LOCALAPPDATA\DockingUniversalNativePreview\bin\docking-universal.cmd" desktop
 ```
+
+The execution-policy option applies only to that installer process; no machine
+policy is changed. Inspect the trusted repository script before running it.
 
 The read-only official Conda-forge metadata audit on 2026-10-18 found no matching
 `win-64` builds for the currently pinned **Vina 1.2.7** and **fpocket 4.2.2**.
