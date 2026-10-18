@@ -71,6 +71,8 @@ Native compatibility corrections include explicit installation-owned Java,
 Unicode-safe RDKit streams and local Meeko export staging, and proper local
 browser file URLs. They preserve chemistry, coordinates and scientific defaults;
 the detailed acceptance boundaries remain in the compatibility record.
+Native tool discovery also handles Windows installers that remove `.py` from
+command names, and protocol archives use cross-platform relative paths.
 
 In the GUI, a locally accepted runtime adds **AutoDock-GPU (AD4, experimental)**
 under **Finalize protocol → Docking program**. The adjacent explanation and

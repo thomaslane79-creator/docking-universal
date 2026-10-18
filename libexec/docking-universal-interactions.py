@@ -22,6 +22,8 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
 
+from docking_universal.plip_runtime import plip_invocation
+
 
 # -----------------------------
 # Small XML helpers
@@ -95,11 +97,12 @@ def parse_bs_residue(text):
 # Shell command helper
 # -----------------------------
 
-def run_command(command, log_path, required=True):
+def run_command(command, log_path, required=True, cwd=None):
     result = subprocess.run(
         command,
         capture_output=True,
         text=True,
+        cwd=cwd,
     )
 
     log_text = (
@@ -612,18 +615,14 @@ def main():
 
     try:
         # Stable PLIP analytical outputs
-        analysis_command = [
-            args.plip_command,
-            "-f", str(input_pdb),
-            "-x",
-            "-t",
-            "-o", str(output_dir),
-        ]
+        analysis_command, analysis_cwd = plip_invocation(
+            args.plip_command, input_pdb, output_dir, "-x", "-t")
 
         run_command(
             analysis_command,
             logs_dir / "plip_xml_text.log",
             required=True,
+            cwd=analysis_cwd,
         )
         manifest["steps"]["plip_xml_text"] = "succeeded"
 
@@ -631,18 +630,14 @@ def main():
         if args.skip_native_visuals:
             manifest["steps"]["plip_native_visuals"] = "skipped"
         else:
-            native_command = [
-                args.plip_command,
-                "-f", str(input_pdb),
-                "-y",
-                "-p",
-                "-o", str(native_visuals_dir),
-            ]
+            native_command, native_cwd = plip_invocation(
+                args.plip_command, input_pdb, native_visuals_dir, "-y", "-p")
 
             native_result = run_command(
                 native_command,
                 logs_dir / "plip_native_visuals.log",
                 required=False,
+                cwd=native_cwd,
             )
 
             if native_result.returncode == 0:

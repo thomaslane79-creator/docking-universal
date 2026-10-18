@@ -15,6 +15,10 @@ Status: active scope-control record, established 2026-09-24.
   repair. Six Windows job-ownership tests also pass. The isolated shell-free
   preparation/report candidate is now being checked through a real native
   fixture workflow; it remains disconnected from desktop scientific controls.
+- Native checkpoint `6671469` (CI 39157453834) additionally passes PDB/mmCIF
+  preparation, protocol PDF/four panels/portable bundle, ligand preparation,
+  Vina docking and clustering, but stops inside PLIP. Relative-file PLIP I/O
+  is under acceptance; do not count this partial run as full scientific support.
 - User authorizes rebuilding the same patched GPU source for an older macOS
   deployment target, and requires Windows/Linux compatibility as well.
 - Keep the accepted runtime and production installation unchanged while testing

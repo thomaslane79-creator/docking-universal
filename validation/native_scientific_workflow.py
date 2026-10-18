@@ -231,14 +231,28 @@ def main():
         # diagram, score table or its raw tail as a troubleshooting shortcut.
         diagnostics = []
         locations = []
+        failure_categories = set()
         for path in out.rglob("*.log"):
             for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                # Export only fixed category names, never the matching tool
+                # message (which may contain a structure or ligand identity).
+                for pattern, category in (
+                    ("Open Babel Error", "openbabel_error"),
+                    ("file contains no valid molecules", "plip_no_readable_molecule"),
+                    ("no valid file format provided", "plip_invalid_format"),
+                    ("Failed to open", "file_open_failed"),
+                    ("Cannot write", "file_write_failed"),
+                    ("Unable to open", "file_open_failed"),
+                ):
+                    if pattern.lower() in line.lower():
+                        failure_categories.add(category)
                 location = re.match(r'\s*File "([^"]+)", line (\d+), in ([\w<>]+)', line)
                 if location:
                     locations.append({"file": Path(location.group(1)).name, "line": int(location.group(2)), "function": location.group(3)})
                 if re.match(r"^(?:ModuleNotFoundError|ImportError|OSError|FileNotFoundError|PermissionError|UnicodeEncodeError|UnicodeDecodeError|TypeError|AttributeError):|^Error: (?:Could not|Invalid|A JNI)|^Exception in thread|^java\.lang\.|^# There is insufficient memory", line):
                     diagnostics.append({"log_name": path.name, "runtime_exception": line[:700]})
         state["runtime_diagnostics"] = diagnostics[-10:]
+        state["runtime_failure_categories"] = sorted(failure_categories)
         state["traceback_locations"] = locations[-12:]
         state["screen_phases"] = [json.loads(path.read_text(encoding="utf-8")).get("phase")
                                   for path in out.rglob("screening_progress.json")]

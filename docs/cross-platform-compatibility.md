@@ -129,6 +129,23 @@ while its stale Conda record remains byte-identical. The original 697-file guard
 therefore has one metadata-only exception; it must not be reported as entirely
 unchanged.
 
+Further native execution exposed a Windows entry-point naming difference:
+Meeko installs `mk_prepare_ligand.exe` / `mk_export.exe`, not the Unix `.py`
+command names. Default native ligand preparation now invokes the pinned Meeko
+module with the scientific Python; explicit custom commands stay authoritative.
+Other standard script-tool discovery accepts the installer-stripped suffix.
+Native run `39157453834` reaches completed chemical states, Meeko ligand atoms,
+Vina docking and pose clustering after correcting the exporter lookup. It then
+stops inside PLIP; this is not a completed native scientific workflow. The next
+candidate runs pinned PLIP with unchanged flags and byte-identical copied input
+through ASCII relative filenames in its owned output directory, avoiding
+OpenBabel's narrow Windows filename boundary. Custom commands remain explicit,
+and Unix invocation is unchanged. This correction still needs native acceptance;
+backend diagnostics remain local and CI exposes only fixed failure categories.
+Protocol ZIP manifests now serialize relative paths with forward slashes, so a
+Windows-produced bundle does not encode OS-specific separators for Linux/macOS.
+No coordinates or scoring parameters are changed by these corrections.
+
 The Windows renderer gate installs the already-pinned Playwright dependency
 with lifecycle scripts and audit submission disabled, uses local Chrome/Edge,
 and requires the approved renderer policy rather than treating any fallback
