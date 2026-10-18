@@ -35,9 +35,20 @@ class NativeInteractionCommandTests(unittest.TestCase):
                  patch("docking_universal.plip_runtime.locate_script_tool", return_value="custom.exe"), \
                  patch("docking_universal.plip_runtime.script_command", return_value=["custom.exe"]) as script:
                 command, cwd = plip_invocation("explicit.exe", source, output, "-y", "-p")
-            script.assert_called_once_with("custom.exe")
+            script.assert_called_once_with(str(Path("custom.exe").resolve()))
             self.assertEqual(command, ["custom.exe", "-f", "plip_input.pdb", "-y", "-p", "-o", "."])
             self.assertEqual(cwd, output)
+
+    def test_relative_custom_tool_is_resolved_before_output_cwd(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "input.pdb"; source.write_bytes(b"END\n")
+            output = root / "output"; output.mkdir()
+            with patch("docking_universal.plip_runtime.platform.system", return_value="Windows"), \
+                 patch("docking_universal.plip_runtime.locate_script_tool", return_value=None), \
+                 patch("docking_universal.plip_runtime.script_command", return_value=["explicit"]) as script:
+                plip_invocation("./custom.py", source, output, "-x", "-t")
+            script.assert_called_once_with(str(Path("./custom.py").resolve()))
 
     def test_unix_invocation_is_unchanged(self):
         with patch("docking_universal.plip_runtime.platform.system", return_value="Darwin"):

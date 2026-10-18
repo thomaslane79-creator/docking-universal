@@ -11,7 +11,7 @@ scientific defaults remain unchanged while the port is developed.
 | Apple Silicon, current Mac | Fresh installer, embedded/full PyMOL and accepted AD4 build tested | Identical results on all Apple GPUs/drivers |
 | macOS 15 candidate GPU host | Same patched source compiled with minimum target 15.0; kernel unchanged; two synthetic repeats exactly match the accepted build on the current Mac | Older-OS native GPU execution and scientific acceptance; candidate is not activated |
 | Linux | Existing Unix installer/environment and CI path; restored a failing test import | Complete release-level desktop/GPU acceptance across distributions |
-| Native Windows | Safety contracts, fresh preview bootstrap, actual Qt desktop/host startup and installed prepared-input Vina repeats passed on Windows Server 2022/x64; native Python/PowerShell, not WSL/Git Bash | Complete scientific installer, preparation/screening/report journey, native PyMOL or GPU acceptance |
+| Native Windows | Safety contracts, fresh preview bootstrap, actual Qt desktop/host startup, installed prepared-input Vina repeats and an isolated public/synthetic preparation-to-report candidate passed on Windows Server 2022/x64; native Python/PowerShell, not WSL/Git Bash | Complete scientific installer/desktop integration, interactive PyMOL, ligand-control/all-engine/unsupported-chemistry coverage or GPU acceptance |
 
 The minimum operating-system field in an executable is a build setting, not a
 proof of driver compatibility. The accepted Mac GPU runtime still requires
@@ -49,7 +49,8 @@ The user requests the next dependency/preparation/docking/report slice fully.
 Fresh native scientific tests preserve every scientific pin in `environment.yml`;
 only Unix installer tooling (`make`) and the unavailable optional fpocket build
 are explicitly omitted. Missing fpocket must not silently change the detector.
-All Windows GUI scientific stages remain disabled until real workflow acceptance.
+Windows GUI scientific stages remain disabled pending scientific installer and
+desktop workflow acceptance; the isolated candidate below does not enable them.
 
 The scientific package set **solves on Windows**. Its first actual installation
 then failed in Conda-forge's `khronos-opencl-icd-loader=2024.10.24=hfd05255_2`
@@ -140,7 +141,7 @@ stops inside PLIP; this is not a completed native scientific workflow. The next
 candidate runs pinned PLIP with unchanged flags and byte-identical copied input
 through ASCII relative filenames in its owned output directory, avoiding
 OpenBabel's narrow Windows filename boundary. Custom commands remain explicit,
-and Unix invocation is unchanged. This correction still needs native acceptance;
+and Unix invocation is unchanged. At `99ceef3`, this correction passes natively;
 backend diagnostics remain local and CI exposes only fixed failure categories.
 Protocol ZIP manifests now serialize relative paths with forward slashes, so a
 Windows-produced bundle does not encode OS-specific separators for Linux/macOS.
@@ -159,9 +160,40 @@ also completes protocol PDF/bundle creation, pH-aware independent ligand states,
 Vina docking, 1.5 Å clustering, PLIP, 2D/3D panels and the screening PDF through
 the existing report pipeline. It explicitly uses one conformer/seed and
 exhaustiveness 1 **only as process acceptance**, not affinity/pose accuracy or a
-new default. Its native Windows counterpart is a separate gate. CI exports only
+new default. Its native Windows counterpart passes the separate gate below. CI exports only
 dependency/stage metadata: no structure, pose, diagram, report or scientific
 tool log is uploaded.
+
+**Native scientific candidate passed:**
+[run 39174126975](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39174126975)
+at `99ceef3`, Windows Server 2022/x64. Both public PDB and generated mmCIF pass
+Reduce2/strict Meeko/P2Rank preparation (15.062/15.250 seconds), followed by
+protocol PDF/four figures/portable bundle (52.469 seconds). The synthetic ligand
+screen completes states, Meeko, official Vina, clustering, PLIP, seven report
+figures and its screening PDF (74.000 seconds). All three retained interaction
+panels use `approved-poseedit-local-v1`, not the legacy fallback. Required PLIP
+XML/text and 2D/3D image/session artifacts are checked locally on the runner.
+These are process-fixture timings, not production-screen speed benchmarks.
+No scientific product controls were enabled and no user study was authorized.
+
+The same checkpoint's
+[general regression run 39174126958](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39174126958)
+passes all eight jobs: native Windows/Linux/macOS safety contracts, fresh Windows
+bootstrap/Qt-host and prepared Vina checks, full Ubuntu/macOS CLI/real-tool
+integration, and the older-Mac host-build check (not GPU acceptance). Final local
+checks including custom relative-tool resolution pass 633 Python test cases
+with expected platform/UI skips and 21 shell checks. A local PLIP path comparison
+also gives identical binding-site XML with the test hash seed fixed; an initial
+raw comparison without that test setting differed only in set-derived residue
+ordering. Production hash/analysis policies were not changed.
+
+This completes the **isolated scientific candidate gate**, not the native
+Windows product. Still outstanding: wire an owned scientific runtime into the
+public installer and desktop without removing unsupported-route guards; validate
+real interactive/detached PyMOL, cancellation/reopening of full GUI scientific
+jobs, known-ligand controls and broader chemistry/engine coverage. Generated
+PSE/PNG files are not evidence that interactive Windows viewing works. GPU
+support remains a separate native hardware gate.
 
 1. **Safety foundation:** real native inter-process workspace/state locking,
    atomic writes and ownership rejection. Previously, the missing `fcntl` import
@@ -172,7 +204,8 @@ tool log is uploaded.
    engine provenance, supported Python/Conda layouts and paths containing spaces
    or Unicode. The current `install.sh`/public dispatcher are Unix shell programs,
    not an already-complete native Windows installer.
-3. **Preparation/execution:** port the remaining POSIX preparation orchestration
+3. **Preparation/execution:** the strict P2Rank/Meeko candidate above passes;
+   port the remaining POSIX preparation orchestration
    without changing its chemical/scientific decisions; native process-tree
    cancellation; P2Rank Java launch without unsafe batch-file argument handling;
    correct Windows executable resolution and failure/skip behaviour.

@@ -64,15 +64,19 @@ Conda-forge OpenCL activation-script build, retaining the original scripts and
 hashes without modifying DLLs or scientific versions. Native process-tree
 cancellation uses owned Windows jobs; full scientific-stage acceptance remains
 separate. Details and current limits are in the same compatibility record.
-The pinned scientific stack now installs/imports on native Windows. A separate
-preparation-to-report rehearsal must also pass before scientific controls can be
-enabled; installation/import success alone is not full workflow acceptance.
+The pinned scientific stack installs/imports on native Windows, and the isolated
+public/synthetic preparation-to-report candidate now passes natively, including
+PLIP and the approved local 2D renderer. This is not yet a complete Windows GUI
+release: scientific installer/desktop integration and interactive PyMOL acceptance
+remain separate, and the preview's scientific controls are still disabled.
 Native compatibility corrections include explicit installation-owned Java,
 Unicode-safe RDKit streams and local Meeko export staging, and proper local
 browser file URLs. They preserve chemistry, coordinates and scientific defaults;
 the detailed acceptance boundaries remain in the compatibility record.
 Native tool discovery also handles Windows installers that remove `.py` from
 command names, and protocol archives use cross-platform relative paths.
+Pinned PLIP uses local relative-file I/O on Windows with byte-identical copied
+input and unchanged analysis flags; explicit custom tools remain authoritative.
 
 In the GUI, a locally accepted runtime adds **AutoDock-GPU (AD4, experimental)**
 under **Finalize protocol → Docking program**. The adjacent explanation and

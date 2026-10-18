@@ -18,7 +18,17 @@ Status: active scope-control record, established 2026-09-24.
 - Native checkpoint `6671469` (CI 39157453834) additionally passes PDB/mmCIF
   preparation, protocol PDF/four panels/portable bundle, ligand preparation,
   Vina docking and clustering, but stops inside PLIP. Relative-file PLIP I/O
-  is under acceptance; do not count this partial run as full scientific support.
+  subsequently passes at `99ceef3`; do not count the earlier partial run as
+  complete scientific support.
+- Isolated native scientific candidate gate completed at `99ceef3` (CI
+  39174126975): unchanged pins, real PDB/mmCIF Reduce2/Meeko/P2Rank, protocol
+  PDF/four figures/portable bundle, synthetic ligand states/Vina/clustering,
+  PLIP/three approved local 2D/3D sets and seven-figure screening PDF. Companion
+  eight-job cross-platform run 39174126958 also passes. Scientific controls stay
+  disabled: public scientific installer/desktop integration, interactive PyMOL,
+  full GUI cancellation/reopening and broader controls/engine/chemistry coverage
+  remain separate gates. No original study, score setting or working Mac code
+  changed; the one stale ReportLab metadata-record exception is documented.
 - User authorizes rebuilding the same patched GPU source for an older macOS
   deployment target, and requires Windows/Linux compatibility as well.
 - Keep the accepted runtime and production installation unchanged while testing

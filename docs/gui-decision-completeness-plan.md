@@ -1,5 +1,15 @@
 # Complete interactive GUI workflow plan
 
+Native Windows scientific candidate gate (2026-10-18): public PDB/mmCIF
+Reduce2/Meeko/P2Rank preparation, protocol PDF/bundle, synthetic-ligand Vina
+screening/clustering/PLIP and approved local 2D/3D/report outputs pass natively
+at `99ceef3` (CI 39174126975). This does not enable the Windows preview's
+scientific GUI controls or establish interactive PyMOL/GPU compatibility.
+Next bounded platform gates are owned scientific installer/desktop integration
+and native interactive-viewer/full-GUI job acceptance; keep unsupported methods
+and control routes unavailable until separately verified. See
+`docs/cross-platform-compatibility.md` for exact evidence and limitations.
+
 User-authorized correction (2026-10-17): related public-PDB ligand lookup must
 not disappear because the receptor already contains a ligand or because the
 known-ligand pathway is chosen. Retain multi-site review, including experimental
