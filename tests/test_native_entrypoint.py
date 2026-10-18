@@ -62,6 +62,15 @@ class NativeEntrypointTests(unittest.TestCase):
         self.assertEqual(main(["check-install"], app=self.app), 0)
         self.assertEqual(main(["check-install", "--full"], app=self.app), 1)
 
+    def test_inventory_finds_configured_manager_without_global_path_changes(self):
+        manager = self.root / "private-manager/Scripts/conda.exe"
+        self.config["package_manager_conda"] = str(manager)
+        before = os.environ.get("PATH")
+        command, environment = launch_command(self.app, self.config, ["runtime-inventory"])
+        self.assertEqual(environment["PATH"].split(os.pathsep)[0], str(manager.parent))
+        self.assertEqual(os.environ.get("PATH"), before)
+        self.assertEqual(command[0], str(self.root / self.config["host_python"]))
+
     def test_foreign_python_and_qt_configuration_is_not_inherited(self):
         values = isolated_environment(self.root, {"PATH": "system-path", "PYTHONHOME": "foreign",
             "PYTHONPATH": "foreign", "QT_PLUGIN_PATH": "Qt5", "KEEP_ME": "yes"})

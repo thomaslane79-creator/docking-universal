@@ -4,6 +4,7 @@
 param(
     [string]$Destination = (Join-Path $env:LOCALAPPDATA 'DockingUniversalPreview'),
     [string]$CondaExe = '',
+    [string]$ManagerRoot = '',
     [switch]$AcceptDevelopmentPreview
 )
 $ErrorActionPreference = 'Stop'
@@ -21,7 +22,7 @@ if (Test-Path -LiteralPath $Destination) {
     throw 'The destination already exists. Choose a new folder; existing/partial installations are never overwritten or deleted.'
 }
 $saved = @{}
-foreach ($key in @('PYTHONHOME', 'PYTHONPATH', 'PYTHONUTF8', 'PYTHONIOENCODING', 'CONDA_PKGS_DIRS', 'CONDA_ENVS_PATH', 'CONDARC')) {
+foreach ($key in @('PYTHONHOME', 'PYTHONPATH', 'PYTHONUTF8', 'PYTHONIOENCODING', 'CONDA_PKGS_DIRS', 'CONDA_ENVS_PATH', 'CONDARC', 'PATH')) {
     $saved[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
 }
 try {
@@ -42,13 +43,23 @@ try {
             $asset.filename -ne [IO.Path]::GetFileName($asset.filename) -or $asset.sha256 -notmatch '^[a-f0-9]{64}$') {
             throw 'The pinned Miniforge download record is invalid; nothing was downloaded.'
         }
+        # Do not disable Constructor's space/Unicode path restrictions. The
+        # application target may contain either; use a separate, private
+        # per-user manager with a fresh installation identity.
+        if (-not $ManagerRoot) { $ManagerRoot = Join-Path $env:LOCALAPPDATA 'DockingUniversal/managers' }
+        $ManagerRoot = [IO.Path]::GetFullPath($ManagerRoot)
+        if ($ManagerRoot -match '[^\x21-\x7E]') {
+            throw 'Miniforge requires a space-free ASCII manager folder. Choose a writable -ManagerRoot with that property; the application destination may still contain spaces or Unicode. No existing dependency was changed.'
+        }
+        $installId = [Guid]::NewGuid().ToString('N')
+        $manager = Join-Path $ManagerRoot $installId
+        if (Test-Path -LiteralPath $manager) { throw 'The private manager identity already exists; nothing was overwritten.' }
         New-Item -ItemType Directory -Path $Destination -ErrorAction Stop | Out-Null
         $bootstrap = Join-Path $Destination '.bootstrap'
         New-Item -ItemType Directory -Path $bootstrap | Out-Null
         $installer = Join-Path $bootstrap $asset.filename
-        $manager = Join-Path $bootstrap 'manager'
         $managerStatus = Join-Path $bootstrap 'manager-status.json'
-        $record = @{ status = 'downloading'; asset = $asset; private_prefix = '.bootstrap/manager' }
+        $record = @{ status = 'downloading'; asset = $asset; private_prefix = $manager; install_id = $installId }
         function Save-ManagerStatus {
             [IO.File]::WriteAllText($managerStatus, ($record | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
         }
@@ -69,6 +80,7 @@ try {
                 throw 'Miniforge checksum mismatch. The downloaded file was NOT executed.'
             }
             $record.status = 'installing'; Save-ManagerStatus
+            New-Item -ItemType Directory -Path $ManagerRoot -Force | Out-Null
             Write-Host 'Installing the private dependency manager. This may take a few minutes.'
             # Constructor requires /D last and unquoted, including spaces.
             # NoRegistry/NoShortcuts also prevent unrelated user-level setup.
@@ -82,7 +94,14 @@ try {
                 -not (Test-Path -LiteralPath (Join-Path $manager 'python.exe') -PathType Leaf)) {
                 throw 'The private installer did not produce its required Python/Conda executables.'
             }
+            $owner = @{ schema = 'docking-universal-private-manager-v1'; installation = $Destination; install_id = $installId; sha256 = $asset.sha256 }
+            $ownerPath = Join-Path $manager 'docking-universal-owner.json'
+            if (Test-Path -LiteralPath $ownerPath) { throw 'Refusing to replace a pre-existing private-manager owner record.' }
+            [IO.File]::WriteAllText($ownerPath, ($owner | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
             $record.status = 'installed'; Save-ManagerStatus
+            # Process-local DLL/tool paths only; restored below. Never write
+            # either the user's or the machine's persistent PATH.
+            $env:PATH = "$manager;$manager\Scripts;$manager\Library\bin;$($env:PATH)"
             $env:CONDA_PKGS_DIRS = Join-Path $bootstrap 'packages'
             $env:CONDA_ENVS_PATH = Join-Path $Destination 'runtimes'
             $env:CONDARC = Join-Path $bootstrap 'condarc.yml'
@@ -100,7 +119,7 @@ try {
     $python = Join-Path $base 'python.exe'
     if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { throw 'Native Conda Python was not found.' }
     $installerOptions = @('--destination', $Destination, '--conda', $CondaExe)
-    if ($ownedManager) { $installerOptions += '--owned-manager' }
+    if ($ownedManager) { $installerOptions += @('--owned-manager', '--manager-root', $ManagerRoot) }
     & $python (Join-Path $PSScriptRoot 'tools/install_native_windows.py') @installerOptions
     if ($LASTEXITCODE -ne 0) { throw 'Native bootstrap failed. Inspect bootstrap-status.json in the destination; partial files were retained.' }
 } finally {

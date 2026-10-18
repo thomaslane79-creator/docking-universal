@@ -51,6 +51,10 @@ def launch_command(app: Path, configuration: dict, arguments: list[str]):
     environment = isolated_environment(host.parent)
     environment["DOCKING_UNIVERSAL_PYTHON"] = str(host)
     if command == "runtime-inventory":
+        if configuration.get("package_manager_conda"):
+            # Private manager discovery is local to this inventory child, not
+            # a persistent PATH change or fallback to somebody else's Conda.
+            environment["PATH"] = str(Path(configuration["package_manager_conda"]).parent) + os.pathsep + environment["PATH"]
         return [str(host), str(app / "docking-universal-runtime-inventory.py"), *options], environment
     if command == "dock":
         # This preview provides exactly one verified CPU engine, not an AD4 or

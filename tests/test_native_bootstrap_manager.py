@@ -16,7 +16,9 @@ class NativeBootstrapManagerTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.destination = Path(self.temporary.name) / "Native Ω managed installation"
         self.bootstrap = self.destination / ".bootstrap"
-        self.prefix = self.bootstrap / "manager"
+        self.manager_root = Path(self.temporary.name) / "managers"
+        self.install_id = "abc123" + "0" * 26
+        self.prefix = self.manager_root / self.install_id
         self.conda = self.prefix / "Scripts/conda.exe"
         self.python = self.prefix / "python.exe"
         self.asset = {"filename": "pinned-fixture.exe", "sha256": hashlib.sha256(b"fixture installer").hexdigest()}
@@ -28,15 +30,19 @@ class NativeBootstrapManagerTests(unittest.TestCase):
         self.conda.parent.mkdir(parents=True)
         self.conda.write_bytes(b"conda fixture")
         self.python.write_bytes(b"python fixture")
+        self.bootstrap.mkdir(parents=True)
         (self.bootstrap / self.asset["filename"]).write_bytes(b"fixture installer")
-        self.record = {"status": "installed", "asset": self.asset, "private_prefix": ".bootstrap/manager"}
+        self.record = {"status": "installed", "asset": self.asset, "private_prefix": str(self.prefix), "install_id": self.install_id}
+        self.owner = {"schema": "docking-universal-private-manager-v1", "installation": str(self.destination),
+                      "install_id": self.install_id, "sha256": self.asset["sha256"]}
+        (self.prefix / "docking-universal-owner.json").write_text(json.dumps(self.owner), encoding="utf-8")
         self.save_record()
 
     def save_record(self):
         (self.bootstrap / "manager-status.json").write_text(json.dumps(self.record), encoding="utf-8")
 
     def handoff(self, **overrides):
-        options = dict(owned_manager=True, executing_python=self.python, asset=self.asset)
+        options = dict(owned_manager=True, executing_python=self.python, asset=self.asset, manager_root=self.manager_root)
         options.update(overrides)
         return MODULE.reserve_destination(self.destination, self.conda, **options)
 
@@ -69,7 +75,7 @@ class NativeBootstrapManagerTests(unittest.TestCase):
             self.handoff(executing_python=Path("foreign-python.exe"))
         with self.assertRaisesRegex(ValueError, "exact private"):
             MODULE.reserve_destination(self.destination, Path("foreign-conda.exe"), owned_manager=True,
-                                       executing_python=self.python, asset=self.asset)
+                                       executing_python=self.python, asset=self.asset, manager_root=self.manager_root)
 
     def test_installer_checksum_is_checked_again_before_installation(self):
         self.stage()
@@ -85,6 +91,13 @@ class NativeBootstrapManagerTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaisesRegex(ValueError, "provenance"):
                 self.handoff()
             self.record[field] = original
+
+    def test_manager_from_another_installation_cannot_be_claimed(self):
+        self.stage()
+        self.owner["installation"] = "another installation"
+        (self.prefix / "docking-universal-owner.json").write_text(json.dumps(self.owner), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "owner"):
+            self.handoff()
 
     def test_manager_pin_and_no_global_setup_flags_are_explicit(self):
         asset = json.loads((ROOT / "dependencies/miniforge-windows.json").read_text())

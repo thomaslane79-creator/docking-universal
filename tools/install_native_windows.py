@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -15,7 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def reserve_destination(destination: Path, conda: Path, *, owned_manager: bool,
-                        executing_python: Path | None = None, asset: dict | None = None) -> dict:
+                        executing_python: Path | None = None, asset: dict | None = None,
+                        manager_root: Path | None = None) -> dict:
     if not owned_manager:
         destination.mkdir(parents=True, exist_ok=False)
         return {"mode": "explicit_existing_conda"}
@@ -24,9 +26,15 @@ def reserve_destination(destination: Path, conda: Path, *, owned_manager: bool,
     if not destination.is_dir() or {p.name for p in destination.iterdir()} != {".bootstrap"}:
         raise ValueError("Owned-manager handoff requires only its fresh bootstrap directory")
     bootstrap = destination / ".bootstrap"
-    prefix = bootstrap / "manager"
-    if bootstrap.resolve().parent != destination.resolve() or prefix.resolve().parent != bootstrap.resolve():
+    if bootstrap.resolve().parent != destination.resolve():
         raise ValueError("Private manager escaped its owned installation directory")
+    record = json.loads((bootstrap / "manager-status.json").read_text(encoding="utf-8"))
+    identity = record.get("install_id", "")
+    if manager_root is None or not re.fullmatch(r"[0-9a-f]{32}", identity):
+        raise ValueError("Private manager provenance lacks its fresh installation identity")
+    prefix = manager_root / identity
+    if prefix.resolve().parent != manager_root.resolve():
+        raise ValueError("Private manager escaped its owned manager root")
     expected_conda = prefix / "Scripts/conda.exe"
     expected_python = prefix / "python.exe"
     if (conda.resolve() != expected_conda.resolve() or
@@ -34,12 +42,16 @@ def reserve_destination(destination: Path, conda: Path, *, owned_manager: bool,
             not expected_conda.is_file() or not expected_python.is_file()):
         raise ValueError("Owned-manager handoff requires its exact private Python/Conda")
     asset = asset or json.loads((ROOT / "dependencies/miniforge-windows.json").read_text(encoding="utf-8"))
-    record = json.loads((bootstrap / "manager-status.json").read_text(encoding="utf-8"))
-    if record.get("status") != "installed" or record.get("asset") != asset or record.get("private_prefix") != ".bootstrap/manager":
+    if record.get("status") != "installed" or record.get("asset") != asset or Path(record.get("private_prefix", "")).resolve() != prefix.resolve():
         raise ValueError("Private manager provenance is incomplete or changed")
+    owner = json.loads((prefix / "docking-universal-owner.json").read_text(encoding="utf-8"))
+    if (owner.get("schema") != "docking-universal-private-manager-v1" or
+            Path(owner.get("installation", "")).resolve() != destination.resolve() or
+            owner.get("install_id") != identity or owner.get("sha256") != asset["sha256"]):
+        raise ValueError("Private manager owner does not match this installation")
     if hashlib.sha256((bootstrap / asset["filename"]).read_bytes()).hexdigest() != asset["sha256"]:
         raise ValueError("Private manager installer checksum mismatch")
-    return {"mode": "application_owned", "prefix": ".bootstrap/manager", "asset": asset}
+    return {"mode": "application_owned", "prefix": str(prefix), "install_id": identity, "asset": asset}
 
 
 def copy_application(source: Path, target: Path) -> dict[str, str]:
@@ -76,13 +88,14 @@ def main():
     parser.add_argument("--destination", required=True, type=Path)
     parser.add_argument("--conda", required=True, type=Path)
     parser.add_argument("--owned-manager", action="store_true", help="Validated handoff from the fresh PowerShell bootstrap only")
+    parser.add_argument("--manager-root", type=Path)
     args = parser.parse_args()
     if platform.system() != "Windows" or platform.machine().lower() not in {"amd64", "x86_64"}:
         parser.error("This preview requires native x64 Windows, not an emulated platform")
     destination = args.destination.resolve()
     # A fresh directory is mandatory. Failed/old installs are inspectable and
     # never removed automatically; reruns use another destination.
-    manager = reserve_destination(destination, args.conda, owned_manager=args.owned_manager)
+    manager = reserve_destination(destination, args.conda, owned_manager=args.owned_manager, manager_root=args.manager_root)
     record = {"status": "installing", "scope": "native Windows bootstrap only; scientific stages unfinished",
               "system": platform.platform(), "steps": [], "package_manager": manager}
     try:
@@ -109,7 +122,8 @@ def main():
         (engine.parent / "provenance.json").write_text(json.dumps(asset, indent=2) + "\n", encoding="utf-8")
         configuration = {"schema": "docking-universal-native-preview-v1", "host_python": "runtimes/host/python.exe",
                          "gui_python": "runtimes/gui/python.exe", "vina_executable": "engines/vina.exe",
-                         "vina_sha256": asset["sha256"], "scientific_stages_supported": False}
+                         "vina_sha256": asset["sha256"], "package_manager_conda": str(args.conda.resolve()),
+                         "scientific_stages_supported": False}
         (app / "native-preview.json").write_text(json.dumps(configuration, indent=2) + "\n", encoding="utf-8")
         launchers = destination / "bin"
         launchers.mkdir()

@@ -252,10 +252,22 @@ file and GitHub asset digest give SHA-256
 `71cf9519087be74fa53021219ff292beb2fc05fa49e0bb6eb0e0b6b14fccbaab`.
 The download is checked before execution and checked again at the Python
 handoff. A mismatch stops; the downloaded file is not executed. The manager,
-download/provenance/logs and package cache stay under the new installation's
-`.bootstrap` directory. Python's handoff accepts only that verified bootstrap,
+download/provenance/logs and supplemental package cache stay under the new
+installation's `.bootstrap` directory. The manager itself has a fresh identity
+under `%LOCALAPPDATA%\DockingUniversal\managers`, with a matching owner record
+bound to this application installation. Python's handoff accepts only that verified bootstrap,
 not arbitrary existing installation content. No automatic deletion/upgrade is
 performed after a failed setup.
+
+The first no-prerequisite attempt (`0f07f33`, run 39177024996) stopped before
+Python because the official installer rejects spaces in its own destination.
+The candidate now uses the separate per-user manager location above; it does
+not disable that upstream guard. The main application target still accepts
+spaces and Unicode. If the user profile's default manager location itself
+contains whitespace/non-ASCII characters, an explicitly chosen, writable
+space-free ASCII `-ManagerRoot` is currently required. That profile edge case
+is not claimed as a seamless novice installation, and the candidate remains
+under native acceptance. No existing installation is reused or overwritten.
 
 The upstream [Constructor installer options](https://conda.github.io/constructor/cli-options/)
 are used with `JustMe`, `RegisterPython=0`, `AddToPath=0`, `NoRegistry=1` and
