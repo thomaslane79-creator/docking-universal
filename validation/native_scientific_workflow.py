@@ -19,6 +19,7 @@ import sys
 import tarfile
 import time
 import urllib.request
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "libexec"))
@@ -171,6 +172,11 @@ def main():
             command_runner=lambda command: run("protocol_report", command)))
         if not outputs.report.read_bytes().startswith(b"%PDF-"):
             raise ValueError("Protocol renderer did not produce a PDF")
+        with zipfile.ZipFile(outputs.bundle) as package:
+            manifest = json.loads(package.read("bundle_manifest.json"))
+        if "\\" in manifest["protocol"] or any("\\" in item["path"] for item in manifest["files"]):
+            raise ValueError("Native protocol bundle does not use cross-platform archive paths")
+        state["portable_bundle_paths"] = True
         protocol_figures = json.loads((request.output_directory / "report/report_figure_manifest.json").read_text(encoding="utf-8"))["outputs"]
         expected = {"cavity_panel_A_selection.png", "cavity_panel_B_structure.png", "cavity_selected_box.png", "cavity_panels_AB.png"}
         if not expected.issubset({Path(path).name for path in protocol_figures}) or not all(Path(path).is_file() for path in protocol_figures):
@@ -193,6 +199,7 @@ def main():
                 raise ValueError("Official Windows Vina checksum mismatch")
             engine = out / asset["filename"]; engine.write_bytes(data)
         os.environ["DOCKING_UNIVERSAL_VINA"] = str(engine)
+        state["ligand_tool_discovery"] = {name: shutil.which(name) for name in ("obabel", "mk_prepare_ligand.py", "mk_prepare_ligand.py.exe", "mk_prepare_ligand.exe")}
         screen = out / "Screening — native"
         stage("ligand_states_docking_clusters_interactions_and_report", lambda: run("screen", [sys.executable,
             ROOT / "libexec/docking-universal-run.py", "--mode", "screen", "--protocol", outputs.bundle,
@@ -229,7 +236,7 @@ def main():
                 location = re.match(r'\s*File "([^"]+)", line (\d+), in ([\w<>]+)', line)
                 if location:
                     locations.append({"file": Path(location.group(1)).name, "line": int(location.group(2)), "function": location.group(3)})
-                if re.match(r"^(?:ModuleNotFoundError|ImportError|OSError|FileNotFoundError|PermissionError|UnicodeEncodeError|UnicodeDecodeError|TypeError):|^Error: (?:Could not|Invalid|A JNI)|^Exception in thread|^java\.lang\.|^# There is insufficient memory", line):
+                if re.match(r"^(?:ModuleNotFoundError|ImportError|OSError|FileNotFoundError|PermissionError|UnicodeEncodeError|UnicodeDecodeError|TypeError|AttributeError):|^Error: (?:Could not|Invalid|A JNI)|^Exception in thread|^java\.lang\.|^# There is insufficient memory", line):
                     diagnostics.append({"log_name": path.name, "runtime_exception": line[:700]})
         state["runtime_diagnostics"] = diagnostics[-10:]
         state["traceback_locations"] = locations[-12:]

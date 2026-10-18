@@ -8,6 +8,7 @@ replaceable scientific executables at explicit subprocess boundaries.
 from __future__ import annotations
 
 import os
+import importlib.util
 import re
 import shutil
 import subprocess
@@ -59,6 +60,7 @@ class LigandOptions:
     charge_model: str = "gasteiger"
     prepare_ligand: Path | None = None
     obabel: Path | None = None
+    native_meeko_module: bool = False
 
 
 @dataclass(frozen=True)
@@ -125,9 +127,16 @@ def validate_and_resolve(options: LigandOptions, environment: Mapping[str, str])
     if options.backend not in ("auto", "meeko", "adfr"):
         raise LigandUsageError("ERROR: --backend must be auto, meeko, or adfr")
 
-    if options.backend == "auto":
+    if (os.name == "nt" and options.backend in {"auto", "meeko"}
+            and options.prepare_ligand is None and importlib.util.find_spec("meeko") is not None):
+        # Use the known scientific interpreter, not a distlib/Conda launcher
+        # name or file association. Explicit custom commands remain untouched.
+        options.backend = "meeko"
+        options.prepare_ligand = Path(sys.executable)
+        options.native_meeko_module = True
+    elif options.backend == "auto":
         if options.prepare_ligand:
-            options.backend = "meeko" if options.prepare_ligand.name == "mk_prepare_ligand.py" else "adfr"
+            options.backend = "meeko" if options.prepare_ligand.name.lower() in {"mk_prepare_ligand.py", "mk_prepare_ligand.py.exe", "mk_prepare_ligand.exe"} else "adfr"
         else:
             meeko = locate_script_tool("mk_prepare_ligand.py", path=environment.get("PATH"))
             options.backend = "meeko" if meeko else "adfr"
@@ -252,7 +261,12 @@ def prepare_ligands(
                 ]
                 if options.target_engines == "qvinaw":
                     command.append("--rigid_macrocycles")
-                failed_stage = _run(script_command(command[0], *command[1:])) != 0
+                if options.native_meeko_module:
+                    command = [sys.executable, "-m", "meeko.cli.mk_prepare_ligand", *command[1:]]
+                else:
+                    command = script_command(command[0], *command[1:])
+                with (work_dir / f"{compound_id}_meeko.log").open("w", encoding="utf-8") as log:
+                    failed_stage = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT).returncode != 0
                 warning = "Meeko ligand preparation"
             else:
                 failed_stage = _run(

@@ -293,7 +293,7 @@ def create_bundle(
                         if structural_root else evidence / source.name,
                     )
                     evidence_files.append({
-                        "path": str(destination.relative_to(packaged_control)),
+                        "path": destination.relative_to(packaged_control).as_posix(),
                         "sha256": sha256(destination),
                     })
 
@@ -338,7 +338,7 @@ def create_bundle(
         if source_ligand:
             retained = _copy(source_ligand, packaged_control / "00_inputs" / source_ligand.name)
             evidence_files.append({
-                "path": str(retained.relative_to(packaged_control)),
+                "path": retained.relative_to(packaged_control).as_posix(),
                 "sha256": sha256(retained),
             })
 
@@ -356,13 +356,13 @@ def create_bundle(
         for path in sorted(packaged_control.glob("**/*")):
             if path.is_file():
                 manifest_files.append({
-                    "path": str(path.relative_to(root)), "sha256": sha256(path),
+                    "path": path.relative_to(root).as_posix(), "sha256": sha256(path),
                 })
         (root / "bundle_manifest.json").write_text(json.dumps({
             "schema_name": "docking-universal-protocol-bundle",
             "schema_version": 1,
             "protocol_type": kind,
-            "protocol": str(bundled_protocol.relative_to(root)),
+            "protocol": bundled_protocol.relative_to(root).as_posix(),
             "files": manifest_files,
         }, indent=2) + "\n")
         output.parent.mkdir(parents=True, exist_ok=True)
