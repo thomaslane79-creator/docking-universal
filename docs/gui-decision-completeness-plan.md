@@ -7,6 +7,11 @@ then integrate the separately validated scientific runtime. Preserve no-admin,
 no-PATH/no-system-Python-change and fresh-target safety. Test with hidden hosted
 dependencies; do not call that a pristine consumer Windows VM or enable the
 unfinished scientific desktop merely because downloads/installations succeed.
+The private Windows bootstrap gate now passes at `f8df0ea` (run 39177346823),
+including hidden prerequisites, real private-manager setup, installed Qt/host,
+existing-target/PATH checks and Vina repeats. Full scientific installer/desktop
+integration and the documented special-profile manager-folder edge case remain
+to finish; this is not a complete novice Windows scientific release.
 
 Native Windows scientific candidate gate (2026-10-18): public PDB/mmCIF
 Reduce2/Meeko/P2Rank preparation, protocol PDF/bundle, synthetic-ligand Vina

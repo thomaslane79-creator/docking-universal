@@ -225,13 +225,13 @@ its own explicit review, not an unrecorded package substitution.
 
 ## Dependency audit
 
-### Native bootstrap under validation
+### Native preview bootstrap acceptance
 
 `install-windows.ps1` is a **development bootstrap, not the finished installer**.
 It requires native x64 Windows, initial Internet access, a new destination
 directory and explicit preview approval, but no preinstalled Python, Conda or
-Git. The default now bootstraps a private Miniforge; this new path is under
-native acceptance. An explicitly supplied `-CondaExe` remains an expert option,
+Git. The default now bootstraps a private Miniforge; this path passed native
+acceptance at `f8df0ea`. An explicitly supplied `-CondaExe` remains an expert option,
 not the default. It creates two isolated Python 3.12
 bootstrap environments (host and Qt6 desktop), copies application code/bundled
 assets only, and checksum-verifies the official Windows Vina 1.2.7 executable.
@@ -251,7 +251,7 @@ pinned in `dependencies/miniforge-windows.json`. Both the published checksum
 file and GitHub asset digest give SHA-256
 `71cf9519087be74fa53021219ff292beb2fc05fa49e0bb6eb0e0b6b14fccbaab`.
 The download is checked before execution and checked again at the Python
-handoff. A mismatch stops; the downloaded file is not executed. The manager,
+handoff. A mismatch stops; the downloaded file is not executed. The
 download/provenance/logs and supplemental package cache stay under the new
 installation's `.bootstrap` directory. The manager itself has a fresh identity
 under `%LOCALAPPDATA%\DockingUniversal\managers`, with a matching owner record
@@ -266,8 +266,8 @@ not disable that upstream guard. The main application target still accepts
 spaces and Unicode. If the user profile's default manager location itself
 contains whitespace/non-ASCII characters, an explicitly chosen, writable
 space-free ASCII `-ManagerRoot` is currently required. That profile edge case
-is not claimed as a seamless novice installation, and the candidate remains
-under native acceptance. No existing installation is reused or overwritten.
+is not claimed as a seamless novice installation. No existing installation is
+reused or overwritten.
 
 The upstream [Constructor installer options](https://conda.github.io/constructor/cli-options/)
 are used with `JustMe`, `RegisterPython=0`, `AddToPath=0`, `NoRegistry=1` and
@@ -283,6 +283,17 @@ PATH/Python registration and fail-before-mutation on an existing destination.
 The test driver still runs on a hosted Windows Server 2022 runner: this is not
 a claim that a pristine consumer Windows 10/11 VM was tested. Scientific GUI,
 interactive PyMOL and GPU remain outside bootstrap acceptance.
+
+At `f8df0ea`, the native bootstrap job in
+[run 39177346823](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39177346823)
+passes all ten recorded checks: absent Python/Conda discovery, rejection of an
+existing destination, actual private Miniforge download/install, persistent
+PATH/Python-registration checks, public PowerShell/CMD launchers, honest rejection
+of a full-install claim, Unicode host/state and failed-stage isolation, real
+installed Qt startup, and installed Vina exact same-seed repeats. The resulting
+package-manager mode is `application_owned`. Local regression checks pass 642
+Python test cases with expected platform/UI skips plus 21 shell checks.
+The failed `0f07f33` attempt remains recorded; it is not described as success.
 
 The preview exposes version, installation status, runtime inventory, desktop
 startup and prepared-input Vina CLI only. `check-install --full` **fails** because

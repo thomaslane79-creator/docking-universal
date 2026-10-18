@@ -15,6 +15,15 @@ Status: active scope-control record, established 2026-09-24.
 - This is installer packaging, not new GUI/scientific behavior. The complete
   owned scientific runtime and desktop/viewer integration remain explicit gates;
   do not claim that bootstrapping Python makes all Windows features available.
+- Native bootstrap acceptance passed at `f8df0ea` (Windows Server 2022, run
+  39177346823): no Python/Conda on the installer PATH, real checksum-pinned
+  private Miniforge installation, existing-target rejection, unchanged persistent
+  PATH/Python-registration checks, installed launchers/Qt-host and identical
+  Vina repeats. Local regressions pass 642 Python cases (expected skips) and
+  21 shell checks. The first attempt failed Miniforge's space restriction;
+  the fix uses an owned per-user manager identity, not a disabled guard.
+  Profiles with whitespace/non-ASCII still need an explicit supported manager
+  folder. Complete scientific installer/desktop/viewer acceptance is not implied.
 
 ### Older-macOS and cross-platform compatibility (authorized 2026-10-18)
 

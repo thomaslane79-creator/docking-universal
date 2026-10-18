@@ -60,12 +60,15 @@ not the finished scientific installer. It uses fresh isolated runtimes and
 rejects unported preparation/report stages. The Windows pipe-transport fix and
 native prefix handling are documented in the compatibility record above.
 The bootstrap's new default downloads a checksum-pinned private Miniforge, so
-preinstalled Python, Conda or Git is not required. This no-prerequisite path is
-under native acceptance. From an extracted source ZIP, `install-windows.cmd`
+preinstalled Python, Conda or Git is not required. The bootstrap passed native
+Windows testing with Python/Conda absent from its starting PATH. From an extracted source ZIP, `install-windows.cmd`
 offers an explicit preview confirmation; initial Internet access is required.
-The private manager does not register Python, create Miniforge shortcuts, add
-to PATH or update an existing environment. Full scientific-runtime packaging
+The private manager does not register Python, create Miniforge shortcuts, modify
+persistent PATH or update an existing environment. Full scientific-runtime packaging
 and desktop integration are still separate from this preview bootstrap.
+Profiles containing whitespace/non-ASCII currently need a space-free ASCII
+`-ManagerRoot`; the application folder itself can contain spaces/Unicode. See
+the compatibility record for the upstream restriction and test boundaries.
 The scientific Windows port additionally audits a path-quoting repair to one
 Conda-forge OpenCL activation-script build, retaining the original scripts and
 hashes without modifying DLLs or scientific versions. Native process-tree
