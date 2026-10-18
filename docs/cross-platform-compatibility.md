@@ -11,7 +11,7 @@ scientific defaults remain unchanged while the port is developed.
 | Apple Silicon, current Mac | Fresh installer, embedded/full PyMOL and accepted AD4 build tested | Identical results on all Apple GPUs/drivers |
 | macOS 15 candidate GPU host | Same patched source compiled with minimum target 15.0; kernel unchanged; two synthetic repeats exactly match the accepted build on the current Mac | Older-OS native GPU execution and scientific acceptance; candidate is not activated |
 | Linux | Existing Unix installer/environment and CI path; restored a failing test import | Complete release-level desktop/GPU acceptance across distributions |
-| Native Windows | Native process-lock implementation, atomic-state tests and local browser discovery added; Windows CI runs native Python, not WSL/Git Bash | Complete native installer, preparation/docking/report journey, embedded PyMOL or GPU acceptance |
+| Native Windows | Native process locks, atomic-state/browser-discovery contracts and synthetic prepared-input Vina CPU adapter tests passed on Windows Server 2022/x64; native Python, not WSL/Git Bash | Complete native installer, preparation/docking/report journey, embedded PyMOL or GPU acceptance |
 
 The minimum operating-system field in an executable is a build setting, not a
 proof of driver compatibility. The accepted Mac GPU runtime still requires
@@ -92,6 +92,11 @@ existing Python docking adapter twice using synthetic prepared inputs, fixed
 seed and paths with spaces. It does not depend on WSL/Git Bash, does not add a
 half-working Windows installer, and does not upload structures or pose outputs.
 This tests the native CPU adapter, not preparation, the full GUI or GPU support.
+The test **passed** on native Windows Server 2022/x64 in
+[CI run 39132054556](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39132054556):
+both fixed-seed runs retained three finite-energy poses and their output files
+were byte-identical. Input/output paths included spaces. This establishes
+neither native Windows ARM support nor the unfinished full application journey.
 
 The audit script is `validation/audit_platform_dependencies.py`; the local record
 is `validation/runs/cross-platform-compatibility-20261018/dependency-builds.json`.
@@ -101,6 +106,9 @@ It accesses public package metadata only and installs nothing.
 
 - Local full `make test` passed after correcting the site-review fixture import
   that had failed Ubuntu CI. This corrects test loading, not scientific logic.
+- CI run 39131637146 completed successfully, including full CLI checks and
+  real-tool integration validation on both Ubuntu and macOS. Production source
+  was unchanged by the subsequent standalone Windows adapter-test addition.
 - Native Windows/Ubuntu 22.04/macOS 15 CI runs the standard-library-only locking,
   state-transaction and browser-discovery contracts. These are foundational
   tests, not a full native Windows scientific installation.
@@ -109,6 +117,9 @@ It accesses public package metadata only and installs nothing.
   kernels/driver correctness remain a separate acceptance gate.
 - CI uses standard public-repository runners, no paid GPU runner. Test logs/build
   metadata are retained; no local study or structural output is uploaded.
+- All 697 protected working installation/configuration/study files remain
+  hash-identical. None of this milestone is installed into the working app;
+  changes are checkpointed on the existing feature branch, not merged to main.
 
 References: [Microsoft CRT byte-range locks](https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/locking),
 [Apple deployment targets](https://developer.apple.com/documentation/xcode/running-code-on-a-specific-version),

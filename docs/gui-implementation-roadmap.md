@@ -9,6 +9,13 @@ installation and dependency gaps and extend bounded native CI/compatibility
 documentation. Preserve scientific method/approval boundaries and distinguish
 WSL2 from native Windows support. No unrelated GUI features are in scope.
 
+First compatibility milestone passed native Windows safety and prepared-input
+Vina adapter checks, native macOS 15 build/loading, and Ubuntu/macOS scientific
+integration CI. Next: native Windows installer/entry point and preparation
+orchestration, then the full desktop/report journey and separate GPU acceptance.
+No full native Windows support or older-Mac GPU activation is claimed. Details:
+`docs/cross-platform-compatibility.md`.
+
 ### Bounded Mac runtime packaging (2026-10-17)
 
 Close only the two clean-install gaps: a relocatable pinned embedded PyMOL

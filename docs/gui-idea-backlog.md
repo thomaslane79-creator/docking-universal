@@ -16,6 +16,13 @@ Status: active scope-control record, established 2026-09-24.
   uses POSIX shell programs; audit native dependencies, add native Windows safety
   and CI foundations, and record the remaining port milestones. Do not silently
   substitute WSL or describe an unfinished installer as native support.
+- First milestone passed: native Windows/Ubuntu/macOS 15 locking/state/browser
+  contracts; a macOS 15 candidate build/loading check; native Windows Vina 1.2.7
+  prepared-input CPU adapter with exact same-seed repeats and paths with spaces;
+  and Ubuntu/macOS full CLI plus real-tool integration CI. Native Windows full
+  installer/preparation/desktop/report acceptance remains unfinished; the older
+  Mac GPU candidate is not activated without older-OS GPU acceptance. See
+  `docs/cross-platform-compatibility.md` and CI runs 39131637146 / 39132054556.
 
 ### Bounded Mac runtime packaging (authorized 2026-10-17)
 
