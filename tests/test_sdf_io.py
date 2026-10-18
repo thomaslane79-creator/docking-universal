@@ -22,6 +22,11 @@ class UnicodeSdfTests(unittest.TestCase):
         for index, atom in enumerate(molecule.GetAtoms(), 1):
             atom.SetAtomMapNum(index)
         with tempfile.TemporaryDirectory() as temporary:
+            baseline = Path(temporary) / "baseline.sdf"
+            with Chem.SDWriter(str(baseline)) as original_writer:
+                original_writer.SetProps(["source"])
+                original_writer.write(molecule)
+            expected = list(Chem.SDMolSupplier(str(baseline), removeHs=False))[0]
             root = Path(temporary) / "Native — Ω 化合物"
             root.mkdir()
             path = root / "ligand.sdf"
@@ -31,7 +36,10 @@ class UnicodeSdfTests(unittest.TestCase):
                     writer.write(molecule)
                 restored = list(read_sdf(path, removeHs=False))[0]
                 write_pdb(restored, root / "ligand.pdb")
-            self.assertEqual(Chem.MolToSmiles(restored), Chem.MolToSmiles(molecule))
+            # RDKit can assign additional tags from 3D during its ordinary SDF
+            # round trip (notably when every explicit H has a unique map).
+            # Compare the existing reader/writer result, not a pre-I/O tag set.
+            self.assertEqual(Chem.MolToSmiles(restored), Chem.MolToSmiles(expected))
             self.assertEqual(restored.GetNumAtoms(), molecule.GetNumAtoms())
             self.assertEqual(restored.GetProp("source"), "fixture")
             self.assertEqual(restored.GetProp("_Name"), "Ligand Ω")
