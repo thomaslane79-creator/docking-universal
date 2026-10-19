@@ -32,8 +32,17 @@ All eight general CI jobs pass in
 including both Linux/macOS CLI jobs and all three native safety platforms.
 The source scientific preparation-through-report gate also passes in
 [39341763459](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39341763459);
-the separate fresh-install real-desktop gate in that run is still pending at
-this documentation checkpoint. The earlier broad Qt test invocation omitted
+the separate fresh-install real-desktop gate in that run **failed** at the
+preparation-to-site-review wait (301.8 seconds). All eleven preceding outer
+checks and the five installed scientific stages passed again, including the
+Unicode Java comparison and local interactions/reports. No failure dialog or
+Qt callback error was captured, but the first status schema did not distinguish
+a pending chemical intervention from orchestration failure; it cannot establish
+the root cause. The follow-up records bounded job/decision/exception-type
+metadata, recognizes failed orchestration/intervention immediately, and keeps
+raw diagnostics and scientific outputs local. The native desktop remains
+unaccepted; increasing the timeout is not the proposed fix.
+The earlier broad Qt test invocation omitted
 the tests import path and failed to load one test module; the corrected
 invocation runs all 165 successfully. No product change was needed for that
 test-harness invocation mistake.

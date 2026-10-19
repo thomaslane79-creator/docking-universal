@@ -16,6 +16,26 @@ from docking_universal.state import JsonStudyStore
 
 @unittest.skipIf(QT_IMPORT_ERROR is not None, "selected Qt 6 binding is unavailable")
 class DesktopWorkspaceTests(unittest.TestCase):
+    def test_native_fresh_study_button_submits_preparation_without_a_viewer(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from docking_universal.windows_desktop import CAPABILITIES
+        StudyController(self.store).create_study('fresh-native', 'Fresh native fixture')
+        client = SimpleNamespace(runtime=CAPABILITIES, connected=True, request=Mock())
+        window = StudyWindow(self.store, 'fresh-native', settings=self.settings, host_client=client)
+        try:
+            source = self.root / 'fixture.pdb'
+            source.write_text('ATOM      1  CA  GLY A   1       0.000   0.000   0.000  1.00 10.00           C\n')
+            window.input_pdb.setText(str(source))
+            window.output_directory.setText(str(self.root / 'native-output'))
+            self.assertTrue(window.start_preparation_button.isEnabled())
+            with patch.object(window, 'prepare_geostd_library', return_value=str(self.root)):
+                window.start_preparation_button.click()
+            self.assertEqual(client.request.call_args.args[1], 'start_receptor_preparation')
+            self.assertEqual(client.request.call_args.args[2]['site_mode'], 'pockets')
+        finally:
+            window.close()
+
     def test_native_capabilities_keep_unaccepted_methods_disabled_after_refresh(self):
         from types import SimpleNamespace
         from docking_universal.windows_desktop import CAPABILITIES

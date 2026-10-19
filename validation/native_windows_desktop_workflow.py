@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 import sys
 import time
@@ -112,8 +113,12 @@ def main():
                 if dialogs or callback_errors:
                     raise GateError("Qt action raised a failure dialog or callback exception; detail retained locally")
                 state = store.load(study)
+                if state.completion_status.value == "failed":
+                    raise GateError("Scientific desktop orchestration failed; diagnostics retained locally")
                 if any(job.status.value == "failed" for job in state.jobs):
                     raise GateError("Scientific desktop job failed; scientific diagnostics retained locally")
+                if any(d.kind != "select_pockets" for d in state.pending_decisions):
+                    raise GateError("Native preparation stopped for an unaccepted scientific intervention; decision preserved")
                 if predicate(state):
                     window.refresh()
                     return state
@@ -152,6 +157,8 @@ def main():
             window.input_pdb.setText(str(structure))
             window.output_directory.setText(str(out / "Preparation Ω"))
             window.study_setup_panel.pdb_evidence.setChecked(False)
+            if not window.start_preparation_button.isEnabled():
+                raise GateError("Fresh native preparation button is disabled before submission")
             window.start_preparation_button.click()
             state = wait_for(lambda s: any(d.kind == "select_pockets" for d in s.pending_decisions))
             if state.selected_pocket_ids or state.approvals:
@@ -263,6 +270,34 @@ def main():
                                  for frame in traceback.extract_tb(exc.__traceback__)],
                       callback_error_types=callback_errors, failure_dialog_count=len(dialogs))
         (out / "exception.local.log").write_text(traceback.format_exc(), encoding="utf-8")
+        if 'store' in locals():
+            status['study_states'] = [{
+                'completion_status': s.completion_status.value,
+                'jobs': [{'stage': j.stage, 'status': j.status.value,
+                          'process_identity_recorded': j.process_id is not None} for j in s.jobs],
+                'pending_kinds': [d.kind for d in s.pending_decisions],
+                'orchestration_errors': [{'type': e.technical.get('error_type'),
+                                          'locations': e.technical.get('error_locations', [])} for e in s.events
+                                         if e.technical.get('component') == 'ProtocolWorkflowRunner'],
+            } for s in store.list_studies()]
+        exceptions, locations = set(), []
+        for path in out.rglob('*.log'):
+            for line in path.read_text(encoding='utf-8', errors='replace').splitlines():
+                match = re.match(r'^(\w*(?:Error|Exception)):', line)
+                if match:
+                    exceptions.add(match.group(1))  # type only, never message/coordinates
+                match = re.match(r'\s*File "([^"]+)", line (\d+), in ([\w<>]+)', line)
+                if match:
+                    locations.append({'file': Path(match.group(1)).name,
+                                      'line': int(match.group(2)), 'function': match.group(3)})
+        status['runtime_exception_types'] = sorted(exceptions)
+        status['runtime_traceback_locations'] = locations[-16:]
+        status['preparation_attempts'] = []
+        for path in out.rglob('native-preparation.json'):
+            record = json.loads(path.read_text(encoding='utf-8'))
+            status['preparation_attempts'].append({'status': record.get('status'),
+                'steps': [{key: item.get(key) for key in ('step', 'returncode', 'accepted')}
+                          for item in record.get('attempts', [])]})
     finally:
         if client:
             client.close()

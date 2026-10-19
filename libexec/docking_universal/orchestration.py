@@ -192,7 +192,7 @@ class ProtocolWorkflowRunner:
                 )
                 self._register_control_outputs(study_id, output, result.status.value)
             except Exception as exc:
-                self._record_orchestration_failure(study_id, str(exc))
+                self._record_orchestration_failure(study_id, exc)
             finally:
                 with self._guard:
                     self._cancellations.pop(study_id, None)
@@ -415,7 +415,7 @@ class ProtocolWorkflowRunner:
                         self._collect_pdb_pocket_evidence(study_id, plan)
                     self._start_review(study_id, plan.output_root)
             except Exception as exc:
-                self._record_orchestration_failure(study_id, str(exc))
+                self._record_orchestration_failure(study_id, exc)
             finally:
                 with self._guard:
                     self._cancellations.pop(study_id, None)
@@ -541,7 +541,7 @@ class ProtocolWorkflowRunner:
                         self._collect_pdb_pocket_evidence(study_id, plan)
                     self._start_review(study_id, plan.output_root)
             except Exception as exc:
-                self._record_orchestration_failure(study_id, str(exc))
+                self._record_orchestration_failure(study_id, exc)
             finally:
                 try:
                     latest = self.controller.get_study(study_id)
@@ -733,7 +733,7 @@ class ProtocolWorkflowRunner:
                 self._start_review(study_id, plans["HIE"].output_root)
                 final_status = "completed"
             except Exception as exc:
-                self._record_orchestration_failure(study_id, str(exc))
+                self._record_orchestration_failure(study_id, exc)
             finally:
                 def finish(latest) -> None:
                     sensitivity = latest.workflow_data.get("receptor_state_sensitivity")
@@ -922,7 +922,7 @@ class ProtocolWorkflowRunner:
                 if result.status.value == "completed":
                     self._register_final_outputs(study_id, paths)
             except Exception as exc:
-                self._record_orchestration_failure(study_id, str(exc))
+                self._record_orchestration_failure(study_id, exc)
             finally:
                 with self._guard:
                     self._cancellations.pop(study_id, None)
@@ -1055,7 +1055,7 @@ class ProtocolWorkflowRunner:
                 )
                 self._register_screening_outputs(study_id, output, result.status.value)
             except Exception as exc:
-                self._record_orchestration_failure(study_id, str(exc))
+                self._record_orchestration_failure(study_id, exc)
             finally:
                 with self._guard:
                     self._cancellations.pop(study_id, None)
@@ -1122,7 +1122,7 @@ class ProtocolWorkflowRunner:
                     validate_pose_interaction_outputs(plan)
                     self._register_pose_interaction(study_id, plan)
             except Exception as exc:
-                self._record_orchestration_failure(study_id, str(exc))
+                self._record_orchestration_failure(study_id, exc)
             finally:
                 with self._guard:
                     self._cancellations.pop(study_id, None)
@@ -1299,7 +1299,8 @@ class ProtocolWorkflowRunner:
                 ))
         self.controller.store.update(study_id, mutation)
 
-    def _record_orchestration_failure(self, study_id: str, error: str) -> None:
+    def _record_orchestration_failure(self, study_id: str, error: Exception | str) -> None:
+        import traceback
         state = self.controller.get_study(study_id)
         # JobService already recorded process failures. This path records only
         # orchestration failures after a successful external stage.
@@ -1309,6 +1310,9 @@ class ProtocolWorkflowRunner:
         state.current_stage = None
         StudyController._event(
             state, EventType.STAGE_FAILED, "GUI protocol orchestration failed",
-            explanation=error, technical={"component": "ProtocolWorkflowRunner"}, mandatory=True,
+            explanation=str(error), technical={"component": "ProtocolWorkflowRunner",
+                "error_type": type(error).__name__ if isinstance(error, Exception) else "unclassified",
+                "error_locations": [{"file": Path(frame.filename).name, "function": frame.name, "line": frame.lineno}
+                    for frame in traceback.extract_tb(error.__traceback__)[-4:]] if isinstance(error, Exception) else []}, mandatory=True,
         )
         self.controller.store.save(state)

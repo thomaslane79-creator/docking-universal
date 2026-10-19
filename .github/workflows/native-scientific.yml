@@ -14,6 +14,7 @@ on:
       - libexec/docking-universal-prepare-native.py
       - libexec/docking-universal-application-host.py
       - libexec/docking_universal/host.py
+      - libexec/docking_universal/orchestration.py
       - libexec/docking_universal/processes.py
       - libexec/docking_universal/gui/desktop.py
       - libexec/docking_universal/gui/workflow_panels.py
