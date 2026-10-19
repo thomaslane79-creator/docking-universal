@@ -101,6 +101,8 @@ def main():
     if platform.system() != "Windows" or platform.machine().lower() not in {"amd64", "x86_64"}:
         parser.error("This preview requires native x64 Windows, not an emulated platform")
     destination = args.destination.resolve()
+    if not args.bootstrap_only and not args.owned_manager and not str(destination).isascii():
+        parser.error("The expert existing-Conda scientific path needs an ASCII destination for pinned Java 17. Use the default private-manager installer to keep a Unicode application folder. Nothing was installed.")
     # A fresh directory is mandatory. Failed/old installs are inspectable and
     # never removed automatically; reruns use another destination.
     manager = reserve_destination(destination, args.conda, owned_manager=args.owned_manager, manager_root=args.manager_root)
@@ -135,10 +137,18 @@ def main():
         if not args.bootstrap_only:
             sys.path.insert(0, str(app))
             from docking_universal.windows_scientific_install import install_scientific_runtime
-            receipt = install_scientific_runtime(conda=args.conda, prefix=destination / "runtimes/scientific",
+            # The pinned Windows Java 17 launcher cannot locate java.dll from
+            # a non-ASCII installation prefix (native acceptance 114ec66).
+            # Keep its entire unchanged scientific environment under OUR fresh
+            # private manager identity, never a foreign user's Conda base.
+            science_prefix = ((Path(manager["prefix"]) / "runtimes/scientific")
+                              if manager["mode"] == "application_owned" else destination / "runtimes/scientific")
+            if manager["mode"] == "application_owned":
+                configuration["scientific_manager"] = {key: manager[key] for key in ("prefix", "install_id", "asset")}
+            receipt = install_scientific_runtime(conda=args.conda, prefix=science_prefix,
                 app=app, source_assets=app / "installation-assets", work=destination / ".bootstrap/scientific-setup")
             receipt_path = destination / ".bootstrap/scientific-setup/scientific-install.json"
-            configuration.update(scientific_python="runtimes/scientific/python.exe",
+            configuration.update(scientific_python=str(science_prefix / "python.exe"),
                                  scientific_dependencies_installed=True,
                                  scientific_receipt=str(receipt_path.relative_to(destination).as_posix()),
                                  scientific_receipt_sha256=hashlib.sha256(receipt_path.read_bytes()).hexdigest())

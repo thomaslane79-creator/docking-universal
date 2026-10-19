@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 
 from .runtime_layout import executable_directories
 
@@ -22,11 +23,34 @@ STAGES = {
 }
 
 
+def owned_scientific_python(app: Path, configuration: dict):
+    """Only this application's owned manager may host an external runtime."""
+    root = app.parent.resolve()
+    manager = configuration.get("scientific_manager")
+    expected = root / "runtimes/scientific/python.exe"
+    if manager:
+        prefix = Path(manager["prefix"]).resolve()
+        identity = manager["install_id"]
+        if not re.fullmatch(r"[a-f0-9]{32}", identity) or prefix.name != identity:
+            raise ValueError("Invalid owned scientific manager identity")
+        owner = json.loads((prefix / "docking-universal-owner.json").read_text(encoding="utf-8"))
+        if (owner.get("schema") != "docking-universal-private-manager-v1"
+                or Path(owner.get("installation", "")).resolve() != root
+                or owner.get("install_id") != identity or owner.get("sha256") != manager["asset"]["sha256"]
+                or Path(configuration["package_manager_conda"]).resolve() != (prefix / "Scripts/conda.exe").resolve()):
+            raise ValueError("Scientific manager belongs to another installation or its ownership record changed")
+        expected = prefix / "runtimes/scientific/python.exe"
+    selected = (root / configuration["scientific_python"]).resolve()
+    if selected != expected.resolve():
+        raise ValueError("Scientific interpreter escaped its exact owned runtime")
+    return selected
+
+
 def scientific_environment(app: Path, configuration: dict, inherited: dict):
     root = app.parent.resolve()
     receipt_path = (root / configuration["scientific_receipt"]).resolve()
-    python = (root / configuration["scientific_python"]).resolve()
-    if not receipt_path.is_relative_to(root) or not python.is_relative_to(root):
+    python = owned_scientific_python(app, configuration)
+    if not receipt_path.is_relative_to(root):
         raise ValueError("Scientific runtime receipt escaped the owned installation")
     if hashlib.sha256(receipt_path.read_bytes()).hexdigest() != configuration["scientific_receipt_sha256"]:
         raise ValueError("Scientific dependency receipt changed; no job was started")

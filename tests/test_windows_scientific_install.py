@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from docking_universal.windows_scientific_install import extract_p2rank, install_scientific_runtime
-from docking_universal.windows_scientific_runtime import require_vina_options, stage_command
+from docking_universal.windows_scientific_runtime import owned_scientific_python, require_vina_options, stage_command
 
 
 class ScientificInstallationTests(unittest.TestCase):
@@ -93,6 +93,25 @@ class InstalledScientificDispatcherTests(unittest.TestCase):
         (self.root / self.configuration["scientific_receipt"]).write_text("changed")
         with self.assertRaisesRegex(ValueError, "receipt changed"):
             stage_command(self.app, self.configuration, "dock", [], {})
+
+    def test_external_scientific_prefix_requires_exact_private_manager_ownership(self):
+        manager = self.root.parent / ("a" * 32)
+        manager.mkdir()
+        owner = {"schema": "docking-universal-private-manager-v1", "installation": str(self.root),
+                 "install_id": manager.name, "sha256": "b" * 64}
+        (manager / "docking-universal-owner.json").write_text(json.dumps(owner), encoding="utf-8")
+        expected = manager / "runtimes/scientific/python.exe"
+        self.configuration.update(scientific_manager={"prefix": str(manager), "install_id": manager.name,
+            "asset": {"sha256": owner["sha256"]}}, scientific_python=str(expected),
+            package_manager_conda=str(manager / "Scripts/conda.exe"))
+        self.assertEqual(owned_scientific_python(self.app, self.configuration), expected)
+        owner["installation"] = str(self.root / "some-other-application")
+        (manager / "docking-universal-owner.json").write_text(json.dumps(owner), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "another installation"):
+            owned_scientific_python(self.app, self.configuration)
+        self.configuration.pop("scientific_manager")
+        with self.assertRaisesRegex(ValueError, "exact owned runtime"):
+            owned_scientific_python(self.app, self.configuration)
 
     def test_explicit_other_engine_or_custom_override_never_becomes_vina(self):
         for options in (["--engine", "adgpu"], ["--engine=qvinaw"], ["--vina-backend=api"],

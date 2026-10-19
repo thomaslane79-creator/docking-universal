@@ -71,6 +71,11 @@ The next installer candidate now installs the pinned scientific stack by default
 the local diagram renderer. Its **installed-code** Windows preparation/screening/
 report gate is pending; dependency installation alone does not enable scientific
 GUI controls or claim interactive PyMOL/GPU support. No existing runtime is updated.
+Pinned Windows Java 17 fails from a non-ASCII installation prefix, so the
+candidate keeps its scientific runtime under its verified private ASCII-safe
+manager identity; the application and study folders may still use Unicode.
+This placement fix is undergoing native revalidation. See the compatibility
+record for the failed attempts and exact ownership checks.
 Profiles containing whitespace/non-ASCII currently need a space-free ASCII
 `-ManagerRoot`; the application folder itself can contain spaces/Unicode. See
 the compatibility record for the upstream restriction and test boundaries.

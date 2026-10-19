@@ -99,10 +99,14 @@ def main(arguments=None, *, app: Path | None = None) -> int:
             engine = app.parent / configuration["vina_executable"]
             if hashlib.sha256(engine.read_bytes()).hexdigest() != configuration["vina_sha256"]:
                 raise ValueError("Pinned native Vina checksum mismatch")
+            if configuration.get("scientific_dependencies_installed"):
+                from .windows_scientific_runtime import scientific_environment
+                scientific_environment(app, configuration, os.environ)
+                print("Owned scientific dependency receipt: verified. Scientific GUI/viewer acceptance: NOT COMPLETE.")
             print("Bootstrap files: present. Full scientific installation: NOT COMPLETE.")
             return 1 if "--full" in arguments else 0
         command_line, environment = launch_command(app, configuration, arguments)
         return subprocess.call(command_line, env=environment, shell=False)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, KeyError, TypeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2

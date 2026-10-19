@@ -145,7 +145,8 @@ def main():
         status["checks"].append("actual_installed_qt_desktop_and_host_startup")
         # Run the prepared-input adapter test using the INSTALLED Python/module
         # and pinned executable, not the repository's direct adapter path.
-        scientific_python = destination / "runtimes/scientific/python.exe" if args.with_scientific else host
+        configuration = json.loads((app / "native-preview.json").read_text(encoding="utf-8"))
+        scientific_python = destination / configuration["scientific_python"] if args.with_scientific else host
         subprocess.run([str(scientific_python), str(ROOT / "validation/native_windows_vina.py"), "--out", str(out / "vina"),
                         "--installed-entry", str(entry), "--engine", str(destination / "engines/vina.exe")],
                        env=environment, check=True, timeout=240)

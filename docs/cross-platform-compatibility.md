@@ -25,6 +25,24 @@ runtime code or repeat the source-only acceptance as an installation claim.
 interactive PyMOL remain separately disabled pending their acceptance. Existing
 Mac installs, user studies, scientific defaults and approvals are unchanged.
 
+Initial installed-code attempts `cfec140` / run 39179516393 and `114ec66` /
+39180007068 installed/imported the unchanged scientific packages but failed
+Java startup in a non-ASCII runtime prefix: `could not find java.dll`. The
+second attempt separated `java -version` from P2Rank, proving that it fails
+before P2Rank/model execution. The candidate therefore places the unchanged
+scientific Conda environment under this installation's private, ASCII-safe
+manager identity (`<manager>/runtimes/scientific`), not under a foreign Conda
+base or the Unicode-capable application folder. Runtime dispatch verifies the
+exact manager owner record, installation identity, bound application and pinned
+asset before accepting that external interpreter; arbitrary external runtimes
+are rejected. Application code, renderer, receipts and study folders remain in
+the selected application directory. The expert existing-Conda path instead
+requires an ASCII destination and rejects unsupported placement before setup.
+This placement correction is **awaiting native revalidation**, not an accepted
+Java-version/model substitution. The companion general run 39179516420 passed
+all eight jobs, including full Linux/macOS CLI/integration checks; its native
+installer failure is reported separately, not described as a CLI regression.
+
 The previously reported failed sync was run 39177024996: both CLI jobs passed;
 the Windows bootstrap alone failed on Miniforge's space-in-prefix guard. Its
 corrected run 39177346823 passed all eight jobs, including both CLI jobs.
