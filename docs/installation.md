@@ -13,13 +13,15 @@ state for reproducibility, and report problems without exposing research data.
 
 ## Recommended Conda installation
 
-The current automated installer is Unix-based. Native Windows is a required
-port under development, **not** a currently complete installer and not a WSL
-substitution. See [cross-platform status and acceptance gates](cross-platform-compatibility.md)
-before assuming that all listed dependencies or engines install on Windows.
-An explicitly opted-in `install-windows.ps1` development bootstrap is being
-validated separately. It is not the finished scientific installer: preparation,
-full screening/reports and native PyMOL/GPU acceptance remain unfinished.
+The established installation below uses the Unix installer. Native Windows has
+a separate opted-in **development preview**, not a WSL substitution or a full
+desktop release. Its default private installer now supplies Python/Conda and the
+scientific dependencies, with installed-code PDB/mmCIF preparation, Vina
+screening, local interactions and reports accepted on a native Windows runner.
+The next bounded Qt-to-scientific-host candidate is awaiting its real desktop
+workflow gate. Interactive PyMOL, known-ligand controls, other engines, consumer
+VM/profile coverage and GPU support remain separate acceptance work. See
+[cross-platform status and exact test boundaries](cross-platform-compatibility.md).
 
 On supported Apple-Silicon Macs, the installer now includes the embedded PyMOL
 runtime. `bash install.sh --with-gpu` additionally installs the pinned optional
@@ -30,8 +32,9 @@ Docking Universal uses external scientific programs as composable stages. The re
 
 P2Rank 2.5.1 is the pinned primary pocket detector on macOS, Linux, and
 Windows. The same upstream archive and prediction models are used on every
-platform; Unix launches `prank`, Windows launches `prank.bat`, and Java 17 or
-newer is required. The archive identity and SHA-256 are recorded in
+platform. Unix uses `prank`; the owned native Windows installation uses its
+verified Java 17 and UTF-8 argument adapter to invoke the unchanged upstream
+main class, without a batch-file command shell. The archive identity and SHA-256 are recorded in
 `dependencies/p2rank.json`. fpocket remains the supported fallback detector.
 
 The desktop additionally uses pinned P2Rank 2.6-alpha for **visualization only**
@@ -51,7 +54,19 @@ fixed, and no grid points or scientific detector results are changed.
 
 ### Beginner route: no Git required
 
-To try the software without learning Git first:
+For the native Windows development preview, extract the source ZIP and open
+`install-windows.cmd`. Read and approve the preview notice. The default installer
+downloads its own pinned private manager and scientific dependencies; do not
+install Python, Conda, Git, Java or Node first. It needs initial Internet access
+and a new installation folder, but does not need administrator access or change
+system Python/PATH. It must not overwrite an existing installation. Launch the
+installed `bin/docking-universal.cmd` with the desired subcommand. The optional
+expert `-BootstrapOnly` mode intentionally skips the scientific dependencies.
+Profiles with spaces/non-ASCII currently need an explicit ASCII, space-free
+`-ManagerRoot`; application and study paths may contain spaces/Unicode. Follow
+the compatibility record before treating this preview as a supported full GUI.
+
+On macOS/Linux, to try the software without learning Git first:
 
 1. Open <https://github.com/thomaslane79-creator/docking-universal>.
 2. Select **Code**, then **Download ZIP**.

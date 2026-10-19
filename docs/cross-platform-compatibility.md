@@ -25,6 +25,19 @@ Fixture approvals are not authority for user studies. The native gate is pending
 interactive PyMOL/GPU are still separate and not enabled by this candidate.
 Only small status metadata may leave the runner, never scientific outputs/logs.
 
+Runtime candidate `41c3cd1` passes 658 local Python cases and 21 shell checks
+(expected platform/Qt skips), plus 165 GUI cases in the separate Qt6 runtime.
+All eight general CI jobs pass in
+[39341763606](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39341763606),
+including both Linux/macOS CLI jobs and all three native safety platforms.
+The source scientific preparation-through-report gate also passes in
+[39341763459](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39341763459);
+the separate fresh-install real-desktop gate in that run is still pending at
+this documentation checkpoint. The earlier broad Qt test invocation omitted
+the tests import path and failed to load one test module; the corrected
+invocation runs all 165 successfully. No product change was needed for that
+test-harness invocation mistake.
+
 ### Installed scientific-runtime gate (2026-10-18, passed at 492de40)
 
 The next Windows installer candidate installs the same scientific package pins
