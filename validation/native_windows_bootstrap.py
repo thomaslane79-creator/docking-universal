@@ -174,7 +174,7 @@ def main():
             receipt = destination / ".bootstrap/scientific-setup/scientific-install.json"
             if receipt.is_file():
                 dependency_status = json.loads(receipt.read_text(encoding="utf-8"))
-                status["scientific_dependency_setup"] = {key: dependency_status.get(key) for key in ("status", "error", "steps", "imports")}
+                status["scientific_dependency_setup"] = {key: dependency_status.get(key) for key in ("status", "error", "steps", "imports", "startup_diagnostics")}
             for path in (out / "install.log", destination / "bootstrap.log",
                          destination / ".bootstrap/manager-install.log", destination / ".bootstrap/manager-install.stderr.log",
                          destination / ".bootstrap/manager-status.json"):

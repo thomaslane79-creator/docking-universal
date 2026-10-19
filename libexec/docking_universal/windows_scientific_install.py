@@ -94,6 +94,12 @@ def install_scientific_runtime(*, conda: Path, prefix: Path, app: Path,
             if capture:
                 log.write(result.stdout)
         if result.returncode:
+            # These probes run before any structure/study exists. Retain only
+            # their startup diagnostics, never later scientific process logs.
+            if name in {"pinned_java_probe", "pinned_p2rank_probe"}:
+                receipt["startup_diagnostics"] = {"probe": name, "returncode": result.returncode,
+                    "text": (work / (name + ".log")).read_text(encoding="utf-8", errors="replace")[-5000:]}
+                save()
             raise RuntimeError(f"Dependency setup failed: {name} (exit {result.returncode}); local logs retained")
         receipt["steps"].append(name); save()
         return result.stdout if capture else None
@@ -133,6 +139,7 @@ def install_scientific_runtime(*, conda: Path, prefix: Path, app: Path,
         extract_p2rank(archive, p2rank)
         from .p2rank_runtime import java_invocation, prefix_java
         java = prefix_java(prefix)
+        run("pinned_java_probe", [java, "-version"], env=runtime_env)
         command, java_env = java_invocation(p2rank, java, ["-v"], environment=runtime_env)
         version = run("pinned_p2rank_probe", command, env=java_env, capture=True)
         if "P2Rank 2.5.1" not in version + (work / "pinned_p2rank_probe.log").read_text(encoding="utf-8"):
