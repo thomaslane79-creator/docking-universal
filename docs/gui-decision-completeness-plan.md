@@ -1,5 +1,15 @@
 # Complete interactive GUI workflow plan
 
+Installed scientific packaging milestone (2026-10-18): default private Windows
+installer + installed-code PDB/mmCIF preparation, protocol, Vina screening,
+PLIP/local approved 2D/3D and reports pass at `492de40` / CI 39181280902.
+Native direct/UTF-8 P2Rank prediction/residue tables match exactly. Java/P2Rank
+now live under the verified private ASCII-safe manager; application/study paths
+remain Unicode-capable. Local regressions pass 652 Python cases/21 shell checks.
+Scientific GUI controls remain disabled: next is desktop-host/preparation
+integration and interactive PyMOL/native GUI lifecycle acceptance, not more
+scientific options. Consumer-profile/browser-fallback coverage also remains open.
+
 User follow-up (2026-10-18): finish joining owned scientific dependencies and
 GUI to the no-prerequisite installer, including installed-code acceptance and
 native interactive-viewer checks. Investigate the reported CLI sync before

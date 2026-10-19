@@ -1,6 +1,6 @@
 # Older macOS, Linux and native Windows compatibility
 
-### Installed scientific-runtime candidate (2026-10-18, acceptance pending)
+### Installed scientific-runtime gate (2026-10-18, passed at 492de40)
 
 The next Windows installer candidate installs the same scientific package pins
 by default, not just the small host/Qt bootstrap. `-BootstrapOnly` is an explicit
@@ -21,7 +21,8 @@ the real default PowerShell installer with Python/Conda absent from its PATH,
 then exercises public/synthetic preparation, Vina, clustering, PLIP, approved
 local 2D/3D and reports using installed code only. It does not borrow repository
 runtime code or repeat the source-only acceptance as an installation claim.
-**This new gate is pending, not passed.** Native scientific GUI controls and
+**This gate passed** in [native run 39181280902](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39181280902).
+Native scientific GUI controls and
 interactive PyMOL remain separately disabled pending their acceptance. Existing
 Mac installs, user studies, scientific defaults and approvals are unchanged.
 
@@ -38,8 +39,8 @@ asset before accepting that external interpreter; arbitrary external runtimes
 are rejected. Application code, renderer, receipts and study folders remain in
 the selected application directory. The expert existing-Conda path instead
 requires an ASCII destination and rejects unsupported placement before setup.
-This placement correction is **awaiting native revalidation**, not an accepted
-Java-version/model substitution. The companion general run 39179516420 passed
+This placement correction was subsequently revalidated at `492de40`; it is not
+a Java-version/model substitution. The companion general run 39179516420 passed
 all eight jobs, including full Linux/macOS CLI/integration checks; its native
 installer failure is reported separately, not described as a CLI regression.
 
@@ -60,7 +61,40 @@ compares direct ASCII-path prediction with Unicode-path prediction. The full
 prediction and residue CSV tables are byte-identical for public 2R8N. The
 installed Windows gate repeats this comparison and additionally prepares into
 a Greek-character study path before accepting the end-to-end workflow. Native
-acceptance of this correction remains pending; prior failures are not successes.
+acceptance of this correction passed at `492de40`; prior failures remain failures.
+
+The retained metadata is at
+`validation/runs/windows-installed-scientific-20261018/492de40/summary.json`
+and `installed-scientific/summary.json` beneath that directory. Eleven outer
+checks pass: prerequisite masking, fresh-target rejection, real private-manager
+download/install, unchanged observed persistent PATH/Python registration,
+installed PowerShell/CMD launchers, honest rejection of a full-release claim,
+Unicode host/restart/lease handling, actual Qt startup and local capture, exact
+same-seed Vina repeats and the installed scientific workflow. Five scientific
+stages pass, including exact direct/UTF-8 P2Rank prediction and residue table
+equality, PDB and mmCIF preparation, four protocol panels/bundle/PDF, and
+synthetic screening with three `approved-poseedit-local-v1` interaction sets,
+seven report figures and a PDF. All structure/pose/XML/image/report files and
+scientific logs remained runner-local; only status metadata was downloaded.
+
+The fixture uses one conformer/seed 41001, exhaustiveness 1, three requested
+poses, pH 7.4, vacuum MMFF94/Gasteiger and an 8 kcal/mol window. Production
+defaults, original studies and approval authority are unchanged. This proves
+process/installation coverage, not docking accuracy. The combined full-GUI/
+interactive-PyMOL/GPU flag stays false, with individual stage results recorded
+separately. A masked hosted runner is not a pristine Windows 10/11 consumer VM.
+Local regression at the same source passes 652 Python cases (expected skips)
+and 21 shell checks; both local/native argument-transport tests use the same
+primary P2Rank model. This gate does not separately assert that the private-
+browser download branch was exercised, so that fallback is not claimed as
+independently accepted.
+
+The same runtime checkpoint also passes all eight general jobs in
+[run 39181280923](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39181280923):
+full Ubuntu/macOS CLI and real-tool integration, three native safety-contract
+platforms, bootstrap/Qt-host, prepared Vina and older-Mac host-build checks.
+The last documentation-only checkpoint records these already completed runtime
+results with `[skip ci]`; it does not remove or skip tests for a code change.
 
 The previously reported failed sync was run 39177024996: both CLI jobs passed;
 the Windows bootstrap alone failed on Miniforge's space-in-prefix guard. Its
@@ -77,7 +111,7 @@ scientific defaults remain unchanged while the port is developed.
 | Apple Silicon, current Mac | Fresh installer, embedded/full PyMOL and accepted AD4 build tested | Identical results on all Apple GPUs/drivers |
 | macOS 15 candidate GPU host | Same patched source compiled with minimum target 15.0; kernel unchanged; two synthetic repeats exactly match the accepted build on the current Mac | Older-OS native GPU execution and scientific acceptance; candidate is not activated |
 | Linux | Existing Unix installer/environment and CI path; restored a failing test import | Complete release-level desktop/GPU acceptance across distributions |
-| Native Windows | Safety contracts, fresh preview bootstrap, actual Qt desktop/host startup, installed prepared-input Vina repeats and an isolated public/synthetic preparation-to-report candidate passed on Windows Server 2022/x64; native Python/PowerShell, not WSL/Git Bash | Complete scientific installer/desktop integration, interactive PyMOL, ligand-control/all-engine/unsupported-chemistry coverage or GPU acceptance |
+| Native Windows | No-prerequisite private scientific installer, installed public/synthetic PDB/mmCIF preparation/Vina/PLIP/local-render/report workflow, exact Unicode Java transport, Qt/host startup and safety contracts passed on Windows Server 2022/x64; not WSL/Git Bash | Complete scientific desktop integration, interactive PyMOL, pristine consumer VM/profile coverage, private-browser fallback, ligand-control/all-engine/unsupported-chemistry or GPU acceptance |
 
 The minimum operating-system field in an executable is a build setting, not a
 proof of driver compatibility. The accepted Mac GPU runtime still requires

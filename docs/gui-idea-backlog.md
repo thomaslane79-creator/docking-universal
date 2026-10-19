@@ -4,6 +4,16 @@ Status: active scope-control record, established 2026-09-24.
 
 ### No-prerequisite Windows installation (authorized 2026-10-18)
 
+- Installed scientific packaging gate passed at `492de40` (CI 39181280902):
+  default private installer with Python/Conda absent from PATH, installed-code
+  PDB/mmCIF preparation/protocol/Vina/PLIP/approved local 2D/3D/report workflow,
+  Qt/host startup and direct/UTF-8 P2Rank table equality. Native Java required
+  ASCII-safe owned runtime/model placement plus an argument-only UTF-8 adapter;
+  the original model/flags/versions remain unchanged. The failed attempts remain
+  documented. Local tests pass 652 Python cases and 21 shell checks. Scientific
+  GUI controls are still disabled; desktop-stage/interactive-viewer acceptance,
+  special-profile/private-browser and pristine consumer-VM coverage remain open.
+
 - Follow-up authorization: integrate the separately validated scientific stack
   and GUI into that installer, and investigate the reported CLI sync failure.
   Latest runtime `f8df0ea` passes both CLI jobs and all eight checks; the older

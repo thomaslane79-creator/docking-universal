@@ -55,49 +55,35 @@ separately from the existing Linux/Unix paths. WSL is not being substituted for
 the requested native Windows port. See the [compatibility status and remaining
 milestones](docs/cross-platform-compatibility.md); native safety tests are not a
 claim that the full Windows installation or GPU pipeline is already supported.
-The opted-in native `install-windows.ps1` bootstrap is a development preview,
-not the finished scientific installer. It uses fresh isolated runtimes and
-rejects unported preparation/report stages. The Windows pipe-transport fix and
-native prefix handling are documented in the compatibility record above.
-The bootstrap's new default downloads a checksum-pinned private Miniforge, so
-preinstalled Python, Conda or Git is not required. The bootstrap passed native
-Windows testing with Python/Conda absent from its starting PATH. From an extracted source ZIP, `install-windows.cmd`
-offers an explicit preview confirmation; initial Internet access is required.
-The private manager does not register Python, create Miniforge shortcuts, modify
-persistent PATH or update an existing environment. Full scientific-runtime packaging
-and desktop integration are still separate from this preview bootstrap.
-The next installer candidate now installs the pinned scientific stack by default
-(expert/test-only `-BootstrapOnly` skips it), including private Java, Node and
-the local diagram renderer. Its **installed-code** Windows preparation/screening/
-report gate is pending; dependency installation alone does not enable scientific
-GUI controls or claim interactive PyMOL/GPU support. No existing runtime is updated.
-Pinned Windows Java 17 fails from a non-ASCII installation prefix, so the
-candidate keeps Java and P2Rank under its verified private ASCII-safe manager
-identity. A separately hashed UTF-8 argument adapter passes Unicode study paths
-to P2Rank's unchanged main method/model. Direct and adapted prediction/residue
-tables match exactly in the local public-fixture test; native revalidation is
-pending. See the compatibility record for the failed attempts and ownership checks.
-Profiles containing whitespace/non-ASCII currently need a space-free ASCII
-`-ManagerRoot`; the application folder itself can contain spaces/Unicode. See
-the compatibility record for the upstream restriction and test boundaries.
-The scientific Windows port additionally audits a path-quoting repair to one
-Conda-forge OpenCL activation-script build, retaining the original scripts and
-hashes without modifying DLLs or scientific versions. Native process-tree
-cancellation uses owned Windows jobs; full scientific-stage acceptance remains
-separate. Details and current limits are in the same compatibility record.
-The pinned scientific stack installs/imports on native Windows, and the isolated
-public/synthetic preparation-to-report candidate now passes natively, including
-PLIP and the approved local 2D renderer. This is not yet a complete Windows GUI
-release: scientific installer/desktop integration and interactive PyMOL acceptance
-remain separate, and the preview's scientific controls are still disabled.
-Native compatibility corrections include explicit installation-owned Java,
-Unicode-safe RDKit streams and local Meeko export staging, and proper local
-browser file URLs. They preserve chemistry, coordinates and scientific defaults;
-the detailed acceptance boundaries remain in the compatibility record.
-Native tool discovery also handles Windows installers that remove `.py` from
-command names, and protocol archives use cross-platform relative paths.
-Pinned PLIP uses local relative-file I/O on Windows with byte-identical copied
-input and unchanged analysis flags; explicit custom tools remain authoritative.
+The opted-in native Windows installer is a **development preview**, not a full
+Windows GUI release. From an extracted source ZIP, `install-windows.cmd` offers
+preview confirmation and starts built-in PowerShell. Its default now downloads
+a checksum-pinned private Miniforge and the pinned scientific dependencies;
+preinstalled Python, Conda, Git, Java or Node is not required. Initial Internet
+access and a fresh installation folder are required. It does not register Python,
+change persistent PATH or update another environment. `-BootstrapOnly` is an
+explicit expert/test option that skips scientific dependencies.
+
+The fresh default installer and **installed-code** preparation-to-report test
+passed on native Windows Server 2022/x64 at `492de40`
+([acceptance run](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39181280902)),
+with Python/Conda hidden from its initial PATH. This includes PDB/mmCIF
+Reduce2/Meeko/P2Rank, Vina, clustering, PLIP, approved local 2D/3D figures,
+protocol bundles and PDFs—not just successful library imports. It is a bounded
+public/synthetic fixture test, not scientific-accuracy validation or a pristine
+consumer Windows VM. Scientific GUI controls remain disabled: desktop-stage
+integration, interactive PyMOL, other engines and GPU acceptance are separate.
+
+Windows compatibility fixes preserve scientific versions/methods: private
+ASCII-safe Java/P2Rank placement, a separately hashed UTF-8 argument adapter,
+audited OpenCL activation quoting, Unicode-safe RDKit/Meeko/PLIP I/O, explicit
+tool discovery and portable protocol paths. Direct versus adapted P2Rank
+prediction/residue tables match byte-for-byte in local and native Windows tests.
+Profiles with whitespace/non-ASCII still need an explicit space-free ASCII
+`-ManagerRoot`; the application/study folders themselves support spaces/Unicode.
+The private-browser fallback and complete desktop release need further native
+acceptance. See the compatibility record for failed attempts, provenance,
+ownership checks and exact boundaries. Structural outputs stay local.
 
 In the GUI, a locally accepted runtime adds **AutoDock-GPU (AD4, experimental)**
 under **Finalize protocol → Docking program**. The adjacent explanation and
