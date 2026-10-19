@@ -4,6 +4,18 @@ Status: active scope-control record, established 2026-09-24.
 
 ### No-prerequisite Windows installation (authorized 2026-10-18)
 
+- Follow-up authorization: integrate the separately validated scientific stack
+  and GUI into that installer, and investigate the reported CLI sync failure.
+  Latest runtime `f8df0ea` passes both CLI jobs and all eight checks; the older
+  `0f07f33` failure was Windows setup, with both CLI jobs passing. Do not erase
+  the failed record or invent a CLI fix. Keep tests enabled for runtime changes.
+- Next implementation sequence: shared owned scientific installation and assets;
+  installed-code preparation/docking/report acceptance without source-tool PATH
+  leaks; then guarded desktop/interactive-viewer integration. Preserve native
+  unsupported-route failures, existing study approvals, Vina defaults, local-only
+  structural data and Windows process ownership. Installation success alone
+  cannot enable unvalidated scientific/viewer capabilities.
+
 - User requires installation for people with no preinstalled dependencies.
   First remove the Python/Conda prerequisite: bootstrap a checksum-pinned,
   application-owned Miniforge using Windows PowerShell alone. No Git, WSL,

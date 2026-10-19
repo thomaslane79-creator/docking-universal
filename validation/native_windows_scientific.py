@@ -17,28 +17,8 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-def scientific_specification(source: str) -> str:
-    lines = source.splitlines()
-    expected = {"  - make", "  - fpocket=4.2.2"}
-    if not expected.issubset(set(lines)):
-        raise ValueError("Scientific environment changed; review native-only omissions before proceeding")
-    return "\n".join(line for line in lines if line not in expected and not line.startswith("name:")) + "\n"
-
-
-def split_pip_phase(specification: str) -> tuple[str, list[str]]:
-    before, marker, after = specification.partition("  - pip:\n")
-    if not marker:
-        raise ValueError("Scientific pip specification changed; review required")
-    requirements = []
-    for line in after.splitlines():
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        if not line.startswith("      - "):
-            raise ValueError("Scientific pip specification changed; review required")
-        requirements.append(line[len("      - "):])
-    return before, requirements
+sys.path.insert(0, str(ROOT / "libexec"))
+from docking_universal.windows_scientific_install import scientific_specification, split_pip_phase
 
 
 def main():

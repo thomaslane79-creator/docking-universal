@@ -1,5 +1,34 @@
 # Older macOS, Linux and native Windows compatibility
 
+### Installed scientific-runtime candidate (2026-10-18, acceptance pending)
+
+The next Windows installer candidate installs the same scientific package pins
+by default, not just the small host/Qt bootstrap. `-BootstrapOnly` is an explicit
+expert/test path. Shared code derives the native specification by omitting only
+Unix `make` and unavailable optional fpocket; it retains chemistry/tool versions,
+the audited OpenCL activation repair, primary P2Rank 2.5.1, Java 17 and the exact
+integrity-locked local renderer packages. If Windows has no usable Chromium,
+the pinned Playwright package can install its own revision into the application's
+private browser folder; that browser download is not independently archive-SHA
+pinned and is a separate validation branch. No study data is sent to the browser
+download service.
+
+The scientific dispatcher verifies the installed receipt, owned interpreter,
+Java/Node paths and Vina binary before launch. Protocol engine authority is
+checked before creating screening output; AD4/QuickVina and custom engine/API
+overrides are not silently interpreted as Vina. The installed-code gate starts
+the real default PowerShell installer with Python/Conda absent from its PATH,
+then exercises public/synthetic preparation, Vina, clustering, PLIP, approved
+local 2D/3D and reports using installed code only. It does not borrow repository
+runtime code or repeat the source-only acceptance as an installation claim.
+**This new gate is pending, not passed.** Native scientific GUI controls and
+interactive PyMOL remain separately disabled pending their acceptance. Existing
+Mac installs, user studies, scientific defaults and approvals are unchanged.
+
+The previously reported failed sync was run 39177024996: both CLI jobs passed;
+the Windows bootstrap alone failed on Miniforge's space-in-prefix guard. Its
+corrected run 39177346823 passed all eight jobs, including both CLI jobs.
+
 User direction, 2026-10-18: native Windows is required. WSL2 is **not** the
 substitute or the definition of Windows support. Existing Mac installations and
 scientific defaults remain unchanged while the port is developed.

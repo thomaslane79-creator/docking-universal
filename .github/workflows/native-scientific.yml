@@ -4,6 +4,13 @@ on:
   push:
     paths:
       - environment.yml
+      - install-windows.ps1
+      - tools/install_native_windows.py
+      - dependencies/p2rank.json
+      - libexec/docking_universal/windows_scientific_install.py
+      - libexec/docking_universal/windows_scientific_runtime.py
+      - libexec/docking_universal/native_entrypoint.py
+      - validation/native_windows_bootstrap.py
       - validation/native_windows_scientific.py
       - validation/native_scientific_workflow.py
       - validation/native_science_dispatch.py
@@ -22,6 +29,30 @@ permissions:
   contents: read
 
 jobs:
+  installed-scientific-gate:
+    name: Native Windows no-prerequisite installed scientific CLI (not interactive viewer acceptance)
+    runs-on: windows-2022
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Private default installation with Python and Conda absent from installer PATH
+        shell: powershell
+        run: |
+          & "$env:pythonLocation\python.exe" validation/native_windows_bootstrap.py --out "$env:RUNNER_TEMP\du-installed-scientific" --without-prerequisites --with-scientific
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Retain status only; never structures, scientific logs, screenshots or reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-windows-installed-scientific-status
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/du-installed-scientific/summary.json
+            ${{ runner.temp }}/du-installed-scientific/installed-scientific/summary.json
+
   scientific-dependency-gate:
     name: Native Windows pinned scientific dependencies (not full workflow)
     runs-on: windows-2022

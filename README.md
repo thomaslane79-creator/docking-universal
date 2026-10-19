@@ -66,6 +66,11 @@ offers an explicit preview confirmation; initial Internet access is required.
 The private manager does not register Python, create Miniforge shortcuts, modify
 persistent PATH or update an existing environment. Full scientific-runtime packaging
 and desktop integration are still separate from this preview bootstrap.
+The next installer candidate now installs the pinned scientific stack by default
+(expert/test-only `-BootstrapOnly` skips it), including private Java, Node and
+the local diagram renderer. Its **installed-code** Windows preparation/screening/
+report gate is pending; dependency installation alone does not enable scientific
+GUI controls or claim interactive PyMOL/GPU support. No existing runtime is updated.
 Profiles containing whitespace/non-ASCII currently need a space-free ASCII
 `-ManagerRoot`; the application folder itself can contain spaces/Unicode. See
 the compatibility record for the upstream restriction and test boundaries.

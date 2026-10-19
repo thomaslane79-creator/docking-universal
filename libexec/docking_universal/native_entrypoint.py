@@ -16,9 +16,9 @@ from .runtime_layout import executable_directories
 
 
 PREVIEW_NOTICE = (
-    "Native Windows development preview: desktop/host startup and prepared-input "
-    "Vina only. Native preparation, full screening/reports and PyMOL/GPU acceptance "
-    "are unfinished. Do not use this preview as a validated scientific installation."
+    "Native Windows development preview. Scientific CLI commands require the "
+    "owned scientific dependency installation; scientific desktop integration "
+    "and interactive PyMOL/GPU acceptance are unfinished. This is not a full validated release."
 )
 
 
@@ -38,6 +38,10 @@ def isolated_environment(prefix: Path, inherited=None) -> dict[str, str]:
 def launch_command(app: Path, configuration: dict, arguments: list[str]):
     """Return a shell-free command; unsupported workflows fail before mutation."""
     command, *options = arguments
+    if configuration.get("scientific_dependencies_installed"):
+        from .windows_scientific_runtime import STAGES, stage_command
+        if command in STAGES:
+            return stage_command(app, configuration, command, options, dict(os.environ))
     root = app.parent
     host = root / configuration["host_python"]
     gui = root / configuration["gui_python"]
@@ -76,7 +80,7 @@ def main(arguments=None, *, app: Path | None = None) -> int:
     command = arguments[0] if arguments else "help"
     if command in {"help", "--help", "-h"}:
         print(PREVIEW_NOTICE)
-        print("Commands: version, check-install, runtime-inventory, desktop, dock")
+        print("Commands: version, check-install, runtime-inventory, desktop, dock; scientific CLI stages require an installed scientific receipt")
         return 0
     if command in {"version", "--version", "-V"}:
         print("Docking Universal " + (app / "VERSION").read_text(encoding="utf-8").strip() + " (native Windows preview)")

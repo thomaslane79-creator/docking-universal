@@ -22,7 +22,6 @@ import urllib.request
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "libexec"))
 
 
 def pinned_p2rank(out):
@@ -60,8 +59,11 @@ def main():
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--p2rank", type=Path)
     parser.add_argument("--vina", type=Path)
+    parser.add_argument("--application-root", type=Path, help="Exercise only installed runtime code, not the source checkout")
     parser.add_argument("--local-development", action="store_true", help="Never counts as native Windows acceptance")
     args = parser.parse_args()
+    libexec = args.application_root.resolve() if args.application_root else ROOT / "libexec"
+    sys.path.insert(0, str(libexec))
     if platform.system() != "Windows" and not args.local_development:
         parser.error("Native Windows execution is required")
     out = args.out.resolve()
@@ -69,6 +71,7 @@ def main():
     state = {"status": "running", "native_windows": platform.system() == "Windows",
              "platform": platform.platform(), "python": sys.version,
              "product_scientific_stages_enabled": False, "steps": [],
+             "installed_application": bool(args.application_root),
              "scope": "public 2R8N preparation and synthetic chemical-library process rehearsal; not docking accuracy validation"}
 
     def save():
@@ -96,21 +99,34 @@ def main():
             raise RuntimeError(f"{name} exited {result.returncode}; detailed scientific log retained locally, not uploaded")
 
     try:
+        if args.application_root:
+            import docking_universal
+            from docking_universal.windows_scientific_runtime import scientific_environment
+            if not Path(docking_universal.__file__).resolve().is_relative_to(libexec):
+                raise ValueError("Validation imported source checkout code instead of the installed application")
+            configuration = json.loads((libexec / "native-preview.json").read_text(encoding="utf-8"))
+            python, environment, receipt = scientific_environment(libexec, configuration, os.environ)
+            if python != Path(sys.executable).resolve():
+                raise ValueError("Installed scientific validation was started by a different interpreter")
+            os.environ.clear(); os.environ.update(environment)
+            args.p2rank = Path(receipt["p2rank"])
+            args.vina = Path(environment["DOCKING_UNIVERSAL_VINA"])
+            state["installed_runtime_identity_verified"] = True
         from docking_universal.native_preparation import prepare_native_candidate
         from docking_universal.services.preparation import ReceptorPreparationOptions
         from docking_universal.runtime_layout import executable_directories
         prefix = Path(sys.prefix)
         os.environ["PATH"] = os.pathsep.join([*(str(path) for path in executable_directories(prefix, windows=os.name == "nt")), os.environ.get("PATH", "")])
         os.environ.update(PYTHONUTF8="1", PYTHONIOENCODING="utf-8", DOCKING_UNIVERSAL_PYTHON=sys.executable,
-                          DOCKING_UNIVERSAL_CLI=str(ROOT / "validation/native_science_dispatch.py"),
-                          DOCKING_UNIVERSAL_LIBEXEC=str(ROOT / "libexec"), DOCKING_UNIVERSAL_CPU="2", DOCKING_UNIVERSAL_VINA_BACKEND="cli")
+                          DOCKING_UNIVERSAL_CLI=str(libexec / "docking-universal-native.py" if args.application_root else ROOT / "validation/native_science_dispatch.py"),
+                          DOCKING_UNIVERSAL_LIBEXEC=str(libexec), DOCKING_UNIVERSAL_CPU="2", DOCKING_UNIVERSAL_VINA_BACKEND="cli")
         # Fresh, writable validation-only caches avoid home-directory writes
         # and keep cache creation from looking like an unresponsive stage.
         for key, folder in (("MPLCONFIGDIR", "matplotlib-cache"), ("XDG_CACHE_HOME", "cache")):
             directory = out / folder
             directory.mkdir()
             os.environ[key] = str(directory)
-        if platform.system() == "Windows":
+        if platform.system() == "Windows" and not args.application_root:
             # Install only the existing pinned local renderer dependencies in
             # this CI checkout. No browser download/lifecycle scripts, shell,
             # coordinate submission, telemetry audit or scientific changes.
@@ -168,7 +184,7 @@ def main():
             tuple(selected_region_records([boxes[0]], [{"label": "P1", "path": boxes[0]}])),
             settings, "fixture-only-approval-not-user-authority", 1, out / "Protocol report", True)
         study = StudyState("native-fixture", "Native public fixture", "site_guided_protocol")
-        outputs = stage("protocol_pdf_and_portable_bundle", lambda: finalize_site_guided_protocol(study, request, libexec=ROOT / "libexec",
+        outputs = stage("protocol_pdf_and_portable_bundle", lambda: finalize_site_guided_protocol(study, request, libexec=libexec,
             command_runner=lambda command: run("protocol_report", command)))
         if not outputs.report.read_bytes().startswith(b"%PDF-"):
             raise ValueError("Protocol renderer did not produce a PDF")
@@ -201,8 +217,9 @@ def main():
         os.environ["DOCKING_UNIVERSAL_VINA"] = str(engine)
         state["ligand_tool_discovery"] = {name: shutil.which(name) for name in ("obabel", "mk_prepare_ligand.py", "mk_prepare_ligand.py.exe", "mk_prepare_ligand.exe")}
         screen = out / "Screening — native"
-        stage("ligand_states_docking_clusters_interactions_and_report", lambda: run("screen", [sys.executable,
-            ROOT / "libexec/docking-universal-run.py", "--mode", "screen", "--protocol", outputs.bundle,
+        screen_entry = [sys.executable, libexec / "docking-universal-native.py", "screen"] if args.application_root else [sys.executable, libexec / "docking-universal-run.py"]
+        stage("ligand_states_docking_clusters_interactions_and_report", lambda: run("screen", [*screen_entry,
+            "--mode", "screen", "--protocol", outputs.bundle,
             "--ligands", ligand, "--out", screen, "--non-interactive", "--accept-exploratory-protocol",
             "--analysis", "representatives", "--stop-on-error"]))
         summary = json.loads((screen / "report/study_summary.json").read_text(encoding="utf-8"))

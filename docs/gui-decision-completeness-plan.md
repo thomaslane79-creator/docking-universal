@@ -1,5 +1,12 @@
 # Complete interactive GUI workflow plan
 
+User follow-up (2026-10-18): finish joining owned scientific dependencies and
+GUI to the no-prerequisite installer, including installed-code acceptance and
+native interactive-viewer checks. Investigate the reported CLI sync before
+changing it: both CLI jobs pass in the older failed and latest successful runs;
+the old failure was Windows installer placement. Preserve explicit unsupported
+methods/engines and do not enable a feature merely because its libraries import.
+
 User installation requirement (2026-10-18): a first-time Windows user should not
 need Python, Conda, Git or the scientific programs already installed. Start by
 adding a pinned private Miniforge bootstrap invoked using Windows PowerShell,

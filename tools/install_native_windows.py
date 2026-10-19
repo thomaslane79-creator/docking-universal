@@ -80,6 +80,13 @@ def copy_application(source: Path, target: Path) -> dict[str, str]:
     for name in ("VERSION", "LICENSE"):
         shutil.copyfile(source / name, target / name)
         hashes[name] = hashlib.sha256((target / name).read_bytes()).hexdigest()
+    for name in ("environment.yml", "dependencies/vina-windows.json", "dependencies/p2rank.json"):
+        original = source / name
+        if original.is_file():
+            destination = target / "installation-assets" / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(original, destination)
+            hashes["installation-assets/" + name] = hashlib.sha256(destination.read_bytes()).hexdigest()
     return hashes
 
 
@@ -89,6 +96,7 @@ def main():
     parser.add_argument("--conda", required=True, type=Path)
     parser.add_argument("--owned-manager", action="store_true", help="Validated handoff from the fresh PowerShell bootstrap only")
     parser.add_argument("--manager-root", type=Path)
+    parser.add_argument("--bootstrap-only", action="store_true", help="Transport-only acceptance; skip scientific dependencies explicitly")
     args = parser.parse_args()
     if platform.system() != "Windows" or platform.machine().lower() not in {"amd64", "x86_64"}:
         parser.error("This preview requires native x64 Windows, not an emulated platform")
@@ -124,6 +132,17 @@ def main():
                          "gui_python": "runtimes/gui/python.exe", "vina_executable": "engines/vina.exe",
                          "vina_sha256": asset["sha256"], "package_manager_conda": str(args.conda.resolve()),
                          "scientific_stages_supported": False}
+        if not args.bootstrap_only:
+            sys.path.insert(0, str(app))
+            from docking_universal.windows_scientific_install import install_scientific_runtime
+            receipt = install_scientific_runtime(conda=args.conda, prefix=destination / "runtimes/scientific",
+                app=app, source_assets=app / "installation-assets", work=destination / ".bootstrap/scientific-setup")
+            receipt_path = destination / ".bootstrap/scientific-setup/scientific-install.json"
+            configuration.update(scientific_python="runtimes/scientific/python.exe",
+                                 scientific_dependencies_installed=True,
+                                 scientific_receipt=str(receipt_path.relative_to(destination).as_posix()),
+                                 scientific_receipt_sha256=hashlib.sha256(receipt_path.read_bytes()).hexdigest())
+            record["scientific_dependencies"] = {key: receipt.get(key) for key in ("status", "imports", "steps", "scientific_gui_enabled", "interactive_viewer_accepted", "gpu_accepted")}
         (app / "native-preview.json").write_text(json.dumps(configuration, indent=2) + "\n", encoding="utf-8")
         launchers = destination / "bin"
         launchers.mkdir()
@@ -134,13 +153,14 @@ def main():
             "& (Join-Path $PSScriptRoot '../runtimes/host/python.exe') (Join-Path $PSScriptRoot '../app/docking-universal-native.py') @args\n"
             "exit $LASTEXITCODE\n", encoding="utf-8")
         subprocess.run([str(prefixes["host"] / "python.exe"), str(app / "docking-universal-native.py"), "check-install"], check=True)
-        record["status"] = "bootstrap_installed"
-        print(f"Native bootstrap installed in {destination}. Full scientific installation is NOT complete.")
+        record["status"] = "bootstrap_installed" if args.bootstrap_only else "scientific_dependencies_installed"
+        print(f"Native preview installed in {destination}. " + ("Scientific dependencies were explicitly skipped." if args.bootstrap_only else
+              "Scientific dependencies are installed; full desktop/viewer acceptance is NOT complete."))
     except Exception as exc:
         record.update(status="failed", error=str(exc))
         print(f"Native bootstrap failed: {exc}", file=sys.stderr)
     (destination / "bootstrap-status.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
-    return 0 if record["status"] == "bootstrap_installed" else 1
+    return 0 if record["status"] in {"bootstrap_installed", "scientific_dependencies_installed"} else 1
 
 
 if __name__ == "__main__":

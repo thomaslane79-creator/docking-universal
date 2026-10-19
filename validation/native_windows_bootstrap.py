@@ -43,6 +43,7 @@ def main():
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--conda", type=Path)
     parser.add_argument("--without-prerequisites", action="store_true")
+    parser.add_argument("--with-scientific", action="store_true", help="Default installer plus installed-code scientific acceptance")
     args = parser.parse_args()
     if platform.system() != "Windows":
         parser.error("Real native Windows required")
@@ -53,12 +54,15 @@ def main():
     status = {"status": "running", "system": platform.platform(), "checks": [],
               "scientific_preparation_reports_pymol_gpu_accepted": False,
               "no_prerequisites_path": args.without_prerequisites,
+              "scientific_install_requested": args.with_scientific,
               "pristine_consumer_vm": False}
     try:
         persistent_before = persistent_runtime_configuration()
         destination = out / "Native Ω runtime with spaces"
         command = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ROOT / "install-windows.ps1"),
                    "-Destination", str(destination), "-AcceptDevelopmentPreview"]
+        if not args.with_scientific:
+            command.append("-BootstrapOnly")
         installer_environment = dict(os.environ)
         if args.without_prerequisites:
             # This driver uses setup-python, but the actual PowerShell child
@@ -87,10 +91,10 @@ def main():
             raise ValueError("Installer did not reject an existing target before mutation")
         status["checks"].append("existing_destination_rejected_before_download_or_mutation")
         with (out / "install.log").open("w", encoding="utf-8") as log:
-            subprocess.run(command, env=installer_environment, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=1500)
+            subprocess.run(command, env=installer_environment, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=2700)
         status["checks"].append("native_powershell_fresh_bootstrap")
         installed = json.loads((destination / "bootstrap-status.json").read_text(encoding="utf-8"))
-        if installed["status"] != "bootstrap_installed":
+        if installed["status"] != ("scientific_dependencies_installed" if args.with_scientific else "bootstrap_installed"):
             raise ValueError("Bootstrap did not reach its explicit installed state")
         status["package_manager_mode"] = installed.get("package_manager", {}).get("mode")
         if args.without_prerequisites:
@@ -141,11 +145,24 @@ def main():
         status["checks"].append("actual_installed_qt_desktop_and_host_startup")
         # Run the prepared-input adapter test using the INSTALLED Python/module
         # and pinned executable, not the repository's direct adapter path.
-        subprocess.run([str(host), str(ROOT / "validation/native_windows_vina.py"), "--out", str(out / "vina"),
+        scientific_python = destination / "runtimes/scientific/python.exe" if args.with_scientific else host
+        subprocess.run([str(scientific_python), str(ROOT / "validation/native_windows_vina.py"), "--out", str(out / "vina"),
                         "--installed-entry", str(entry), "--engine", str(destination / "engines/vina.exe")],
                        env=environment, check=True, timeout=240)
         status["vina"] = json.loads((out / "vina/summary.json").read_text(encoding="utf-8"))
         status["checks"].append("installed_native_vina_exact_same_seed_repeat")
+        if args.with_scientific:
+            # Mask the parent's scientific and source-checkout paths too.
+            # The installed dispatcher must reconstruct its owned runtime.
+            environment.update(installer_environment)
+            for key in ("PYTHONHOME", "PYTHONPATH"):
+                environment.pop(key, None)
+            with (out / "scientific-workflow.local.log").open("w", encoding="utf-8") as log:
+                subprocess.run([str(scientific_python), str(ROOT / "validation/native_scientific_workflow.py"),
+                    "--application-root", str(app), "--out", str(out / "installed-scientific")],
+                    env=environment, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=1800)
+            status["checks"].append("installed_public_dispatch_preparation_screening_reports_and_local_interactions")
+            status["installed_scientific_workflow"] = "passed"
         status["status"] = "passed"
     except Exception as exc:
         status.update(status="failed", error=str(exc))
@@ -154,6 +171,10 @@ def main():
         # narrow, so later engine/desktop logs can never leak pose coordinates.
         if "native_powershell_fresh_bootstrap" not in status["checks"]:
             status["installer_diagnostics"] = {}
+            receipt = destination / ".bootstrap/scientific-setup/scientific-install.json"
+            if receipt.is_file():
+                dependency_status = json.loads(receipt.read_text(encoding="utf-8"))
+                status["scientific_dependency_setup"] = {key: dependency_status.get(key) for key in ("status", "error", "steps", "imports")}
             for path in (out / "install.log", destination / "bootstrap.log",
                          destination / ".bootstrap/manager-install.log", destination / ".bootstrap/manager-install.stderr.log",
                          destination / ".bootstrap/manager-status.json"):

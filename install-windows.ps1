@@ -5,6 +5,7 @@ param(
     [string]$Destination = (Join-Path $env:LOCALAPPDATA 'DockingUniversalPreview'),
     [string]$CondaExe = '',
     [string]$ManagerRoot = '',
+    [switch]$BootstrapOnly,
     [switch]$AcceptDevelopmentPreview
 )
 $ErrorActionPreference = 'Stop'
@@ -119,6 +120,7 @@ try {
     $python = Join-Path $base 'python.exe'
     if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { throw 'Native Conda Python was not found.' }
     $installerOptions = @('--destination', $Destination, '--conda', $CondaExe)
+    if ($BootstrapOnly) { $installerOptions += '--bootstrap-only' }
     if ($ownedManager) { $installerOptions += @('--owned-manager', '--manager-root', $ManagerRoot) }
     & $python (Join-Path $PSScriptRoot 'tools/install_native_windows.py') @installerOptions
     if ($LASTEXITCODE -ne 0) { throw 'Native bootstrap failed. Inspect bootstrap-status.json in the destination; partial files were retained.' }
