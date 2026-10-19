@@ -135,11 +135,19 @@ def install_scientific_runtime(*, conda: Path, prefix: Path, app: Path,
         if hashlib.sha256(data).hexdigest() != pin["sha256"]:
             raise ValueError("Pinned P2Rank archive checksum mismatch; archive was not extracted")
         archive.write_bytes(data)
-        p2rank = app.parent / "share" / ("p2rank-" + pin["version"])
+        p2rank = prefix.parent.parent / "share" / ("p2rank-" + pin["version"])
         extract_p2rank(archive, p2rank)
-        from .p2rank_runtime import java_invocation, prefix_java
+        from .p2rank_runtime import JAVA_ARGUMENT_SOURCE, java_invocation, prefix_java
         java = prefix_java(prefix)
         run("pinned_java_probe", [java, "-version"], env=runtime_env)
+        bridge = p2rank / "docking-universal-launcher"
+        bridge.mkdir()
+        source = bridge / "NativeArguments.java"
+        source.write_text(JAVA_ARGUMENT_SOURCE, encoding="utf-8")
+        run("java_argument_transport_compile", [java.with_name("javac.exe"), "-encoding", "UTF-8", "-d", bridge, source], env=runtime_env)
+        receipt["java_argument_transport"] = {"format": "DUJ1 UTF-8 strings; original Main.main unchanged",
+            "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+            "class_sha256": hashlib.sha256((bridge / "NativeArguments.class").read_bytes()).hexdigest()}
         command, java_env = java_invocation(p2rank, java, ["-v"], environment=runtime_env)
         version = run("pinned_p2rank_probe", command, env=java_env, capture=True)
         if "P2Rank 2.5.1" not in version + (work / "pinned_p2rank_probe.log").read_text(encoding="utf-8"):

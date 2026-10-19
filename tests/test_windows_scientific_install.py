@@ -67,8 +67,14 @@ class InstalledScientificDispatcherTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b"pinned")
         receipt = self.root / ".bootstrap/scientific-install.json"
         receipt.parent.mkdir(parents=True)
+        p2rank = self.root / "share/p2rank-2.5.1"
+        launcher = p2rank / "docking-universal-launcher"
+        launcher.mkdir(parents=True)
+        for name in ("NativeArguments.java", "NativeArguments.class"):
+            (launcher / name).write_bytes(b"pinned")
         receipt.write_text(json.dumps({"status": "dependencies_installed", "python": str(python),
-            "java": str(java), "node": str(node), "p2rank": str(self.root / "share/p2rank-2.5.1"),
+            "java": str(java), "node": str(node), "p2rank": str(p2rank),
+            "java_argument_transport": {key: hashlib.sha256(b"pinned").hexdigest() for key in ("source_sha256", "class_sha256")},
             "browser": str(self.root / "browser.exe")}), encoding="utf-8")
         self.configuration = {"scientific_receipt": str(receipt.relative_to(self.root)),
             "scientific_receipt_sha256": hashlib.sha256(receipt.read_bytes()).hexdigest(),
@@ -92,6 +98,12 @@ class InstalledScientificDispatcherTests(unittest.TestCase):
     def test_damaged_install_record_stops_before_any_child_launch(self):
         (self.root / self.configuration["scientific_receipt"]).write_text("changed")
         with self.assertRaisesRegex(ValueError, "receipt changed"):
+            stage_command(self.app, self.configuration, "dock", [], {})
+
+    def test_changed_unicode_transport_stops_before_any_job(self):
+        launcher = self.root / "share/p2rank-2.5.1/docking-universal-launcher/NativeArguments.class"
+        launcher.write_bytes(b"changed")
+        with self.assertRaisesRegex(ValueError, "transport changed"):
             stage_command(self.app, self.configuration, "dock", [], {})
 
     def test_external_scientific_prefix_requires_exact_private_manager_ownership(self):

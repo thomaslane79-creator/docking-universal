@@ -43,6 +43,25 @@ Java-version/model substitution. The companion general run 39179516420 passed
 all eight jobs, including full Linux/macOS CLI/integration checks; its native
 installer failure is reported separately, not described as a CLI regression.
 
+At `7207502` / run 39180479623, Java itself started successfully from that
+private prefix, but its native launcher could not load P2Rank's classpath from
+the Unicode application directory (`ClassNotFoundException`). P2Rank's original
+archive now lives alongside the owned runtime, also in an ASCII-safe path.
+A small separately hashed Java argument adapter decodes length-prefixed UTF-8
+strings and invokes the original `cz.siret.prank.program.Main.main(String[])`
+on its unchanged application classpath. This is argument transport only: no
+classloader, model, algorithm, Java version, heap or prediction flags change.
+Argument records remain private/local; no structure is sent to an external
+service. Runtime dispatch verifies the adapter source/class hashes before jobs.
+Unix/default source launches remain unchanged.
+
+Local functional validation compiles that adapter with the same Java 17 and
+compares direct ASCII-path prediction with Unicode-path prediction. The full
+prediction and residue CSV tables are byte-identical for public 2R8N. The
+installed Windows gate repeats this comparison and additionally prepares into
+a Greek-character study path before accepting the end-to-end workflow. Native
+acceptance of this correction remains pending; prior failures are not successes.
+
 The previously reported failed sync was run 39177024996: both CLI jobs passed;
 the Windows bootstrap alone failed on Miniforge's space-in-prefix guard. Its
 corrected run 39177346823 passed all eight jobs, including both CLI jobs.

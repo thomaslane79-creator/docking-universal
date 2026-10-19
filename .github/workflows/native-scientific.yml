@@ -13,8 +13,10 @@ on:
       - validation/native_windows_bootstrap.py
       - validation/native_windows_scientific.py
       - validation/native_scientific_workflow.py
+      - validation/p2rank_argument_transport.py
       - validation/native_science_dispatch.py
       - libexec/docking_universal/native_preparation.py
+      - libexec/docking_universal/p2rank_runtime.py
       - libexec/docking_universal/tool_commands.py
       - libexec/docking_universal/plip_runtime.py
       - libexec/docking-universal-interactions.py

@@ -154,8 +154,13 @@ def main():
         inputs.mkdir()
         source = inputs / "2R8N.pdb"
         shutil.copyfile(ROOT / "examples/tutorials/02_ligand_free_cavity/inputs/2R8N.pdb", source)
+        if args.application_root:
+            from p2rank_argument_transport import validate_transport
+            state["java_argument_transport"] = stage("unicode_java_arguments_preserve_direct_p2rank_predictions",
+                lambda: validate_transport(p2rank, Path(java), source, out / "java-argument-transport"))
         from docking_universal.services.geostd_components import bundled_minimal_library
-        options = ReceptorPreparationOptions(source, out / "Preparation — native", "pockets", reduce2="required", max_pockets=0,
+        preparation_folder = "Preparation Ω — native" if args.application_root else "Preparation — native"
+        options = ReceptorPreparationOptions(source, out / preparation_folder, "pockets", reduce2="required", max_pockets=0,
                                              geostd_library=bundled_minimal_library(), pocket_engine="p2rank", preparation_backend="meeko")
         preparation = stage("public_pdb_reduce2_meeko_p2rank", lambda: prepare_native_candidate(options, p2rank=p2rank, java=Path(java)))
         audit = json.loads((preparation / "receptor/reduce2_audit.json").read_text(encoding="utf-8"))

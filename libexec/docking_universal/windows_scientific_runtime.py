@@ -61,8 +61,15 @@ def scientific_environment(app: Path, configuration: dict, inherited: dict):
         executable = Path(receipt[name]).resolve()
         if not executable.is_relative_to(python.parent) or not executable.is_file():
             raise ValueError(f"Owned scientific executable is missing: {name}")
-    if not Path(receipt["p2rank"]).resolve().is_relative_to(root / "share"):
+    if Path(receipt["p2rank"]).resolve() != (python.parent.parent.parent / "share/p2rank-2.5.1").resolve():
         raise ValueError("P2Rank escaped the owned installation")
+    transport = receipt.get("java_argument_transport")
+    if not isinstance(transport, dict):
+        raise ValueError("Scientific runtime is missing its accepted Unicode argument transport")
+    launcher = Path(receipt["p2rank"]) / "docking-universal-launcher"
+    for filename, key in (("NativeArguments.java", "source_sha256"), ("NativeArguments.class", "class_sha256")):
+        if hashlib.sha256((launcher / filename).read_bytes()).hexdigest() != transport.get(key):
+            raise ValueError("Unicode Java argument transport changed; no job was started")
     engine = (root / configuration["vina_executable"]).resolve()
     if not engine.is_relative_to(root / "engines"):
         raise ValueError("Pinned Vina escaped the owned engine directory")

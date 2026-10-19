@@ -1,10 +1,11 @@
 import os
+import struct
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
 
-from docking_universal.p2rank_runtime import java_invocation, run_p2rank, prefix_java
+from docking_universal.p2rank_runtime import java_invocation, run_p2rank, prefix_java, write_argument_file
 
 
 class P2RankRuntimeTests(unittest.TestCase):
@@ -47,3 +48,27 @@ class P2RankRuntimeTests(unittest.TestCase):
         expected.parent.mkdir(parents=True)
         expected.touch()
         self.assertEqual(prefix_java(self.root), expected.resolve())
+
+    def test_unicode_transport_is_lossless_and_uses_original_classpath(self):
+        root = self.root.parent / "ascii-p2rank"
+        (root / "bin/lib").mkdir(parents=True)
+        (root / "bin/p2rank.jar").touch()
+        bridge = root / "docking-universal-launcher"
+        bridge.mkdir(); (bridge / "NativeArguments.class").touch()
+        java = root / "java.exe"; java.touch()
+        arguments = ["predict", "-f", str(self.root / "蛋白 Ω & input.pdb"), "-o", "a b"]
+        command, environment = java_invocation(root, java, arguments, windows=True)
+        self.assertEqual(command[-2], "NativeArguments")
+        self.assertEqual(command[3].split(os.pathsep)[1:], [str(root / "bin/p2rank.jar"), str(root / "bin/lib/*")])
+        with Path(command[-1]).open("rb") as stream:
+            self.assertEqual(stream.read(4), b"DUJ1")
+            count, = struct.unpack(">I", stream.read(4))
+            values = []
+            for _ in range(count):
+                size, = struct.unpack(">I", stream.read(4))
+                values.append(stream.read(size).decode("utf-8"))
+            self.assertEqual(values, arguments)
+            self.assertEqual(stream.read(), b"")
+        self.assertEqual(environment["INSTALL_DIR"], str(root))
+        with self.assertRaises(ValueError):
+            write_argument_file(bridge / "arguments", ["x"] * 129)
