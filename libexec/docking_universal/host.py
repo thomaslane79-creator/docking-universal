@@ -78,8 +78,10 @@ class CommandDispatcher:
         controller: StudyController,
         session_id: str | None = None,
         preparation_executable: Path | str | None = None,
+        *, workflow_guard=None,
     ):
         self.controller = controller
+        self.workflow_guard = workflow_guard
         self.session_id = session_id or f"session-{uuid4().hex}"
         self._lock = threading.RLock()
         self._responses: dict[str, Response] = {}
@@ -109,6 +111,8 @@ class CommandDispatcher:
             self.workflow_runner.shutdown()
 
     def _apply(self, command: Command) -> Response:
+        if self.workflow_guard is not None:
+            self.workflow_guard(command, self.controller)
         if command.operation == "create_study":
             try:
                 state = self.controller.get_study(command.study_id)

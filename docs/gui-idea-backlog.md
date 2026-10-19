@@ -4,6 +4,13 @@ Status: active scope-control record, established 2026-09-24.
 
 ### No-prerequisite Windows installation (authorized 2026-10-18)
 
+- Follow-up authorized 2026-10-19: join the installed scientific runtime to the
+  native desktop host and validate real preparation/review/finalization/screening,
+  failure/cancellation and reopening. Start with the accepted strict P2Rank/
+  Meeko/Vina exploratory route; reject unaccepted control/engine/chemistry routes
+  before job/state mutation. Keep interactive PyMOL as its own native gate and
+  leave the working Mac installation, studies and scientific defaults unchanged.
+
 - Installed scientific packaging gate passed at `492de40` (CI 39181280902):
   default private installer with Python/Conda absent from PATH, installed-code
   PDB/mmCIF preparation/protocol/Vina/PLIP/approved local 2D/3D/report workflow,

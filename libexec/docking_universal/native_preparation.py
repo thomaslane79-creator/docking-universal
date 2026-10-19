@@ -1,4 +1,4 @@
-"""Shell-free scientific preparation candidate; not yet enabled in the desktop.
+"""Shell-free preparation for the bounded installed native desktop candidate.
 
 This bounded native port uses the existing filter, Reduce2 audit, conservative
 PDBFixer helper, strict Meeko reader and P2Rank normalizer. Unsupported legacy
@@ -94,7 +94,7 @@ def prepare_native_candidate(options: ReceptorPreparationOptions, *,
                              runner: Callable = subprocess.run) -> Path:
     """Prepare into a fresh directory, without a shell or implicit approval.
 
-    This candidate intentionally cannot replace the product Bash route yet.
+    This bounded candidate does not replace the Unix product Bash route.
     In particular, ADFR, fpocket and automatic disulfide allow-bad-res retries
     are not claimed as native support. The latter requires reviewed input.
     """

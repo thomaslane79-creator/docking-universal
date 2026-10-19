@@ -9,6 +9,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--app", required=True, type=Path)
     parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--scientific", action="store_true")
     args = parser.parse_args()
     sys.path.insert(0, str(args.app))
     from docking_universal.gui.host_client import ApplicationHostClient, ApplicationHostError
@@ -18,17 +19,17 @@ def main():
     client = ApplicationHostClient(root, args.app / "docking-universal-application-host.py")
     try:
         client.start()
-        if client.runtime["scientific_stages_supported"]:
-            raise ValueError("Native preview unexpectedly enabled unported scientific stages")
+        if client.runtime["scientific_stages_supported"] != args.scientific:
+            raise ValueError("Native host scientific capabilities do not match the installed scope")
         response = client.request("native-probe", "create_study", {"name": "Protein Ω 日本語"})
         if response["result"]["study"]["name"] != "Protein Ω 日本語":
             raise ValueError("Unicode host response failed to round trip")
         store = JsonStudyStore(root)
         prior = store.path_for("native-probe").read_bytes()
         try:
-            client.request("native-probe", "start_receptor_preparation", {}, expected_revision=response["revision"])
+            client.request("native-probe", "start_control_validation" if args.scientific else "start_receptor_preparation", {}, expected_revision=response["revision"])
         except ApplicationHostError as exc:
-            if "not configured" not in str(exc):
+            if not any(text in str(exc) for text in ("not configured", "not accepted")):
                 raise
         else:
             raise ValueError("Unported native preparation was unexpectedly accepted")

@@ -1,5 +1,30 @@
 # Older macOS, Linux and native Windows compatibility
 
+### Native scientific desktop candidate (2026-10-19, acceptance pending)
+
+The next bounded candidate launches GUI Qt6/Python 3.12 separately from the exact
+receipt-verified scientific Python 3.9 host. Its supervised native preparation
+service uses the existing accepted strict Meeko/Reduce2/P2Rank path, not Bash,
+WSL or file associations. The same serialized host owns explicit site approval,
+exploratory protocol finalization and selected-compound Vina screening. Native
+Python child scripts use the explicit interpreter, UTF-8 logs and owned Windows
+job trees. The Mac preparation path and scientific defaults are unchanged.
+
+Capability guards reject unaccepted control, ligand-only, fpocket/ADFR, other
+engine and preparation-intervention routes before creating jobs or changing
+state. Disabled GUI choices remain visible when an older study has retained
+them: opening it must not silently relabel its engine or transfer approval.
+The GUI environment adds Gemmi for the existing local component review before
+submission; it does not replace the scientific host's chemistry libraries.
+
+`validation/native_windows_desktop_workflow.py` exercises actual installed Qt
+buttons, the real host and public/synthetic jobs, including explicit approvals,
+library selection, PDFs/bundles/local interactions, rejection before mutation,
+cancellation/process cleanup and reopening both pending and completed studies.
+Fixture approvals are not authority for user studies. The native gate is pending;
+interactive PyMOL/GPU are still separate and not enabled by this candidate.
+Only small status metadata may leave the runner, never scientific outputs/logs.
+
 ### Installed scientific-runtime gate (2026-10-18, passed at 492de40)
 
 The next Windows installer candidate installs the same scientific package pins
@@ -22,8 +47,8 @@ then exercises public/synthetic preparation, Vina, clustering, PLIP, approved
 local 2D/3D and reports using installed code only. It does not borrow repository
 runtime code or repeat the source-only acceptance as an installation claim.
 **This gate passed** in [native run 39181280902](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39181280902).
-Native scientific GUI controls and
-interactive PyMOL remain separately disabled pending their acceptance. Existing
+At that checkpoint native scientific GUI controls and
+interactive PyMOL remained separately disabled pending their acceptance. Existing
 Mac installs, user studies, scientific defaults and approvals are unchanged.
 
 Initial installed-code attempts `cfec140` / run 39179516393 and `114ec66` /

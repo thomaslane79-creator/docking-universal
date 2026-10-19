@@ -1,7 +1,10 @@
-# Native desktop startup only: no embedded PyMOL or scientific-stage approval.
+# Native Qt6 presentation/metadata only; scientific methods stay in Python 3.9.
 channels:
   - conda-forge
   - nodefaults
 dependencies:
   - python=3.12
   - pyqt6
+  # Local deposited-structure/component review is invoked by the GUI before
+  # submitting a job; this does not replace the scientific host's Gemmi.
+  - gemmi

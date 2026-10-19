@@ -152,6 +152,8 @@ def main():
                                  scientific_dependencies_installed=True,
                                  scientific_receipt=str(receipt_path.relative_to(destination).as_posix()),
                                  scientific_receipt_sha256=hashlib.sha256(receipt_path.read_bytes()).hexdigest())
+            from docking_universal.windows_desktop import WORKFLOW
+            configuration["scientific_desktop_workflow"] = WORKFLOW
             record["scientific_dependencies"] = {key: receipt.get(key) for key in ("status", "imports", "steps", "scientific_gui_enabled", "interactive_viewer_accepted", "gpu_accepted")}
         (app / "native-preview.json").write_text(json.dumps(configuration, indent=2) + "\n", encoding="utf-8")
         launchers = destination / "bin"

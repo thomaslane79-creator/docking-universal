@@ -91,6 +91,9 @@ class ProcessRunner:
         command = tuple(str(value) for value in request.command)
         if not command:
             raise ValueError("A process request requires a command")
+        if os.name == "nt":
+            from .tool_commands import script_command
+            command = tuple(script_command(command[0], *command[1:]))
         log_directory = Path(request.log_directory)
         log_directory.mkdir(parents=True, exist_ok=True)
         stdout_log = log_directory / f"{request.log_name}.stdout.log"
@@ -107,6 +110,7 @@ class ProcessRunner:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding="utf-8", errors="replace",
                 bufsize=1,
                 start_new_session=os.name != "nt",
             )
@@ -127,7 +131,7 @@ class ProcessRunner:
                 raise
 
         def consume(stream_name: str, stream, path: Path) -> None:
-            with path.open("w") as handle:
+            with path.open("w", encoding="utf-8") as handle:
                 for line in iter(stream.readline, ""):
                     handle.write(line)
                     handle.flush()

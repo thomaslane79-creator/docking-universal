@@ -10,7 +10,17 @@ on:
       - libexec/docking_universal/windows_scientific_install.py
       - libexec/docking_universal/windows_scientific_runtime.py
       - libexec/docking_universal/native_entrypoint.py
+      - libexec/docking_universal/windows_desktop.py
+      - libexec/docking-universal-prepare-native.py
+      - libexec/docking-universal-application-host.py
+      - libexec/docking_universal/host.py
+      - libexec/docking_universal/processes.py
+      - libexec/docking_universal/gui/desktop.py
+      - libexec/docking_universal/gui/workflow_panels.py
+      - environments/windows-bootstrap-gui.yml
       - validation/native_windows_bootstrap.py
+      - validation/native_windows_host_probe.py
+      - validation/native_windows_desktop_workflow.py
       - validation/native_windows_scientific.py
       - validation/native_scientific_workflow.py
       - validation/p2rank_argument_transport.py
@@ -32,7 +42,7 @@ permissions:
 
 jobs:
   installed-scientific-gate:
-    name: Native Windows no-prerequisite installed scientific CLI (not interactive viewer acceptance)
+    name: Native Windows installed science and Qt workflow (not interactive viewer acceptance)
     runs-on: windows-2022
     timeout-minutes: 65
     steps:
@@ -54,6 +64,7 @@ jobs:
           path: |
             ${{ runner.temp }}/du-installed-scientific/summary.json
             ${{ runner.temp }}/du-installed-scientific/installed-scientific/summary.json
+            ${{ runner.temp }}/du-installed-scientific/desktop-workflow/summary.json
 
   scientific-dependency-gate:
     name: Native Windows pinned scientific dependencies (not full workflow)

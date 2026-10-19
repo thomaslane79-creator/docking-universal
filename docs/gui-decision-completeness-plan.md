@@ -1,5 +1,12 @@
 # Complete interactive GUI workflow plan
 
+Current authorized step (2026-10-19): native Windows desktop-to-scientific-host
+integration using the accepted owned runtime and strict native preparation path.
+Validate real job ownership, explicit region/exploratory approvals, report/bundle
+creation, selected-ligand screening, cancellation/reopening and unsupported-route
+rejection before mutation. Do not infer interactive PyMOL acceptance from this
+stage or alter the working Mac installation/scientific defaults.
+
 Installed scientific packaging milestone (2026-10-18): default private Windows
 installer + installed-code PDB/mmCIF preparation, protocol, Vina screening,
 PLIP/local approved 2D/3D and reports pass at `492de40` / CI 39181280902.

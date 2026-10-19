@@ -45,6 +45,8 @@ class StudySetupPanel(QtWidgets.QWidget):
         super().__init__(parent)
         self.setObjectName("study_setup_panel")
         self._locked = False
+        self._native_control_supported = True
+        self._native_ligand_prediction_supported = True
         form = QtWidgets.QFormLayout(self)
         self._form = form
         self.input_pdb = QtWidgets.QLineEdit()
@@ -299,6 +301,13 @@ class StudySetupPanel(QtWidgets.QWidget):
         self._update_mode()
         self._update_download_availability()
 
+    def set_native_capabilities(self, runtime) -> None:
+        self._native_control_supported = runtime.get("known_ligand_control_supported", True)
+        self._native_ligand_prediction_supported = "ligand" in runtime.get("supported_site_modes", ["pockets", "ligand"])
+        if not self._native_control_supported:
+            self.redock_ligand.setToolTip("Known-ligand control is awaiting native Windows acceptance; it is not silently replaced by exploratory docking.")
+        self._update_mode()
+
     def _update_mode(self):
         reuse = self.pathway.currentData() == "reuse"
         control = self.pathway.currentData() == "control"
@@ -314,7 +323,7 @@ class StudySetupPanel(QtWidgets.QWidget):
                 self.site_mode.setCurrentIndex(self.site_mode.findData("ligand"))
         self._form.setRowVisible(self.redock_ligand, not reuse)
         self._form.setRowVisible(self.redock_note, not reuse)
-        self.redock_ligand.setEnabled(not reuse and not self._locked)
+        self.redock_ligand.setEnabled(not reuse and not self._locked and self._native_control_supported)
         self.redock_note.setText(
             "Tests recovery of the selected experimental ligand after site review. "
             "Evidence lookup and additional-pocket prediction are separate choices."
@@ -345,7 +354,7 @@ class StudySetupPanel(QtWidgets.QWidget):
         self._form.setRowVisible(self.ligand_resname.parentWidget(), ligand_site)
         self.site_mode.setEnabled(not control and not self._locked)
         self.pocket_engine.setEnabled(not reuse and prediction and not self._locked)
-        self.predict_with_ligand.setEnabled(ligand_site and not self._locked)
+        self.predict_with_ligand.setEnabled(ligand_site and not self._locked and self._native_ligand_prediction_supported)
         self.pdb_evidence.setEnabled(not reuse and not self._locked)
         self.control_engine.setEnabled(control and not self._locked)
         self.control_tier.setEnabled(control and not self._locked)

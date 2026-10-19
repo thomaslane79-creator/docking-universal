@@ -108,6 +108,8 @@ def main():
         gui = destination / "runtimes/gui/python.exe"
         app = destination / "app"
         entry = app / "docking-universal-native.py"
+        configuration = json.loads((app / "native-preview.json").read_text(encoding="utf-8"))
+        scientific_python = destination / configuration["scientific_python"] if args.with_scientific else host
         for launcher in (destination / "bin/docking-universal.ps1", destination / "bin/docking-universal.cmd"):
             if launcher.suffix == ".ps1":
                 invoke = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(launcher), "version"]
@@ -122,10 +124,11 @@ def main():
         if subprocess.run([str(host), str(entry), "check-install", "--full"], capture_output=True, timeout=30).returncode != 1:
             raise ValueError("Preview incorrectly claimed a full scientific installation")
         status["checks"].append("full_install_claim_rejected")
-        # Real installed host, not a fake JSON peer. No scientific job may be
-        # registered when the unported preparation stage is requested.
-        probe = subprocess.run([str(host), str(ROOT / "validation/native_windows_host_probe.py"),
-                                "--app", str(app), "--out", str(out / "host-probe")],
+        # Real installed host, not a fake JSON peer. Unsupported methods must
+        # fail before registering a job or changing scientific state.
+        probe = subprocess.run([str(scientific_python), str(ROOT / "validation/native_windows_host_probe.py"),
+                                "--app", str(app), "--out", str(out / "host-probe"),
+                                *(["--scientific"] if args.with_scientific else [])],
                                capture_output=True, text=True, encoding="utf-8", timeout=60, check=True)
         status["host"] = json.loads(probe.stdout)
         status["checks"].append("installed_unicode_host_and_fail_before_mutation")
@@ -145,8 +148,6 @@ def main():
         status["checks"].append("actual_installed_qt_desktop_and_host_startup")
         # Run the prepared-input adapter test using the INSTALLED Python/module
         # and pinned executable, not the repository's direct adapter path.
-        configuration = json.loads((app / "native-preview.json").read_text(encoding="utf-8"))
-        scientific_python = destination / configuration["scientific_python"] if args.with_scientific else host
         subprocess.run([str(scientific_python), str(ROOT / "validation/native_windows_vina.py"), "--out", str(out / "vina"),
                         "--installed-entry", str(entry), "--engine", str(destination / "engines/vina.exe")],
                        env=environment, check=True, timeout=240)
@@ -164,6 +165,15 @@ def main():
                     env=environment, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=1800)
             status["checks"].append("installed_public_dispatch_preparation_screening_reports_and_local_interactions")
             status["installed_scientific_workflow"] = "passed"
+            with (out / "desktop-workflow.local.log").open("w", encoding="utf-8") as log:
+                fixtures = out / "installed-scientific/Public inputs — native Unicode"
+                subprocess.run([str(gui), str(ROOT / "validation/native_windows_desktop_workflow.py"),
+                    "--app", str(app), "--out", str(out / "desktop-workflow"),
+                    "--structure", str(fixtures / "2R8N.cif"),
+                    "--ligand", str(fixtures / "synthetic_carbamate.sdf")],
+                    env=environment, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=1500)
+            status["checks"].append("installed_real_qt_buttons_scientific_host_review_finalize_screen_cancel_reopen")
+            status["installed_desktop_workflow"] = "passed"
         status["status"] = "passed"
     except Exception as exc:
         status.update(status="failed", error=str(exc))

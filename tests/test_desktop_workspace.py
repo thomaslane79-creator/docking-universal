@@ -16,6 +16,29 @@ from docking_universal.state import JsonStudyStore
 
 @unittest.skipIf(QT_IMPORT_ERROR is not None, "selected Qt 6 binding is unavailable")
 class DesktopWorkspaceTests(unittest.TestCase):
+    def test_native_capabilities_keep_unaccepted_methods_disabled_after_refresh(self):
+        from types import SimpleNamespace
+        from docking_universal.windows_desktop import CAPABILITIES
+        self.window.host_client = SimpleNamespace(runtime=CAPABILITIES, connected=False)
+        self.window._apply_runtime_capabilities()
+        panel = self.window.study_setup_panel
+        panel.set_locked(False)
+        self.assertFalse(panel.redock_ligand.isEnabled())
+        self.assertFalse(panel.redock_ligand.isChecked())
+        self.assertFalse(panel.predict_with_ligand.isEnabled())
+        for combo, values in ((self.window.protocol_engine, {"vina"}),
+                              (self.window.control_engine, {"vina"}),
+                              (self.window.site_mode, {"pockets"}),
+                              (self.window.pocket_engine, {"auto", "p2rank"})):
+            self.assertEqual({combo.itemData(i) for i in range(combo.count())
+                              if combo.model().item(i).isEnabled()}, values)
+        self.assertFalse(self.window.study_pathway.model().item(self.window.study_pathway.findData("control")).isEnabled())
+        index = self.window.protocol_engine.findData('adgpu')
+        self.window.protocol_engine.setCurrentIndex(index)
+        self.window._apply_runtime_capabilities()
+        self.assertEqual(self.window.protocol_engine.currentData(), 'adgpu')
+        self.window.host_client = None
+
     def test_screening_cpu_choice_reaches_launch_payload_without_changing_state(self):
         from unittest.mock import Mock
         original = self.store.path_for('desktop').read_bytes()

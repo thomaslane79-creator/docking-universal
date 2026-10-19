@@ -43,6 +43,18 @@ class NativeEntrypointTests(unittest.TestCase):
             self.assertEqual(main(["prepare-receptor", "--input", "private.pdb"], app=self.app), 2)
             run.assert_not_called()
 
+    def test_scientific_desktop_keeps_qt6_separate_and_selects_owned_scientific_host(self):
+        self.config["scientific_desktop_workflow"] = "strict-p2rank-vina-preview-v1"
+        scientific = self.root / "private-scientific/python.exe"
+        with patch("docking_universal.windows_scientific_runtime.scientific_environment",
+                   return_value=(scientific, {"PATH": "science-tools", "PYTHONPATH": "foreign-qt5", "OWNED": "yes"}, {})):
+            command, environment = launch_command(self.app, self.config, ["desktop"])
+        self.assertEqual(command[0], str(self.root / self.config["gui_python"]))
+        self.assertEqual(command[command.index("--host-python") + 1], str(scientific))
+        self.assertEqual(command[command.index("--viewer-backend") + 1], "none")
+        self.assertNotIn("PYTHONPATH", environment)
+        self.assertEqual(environment["OWNED"], "yes")
+
     def test_engine_choice_cannot_be_silently_substituted(self):
         for flag in ("--engine", "--engine=ad4", "--engine-command", "--engine-env", "--vina-backend=api"):
             with self.subTest(flag=flag), self.assertRaisesRegex(ValueError, "engine overrides"):

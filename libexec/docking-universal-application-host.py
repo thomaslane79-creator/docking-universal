@@ -19,14 +19,25 @@ def main() -> int:
     parser.add_argument("--state-root", type=Path, required=True)
     parser.add_argument("--session-id")
     args = parser.parse_args()
+    preparation = None if os.name == "nt" else Path(__file__).with_name("docking-universal-prepare")
+    guard = None
+    capabilities = {"scientific_stages_supported": os.name != "nt"}
+    if os.name == "nt":
+        from docking_universal.windows_desktop import installed_host, workflow_guard, CAPABILITIES
+        try:
+            native = installed_host(Path(__file__).resolve().parent)
+            if native is not None:
+                preparation, environment, _receipt = native
+                os.environ.update(environment)
+                guard = workflow_guard
+                capabilities = CAPABILITIES
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            print(json.dumps({"type": "fatal", "error": str(exc)}), file=sys.stderr)
+            return 2
     store = JsonStudyStore(args.state_root)
     dispatcher = CommandDispatcher(
         StudyController(store), args.session_id,
-        # Native bootstrap intentionally cannot run the unported POSIX stages.
-        # Reject before registering a job, rather than invoking Bash or silently
-        # changing the preparation method to make Windows appear supported.
-        preparation_executable=(None if os.name == "nt" else
-                                Path(__file__).with_name("docking-universal-prepare")),
+        preparation_executable=preparation, workflow_guard=guard,
     )
     try:
         with ApplicationHostLease(args.state_root):
@@ -44,7 +55,7 @@ def main() -> int:
                         if (Path(sys.prefix) / "conda-meta").is_dir() else None
                     ),
                     "python_prefix": sys.prefix,
-                    "scientific_stages_supported": os.name != "nt",
+                    **capabilities,
                 },
             }), flush=True)
             serve_json_lines(dispatcher, sys.stdin, sys.stdout)

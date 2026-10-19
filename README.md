@@ -71,8 +71,13 @@ with Python/Conda hidden from its initial PATH. This includes PDB/mmCIF
 Reduce2/Meeko/P2Rank, Vina, clustering, PLIP, approved local 2D/3D figures,
 protocol bundles and PDFs—not just successful library imports. It is a bounded
 public/synthetic fixture test, not scientific-accuracy validation or a pristine
-consumer Windows VM. Scientific GUI controls remain disabled: desktop-stage
-integration, interactive PyMOL, other engines and GPU acceptance are separate.
+consumer Windows VM. At that checkpoint scientific GUI controls were disabled.
+The next development candidate connects the Qt desktop to its exact owned
+scientific Python for strict P2Rank/Meeko preparation, explicit site review,
+exploratory Vina protocols and screening. Its real-button/cancellation/reopening
+gate is pending; this is not yet a passed desktop-release claim. Unsupported
+methods remain disabled and rejected before scientific-state mutation.
+Interactive PyMOL, ligand controls, other engines and GPU acceptance are separate.
 
 Windows compatibility fixes preserve scientific versions/methods: private
 ASCII-safe Java/P2Rank placement, a separately hashed UTF-8 argument adapter,

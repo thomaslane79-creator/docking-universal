@@ -46,7 +46,11 @@ def launch_command(app: Path, configuration: dict, arguments: list[str]):
     host = root / configuration["host_python"]
     gui = root / configuration["gui_python"]
     if command == "desktop":
-        environment = isolated_environment(gui.parent)
+        inherited = None
+        if configuration.get("scientific_desktop_workflow"):
+            from .windows_scientific_runtime import scientific_environment
+            host, inherited, _receipt = scientific_environment(app, configuration, os.environ)
+        environment = isolated_environment(gui.parent, inherited)
         # A fresh, preview-only study root avoids opening production studies by
         # accident. An explicit --state-root remains the user's choice.
         defaults = ["--host-python", str(host), "--viewer-backend", "none",

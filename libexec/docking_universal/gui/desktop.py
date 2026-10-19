@@ -115,6 +115,7 @@ if QtWidgets is not None:
             self.resize(1280, 820)
             self.setMinimumSize(1100, 700)
             self._build()
+            self._apply_runtime_capabilities()
             self._show_runtime_identity()
             self.workspace_controller = WorkspaceWindowController(
                 self, self.settings, self._refresh_polled_state,
@@ -135,7 +136,32 @@ if QtWidgets is not None:
             self.reports_dock.hide()
             self.selection_dock.hide()
             self._restore_form_values()
+            self._apply_runtime_capabilities()
             self.refresh()
+
+        def _apply_runtime_capabilities(self) -> None:
+            """Do not offer unaccepted Windows methods as if they were usable."""
+            runtime = getattr(self.host_client, "runtime", {}) or {}
+            if not runtime.get("native_scientific_preview"):
+                return
+            allowed = ((self.protocol_engine, runtime["supported_engines"]),
+                       (self.control_engine, runtime["supported_engines"]),
+                       (self.site_mode, runtime["supported_site_modes"]),
+                       (self.pocket_engine, [*runtime["supported_pocket_engines"], "auto"]))
+            for combo, values in allowed:
+                for index in range(combo.count()):
+                    # Keep retained choices visible when an older study opens;
+                    # never relabel its engine as Vina by removing its item.
+                    combo.model().item(index).setEnabled(combo.itemData(index) in values)
+            panel = self.study_setup_panel
+            panel.redock_ligand.setEnabled(False)
+            panel.redock_ligand.setToolTip("Known-ligand control is awaiting native Windows acceptance; it is not silently replaced by exploratory docking.")
+            panel.predict_with_ligand.setEnabled(False)
+            # Preserve the serialized choice for read-only older-study review.
+            index = self.study_pathway.findData("control")
+            if index >= 0:
+                self.study_pathway.model().item(index).setEnabled(False)
+            panel.set_native_capabilities(runtime)
 
         def _show_runtime_identity(self) -> None:
             gui_version = QtCore.qVersion()
@@ -207,6 +233,7 @@ if QtWidgets is not None:
             self.refresh()
 
         def _show_connected_runtime_identity(self) -> None:
+            self._apply_runtime_capabilities()
             host_runtime = getattr(self.host_client, "runtime", {}) or {}
             host_version = host_runtime.get("python_version", "unavailable")
             host_environment = host_runtime.get("conda_environment") or "explicit interpreter"
