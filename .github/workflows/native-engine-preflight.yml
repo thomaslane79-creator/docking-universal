@@ -1,0 +1,37 @@
+name: native-windows-engine-preflight
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/native-engine-preflight.yml
+      - validation/native_windows_engine_preflight.py
+
+permissions:
+  contents: read
+
+jobs:
+  remaining-engines:
+    name: Native Windows engine availability and guards (not docking acceptance)
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          activate-environment: ''
+          auto-activate: false
+          conda-remove-defaults: true
+      - name: Query pinned QuickVina package, installed GPU drivers and native AD4 rejection
+        shell: powershell
+        run: |
+          & "$env:CONDA\python.exe" validation/native_windows_engine_preflight.py --conda "$env:CONDA\Scripts\conda.exe" --out "$env:RUNNER_TEMP\du-native-engine-preflight"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Retain availability metadata only; no structure or docking output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-windows-engine-preflight-status
+          retention-days: 7
+          path: ${{ runner.temp }}/du-native-engine-preflight/summary.json
