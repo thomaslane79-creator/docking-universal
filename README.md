@@ -72,10 +72,13 @@ Reduce2/Meeko/P2Rank, Vina, clustering, PLIP, approved local 2D/3D figures,
 protocol bundles and PDFs—not just successful library imports. It is a bounded
 public/synthetic fixture test, not scientific-accuracy validation or a pristine
 consumer Windows VM. At that checkpoint scientific GUI controls were disabled.
-The next development candidate connects the Qt desktop to its exact owned
+The development preview now connects the Qt desktop to its exact owned
 scientific Python for strict P2Rank/Meeko preparation, explicit site review,
-exploratory Vina protocols and screening. Its real-button/cancellation/reopening
-gate is pending; this is not yet a passed desktop-release claim. Unsupported
+exploratory Vina protocols and screening. Its installed real-button,
+cancellation and reopening gate **passed at `00e2241`** in
+[native acceptance 39348681324](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39348681324).
+All eight general CI jobs also pass, including Linux/macOS CLI checks.
+This bounded fixture validation is not a full desktop-release claim. Unsupported
 methods remain disabled and rejected before scientific-state mutation.
 Interactive PyMOL, ligand controls, other engines and GPU acceptance are separate.
 
@@ -88,8 +91,8 @@ acceptance confirms this clears the preparation hang. A byte-preserving Vina
 path wrapper now passes the installed Windows non-ASCII case with complete pose
 output byte-identical to the ASCII reference; it does not modify the executable,
 coordinates or search settings. Windows state readers also join the writer's
-transaction to avoid a file-sharing race during live polling (under full native
-workflow validation). Direct versus adapted P2Rank
+transaction to avoid a file-sharing race during live polling; the complete
+bounded native workflow now passes with these corrections. Direct versus adapted P2Rank
 prediction/residue tables match byte-for-byte in local and native Windows tests.
 Profiles with whitespace/non-ASCII still need an explicit space-free ASCII
 `-ManagerRoot`; the application/study folders themselves support spaces/Unicode.

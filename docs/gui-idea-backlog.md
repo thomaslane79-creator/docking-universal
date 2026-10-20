@@ -4,6 +4,16 @@ Status: active scope-control record, established 2026-09-24.
 
 ### No-prerequisite Windows installation (authorized 2026-10-18)
 
+- Bounded desktop slice completed 2026-10-20 at `00e2241`: native CI 39348681324
+  passes the fresh installer/installed science and all nine real Qt/host workflow
+  steps, including explicit approvals, screening/results, cancellation and both
+  pending/completed reopening. All eight general jobs pass in 39348681322.
+  Local checks: 667 Python cases, 21 shell checks, 166 Qt6 cases. Input isolation,
+  byte-identical native Vina Unicode transport and transactional Windows state
+  reads fix the observed failures; failed records remain documented. Interactive
+  PyMOL, other engines/controls, browser/profile/consumer-VM coverage and the full
+  native release remain open. No Mac install/study/default change or main merge.
+
 - Follow-up authorized 2026-10-19: join the installed scientific runtime to the
   native desktop host and validate real preparation/review/finalization/screening,
   failure/cancellation and reopening. Start with the accepted strict P2Rank/
@@ -18,7 +28,8 @@ Status: active scope-control record, established 2026-09-24.
   ASCII-safe owned runtime/model placement plus an argument-only UTF-8 adapter;
   the original model/flags/versions remain unchanged. The failed attempts remain
   documented. Local tests pass 652 Python cases and 21 shell checks. Scientific
-  GUI controls are still disabled; desktop-stage/interactive-viewer acceptance,
+  GUI controls were disabled at that checkpoint; the later bounded desktop gate
+  above supersedes that status. Interactive-viewer acceptance,
   special-profile/private-browser and pristine consumer-VM coverage remain open.
 
 - Follow-up authorization: integrate the separately validated scientific stack

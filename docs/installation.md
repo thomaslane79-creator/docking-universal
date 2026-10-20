@@ -18,8 +18,10 @@ a separate opted-in **development preview**, not a WSL substitution or a full
 desktop release. Its default private installer now supplies Python/Conda and the
 scientific dependencies, with installed-code PDB/mmCIF preparation, Vina
 screening, local interactions and reports accepted on a native Windows runner.
-The next bounded Qt-to-scientific-host candidate is awaiting its real desktop
-workflow gate. Interactive PyMOL, known-ligand controls, other engines, consumer
+The bounded Qt-to-scientific-host workflow also passes its installed native
+gate at `00e2241`: preparation/site approval, protocol PDF/bundle, selected-ligand
+Vina screening, local interactions/reports, cancellation and reopening.
+Interactive PyMOL, known-ligand controls, other engines, consumer
 VM/profile coverage and GPU support remain separate acceptance work. See
 [cross-platform status and exact test boundaries](cross-platform-compatibility.md).
 

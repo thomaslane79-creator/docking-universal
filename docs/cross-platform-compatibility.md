@@ -1,8 +1,56 @@
 # Older macOS, Linux and native Windows compatibility
 
-### Native scientific desktop candidate (2026-10-19, acceptance pending)
+### Native scientific desktop gate (2026-10-20, passed at 00e2241)
 
-The next bounded candidate launches GUI Qt6/Python 3.12 separately from the exact
+The bounded installed Qt-to-scientific-host gate **passes** in
+[native run 39348681324](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39348681324).
+Both native jobs pass. All eight companion general jobs pass in
+[39348681322](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39348681322),
+including full Linux/macOS CLI/integration, the three native safety platforms,
+actual Windows bootstrap/Qt-host, prepared Vina/Unicode transport and the
+older-Mac host build (not GPU acceptance). Local regressions pass 667 Python
+cases (expected platform skips), 21 shell checks and 166 separate Qt6 GUI cases.
+
+Twelve outer installer checks and all nine installed real-Qt workflow steps
+pass on native Windows Server 2022/x64: exact owned science host, unsupported
+method rejection without state mutation, mmCIF preparation into site review,
+pending-review restart, explicit fixture-only approval, protocol PDF/bundle,
+compound selection/workload/screen/results, completed-screen restart, and real
+cancellation/process cleanup. No failure dialog appeared and the host's reader
+and workspace lease released normally. GUI Qt 6.11.2/Python 3.12.15 remains
+separate from the pinned scientific Python 3.9.23. The fixture's preparation,
+finalization and screening stages took 18.4, 52.2 and 72.4 seconds respectively;
+these are integration-test settings, not performance comparisons.
+
+The installed CLI gate additionally passes its five scientific stages,
+including direct/UTF-8 Java table equality, PDB/mmCIF preparation, four protocol
+figures, bundle/PDF and three approved local interaction sets/seven screen
+figures/PDF. Raw pinned Windows Vina fails the Greek/Japanese path case; the
+adapter returns complete pose output byte-identical to both ASCII references.
+The separate source Vina probe now also passes with the same explicit UTF-8
+process contract as the installed launcher.
+
+Status-only evidence is retained at
+`validation/runs/windows-desktop-20261019/00e2241/installed/summary.json`,
+`desktop-workflow/summary.json` and `installed-scientific/summary.json` beneath
+that directory. No structure, pose, interaction record, diagram, screenshot,
+report or scientific log was uploaded. The earlier failed attempts below remain
+failed records; they exposed open host-input inheritance, native Vina filename
+transport and a live Windows state-publication race, all now corrected and
+revalidated. Production scientific defaults, original studies and the working
+Mac installation were not changed. The 697-file protection audit still has only
+the previously documented stale ReportLab metadata exception (696 match).
+
+This is an exploratory strict P2Rank/Meeko/Vina public/synthetic workflow gate,
+not docking accuracy, a pristine consumer VM, interactive PyMOL or GPU acceptance.
+Known-ligand controls, other engines, unsupported chemistry interventions,
+special-profile/private-browser coverage and full desktop release remain open.
+The combined full-capability flag intentionally stays false; individual passed
+stage results above are the authoritative narrower evidence.
+
+#### Implementation and diagnostic history
+
+The bounded candidate was implemented with GUI Qt6/Python 3.12 separately from the exact
 receipt-verified scientific Python 3.9 host. Its supervised native preparation
 service uses the existing accepted strict Meeko/Reduce2/P2Rank path, not Bash,
 WSL or file associations. The same serialized host owns explicit site approval,
@@ -21,8 +69,8 @@ submission; it does not replace the scientific host's chemistry libraries.
 buttons, the real host and public/synthetic jobs, including explicit approvals,
 library selection, PDFs/bundles/local interactions, rejection before mutation,
 cancellation/process cleanup and reopening both pending and completed studies.
-Fixture approvals are not authority for user studies. The native gate is pending;
-interactive PyMOL/GPU are still separate and not enabled by this candidate.
+Fixture approvals are not authority for user studies. This gate was initially pending;
+interactive PyMOL/GPU remain separate and are not enabled by this candidate.
 Only small status metadata may leave the runner, never scientific outputs/logs.
 
 Runtime candidate `41c3cd1` passes 658 local Python cases and 21 shell checks
@@ -210,7 +258,7 @@ scientific defaults remain unchanged while the port is developed.
 | Apple Silicon, current Mac | Fresh installer, embedded/full PyMOL and accepted AD4 build tested | Identical results on all Apple GPUs/drivers |
 | macOS 15 candidate GPU host | Same patched source compiled with minimum target 15.0; kernel unchanged; two synthetic repeats exactly match the accepted build on the current Mac | Older-OS native GPU execution and scientific acceptance; candidate is not activated |
 | Linux | Existing Unix installer/environment and CI path; restored a failing test import | Complete release-level desktop/GPU acceptance across distributions |
-| Native Windows | No-prerequisite private scientific installer, installed public/synthetic PDB/mmCIF preparation/Vina/PLIP/local-render/report workflow, exact Unicode Java transport, Qt/host startup and safety contracts passed on Windows Server 2022/x64; not WSL/Git Bash | Complete scientific desktop integration, interactive PyMOL, pristine consumer VM/profile coverage, private-browser fallback, ligand-control/all-engine/unsupported-chemistry or GPU acceptance |
+| Native Windows | No-prerequisite private installer and real installed Qt/host preparation, site approval, Vina screening, PLIP/local reports, cancellation/reopening; exact Unicode Java/Vina transport and native state concurrency passed on Windows Server 2022/x64; not WSL/Git Bash | Interactive PyMOL/full desktop release, pristine consumer VM/profile coverage, private-browser fallback, ligand-control/all-engine/unsupported-chemistry or GPU acceptance |
 
 The minimum operating-system field in an executable is a build setting, not a
 proof of driver compatibility. The accepted Mac GPU runtime still requires
@@ -248,8 +296,8 @@ The user requests the next dependency/preparation/docking/report slice fully.
 Fresh native scientific tests preserve every scientific pin in `environment.yml`;
 only Unix installer tooling (`make`) and the unavailable optional fpocket build
 are explicitly omitted. Missing fpocket must not silently change the detector.
-Windows GUI scientific stages remain disabled pending scientific installer and
-desktop workflow acceptance; the isolated candidate below does not enable them.
+At this earlier milestone Windows GUI scientific stages remained disabled pending
+installer/desktop acceptance; the later bounded gate above supersedes that status.
 
 The scientific package set **solves on Windows**. Its first actual installation
 then failed in Conda-forge's `khronos-opencl-icd-loader=2024.10.24=hfd05255_2`
@@ -284,7 +332,7 @@ cancelled calculation alive indefinitely. This implements the documented
 [Windows job-object contract](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects),
 including [nested jobs](https://learn.microsoft.com/en-us/windows/win32/procthread/nested-jobs).
 
-The scientific candidate is deliberately not wired to the Windows desktop yet.
+At this earlier milestone the scientific candidate was not yet wired to the desktop.
 `native_preparation.py` ports the established fixed-column component filter,
 native mmCIF projection, audited Reduce2, strict Meeko/conservative PDBFixer and
 direct Java/P2Rank 2.5.1 invocation. It requires fresh outputs, preserves failed

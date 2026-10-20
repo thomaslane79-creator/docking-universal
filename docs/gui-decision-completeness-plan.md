@@ -1,6 +1,18 @@
 # Complete interactive GUI workflow plan
 
-Current authorized step (2026-10-19): native Windows desktop-to-scientific-host
+Completed 2026-10-20 at `00e2241`: the bounded native Windows installed Qt-to-host
+workflow passes all nine real-button/lifecycle steps in CI 39348681324, alongside
+all eight general jobs in 39348681322. Preparation, explicit site approval,
+protocol PDF/bundle, compound selection/screening/local interaction reports,
+pending/completed reopening and cancellation/process cleanup pass. Corrections
+isolate scientific stdin, transport native Vina Unicode paths without changing
+file bytes or scientific flags, and serialize Windows state reads/publication.
+Local regressions pass 667 Python cases/21 shell checks and 166 Qt6 cases.
+The working Mac install/studies/defaults are unchanged. Next remaining native
+gates are interactive PyMOL, controls/other engines and consumer-profile/browser
+coverage; this is not a full Windows release or scientific-accuracy claim.
+
+Authorized scope (2026-10-19, completed above): native Windows desktop-to-scientific-host
 integration using the accepted owned runtime and strict native preparation path.
 Validate real job ownership, explicit region/exploratory approvals, report/bundle
 creation, selected-ligand screening, cancellation/reopening and unsupported-route
@@ -13,9 +25,9 @@ PLIP/local approved 2D/3D and reports pass at `492de40` / CI 39181280902.
 Native direct/UTF-8 P2Rank prediction/residue tables match exactly. Java/P2Rank
 now live under the verified private ASCII-safe manager; application/study paths
 remain Unicode-capable. Local regressions pass 652 Python cases/21 shell checks.
-Scientific GUI controls remain disabled: next is desktop-host/preparation
-integration and interactive PyMOL/native GUI lifecycle acceptance, not more
-scientific options. Consumer-profile/browser-fallback coverage also remains open.
+At that milestone scientific GUI controls remained disabled. The bounded
+desktop-host/workflow acceptance above is now complete; interactive PyMOL and
+consumer-profile/browser-fallback coverage remain open, not more scientific options.
 
 User follow-up (2026-10-18): finish joining owned scientific dependencies and
 GUI to the no-prerequisite installer, including installed-code acceptance and
