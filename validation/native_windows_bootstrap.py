@@ -16,6 +16,20 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def installation_diagnostic(text, limit=8000):
+    """Keep the root error as well as context, never Conda's environment dump.
+
+    Used only when installation fails before any scientific fixture is created.
+    Later study/engine/viewer logs must never enter the uploaded status record.
+    """
+    text = text.split("  environment variables:", 1)[0]
+    if len(text) <= limit:
+        return text
+    marker = "\n[dependency diagnostic excerpt]\n"
+    head = min(1000, limit // 4)
+    return text[:head] + marker + text[-(limit - head - len(marker)):]
+
+
 def persistent_runtime_configuration():
     """Observe only PATH/default-Python registry keys; never export values."""
     import winreg
@@ -193,8 +207,7 @@ def main():
                     text = path.read_text(encoding="utf-8", errors="replace")
                     # Conda's failure report appends an environment-variable
                     # dump; retain the preceding traceback, not that dump.
-                    text = text.split("  environment variables:", 1)[0]
-                    status["installer_diagnostics"][path.name] = text[:8000]
+                    status["installer_diagnostics"][path.name] = installation_diagnostic(text)
     (out / "summary.json").write_text(json.dumps(status, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(status))
     return 0 if status["status"] == "passed" else 1
