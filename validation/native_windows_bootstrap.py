@@ -119,10 +119,10 @@ def main():
             raise ValueError("Installer changed persistent PATH or default-Python registry configuration")
         status["checks"].append("persistent_path_and_python_registration_unchanged")
         host = destination / "runtimes/host/python.exe"
-        gui = destination / "runtimes/gui/python.exe"
         app = destination / "app"
         entry = app / "docking-universal-native.py"
         configuration = json.loads((app / "native-preview.json").read_text(encoding="utf-8"))
+        gui = destination / configuration['gui_python']
         scientific_python = destination / configuration["scientific_python"] if args.with_scientific else host
         for launcher in (destination / "bin/docking-universal.ps1", destination / "bin/docking-universal.cmd"):
             if launcher.suffix == ".ps1":
@@ -168,6 +168,12 @@ def main():
         status["vina"] = json.loads((out / "vina/summary.json").read_text(encoding="utf-8"))
         status["checks"].append("installed_native_vina_exact_same_seed_repeat")
         if args.with_scientific:
+            with (out / 'installed-viewer.local.log').open('w', encoding='utf-8') as log:
+                subprocess.run([str(gui), str(ROOT / 'validation/native_viewer_probe.py'), '--app', str(app),
+                    '--out', str(out / 'installed-viewer'), '--installed'],
+                    env=environment, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=180)
+            status['checks'].append('installed_owned_qt6_viewer_render_detach_return_ray_export')
+            status['installed_viewer'] = 'passed'
             # Mask the parent's scientific and source-checkout paths too.
             # The installed dispatcher must reconstruct its owned runtime.
             environment.update(installer_environment)

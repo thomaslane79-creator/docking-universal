@@ -1,0 +1,32 @@
+{
+  "schema": "docking-universal-windows-viewer-v1",
+  "profile": "pymol-qt6-mesa26-software-v1",
+  "system": "Windows",
+  "machine": "x86_64",
+  "python": "3.12",
+  "wheel": {
+    "name": "pymol-3.2.0a0-cp312-cp312-win_amd64.whl",
+    "sha256": "cea1b079b490a8f93919b317307602d8ad1584a9ceab0c5777a1b289e895edc0",
+    "bytes": 6970088,
+    "upstream_commit": "5e8bfca5a7f5dc4d5e7f84fa1d15af707cc86e69",
+    "upstream": "https://github.com/schrodinger/pymol-open-source",
+    "source_archive": "dependencies/runtime/macos-arm64/pymol-source.tar.gz",
+    "source_sha256": "81053fb954161ac7c8b34be581b5d2d0ae01bdd1ba7150c8d8f4a9c6537680b0",
+    "source_changes": false,
+    "build_options": {"libxml": "no", "use-msgpackc": "no", "vmd-plugins": "no"},
+    "native_library_validation": "https://github.com/thomaslane79-creator/docking-universal/actions/runs/39429574645"
+  },
+  "mesa": {
+    "version": "26.2.4",
+    "filename": "mesa3d-26.2.4-release-msvc.7z",
+    "url": "https://github.com/pal1000/mesa-dist-win/releases/download/26.2.4/mesa3d-26.2.4-release-msvc.7z",
+    "sha256": "351fc8c8b695878ffb3eaa044b3ead08672a48b1a045e3c3e3975811df0f6695",
+    "source": "https://github.com/pal1000/mesa-dist-win/releases/tag/26.2.4",
+    "source_license": "https://docs.mesa3d.org/license.html",
+    "libraries": {
+      "x64/opengl32.dll": "75b295fc80df0eaa8f1264c28663f6932c8b72d36513eb092556608858b7f5e0",
+      "x64/libgallium_wgl.dll": "53e49adf87590d5b0cab8553b1e98084812040cc1fca8c487695b17b7af3702e"
+    },
+    "policy": "Private process-local CPU viewing only; no system driver replacement, OpenCL installation or GPU docking"
+  }
+}

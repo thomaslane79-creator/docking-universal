@@ -30,6 +30,11 @@ def main() -> int:
         help="Python executable for the isolated scientific application host",
     )
     args = parser.parse_args()
+    if sys.platform == 'win32' and args.viewer_backend in {'embedded', 'auto'}:
+        app = Path(__file__).resolve().parent
+        if (app / 'native-preview.json').is_file():
+            from docking_universal.windows_viewer_runtime import activate_installed_viewer
+            activate_installed_viewer(app)
     if args.detach:
         child_args = [arg for arg in sys.argv[1:] if arg != "--detach"]
         subprocess.Popen(

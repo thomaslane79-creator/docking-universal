@@ -1,0 +1,16 @@
+# Owned Windows Qt6/PyMOL runtime. Chemistry remains in its separate pinned 3.9 prefix.
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12
+  - pyqt6
+  - gemmi
+  - numpy>=2.0
+  - glew=2.3.0
+  - freetype>=2.14
+  - libpng>=1.6
+  - pillow
+  - pip
+  # Private extraction only; no preinstalled 7-Zip or compiler is required.
+  - 7zip=26.04

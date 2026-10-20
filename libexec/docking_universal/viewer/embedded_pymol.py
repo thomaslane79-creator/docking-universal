@@ -11,6 +11,7 @@ from pathlib import Path
 import hashlib
 import itertools
 import math
+import os
 import sys
 from typing import Any
 from uuid import uuid4
@@ -216,6 +217,8 @@ class EmbeddedPymolAdapter:
 
     def __init__(self, widget):
         self.widget = widget
+        if sys.platform == 'win32' and os.environ.get('DOCKING_UNIVERSAL_VIEWER_GRAPHICS') == 'software':
+            self.backend_name = 'Embedded PyMOL · software graphics'
         self.cmd = widget.cmd
         self.session_id = f"embedded-viewer-{uuid4().hex}"
         self.structures: dict[str, RegisteredStructure] = {}

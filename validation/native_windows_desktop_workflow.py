@@ -68,6 +68,10 @@ def main():
         os.environ.clear(); os.environ.update(isolated_environment(Path(sys.prefix), inherited))
         os.environ.update(MPLCONFIGDIR=str(out / "matplotlib-cache"), XDG_CACHE_HOME=str(out / "cache"))
         os.environ.pop("QT_QPA_PLATFORM", None)
+        with_viewer = bool(configuration.get('viewer_candidate_installed'))
+        if with_viewer:
+            from docking_universal.windows_viewer_runtime import activate_installed_viewer
+            activate_installed_viewer(app)
         from docking_universal.gui.qt import QtCore, QtWidgets
         from docking_universal.gui.desktop import StudyWindow
         from docking_universal.gui.host_client import ApplicationHostClient, ApplicationHostError
@@ -102,9 +106,25 @@ def main():
         settings = QtCore.QSettings(str(out / "desktop.ini"), QtCore.QSettings.Format.IniFormat)
 
         def open_window(study="desktop-fixture"):
-            result = StudyWindow(store, study, settings=settings, host_client=client)
+            viewer = widget = None
+            if with_viewer:
+                from docking_universal.viewer.embedded_pymol import create_embedded_pymol_widget, EmbeddedPymolAdapter
+                from docking_universal.gui.study_viewer import StudyViewerCoordinator
+                widget = create_embedded_pymol_widget()
+                viewer = StudyViewerCoordinator(EmbeddedPymolAdapter(widget))
+            result = StudyWindow(store, study, settings=settings, host_client=client,
+                                viewer_coordinator=viewer, viewer_widget=widget)
             result.show(); application.processEvents()
             return result
+
+        def close_window():
+            if window is not None:
+                window.close(); application.processEvents()
+                if window.viewer_coordinator is not None:
+                    window.viewer_coordinator.close()
+                if window.viewer_widget is not None:
+                    window.viewer_widget.deleteLater()
+                application.processEvents()
 
         def wait_for(predicate, *, study="desktop-fixture", seconds=300):
             deadline = time.monotonic() + seconds
@@ -168,10 +188,35 @@ def main():
             status["candidate_count"] = window.candidates.rowCount()
         stage("qt_mmcif_preparation_to_explicit_site_review", prepare)
 
+        def visual_review():
+            from PyQt6.QtTest import QTest
+            wait_for(lambda _s: window.viewer_coordinator.connected, seconds=30)
+            adapter = window.viewer_coordinator.adapter
+            if adapter.cmd.count_atoms() < 100:
+                raise GateError('Installed PyMOL initial candidate scene is blank')
+            frame = window.viewer_widget.grabFramebuffer()
+            if frame.isNull():
+                raise GateError('Installed PyMOL did not render the actual prepared receptor')
+            camera, engine = tuple(adapter.cmd.get_view())[:9], window.viewer_widget.pymol
+            window.detach_viewer_button.click(); QTest.qWait(400)
+            detached = window._detached_structure_window
+            if detached is None or not getattr(detached, '_du_full_pymol', False):
+                raise GateError('Actual full-PyMOL detach button did not open its window')
+            if window.viewer_widget.pymol is not engine or not hasattr(detached, 'study_panel'):
+                raise GateError('Detached viewer did not retain its engine and study evidence controls')
+            detached.close(); QTest.qWait(300)
+            if window._detached_structure_window is not None:
+                raise GateError('Detached PyMOL did not return its viewport')
+            if max(abs(a-b) for a,b in zip(camera, adapter.cmd.get_view()[:9])) > 1e-5:
+                raise GateError('Detached PyMOL changed the receptor orientation')
+            status['installed_viewer_graphics'] = dict(zip(('vendor','renderer','version'), adapter.cmd.get_renderer()))
+        if with_viewer:
+            stage('installed_initial_pocket_scene_and_full_pymol_detach_return', visual_review)
+
         def reopen():
             nonlocal window
             prior = store.path_for("desktop-fixture").read_bytes()
-            window.close(); application.processEvents()
+            close_window()
             client.restart()
             window = open_window()
             if store.path_for("desktop-fixture").read_bytes() != prior:
@@ -221,11 +266,50 @@ def main():
                 raise GateError("A registered fixture artifact is missing after screening")
             status["completed_job_count"] = sum(j.status.value == "completed" for j in state.jobs)
         stage("qt_compound_selection_preview_screening_and_results", screen)
+
+        def paired_review():
+            import hashlib
+            from PyQt6.QtTest import QTest
+            from docking_universal.gui.linked_pose_review import pose_view
+            from docking_universal.gui.image_export import capture_pymol_image, diagram_export
+            state = store.load('desktop-fixture')
+            views = [pose_view(Path(a.path)) for a in state.artifacts if a.kind == 'screening_interaction_diagram']
+            view = next((item for item in views if item is not None), None)
+            if view is None or view.coordinate_kind != 'docked':
+                raise GateError('No exact docked-pose interaction view was retained')
+            original = hashlib.sha256(view.diagram.read_bytes()).hexdigest()
+            if not window._open_interaction_review(view):
+                raise GateError('Actual paired 2D/3D window could not open')
+            QTest.qWait(500)
+            popup = window._paired_interaction_window
+            adapter = window.viewer_coordinator.adapter
+            if popup is None or adapter.cmd.count_atoms('du_review_pose') == 0:
+                raise GateError('Paired window did not load the matching docked ligand')
+            for action in popup.contact_type_actions.values():
+                action.setChecked(False); action.setChecked(True)
+            if popup._residues:
+                popup.labels.setChecked(True)
+                if not adapter.has_review_residue_labels():
+                    raise GateError('Paired residue-label option did not label contacting residues')
+                popup.labels.setChecked(False)
+                if adapter.has_review_residue_labels():
+                    raise GateError('Paired residue labels did not toggle off')
+                popup.clicked_residue(popup._residues[0])
+            popup.clicked_ligand()
+            if capture_pymol_image(window.viewer_widget).isNull() or diagram_export(view).image.isNull():
+                raise GateError('Current 3D or retained 2D image export is empty')
+            if hashlib.sha256(view.diagram.read_bytes()).hexdigest() != original:
+                raise GateError('Interactive visibility changes modified the retained 2D image')
+            popup.close(); QTest.qWait(300)
+            if window._paired_interaction_window is not None:
+                raise GateError('Paired 2D/3D viewport did not return normally')
+        if with_viewer:
+            stage('installed_docked_pose_linked_2d_3d_labels_contacts_and_exports', paired_review)
         stage("completed_screen_survives_window_and_host_restart", reopen)
 
         def cancel():
             nonlocal window
-            window.close(); application.processEvents()
+            close_window()
             client.request("cancel-fixture", "create_study", {"name": "Disposable cancellation fixture"})
             window = open_window("cancel-fixture")
             window.input_pdb.setText(str(structure))
@@ -253,7 +337,7 @@ def main():
                 finally:
                     kernel.CloseHandle(handle)
         stage("qt_cancellation_reaps_owned_process_without_approval", cancel)
-        window.close(); window = None; application.processEvents()
+        close_window(); window = None; application.processEvents()
         reader = client._reader
         client.close()
         if reader.is_alive():
@@ -316,6 +400,8 @@ def main():
         # cancel in cleanup, or manipulate persisted job state to hide failure.
         if window:
             window.hide()
+            if window.viewer_coordinator is not None:
+                window.viewer_coordinator.close()
     save()
     print(json.dumps(status))
     return 0 if status["status"] == "passed" else 1

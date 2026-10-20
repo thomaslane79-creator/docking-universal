@@ -19,6 +19,7 @@ def main():
     parser.add_argument('--app', required=True, type=Path)
     parser.add_argument('--out', required=True, type=Path)
     parser.add_argument('--opengl-dll', type=Path, help='Explicit isolated Windows software-graphics probe only')
+    parser.add_argument('--installed', action='store_true', help='Verify and activate the actual installed receipt before Qt')
     args = parser.parse_args()
     out, source = args.out.resolve(), args.app.resolve()
     out.mkdir(parents=True, exist_ok=False)
@@ -39,6 +40,10 @@ def main():
         status['phase'] = name; save()
 
     try:
+        if args.installed:
+            from docking_universal.windows_viewer_runtime import activate_installed_viewer
+            record = activate_installed_viewer(source)
+            check('installed viewer receipt and owned libraries verified', record is not None)
         if args.opengl_dll:
             if platform.system() != 'Windows':
                 raise ValueError('Explicit DLL probe requires Windows')

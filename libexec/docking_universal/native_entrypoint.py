@@ -24,7 +24,8 @@ PREVIEW_NOTICE = (
 
 def isolated_environment(prefix: Path, inherited=None) -> dict[str, str]:
     environment = dict(os.environ if inherited is None else inherited)
-    for key in ("PYTHONHOME", "PYTHONPATH", "QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH", "QML2_IMPORT_PATH"):
+    for key in ("PYTHONHOME", "PYTHONPATH", "QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH", "QML2_IMPORT_PATH",
+                'QT_OPENGL', 'QT_OPENGL_DLL', 'GALLIUM_DRIVER', 'LIBGL_ALWAYS_SOFTWARE'):
         environment.pop(key, None)
     environment["PYTHONIOENCODING"] = "utf-8"
     environment["PYTHONUTF8"] = "1"
@@ -53,7 +54,7 @@ def launch_command(app: Path, configuration: dict, arguments: list[str]):
         environment = isolated_environment(gui.parent, inherited)
         # A fresh, preview-only study root avoids opening production studies by
         # accident. An explicit --state-root remains the user's choice.
-        defaults = ["--host-python", str(host), "--viewer-backend", "none",
+        defaults = ["--host-python", str(host), "--viewer-backend", 'embedded' if configuration.get('viewer_supported') else 'none',
                     "--state-root", str(root / "preview-studies")]
         return [str(gui), str(app / "docking-universal-desktop.py"), *defaults, *options], environment
     environment = isolated_environment(host.parent)

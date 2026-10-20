@@ -76,7 +76,8 @@ def scientific_environment(app: Path, configuration: dict, inherited: dict):
     if hashlib.sha256(engine.read_bytes()).hexdigest() != configuration["vina_sha256"]:
         raise ValueError("Pinned native Vina checksum mismatch; no job was started")
     environment = dict(inherited)
-    for name in ("PYTHONHOME", "PYTHONPATH", "QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH", "QML2_IMPORT_PATH"):
+    for name in ("PYTHONHOME", "PYTHONPATH", "QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH", "QML2_IMPORT_PATH",
+                 'QT_OPENGL', 'QT_OPENGL_DLL', 'GALLIUM_DRIVER', 'LIBGL_ALWAYS_SOFTWARE'):
         environment.pop(name, None)
     environment["PATH"] = os.pathsep.join([*(str(path) for path in executable_directories(python.parent, windows=True)), environment.get("PATH", "")])
     environment.update(PYTHONUTF8="1", PYTHONIOENCODING="utf-8", DOCKING_UNIVERSAL_PYTHON=str(python),

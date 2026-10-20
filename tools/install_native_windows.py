@@ -87,6 +87,20 @@ def copy_application(source: Path, target: Path) -> dict[str, str]:
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(original, destination)
             hashes["installation-assets/" + name] = hashlib.sha256(destination.read_bytes()).hexdigest()
+    viewer_assets = source / 'dependencies/runtime/windows-x64'
+    if (viewer_assets / 'manifest.json').is_file():
+        manifest = json.loads((viewer_assets / 'manifest.json').read_text(encoding='utf-8'))
+        wheel_name = manifest['wheel']['name']
+        if Path(wheel_name).name != wheel_name:
+            raise ValueError('Unsafe viewer asset name')
+        for filename in ('manifest.json', 'LICENSE-PyMOL', wheel_name):
+            original = viewer_assets / filename
+            if viewer_assets.is_symlink() or original.is_symlink():
+                raise ValueError('Viewer asset staging refuses symlinks')
+            destination = target / 'installation-assets/dependencies/runtime/windows-x64' / filename
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(original, destination)
+            hashes[str(destination.relative_to(target).as_posix())] = hashlib.sha256(destination.read_bytes()).hexdigest()
     return hashes
 
 
@@ -112,10 +126,14 @@ def main():
         prefixes = {}
         with (destination / "bootstrap.log").open("w", encoding="utf-8") as log:
             for role in ("host", "gui"):
-                prefixes[role] = destination / "runtimes" / role
+                prefixes[role] = ((Path(manager['prefix']) / 'runtimes/gui')
+                    if role == 'gui' and not args.bootstrap_only and manager['mode'] == 'application_owned'
+                    else destination / 'runtimes' / role)
+                specification = ('environments/windows-gui.yml' if role == 'gui' and not args.bootstrap_only
+                                 else f'environments/windows-bootstrap-{role}.yml')
                 print(f"Creating isolated native {role} runtime…", flush=True)
                 subprocess.run([str(args.conda), "env", "create", "--yes", "--prefix", str(prefixes[role]),
-                                "--file", str(ROOT / f"environments/windows-bootstrap-{role}.yml")],
+                                "--file", str(ROOT / specification)],
                                stdout=log, stderr=subprocess.STDOUT, check=True)
                 record["steps"].append(f"{role}_environment_created")
         app = destination / "app"
@@ -131,7 +149,7 @@ def main():
         engine.write_bytes(binary)
         (engine.parent / "provenance.json").write_text(json.dumps(asset, indent=2) + "\n", encoding="utf-8")
         configuration = {"schema": "docking-universal-native-preview-v1", "host_python": "runtimes/host/python.exe",
-                         "gui_python": "runtimes/gui/python.exe", "vina_executable": "engines/vina.exe",
+                         "gui_python": str(prefixes['gui'] / 'python.exe'), "vina_executable": "engines/vina.exe",
                          "vina_sha256": asset["sha256"], "package_manager_conda": str(args.conda.resolve()),
                          "scientific_stages_supported": False}
         if not args.bootstrap_only:
@@ -155,6 +173,13 @@ def main():
             from docking_universal.windows_desktop import WORKFLOW
             configuration["scientific_desktop_workflow"] = WORKFLOW
             record["scientific_dependencies"] = {key: receipt.get(key) for key in ("status", "imports", "steps", "scientific_gui_enabled", "interactive_viewer_accepted", "gpu_accepted")}
+            from docking_universal.windows_viewer_runtime import install_viewer_runtime, PROFILE
+            viewer_work = destination / '.bootstrap/viewer-setup'
+            install_viewer_runtime(gui=prefixes['gui'], app=app, source_assets=app / 'installation-assets', work=viewer_work)
+            viewer_receipt = viewer_work / 'viewer-install.json'
+            configuration.update(viewer_profile=PROFILE, viewer_candidate_installed=True, viewer_supported=False,
+                viewer_receipt=str(viewer_receipt.relative_to(destination).as_posix()),
+                viewer_receipt_sha256=hashlib.sha256(viewer_receipt.read_bytes()).hexdigest())
         (app / "native-preview.json").write_text(json.dumps(configuration, indent=2) + "\n", encoding="utf-8")
         launchers = destination / "bin"
         launchers.mkdir()
