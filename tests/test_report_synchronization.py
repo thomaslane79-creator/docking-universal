@@ -53,7 +53,7 @@ class ReportSynchronizationTests(unittest.TestCase):
 
     def test_ligand_only_report_records_no_detector_without_inventing_fpocket(self):
         with tempfile.TemporaryDirectory() as directory:
-            protocol = {'pocket_detection': {'engine': 'none'}}
+            protocol = {'pocket_detection': {'engine': 'none', 'site_definition': 'input_bound_ligand'}}
             provenance = REPORT.reproducibility_record(protocol, Path(directory), None)
             definition = next(row for row in provenance['software']
                               if row['role'] == 'Docking-region definition')
@@ -66,6 +66,27 @@ class ReportSynchronizationTests(unittest.TestCase):
             self.assertIn(definition, used['software'])
             self.assertFalse(any('Fpocket:' in row['citation'] or 'P2Rank:' in row['citation']
                                  for row in used['references']))
+
+    def test_other_structure_ligand_site_is_not_mislabeled_as_the_input_ligand(self):
+        with tempfile.TemporaryDirectory() as directory:
+            protocol = {'pocket_detection': {'engine': 'none', 'site_definition': 'input_bound_ligand'},
+                        'docking_regions': [{'box_label': 'L1', 'site_source': 'aligned_ligand',
+                                             'definition_origin': 'same-protein-ligands', 'geometry': {}}]}
+            provenance = REPORT.reproducibility_record(protocol, Path(directory), None)
+            definition = next(row for row in provenance['software'] if row['role'] == 'Docking-region definition')
+            self.assertEqual(definition['software'], 'User-selected ligand-defined docking region')
+            cavity = REPORT.inherited_protocol_cavity_record(protocol)
+            self.assertEqual(REPORT.pocket_prediction_rows(cavity),
+                             [['Pocket prediction', 'Not requested; ligand-defined docking region']])
+            self.assertNotIn('Exact input', provenance['methods']['cavity_detection'])
+
+    def test_mixed_or_unrecorded_ligand_sites_do_not_imply_exact_input_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for regions in ([], [{'site_source': 'input_bound_ligand'}, {'site_source': 'aligned_ligand'}]):
+                provenance = REPORT.reproducibility_record(
+                    {'pocket_detection': {'engine': 'none'}, 'docking_regions': regions}, Path(directory), None)
+                definition = next(row for row in provenance['software'] if row['role'] == 'Docking-region definition')
+                self.assertEqual(definition['software'], 'User-selected ligand-defined docking region')
 
     def test_retained_cavity_methods_use_the_recorded_predictor_name(self):
         with tempfile.TemporaryDirectory() as directory:

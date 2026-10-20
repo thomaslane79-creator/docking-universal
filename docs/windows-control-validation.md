@@ -50,10 +50,15 @@ locations are retained outside the runner. Structures, poses, diagrams, reports,
 scientific logs and numerical structural evidence remain runner-local. No
 completed user study or working Mac installation is changed.
 
-Local evidence so far: 723 Python cases/21 shell checks pass, including the
+Local evidence so far: 728 Python cases/21 shell checks pass, including the
 report-synchronization regressions now in the normal test target;
-targeted control/transport/authority tests and 110 separate Qt
-cases pass. Real isolated Mac preparations of public 2R5P and 1STP mmCIF inputs
+extended scientific-host discovery also passes 885 cases (111 expected runtime
+skips), and separate GUI regressions pass 185 cases. The initial unsplit
+discovery attempt lacked Qt and the shell test environment; a second explicit
+module invocation also lacked the tests' sibling-import path. Those diagnostics
+are preserved locally; the correctly separated runs above do not hide these
+environment requirements. No dependency or Xcode license was changed.
+Real isolated Mac preparations of public 2R5P and 1STP mmCIF inputs
 complete Reduce2, strict Meeko and the component audit without running P2Rank.
 The new stage also completes the unchanged quick biotin control locally,
 including independent conformers, two seeds, comparisons and reference/pose
@@ -78,7 +83,7 @@ input-ligand site/prediction-not-requested case from P2Rank/fpocket, and preserv
 the historical default only for genuinely missing legacy records. Regression
 checks also cover an unfamiliar detector without substituting fpocket. Reusing
 the already completed scientific control produces its normal PDF; no redocking
-was needed. The earlier failed local report record is preserved. The pending
+was needed. The earlier failed local report record is preserved. The failed
 native run at `dba4a7b` predates this correction and the separate positive gate;
 it cannot validate the corrected build. Failure metadata remains restricted to
 exception types and code locations, never scientific log text.
@@ -99,3 +104,16 @@ Retained passed/unapproved controls are described as performed site-specific
 controls, not as though no control was run. Related-site scope restrictions
 remain intact. These semantics have dedicated regressions; the corrected native
 four-case gate remains pending and normal installations still disable controls.
+The corrected feature-branch build is `f8ef36a`; native run
+[39473514519](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39473514519)
+and companion general run
+[39473514518](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39473514518)
+are the relevant gates, not the earlier failed run. The companion general run
+has completed successfully with all eight jobs passing; the installed native
+gate is still active. Its dependency/source-workflow job has already passed.
+
+The no-prediction wording also follows the actual selected region(s): another
+structure's aligned ligand and mixed input/evidence selections are not labeled
+as though every box came from the exact input ligand. The original preparation
+mode alone is insufficient to make that claim. These additional report-only
+regressions pass locally; they do not change docking inputs or acceptance rules.

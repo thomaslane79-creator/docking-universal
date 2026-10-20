@@ -398,6 +398,7 @@ def discover_cavity_record(study):
         "detail": detail, "descriptors": descriptors, "config": config,
         "selected_file": selected_file, "box_dimensions": dimensions, "box_center": center,
         "pocket_engine": engine_key, "pocket_engine_name": engine_name,
+        "site_source": region.get("site_source"),
     }
 
 def inherited_protocol_cavity_record(protocol, protocol_path=None):
@@ -433,13 +434,15 @@ def inherited_protocol_cavity_record(protocol, protocol_path=None):
         "box_dimensions": [geometry.get(f"size_{axis}") for axis in "xyz"],
         "box_center": [geometry.get(f"center_{axis}") for axis in "xyz"],
         "pocket_engine": engine_key, "pocket_engine_name": engine_name,
+        "site_source": selected_region.get("site_source"),
     }
 
 
 def pocket_prediction_rows(cavity, *, review_only=False, threshold_text="not recorded", descriptor=None):
     """No predictor means no invented prediction score or fpocket descriptors."""
     if cavity.get("pocket_engine") == "none":
-        return [["Pocket prediction", "Not requested; exact input-ligand site"]]
+        definition = "exact input-ligand site" if cavity.get("site_source") == "input_bound_ligand" else "ligand-defined docking region"
+        return [["Pocket prediction", "Not requested; " + definition]]
     prefix = "Top" if review_only else "Selected"
     selected = cavity["selected"]
     rows = [[f"{prefix} {cavity['pocket_engine_name']} score",
@@ -1124,8 +1127,12 @@ def reproducibility_record(protocol, study, control):
     detector_key = str((protocol or {}).get('pocket_detection', {}).get('engine')
                        or (cavity_record or {}).get("pocket_engine", "fpocket")).lower()
     if detector_key == "none":
+        regions = (protocol or {}).get("docking_regions") or []
+        exact_input_site = (all(region.get("site_source") == "input_bound_ligand" for region in regions)
+                            if regions else (protocol or {}).get("pocket_detection", {}).get("site_definition") == "input_bound_ligand")
         detector_software = {
-            "role": "Docking-region definition", "software": "Exact input-ligand site",
+            "role": "Docking-region definition",
+            "software": "Exact input-ligand site" if exact_input_site else "User-selected ligand-defined docking region",
             "version": "Pocket prediction not requested",
         }
     else:
@@ -1209,7 +1216,7 @@ def reproducibility_record(protocol, study, control):
         "report_generation": report_runtime,
         "methods": {
             "cavity_detection": (
-                "Not requested; docking region defined from the exact input ligand" if detector_key == "none" else
+                "Not requested; " + detector_name if detector_key == "none" else
                 f"{detector_name} pocket detection with recorded geometry/overlap filtering" if cavity_record else
                 "not used in the retained report study"
             ),
@@ -1351,7 +1358,10 @@ def reproducibility_summary(provenance, cavity, has_docking):
     preparation = provenance["receptor_preparation"]
     sentences = []
     if cavity and cavity.get("pocket_engine") == "none":
-        sentences.append("No pocket prediction was requested; the exact input ligand defined the docking region, not independent supporting evidence.")
+        sentences.append(
+            "No pocket prediction was requested; the docking region was ligand-defined. "
+            "An input ligand defines a site but is not independent supporting evidence."
+        )
     elif cavity:
         sentences.append(
             f"{cavity.get('pocket_engine_name', 'fpocket')} generated the cavity candidates and recorded ranking evidence."
@@ -1636,7 +1646,7 @@ def main():
                 same_config = cavity.get('config') == locked_cavity.get('config')
                 cavity.update({key: locked_cavity[key] for key in (
                     'selected', 'config', 'box_dimensions',
-                    'box_center', 'pocket_engine', 'pocket_engine_name')})
+                    'box_center', 'pocket_engine', 'pocket_engine_name', 'site_source')})
                 if not same_config:
                     cavity['selected_file'] = locked_cavity['selected_file']
             else:
@@ -1804,8 +1814,11 @@ def main():
         if no_pocket_prediction:
             cavity_heading = "Docking-region configuration"
             cavity_explanation = (
-                "The exact input bound ligand defined this docking region. No pocket prediction was requested. "
-                "The input ligand is not independent supporting evidence. "
+                ("The exact input bound ligand defined this docking region. "
+                 "The input ligand is not independent supporting evidence. " if input_ligand_defined else
+                 "This docking region was defined from the user-selected aligned ligand evidence from other structures. " if ligand_defined else
+                 "The user-selected docking region was retained without a pocket-prediction measurement. ")
+                + "No pocket prediction was requested. "
                 + (cavity_explanation if related_site_control and not review_only else
                    retained_control_statement or "No bound-ligand pose-recovery control was performed.")
             )
