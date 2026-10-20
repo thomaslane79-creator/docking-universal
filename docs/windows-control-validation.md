@@ -4,6 +4,15 @@ The exploratory Vina/QuickVina-W GUI, private renderer and interactive software
 viewer passed at `50a8ef2`; see [the completed gate](windows-viewer-engine-validation.md).
 That success does not validate the separate known-ligand control path.
 
+Current candidate: `ba85d2f`, with the retained-detector-version correction and
+the report-origin changes included. Native run
+[39479026877](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39479026877)
+and general run
+[39479026589](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39479026589)
+are pending. Both earlier failed native runs below remain failed records.
+The normal control capability stays disabled until the complete native gate
+and its subsequent enabled-default rerun pass.
+
 The next bounded port removes Bash orchestration only. It reuses the existing
 strict coordinate-free CCD chemistry helper, independent conformer generator,
 Meeko preparation/export, Vina-family adapters, calibration tiers, no-fit
