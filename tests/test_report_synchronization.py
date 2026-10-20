@@ -24,6 +24,33 @@ RUN = load('synchronized_run','libexec/docking-universal-run.py')
 
 
 class ReportSynchronizationTests(unittest.TestCase):
+    def test_ligand_only_site_table_has_no_prediction_measurement_or_fpocket_descriptor(self):
+        region = {'box_label': 'B1', 'site_source': 'input_bound_ligand', 'geometry': {}}
+        cavity = REPORT.inherited_protocol_cavity_record(
+            {'pocket_detection': {'engine': 'none'}, 'docking_regions': [region]})
+        rows = REPORT.pocket_prediction_rows(cavity)
+        self.assertEqual(rows, [['Pocket prediction', 'Not requested; exact input-ligand site']])
+        self.assertNotIn('fpocket', str(rows))
+        self.assertNotIn('score', str(rows))
+
+    def test_site_report_distinguishes_performed_control_from_untested_exploratory_selection(self):
+        self.assertIsNone(REPORT.site_control_statement({'control_status': 'not_performed'}))
+        statement = REPORT.site_control_statement({'control_status': 'failed', 'unknown_docking_allowed': False})
+        self.assertIn('was performed but was not approved', statement)
+        statement = REPORT.site_control_statement({'control_status': 'approved', 'unknown_docking_allowed': True})
+        self.assertIn('passed for the tested receptor, site, engine and settings', statement)
+        self.assertIn('does not establish affinity', statement)
+
+    def test_predictor_specific_rows_preserve_scores_without_cross_detector_descriptors(self):
+        cavity = {'pocket_engine': 'p2rank', 'pocket_engine_name': 'P2Rank',
+                  'selected': {'rank_score': 2.49, 'probability': .069}}
+        self.assertEqual(REPORT.pocket_prediction_rows(cavity),
+                         [['Selected P2Rank score', 2.49], ['Selected P2Rank probability', .069]])
+        cavity.update(pocket_engine='fpocket', pocket_engine_name='fpocket')
+        rows = REPORT.pocket_prediction_rows(cavity, threshold_text='.1', descriptor={'druggability_score': .6})
+        self.assertIn(['fpocket eligibility threshold used', '.1'], rows)
+        self.assertIn(['Selected-pocket druggability descriptor', .6], rows)
+
     def test_ligand_only_report_records_no_detector_without_inventing_fpocket(self):
         with tempfile.TemporaryDirectory() as directory:
             protocol = {'pocket_detection': {'engine': 'none'}}

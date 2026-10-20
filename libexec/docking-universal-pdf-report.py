@@ -435,6 +435,35 @@ def inherited_protocol_cavity_record(protocol, protocol_path=None):
         "pocket_engine": engine_key, "pocket_engine_name": engine_name,
     }
 
+
+def pocket_prediction_rows(cavity, *, review_only=False, threshold_text="not recorded", descriptor=None):
+    """No predictor means no invented prediction score or fpocket descriptors."""
+    if cavity.get("pocket_engine") == "none":
+        return [["Pocket prediction", "Not requested; exact input-ligand site"]]
+    prefix = "Top" if review_only else "Selected"
+    selected = cavity["selected"]
+    rows = [[f"{prefix} {cavity['pocket_engine_name']} score",
+             selected.get("rank_score", selected.get("score", "Not retained"))]]
+    if cavity.get("pocket_engine") == "p2rank":
+        rows.append([f"{prefix} P2Rank probability", selected.get("probability", "Not retained")])
+    elif cavity.get("pocket_engine") == "fpocket":
+        rows.extend([["fpocket eligibility threshold used", threshold_text],
+                     [f"{prefix}-pocket druggability descriptor", (descriptor or {}).get("druggability_score", "NA")]])
+    return rows
+
+
+def site_control_statement(protocol):
+    """A retained control is not the same as an exploratory untested site."""
+    if (protocol or {}).get("control_status") not in {"approved", "failed"}:
+        return None
+    return (
+        "Pose-recovery control passed for the tested receptor, site, engine and settings; "
+        "this does not establish affinity or prospective pose accuracy."
+        if protocol.get("unknown_docking_allowed") else
+        "Pose-recovery control was performed but was not approved; no validated screening protocol was issued."
+    )
+
+
 def protocol_conformational_evidence(protocol, protocol_path):
     """Load retained rotamer/accessibility evidence from source or bundle."""
     pocket_evidence = protocol.get("pdb_pocket_evidence") or {}
@@ -1321,7 +1350,9 @@ def reproducibility_summary(provenance, cavity, has_docking):
     """Describe recorded tools and scientific operations for this report type."""
     preparation = provenance["receptor_preparation"]
     sentences = []
-    if cavity:
+    if cavity and cavity.get("pocket_engine") == "none":
+        sentences.append("No pocket prediction was requested; the exact input ligand defined the docking region, not independent supporting evidence.")
+    elif cavity:
         sentences.append(
             f"{cavity.get('pocket_engine_name', 'fpocket')} generated the cavity candidates and recorded ranking evidence."
         )
@@ -1614,8 +1645,11 @@ def main():
     # docking.  Require retained pose-cluster results before adding docking
     # sections to a preparation-only report.
     has_docking = has_retained_docking_results(args.study)
+    no_pocket_prediction = bool(cavity and cavity.get("pocket_engine") == "none")
+    retained_control_statement = site_control_statement(protocol)
     report_title = (
         "Docking Universal - Preliminary Pocket-Review Report (Not a Protocol)" if review_only
+        else "Docking Universal - Docking Study Report" if no_pocket_prediction or retained_control_statement
         else "Docking Universal - Reusable Exploratory Protocol Report" if cavity and summary_protocol_type in {
             "site-guided-exploratory", "ligand-guided-exploratory"
         } and not has_docking
@@ -1654,6 +1688,8 @@ def main():
                 + str(related_site_control["tested_box_label"])
                 + "; it does not validate all selected sites or receptor states."
             )
+        elif retained_control_statement and not review_only:
+            status_text = "Interpretive status: " + retained_control_statement
         story += [Paragraph(status_text, styles["BodyText"]), Spacer(1,8)]
     # An exploratory report begins with the pocket configuration and its A/B
     # cavity figure.  A docking-at-a-glance table before that figure implies
@@ -1759,6 +1795,20 @@ def main():
                 "This protocol retains the user's selected regions as explicitly exploratory; the control "
                 "does not validate additional sites, receptor states, or changed settings."
             )
+        elif retained_control_statement and not review_only:
+            cavity_heading = "Docking-region configuration"
+            cavity_explanation = (
+                "Site selection preceded the pose-recovery control. " + retained_control_statement
+                + " Predicted pockets, when requested, are site hypotheses rather than binding validation."
+            )
+        if no_pocket_prediction:
+            cavity_heading = "Docking-region configuration"
+            cavity_explanation = (
+                "The exact input bound ligand defined this docking region. No pocket prediction was requested. "
+                "The input ligand is not independent supporting evidence. "
+                + (cavity_explanation if related_site_control and not review_only else
+                   retained_control_statement or "No bound-ligand pose-recovery control was performed.")
+            )
         cavity_threshold = summary.get("cavity_score_threshold_used", "not recorded")
         try:
             threshold_value = float(cavity_threshold)
@@ -1774,18 +1824,11 @@ def main():
             ["Pocket configuration", "Recorded value"],
             ["Interpretive status", "Pocket review only; not a protocol" if review_only else
              "Exploratory; a separate site-specific control does not validate this complete selection" if related_site_control else
+             retained_control_statement if retained_control_statement else
              "Exploratory; not evaluated by a bound-ligand pose-recovery control"],
-            [f"{'Top' if review_only else 'Selected'} {pocket_engine} score", selected.get("rank_score", selected.get("score", "Not retained"))],
         ]
-        if cavity.get("pocket_engine") == "p2rank":
-            configuration_rows.append([
-                f"{'Top' if review_only else 'Selected'} P2Rank probability", selected.get("probability", "Not retained"),
-            ])
-        else:
-            configuration_rows.extend([
-                ["fpocket eligibility threshold used", threshold_text],
-                [f"{'Top' if review_only else 'Selected'}-pocket druggability descriptor", descriptor.get("druggability_score", "NA")],
-            ])
+        configuration_rows.extend(pocket_prediction_rows(cavity, review_only=review_only,
+                                  threshold_text=threshold_text, descriptor=descriptor))
         configuration_rows.append([
             "Selected docking region",
             "Not yet selected; choose one or more boxes after reviewing this report"

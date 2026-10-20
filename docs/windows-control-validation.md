@@ -58,8 +58,19 @@ complete Reduce2, strict Meeko and the component audit without running P2Rank.
 The new stage also completes the unchanged quick biotin control locally,
 including independent conformers, two seeds, comparisons and reference/pose
 visuals. It correctly withholds approval under the five-seed rule. This is not
-native Windows or full outer GUI/report acceptance. Native candidate results
-remain pending.
+native Windows or full outer GUI/report acceptance.
+
+The first native candidate at `dba4a7b` (run
+[39470496663](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39470496663))
+passed the existing installed science/viewer and both exploratory CPU-engine
+GUI paths, but failed the first control's ordinary-PDF retention check after
+redocking. It restored the disabled production control capability. The native
+metadata does not include the PDF traceback; the local matching ligand-only
+report independently reproduced the no-detector error below. The companion
+[general run 39470496717](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39470496717)
+passes all eight jobs. Preserve this partial native run as failed, not accepted.
+Status-only records are under
+`validation/runs/windows-support-20261020/dba4a7b/installed/`.
 
 The local report-only rehearsal exposed a genuine report bug: explicit detector
 `none` was indexed as a software version. Reports now distinguish the exact
@@ -71,3 +82,20 @@ was needed. The earlier failed local report record is preserved. The pending
 native run at `dba4a7b` predates this correction and the separate positive gate;
 it cannot validate the corrected build. Failure metadata remains restricted to
 exception types and code locations, never scientific log text.
+
+A separate actual local five-seed repeatability control also passes sampling,
+ranking and seed requirements, produces the ordinary PDF and an approved
+portable bundle, and verifies its receptor/PDB/site hashes after extraction.
+The first network-restricted attempt stopped before conformer generation at
+the required public CCD identity lookup; its failed output is preserved. The
+fresh successful run used the same strict helper with that coordinate-free
+lookup permitted, not inferred chemistry or forced approval. Only disposable
+public-fixture outputs were created. This remains Mac evidence for the shared
+stage, not a substitute for native Windows acceptance.
+
+Report correctness checks now also prevent a ligand-only site from acquiring a
+fictitious `none score`/fpocket descriptor or a ligand-free-cavity heading.
+Retained passed/unapproved controls are described as performed site-specific
+controls, not as though no control was run. Related-site scope restrictions
+remain intact. These semantics have dedicated regressions; the corrected native
+four-case gate remains pending and normal installations still disable controls.
