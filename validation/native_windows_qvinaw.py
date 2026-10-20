@@ -106,6 +106,21 @@ def main():
         output = target / 'fragment_qvinaw.pdbqt'
         state['unicode_paths'] = {'returncode': code, 'output_created': output.is_file(),
             'exact_ascii_output': code == 0 and output.is_file() and output.read_bytes() == outputs[0]}
+        # An explicit, separate diagnostic control tests the already-existing
+        # byte-preserving Vina path carrier with this executable. This does NOT
+        # modify/accept the production QuickVina adapter or erase its failure.
+        from docking_universal.vina_cli import run_native_vina
+        diagnostic_output = unicode / 'diagnostic-transport.pdbqt'
+        arguments = ['--receptor', str(unicode / receptor.name), '--ligand', str(unicode_ligands / ligand.name),
+            '--config', str(unicode / box.name), '--out', str(diagnostic_output), '--exhaustiveness', '1',
+            '--num_modes', '3', '--seed', '41001', '--cpu', '1']
+        with (out / 'diagnostic-transport.local.log').open('wb') as log:
+            diagnostic = run_native_vina([str(executable)], arguments, environment=env, log=log,
+                                         staging_root=out / 'diagnostic-ascii-staging')
+        state['diagnostic_path_transport'] = {'returncode': diagnostic.returncode,
+            'exact_ascii_output': diagnostic.returncode == 0 and diagnostic_output.is_file()
+                                   and diagnostic_output.read_bytes() == outputs[0],
+            'production_adapter_changed': False}
         state['status'] = 'passed_prepared_input_gate' if state['unicode_paths']['exact_ascii_output'] else 'completed_with_unicode_failure'
     except Exception as exc:
         state.update(status='failed', error_type=type(exc).__name__)
