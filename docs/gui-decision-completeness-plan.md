@@ -1,5 +1,14 @@
 # Complete interactive GUI workflow plan
 
+Completed candidate gate 2026-10-20 at `ba85d2f`: native 39479026877 passes both
+jobs and all four actual GUI controls (Vina/QuickVina-W quick rejection plus
+five-seed approval, PDFs, verified portable inputs, unchanged reviewed assets
+and cleanup). All eight general jobs pass in 39479026589. Enable only this
+strict reviewed-control capability for fresh native installs; the final
+enabled-default run must reject disabled configuration and use no fixture
+override or configuration rewrite. Chemistry interventions, GPU and consumer
+hardware remain separate; no existing study or working Mac install changes.
+
 Completed 2026-10-20 at `50a8ef2`: enabled-default native Windows launch and
 application-private browser pass the fresh no-prerequisite install, 20 viewer
 checks, five installed CLI stages and both 11-step real GUI workflows in

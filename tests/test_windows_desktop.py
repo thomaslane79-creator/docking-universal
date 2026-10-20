@@ -12,6 +12,20 @@ from docking_universal.windows_desktop import WORKFLOW, installed_host, installe
 
 
 class NativeDesktopGuardTests(unittest.TestCase):
+    def test_control_capability_uses_installation_configuration_not_an_environment_bypass(self):
+        app = self.root / 'app'; app.mkdir()
+        path = app / 'native-preview.json'
+        path.write_text('{}', encoding='utf-8')
+        baseline = installed_capabilities(app, {'DOCKING_UNIVERSAL_ACCEPT_CONTROL_CANDIDATE': '1'})
+        self.assertFalse(baseline['known_ligand_control_supported'])
+        self.assertEqual(baseline['supported_site_modes'], ['pockets'])
+        path.write_text(json.dumps({'native_control_supported': True}), encoding='utf-8')
+        enabled = installed_capabilities(app, {})
+        self.assertTrue(enabled['known_ligand_control_supported'])
+        self.assertEqual(enabled['supported_site_modes'], ['pockets', 'ligand'])
+        self.assertFalse(enabled['preparation_interventions_supported'])
+        self.assertEqual(enabled['supported_engines'], ['vina'])
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
@@ -46,6 +60,19 @@ class NativeDesktopGuardTests(unittest.TestCase):
                 {"protocol_bundle": "other.duprotocol", "reviewed_sha256": "test"}, self.store.load("native").revision))
         self.assertEqual(response.status, "rejected")
         self.assertEqual(self.store.path_for("native").read_bytes(), prior)
+
+    def test_enabled_controls_still_reject_gpu_and_incomplete_control_without_mutation(self):
+        dispatcher = CommandDispatcher(self.controller, 'enabled', workflow_guard=lambda command, controller:
+            workflow_guard(command, controller, supported_engines=('vina', 'qvinaw'),
+                supported_site_modes=('pockets', 'ligand'), known_ligand_control_supported=True))
+        self.addCleanup(dispatcher.shutdown)
+        prior = self.store.path_for('native').read_bytes()
+        for operation, payload in (('start_protocol_finalization', {'engine': 'adgpu'}),
+                                   ('start_control_validation', {})):
+            response = dispatcher.dispatch(Command('native', 'enabled', operation, operation, payload,
+                self.store.load('native').revision))
+            self.assertEqual(response.status, 'rejected')
+            self.assertEqual(self.store.path_for('native').read_bytes(), prior)
 
     def test_candidate_control_continuation_checks_retained_engine_before_mutation(self):
         def retained(state):

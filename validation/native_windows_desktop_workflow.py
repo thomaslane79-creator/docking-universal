@@ -164,11 +164,11 @@ def main():
                 except ApplicationHostError:
                     pass
                 else:
-                    raise GateError("Unsupported native method was unexpectedly accepted")
+                    raise GateError("Unsupported or incomplete native request was unexpectedly accepted")
                 if store.path_for("desktop-fixture").read_bytes() != prior:
-                    raise GateError("Unsupported native request mutated the fixture study")
-            if window.study_setup_panel.redock_ligand.isEnabled():
-                raise GateError("Unaccepted native control remains enabled in the Qt form")
+                    raise GateError("Unsupported or incomplete native request mutated the fixture study")
+            if bool(window.study_setup_panel.redock_ligand.isEnabled()) != bool(client.runtime.get("known_ligand_control_supported")):
+                raise GateError("Qt control option does not match the installed accepted capability")
             enabled = {window.protocol_engine.itemData(i) for i in range(window.protocol_engine.count())
                        if window.protocol_engine.model().item(i).isEnabled()}
             if enabled != set(expected_engines):

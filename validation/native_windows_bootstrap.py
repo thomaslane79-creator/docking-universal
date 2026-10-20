@@ -213,13 +213,14 @@ def main():
                         env=environment, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=1500)
                 status['checks'].append('installed_real_qt_quickvina_protocol_screening_viewer_and_lifecycle')
                 status['installed_qvinaw_desktop_workflow'] = 'passed'
-            if 'native_control_supported' in configuration:
-                with (out / 'control-candidate.local.log').open('w', encoding='utf-8') as log:
-                    subprocess.run([str(gui), str(ROOT / 'validation/native_windows_control_workflow.py'),
-                        '--app', str(app), '--out', str(out / 'control-candidate')],
-                        env=environment, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=2700)
-                status['checks'].append('installed_strict_reviewed_control_candidate_both_cpu_engines')
-                status['installed_control_candidate'] = 'passed_not_production_enabled'
+            if configuration.get('native_control_supported') is not True:
+                raise ValueError('Fresh scientific installer did not enable the accepted native control capability')
+            with (out / 'control-candidate.local.log').open('w', encoding='utf-8') as log:
+                subprocess.run([str(gui), str(ROOT / 'validation/native_windows_control_workflow.py'),
+                    '--app', str(app), '--out', str(out / 'control-candidate')],
+                    env=environment, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=2700)
+            status['checks'].append('installed_strict_reviewed_controls_enabled_defaults_both_cpu_engines')
+            status['installed_control_workflow'] = 'passed_enabled_defaults'
         status["status"] = "passed"
     except Exception as exc:
         status.update(status="failed", error=str(exc))

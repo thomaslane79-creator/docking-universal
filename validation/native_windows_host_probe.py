@@ -27,14 +27,16 @@ def main():
         store = JsonStudyStore(root)
         prior = store.path_for("native-probe").read_bytes()
         try:
-            client.request("native-probe", "start_control_validation" if args.scientific else "start_receptor_preparation", {}, expected_revision=response["revision"])
+            operation, payload = (("start_protocol_finalization", {"engine": "adgpu"})
+                                  if args.scientific else ("start_receptor_preparation", {}))
+            client.request("native-probe", operation, payload, expected_revision=response["revision"])
         except ApplicationHostError as exc:
-            if not any(text in str(exc) for text in ("not configured", "not accepted")):
+            if not any(text in str(exc) for text in ("not configured", "not accepted", "no engine substitution")):
                 raise
         else:
-            raise ValueError("Unported native preparation was unexpectedly accepted")
+            raise ValueError("Unsupported native method was unexpectedly accepted")
         if store.path_for("native-probe").read_bytes() != prior:
-            raise ValueError("Rejected native preparation mutated study state")
+            raise ValueError("Rejected native method mutated study state")
         first = client.session_id
         client.restart()
         if client.session_id == first or client.request("native-probe", "snapshot")["status"] != "applied":

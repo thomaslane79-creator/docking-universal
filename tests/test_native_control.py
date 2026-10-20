@@ -11,6 +11,17 @@ from docking_universal.native_control import parse_args, run_reviewed_control, s
 
 
 class NativeControlTests(unittest.TestCase):
+    def test_final_native_gate_requires_normal_enabled_installation_without_fixture_override(self):
+        from validation.native_windows_control_workflow import GateError, require_enabled_controls
+        for config in ({}, {'native_control_supported': False}, {'native_control_supported': 'true'}):
+            before = dict(config)
+            with self.assertRaisesRegex(GateError, 'no fixture override'):
+                require_enabled_controls(config)
+            self.assertEqual(config, before)
+        config = {'native_control_supported': True}
+        require_enabled_controls(config)
+        self.assertEqual(config, {'native_control_supported': True})
+
     def test_native_failure_status_keeps_only_types_and_code_locations_not_scientific_log_text(self):
         from validation.native_windows_control_workflow import runtime_failure_metadata
         with tempfile.TemporaryDirectory() as directory:

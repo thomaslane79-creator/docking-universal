@@ -1,8 +1,8 @@
-"""Native installed GUI control candidate; public fixture, status-only artifact.
+"""Native installed GUI control acceptance; public fixture, status-only artifact.
 
-The control gate is enabled ONLY in this disposable installation's configuration
-and restored after closing/reaping its host. No user study or scientific default
-is changed. Quick tiers must NOT authorize screening (two seeds, minimum five);
+The normal installer must enable the independently accepted control capability.
+No fixture override or installation mutation is permitted. No user study or
+scientific default is changed. Quick tiers must NOT authorize screening (two seeds, minimum five);
 separate five-seed fixtures exercise the approved-protocol path without override.
 """
 from __future__ import annotations
@@ -21,6 +21,11 @@ import urllib.request
 
 class GateError(RuntimeError):
     pass
+
+
+def require_enabled_controls(configuration):
+    if configuration.get('native_control_supported') is not True:
+        raise GateError('Fresh installation did not enable the accepted control capability; no fixture override is permitted')
 
 
 def runtime_failure_metadata(root):
@@ -58,7 +63,7 @@ def main():
     original = configuration_path.read_bytes()
     configuration = json.loads(original)
     status = {'status': 'running', 'native_windows': True, 'cases': [],
-              'candidate_configuration_only': True, 'scientific_accuracy_claim': False,
+              'candidate_configuration_only': False, 'capability_override_used': False, 'scientific_accuracy_claim': False,
               'production_control_enabled': bool(configuration.get('native_control_supported'))}
     client = window = application = None
     dialogs, callbacks = [], []
@@ -66,14 +71,13 @@ def main():
         (out / 'summary.json').write_text(json.dumps(status, indent=2) + '\n', encoding='utf-8')
     save()
     try:
+        require_enabled_controls(configuration)
         source = out / '1STP.cif'
         with urllib.request.urlopen('https://files.rcsb.org/download/1STP.cif', timeout=60) as response:
             data = response.read()
         if hashlib.sha256(data).hexdigest() != '36be77b9722ebb9f603b27bf16cbc30057f87ab9923a2d2adab0eadbdb30c30f':
             raise GateError('Public fixture checksum changed; no preparation/control was started')
         source.write_bytes(data)
-        configuration['native_control_supported'] = True  # fixture-only authority
-        configuration_path.write_text(json.dumps(configuration, indent=2) + '\n', encoding='utf-8')
         sys.path.insert(0, str(app))
         from docking_universal.windows_scientific_runtime import scientific_environment
         from docking_universal.native_entrypoint import isolated_environment
@@ -111,7 +115,7 @@ def main():
                                        python_executable=scientific, timeout_seconds=30)
         client.start()
         if not client.runtime.get('known_ligand_control_supported'):
-            raise GateError('Disposable candidate host did not expose its explicit test capability')
+            raise GateError('Installed host did not expose the normally enabled accepted control capability')
         settings = QtCore.QSettings(str(out / 'desktop.ini'), QtCore.QSettings.Format.IniFormat)
         def wait(study, predicate, seconds=300):
             deadline = time.monotonic() + seconds
@@ -242,7 +246,7 @@ def main():
     finally:
         if client is not None:
             try:
-                client.close()  # cancel/reap before restoring the fixture-only capability
+                client.close()  # cancel/reap; never rewrite installation capability
             except BaseException as exc:
                 status.update(status='failed', host_cleanup_error_type=type(exc).__name__)
         if window is not None:
@@ -252,8 +256,9 @@ def main():
                 application.processEvents()
             except BaseException:
                 status['viewer_cleanup_failed'] = True; status['status'] = 'failed'
-        configuration_path.write_bytes(original)
-        status['original_installation_capability_restored'] = configuration_path.read_bytes() == original
+        status['installation_configuration_unchanged'] = configuration_path.read_bytes() == original
+        if not status['installation_configuration_unchanged']:
+            status['status'] = 'failed'
         save()
     return 0 if status['status'] == 'passed' else 1
 

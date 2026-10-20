@@ -21,8 +21,14 @@ screening, local interactions and reports accepted on a native Windows runner.
 The bounded Qt-to-scientific-host workflow also passes its installed native
 gate at `00e2241`: preparation/site approval, protocol PDF/bundle, selected-ligand
 Vina screening, local interactions/reports, cancellation and reopening.
-Interactive PyMOL, known-ligand controls, other engines, consumer
-VM/profile coverage and GPU support remain separate acceptance work. See
+The later installed gates also accept QuickVina-W, private Chromium and
+embedded/detachable PyMOL with process-local CPU software graphics. The strict
+reviewed-site control gate passes all four Vina/QuickVina-W short/five-repeat
+cases at `ba85d2f`, including PDFs and verified approved bundles. Fresh installs
+now enable that control capability; its final enabled-default rerun is pending.
+This does not change sampling/approval criteria or reapprove existing studies.
+Broader chemistry interventions, consumer VM/profile coverage and native GPU
+support remain separate acceptance work. See
 [cross-platform status and exact test boundaries](cross-platform-compatibility.md).
 
 On supported Apple-Silicon Macs, the installer now includes the embedded PyMOL

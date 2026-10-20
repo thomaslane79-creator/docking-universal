@@ -1,17 +1,29 @@
-# Native Windows reviewed-control port — candidate, not enabled
+# Native Windows reviewed-control port — candidate passed, default verification pending
 
 The exploratory Vina/QuickVina-W GUI, private renderer and interactive software
 viewer passed at `50a8ef2`; see [the completed gate](windows-viewer-engine-validation.md).
 That success does not validate the separate known-ligand control path.
 
-Current candidate: `ba85d2f`, with the retained-detector-version correction and
+Accepted candidate: `ba85d2f`, with the retained-detector-version correction and
 the report-origin changes included. Native run
 [39479026877](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39479026877)
 and general run
 [39479026589](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39479026589)
-are pending. Both earlier failed native runs below remain failed records.
-The normal control capability stays disabled until the complete native gate
-and its subsequent enabled-default rerun pass.
+both passed. All eight general jobs pass. All four native cases pass, with no
+failure dialogs, released host lease and the fixture configuration restored.
+The installed science/viewer and both exploratory engine GUI paths pass too.
+Both earlier failed native runs below remain failed records.
+
+Fresh full installers now enable only this accepted strict reviewed-control
+capability. The final enabled-default rerun is pending: its driver now refuses
+a disabled installation, never overrides or writes the installation
+configuration, and requires it to remain byte-identical through cleanup.
+The baseline host probe now checks an actually unsupported GPU-engine request,
+not the previously unaccepted control method; the Qt gate checks that the control
+option agrees with the installation's advertised capability. Both retain
+fail-before-state-mutation checks, including incomplete control requests.
+Chemistry interventions and GPU support remain separately gated. Historical
+candidate notes below describe the earlier disabled/fixture-override stage.
 
 The next bounded port removes Bash orchestration only. It reuses the existing
 strict coordinate-free CCD chemistry helper, independent conformer generator,
@@ -35,9 +47,10 @@ staging folder. Missing new SDF output cannot be mistaken for a previous result.
 Unix keeps its existing executable/file arguments; no exported molecular data
 or energy is transformed by the transport.
 
-`native_control_supported` stays **false** in normal installations. The native
-acceptance driver enables it only in its fresh disposable installation and
-restores that configuration after closing/reaping the host. It exercises actual
+During candidate acceptance, `native_control_supported` stayed **false** in
+normal installations; the disposable fixture enabled and restored it only for
+its independent gate. The final driver instead requires normally enabled
+defaults, with no override. Both exercise actual
 Qt buttons and the owned scientific host with public 1STP/biotin BTN A:300:
 
 - Vina, exact ligand site without P2Rank;
@@ -166,3 +179,30 @@ The corrected detector-version build passes the complete local 732-case/21-shell
 suite and all 64 focused report/control checks. The 697-file protection audit
 still matches 696 files with only the previously recorded stale ReportLab conda
 metadata exception. No working installation or completed user study changed.
+
+## Candidate acceptance result — ba85d2f
+
+The native four-case status is `passed`: Vina quick (no P2Rank), QuickVina-W
+quick (P2Rank requested), Vina repeatability and QuickVina-W repeatability all
+finish normally. Both quick cases correctly retain no approved bundle; both
+five-seed cases pass the real sampling/ranking/seed rules, publish an approved
+bundle and verify its portable receptor/PDB/site hashes. Every case retains its
+ordinary PDF and unchanged reviewed assets. There are zero failure dialogs,
+the host lease is released, and the fixture-only configuration is restored.
+
+The native run passes both jobs; the companion general run passes all eight.
+Only status metadata was retrieved into
+`validation/runs/windows-support-20261020/ba85d2f/installed/`. Scientific results
+and logs remain runner-local. This is native Server 2022/x64 workflow evidence,
+not prospective docking accuracy, a consumer Windows VM or GPU acceptance.
+The bounded fresh-install capability activation follows this independent pass;
+its separate normal-default acceptance must now complete without an override.
+
+## Enabled-default build checks
+
+The bounded activation and no-override acceptance changes pass 735 Python cases,
+21 shell checks and 110 targeted Qt cases locally; all 29 focused native
+control/desktop/bootstrap/scientific cases pass too. Validators compile and
+the diff has no whitespace errors. The protection audit still matches 696 of
+697 entries, with only the previously recorded stale ReportLab conda metadata
+exception. No user study or working Mac installation is changed.

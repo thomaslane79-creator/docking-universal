@@ -92,9 +92,16 @@ rerun **also passes at `50a8ef2`** in
 [39437705394](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39437705394),
 with all eight general jobs passing in
 [39437705306](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39437705306).
-Known-ligand controls, native AD4 GPU docking
-and pristine consumer-machine acceptance are still open; this is a bounded
-native exploratory workflow, not a full Windows release claim.
+Strict reviewed-site known-ligand controls now also **pass at `ba85d2f`** in
+[39479026877](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39479026877):
+both CPU engines preserve the short-run rejection rule and produce verified
+approved protocols after the real five-repeat control. PDFs, explicit site
+review, unchanged inputs and host cleanup pass. Fresh installations now enable
+this accepted control path; its final enabled-default rerun is pending. See the
+[control acceptance record](docs/windows-control-validation.md), including the
+report-provenance fixes and earlier failures. Native AD4 GPU docking, broader
+chemistry interventions and pristine consumer-machine acceptance remain open;
+this is not a full Windows release or scientific-accuracy claim.
 
 Windows compatibility fixes preserve scientific versions/methods: private
 ASCII-safe Java/P2Rank placement, a separately hashed UTF-8 argument adapter,

@@ -4,6 +4,15 @@ Status: active scope-control record, established 2026-09-24.
 
 ### No-prerequisite Windows installation (authorized 2026-10-18)
 
+- Reviewed-control candidate gate passed at `ba85d2f` in native 39479026877;
+  all eight general jobs pass in 39479026589. Both engines' quick cases reject
+  approval as required; both real five-seed cases produce PDFs and verified
+  portable approved protocols, with unchanged inputs and clean host shutdown.
+  Enable only this accepted capability for fresh installations and validate
+  enabled defaults without a fixture override before final support reporting.
+  No chemistry-intervention/GPU/consumer-machine acceptance or scientific
+  threshold/default change is implied. Preserve the two failed earlier gates.
+
 - Follow-through at `f8ef36a`: all eight general jobs pass and the existing
   installed Windows CLI/viewer/exploratory engine paths pass. The native Vina
   quick control now passes its report; the QuickVina-W/P2Rank quick control
