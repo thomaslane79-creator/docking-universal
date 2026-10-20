@@ -77,6 +77,28 @@ ASCII-safe scientific runtime; files return byte-for-byte to the selected study.
 Unix and ASCII-only CLI invocations retain their original execution path. This
 path diagnosis/transport remains under native validation, not yet accepted.
 
+At `6dd81cc`, the installed Windows bootstrap proves the pinned raw Vina CLI
+fails the Greek/Japanese input/output case (return 1, no pose file), while the
+path wrapper returns complete output byte-identical to both ASCII reference
+repeats. Status is retained under
+`validation/runs/windows-desktop-20261019/6dd81cc/bootstrap/summary.json`.
+The standalone source probe initially omitted the installed entry point's
+UTF-8 I/O environment; the follow-up makes that process contract explicit and
+retains exception types, not raw logs, for any further failure.
+
+The full installed GUI run 39347076693 reaches screening visualization, after
+successful preparation/review/reopening/approval/protocol generation, then fails
+with `PermissionError` opening the state snapshot during concurrent publication.
+Its scientific job is still running, so this is not a failed Vina search or a
+completed screen. Windows readers now use the same native transaction lock as
+writers; update() reads under its already-held lock rather than recursively
+locking another CRT handle. Browsing and polling remain read-only, with no
+revision or approval changes, and missing-study reads create no directory.
+Regression tests cover an intentionally held writer, separate-process repeated
+publication, monotonic complete snapshots, unchanged bytes, and nonrecursive
+updates. Unix keeps its existing atomic reader path. The next native workflow
+must still pass fully before this desktop slice is accepted.
+
 ### Installed scientific-runtime gate (2026-10-18, passed at 492de40)
 
 The next Windows installer candidate installs the same scientific package pins

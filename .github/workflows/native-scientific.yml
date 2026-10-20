@@ -16,6 +16,8 @@ on:
       - libexec/docking_universal/host.py
       - libexec/docking_universal/orchestration.py
       - libexec/docking_universal/processes.py
+      - libexec/docking_universal/state.py
+      - tests/test_state_transactions.py
       - libexec/docking_universal/vina_cli.py
       - libexec/docking_universal_dock.py
       - validation/native_windows_vina.py

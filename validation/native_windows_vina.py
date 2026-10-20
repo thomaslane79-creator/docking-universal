@@ -10,6 +10,7 @@ import math
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -66,7 +67,10 @@ def main():
             command = [*dispatcher,
                 '--receptor', str(receptor), '--ligands', str(ligands), '--config', str(box), '--out', str(target),
                 '--seed', '41001', '--cpu', '1', '--exhaustiveness', '1', '--num-modes', '3']
-            env = dict(os.environ, DOCKING_UNIVERSAL_PYTHON=sys.executable)
+            # Match the installed native entry point's UTF-8 process contract;
+            # redirected Windows stdout otherwise uses the ANSI code page.
+            env = dict(os.environ, DOCKING_UNIVERSAL_PYTHON=sys.executable,
+                       PYTHONUTF8='1', PYTHONIOENCODING='utf-8')
             with (out / f'adapter-{repeat}.log').open('w') as stream:
                 subprocess.run(command, env=env, stdout=stream, stderr=subprocess.STDOUT, check=True, timeout=90)
             result = target / 'fragment_vina.pdbqt'
@@ -111,6 +115,9 @@ def main():
                      installed_dispatcher=bool(args.installed_entry))
     except BaseException as exc:
         state.update(status='failed', error=str(exc))
+        state['runtime_exception_types'] = sorted({match.group(1) for path in out.glob('*.log')
+            for line in path.read_text(encoding='utf-8', errors='replace').splitlines()
+            for match in [re.match(r'^(\w*(?:Error|Exception)):', line)] if match})
     (out / 'summary.json').write_text(json.dumps(state, indent=2) + '\n')
     print(json.dumps({k: state.get(k) for k in ('status', 'error', 'native_version', 'exact_same_seed_repeat')}))
     return 0 if state['status'] == 'passed' else 1

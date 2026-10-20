@@ -20,6 +20,7 @@ from .models import ArtifactRecord, CompletionStatus, Job, JobStatus, Scientific
 
 SCHEMA_NAME = "docking-universal-application-state"
 SCHEMA_VERSION = 3
+WINDOWS = os.name == "nt"
 T = TypeVar("T")
 
 
@@ -130,7 +131,20 @@ class JsonStudyStore:
         return state
 
     def load(self, study_id: str) -> StudyState:
-        return StudyState.from_dict(json.loads(self.path_for(study_id).read_text()))
+        if not WINDOWS:
+            return self._load_unlocked(study_id)
+        # Windows can reject opening a record while ReplaceFile/MoveFile is
+        # publishing it. Readers must join the existing writer transaction,
+        # not retry/ignore a potentially damaged record or hold it open across
+        # the writer's replace. Missing-study reads must not create a folder.
+        path = self.path_for(study_id)
+        if not path.parent.is_dir():
+            raise FileNotFoundError(path)
+        with self._lock(study_id):
+            return self._load_unlocked(study_id)
+
+    def _load_unlocked(self, study_id: str) -> StudyState:
+        return StudyState.from_dict(json.loads(self.path_for(study_id).read_text(encoding="utf-8")))
 
     def list_studies(self) -> list[StudyState]:
         """Return valid studies newest-first, ignoring unrelated directories."""
@@ -139,7 +153,7 @@ class JsonStudyStore:
             return studies
         for path in self.root.glob("*/application_state.json"):
             try:
-                state = StudyState.from_dict(json.loads(path.read_text()))
+                state = self.load(path.parent.name)
                 if state.workflow_data.get("removed_from_library_at"):
                     continue
                 studies.append(state)
@@ -189,7 +203,9 @@ class JsonStudyStore:
     ) -> tuple[StudyState, T]:
         """Atomically load, validate, mutate, and replace a study record."""
         with self._lock(study_id):
-            state = self.load(study_id)
+            # This transaction already owns the native file lock; acquiring a
+            # second CRT handle for load() would deadlock on Windows.
+            state = self._load_unlocked(study_id)
             if expected_revision is not None and state.revision != expected_revision:
                 raise RevisionConflictError(
                     f"Study {study_id} changed from revision {expected_revision} to {state.revision}"
@@ -217,7 +233,7 @@ class JsonStudyStore:
 
     @staticmethod
     def _read_revision(path: Path) -> int:
-        value = json.loads(path.read_text())
+        value = json.loads(path.read_text(encoding="utf-8"))
         return int(value.get("revision", 0))
 
     def _write_unlocked(self, state: StudyState) -> None:
@@ -227,7 +243,7 @@ class JsonStudyStore:
         descriptor, temporary_name = tempfile.mkstemp(prefix=".application_state.", suffix=".tmp", dir=path.parent)
         temporary = Path(temporary_name)
         try:
-            with os.fdopen(descriptor, "w") as handle:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
                 json.dump(state.to_dict(), handle, indent=2, sort_keys=True)
                 handle.write("\n")
                 handle.flush()
