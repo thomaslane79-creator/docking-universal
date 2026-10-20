@@ -101,10 +101,20 @@ def create_embedded_pymol_widget(parent=None):
             )
 
         def initializeGL(self):
+            if self._du_stopped:
+                return
             super().initializeGL()
             handle = self.window().windowHandle()
             if handle:
                 self.updateFbScale(handle)
+
+        def updateFbScale(self, context):
+            if not getattr(self, '_du_stopped', False):
+                super().updateFbScale(context)
+
+        def _pymolProcess(self):
+            if not self._du_stopped:
+                super()._pymolProcess()
 
         def event(self, event):
             if getattr(self, "_du_full_interface", False):
@@ -202,9 +212,16 @@ def create_embedded_pymol_widget(parent=None):
             self._timer.stop()
             self.cmd.set_wizard()
             self.makeCurrent()
-            self.pymol.stop()
-            self.doneCurrent()
-            self._du_stopped = True
+            try:
+                self.pymol.stop()
+                self._du_stopped = True
+                # Upstream SingletonPyMOL.stop clears cmd._COb, but the widget's
+                # engine still owns the same native capsule. Its destructor
+                # frees the singleton; release it while the GL context is
+                # current so switching studies can safely create the next one.
+                self.pymol._COb = None
+            finally:
+                self.doneCurrent()
 
     return EmbeddedPymolWidget(parent)
 

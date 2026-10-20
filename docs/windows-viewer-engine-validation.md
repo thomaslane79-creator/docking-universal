@@ -160,3 +160,41 @@ Final evidence: `validation/runs/windows-validation-20261020/20e96a7/installed/`
 The final 697-file working-install/study protection audit has only its known
 pre-existing stale ReportLab metadata exception; 696 files match. No main merge,
 working-install change or original-study modification was performed.
+
+## Authorized support implementation — 2026-10-20
+
+The user authorized correcting the remaining failures and continuing native
+acceptance. QuickVina-W now uses the same byte-preserving Windows path carrier
+as Vina, without substituting engines or altering search settings. Native run
+[39429574702](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39429574702)
+passes repeated full-output equality, Unicode paths, and skip-existing
+provenance. Installed GUI screening is a separate gate, still pending.
+
+The private installer now supplies a checksum-pinned Windows Python 3.12/Qt6
+PyMOL wheel and Mesa 26.2.4 software graphics. Only the two required graphics
+libraries are extracted into the owned GUI environment. No system driver,
+registry setting or persistent PATH is modified, and graphics variables do not
+leak into chemistry or engine processes. **Software graphics draws the viewer
+using the CPU; it is not GPU-accelerated docking.** The upstream source/license,
+build flags, wheel hash and library hashes are recorded alongside the assets
+and in the installation receipt. Users do not need a compiler or existing
+Python/Conda/7-Zip installation.
+
+Installed native runs at `69b8cd0` and `a153205` pass private setup, the genuine
+viewer/framebuffer, full PyMOL detach/return, ray export, source/installed
+scientific workflow and the initial actual-receptor scene. Both then expose
+the same viewer lifecycle failure when reopening the study: upstream
+`SingletonPyMOL.stop()` clears the global command handle but leaves the
+widget-owned native capsule alive, preventing a replacement singleton. The
+application correction releases that stopped capsule with the OpenGL context
+current and guards late timer/display-scale callbacks. A real Mac Qt6/OpenGL
+regression now covers render → detach/return → export → stop → replacement
+render, and passes; native Windows acceptance must pass independently.
+
+Until those installed workflow tests pass, `viewer_supported` and
+`qvinaw_supported` remain false in the installer. Candidate tests exercise them
+explicitly. Neither candidate packaging nor the isolated viewer success is
+represented as a full Windows release. Windows AD4 still requires a native
+build and actual supported OpenCL device validation; Mesa viewing cannot
+satisfy it. Known-ligand controls and consumer-machine acceptance also remain
+separate, gated work.

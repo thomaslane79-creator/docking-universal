@@ -129,6 +129,8 @@ def main():
                     window.viewer_coordinator.close()
                 if window.viewer_widget is not None:
                     window.viewer_widget.deleteLater()
+                window.deleteLater()
+                application.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
                 application.processEvents()
 
         def wait_for(predicate, *, study="desktop-fixture", seconds=300):

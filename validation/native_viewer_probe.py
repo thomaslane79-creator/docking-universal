@@ -145,6 +145,23 @@ def main():
             kernel.GetModuleHandleW.restype = ctypes.c_void_p
             check('Qt5 native DLL not loaded', not kernel.GetModuleHandleW('Qt5Core.dll'))
             check('Qt6 native DLL loaded', bool(kernel.GetModuleHandleW('Qt6Core.dll')))
+        phase('stopping_and_reopening_viewer')
+        adapter.close()
+        check('stopped engine releases its native singleton handle', widget.pymol._COb is None)
+        adapter.close()  # repeated cleanup must not stop a replacement engine
+        window.takeCentralWidget()
+        widget.deleteLater()
+        application.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
+        widget = create_embedded_pymol_widget()
+        window.setCentralWidget(widget)
+        adapter = EmbeddedPymolAdapter(widget)
+        adapter.launch()
+        widget.cmd.fragment('gly', 'reopened')
+        widget.cmd.orient('reopened')
+        QTest.qWait(300)
+        check('replacement viewer starts and renders after full-window return',
+              adapter.is_alive() and widget.cmd.count_atoms('reopened') > 0
+              and not widget.grabFramebuffer().isNull())
         status.update(status='passed', phase='completed')
     except BaseException as exc:
         status.update(status='failed', error_type=type(exc).__name__,
