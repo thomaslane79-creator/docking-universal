@@ -48,6 +48,8 @@ on:
       - libexec/docking-universal-redock-compare.py
       - libexec/docking-universal-cluster-poses.py
       - libexec/docking-universal-run.py
+      - libexec/docking-universal-pdf-report.py
+      - tests/test_report_synchronization.py
       - validation/native_windows_control_workflow.py
       - tests/test_native_control.py
       - tests/test_meeko_export.py

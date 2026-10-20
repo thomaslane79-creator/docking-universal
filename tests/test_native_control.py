@@ -11,6 +11,21 @@ from docking_universal.native_control import parse_args, run_reviewed_control, s
 
 
 class NativeControlTests(unittest.TestCase):
+    def test_native_failure_status_keeps_only_types_and_code_locations_not_scientific_log_text(self):
+        from validation.native_windows_control_workflow import runtime_failure_metadata
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'private.log').write_text(
+                'PRIVATE structure score -12.345 ligand coordinates 10 20 30\n'
+                '  File "C:\\private\\project\\docking-universal-pdf-report.py", line 1095, in reproducibility_record\n'
+                'KeyError: private structure identifier\n')
+            result = runtime_failure_metadata(root)
+            self.assertEqual(result['runtime_exception_types'], ['KeyError'])
+            self.assertEqual(result['runtime_traceback_locations'], [
+                {'file': 'docking-universal-pdf-report.py', 'line': 1095, 'function': 'reproducibility_record'}])
+            self.assertNotIn('private', json.dumps(result))
+            self.assertNotIn('-12.345', json.dumps(result))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

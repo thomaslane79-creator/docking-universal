@@ -4,6 +4,14 @@ Status: active scope-control record, established 2026-09-24.
 
 ### No-prerequisite Windows installation (authorized 2026-10-18)
 
+- Native reviewed-control candidate follow-through: real local control/report
+  reuse exposed and corrected the explicit no-detector PDF failure. Preserve
+  the failed record. Acceptance now also requires the real five-seed approved
+  bundle path for both CPU engines, in separate fixture studies, alongside the
+  two-seed rejection checks. No approval rule/default is relaxed. Local checks
+  pass 723 Python cases/21 shell checks plus 110 Qt cases; native corrected-build
+  acceptance remains pending and the normal installation control gate stays off.
+
 - Final enabled-default/private-browser rerun passed at `50a8ef2`: native
   39437705394 passes setup, viewer, installed CLI and both real CPU-engine GUI
   workflows; all eight general jobs pass in 39437705306. Local full checks pass

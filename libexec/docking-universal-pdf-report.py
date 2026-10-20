@@ -1094,13 +1094,23 @@ def reproducibility_record(protocol, study, control):
     cavity_record = discover_cavity_record(study)
     detector_key = str((protocol or {}).get('pocket_detection', {}).get('engine')
                        or (cavity_record or {}).get("pocket_engine", "fpocket")).lower()
-    detector_name = "P2Rank" if detector_key == "p2rank" else "fpocket"
+    if detector_key == "none":
+        detector_software = {
+            "role": "Docking-region definition", "software": "Exact input-ligand site",
+            "version": "Pocket prediction not requested",
+        }
+    else:
+        detector_software = {
+            "role": "Ligand-free cavity detection",
+            "software": {"p2rank": "P2Rank", "fpocket": "fpocket"}.get(detector_key, detector_key),
+            "version": recorded.get(detector_key) or run_versions.get(detector_key, "not recorded"),
+        }
+    detector_name = detector_software["software"]
     software = [
         {"role": "Scientific workflow", "software": "Docking Universal", "version": run_versions["docking_universal"]},
         # Reuse does not rerun detection. Its version belongs to the locked
         # protocol, not the current ligand-screening runtime.
-        {"role": "Ligand-free cavity detection", "software": detector_name,
-         "version": recorded.get(detector_key) or run_versions[detector_key]},
+        detector_software,
         {"role": "Docking scores and poses", "software": docking_engine_name, "version": engine_version},
         {"role": "Receptor and ligand parameterization", "software": "Meeko", "version": run_versions["meeko"]},
         {"role": "Linked-component receptor compatibility fallback", "software": "ADFRsuite", "version": adfrsuite_version(summary, receptor_preparation)},
@@ -1169,7 +1179,11 @@ def reproducibility_record(protocol, study, control):
         "control_to_new_run_version_check": compare_scientific_versions(recorded, run_versions, docking_engine_name) if protocol else None,
         "report_generation": report_runtime,
         "methods": {
-            "cavity_detection": f"{detector_name} pocket detection with recorded geometry/overlap filtering" if cavity_record else "not used in the retained report study",
+            "cavity_detection": (
+                "Not requested; docking region defined from the exact input ligand" if detector_key == "none" else
+                f"{detector_name} pocket detection with recorded geometry/overlap filtering" if cavity_record else
+                "not used in the retained report study"
+            ),
             "docking_scores_and_poses": docking_engine_name,
             "interaction_detection": "PLIP rule-based calls; retained PLIP XML is authoritative",
             "interaction_diagram": figure_manifest.get("interaction_diagram_renderer", "native SDF plus PLIP XML"),
@@ -1188,6 +1202,8 @@ def retain_used_report_methods(provenance, cavity, has_docking):
     used_software = {
         "Docking Universal", "Meeko", "PyMOL", "Matplotlib", "ReportLab", "Python",
     }
+    used_software.update(row["software"] for row in provenance.get("software", [])
+                         if row.get("role") == "Docking-region definition")
     poseedit_used = provenance.get("methods", {}).get("interaction_diagram") == "approved-poseedit-local-v1"
     if poseedit_used:
         used_software.update({"Docking Universal PoseEdit-style renderer", "Playwright", "Node.js"})

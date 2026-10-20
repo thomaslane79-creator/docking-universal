@@ -38,6 +38,10 @@ Qt buttons and the owned scientific host with public 1STP/biotin BTN A:300:
   exhaustiveness 16, 15 poses, 8 kcal/mol window);
 - the five-seed approval requirement must keep these quick runs unapproved,
   even if they recover a pose; no approved bundle may be published;
+- separate repeatability-tier fixtures with both engines must pass the actual
+  unchanged five-seed sampling/ranking rules, publish approved bundles, and
+  verify their portable receptor/site hashes. They are fresh disposable studies,
+  not a silent escalation/retry of the quick studies;
 - normal report generation, unchanged reviewed inputs and complete host cleanup.
 
 These are compatibility/workflow fixtures, not target-accuracy or engine-
@@ -46,8 +50,9 @@ locations are retained outside the runner. Structures, poses, diagrams, reports,
 scientific logs and numerical structural evidence remain runner-local. No
 completed user study or working Mac installation is changed.
 
-Local evidence so far: 705 Python cases/21 shell checks passed before the last
-additional guard test; targeted control/transport/authority tests and 110 Qt
+Local evidence so far: 723 Python cases/21 shell checks pass, including the
+report-synchronization regressions now in the normal test target;
+targeted control/transport/authority tests and 110 separate Qt
 cases pass. Real isolated Mac preparations of public 2R5P and 1STP mmCIF inputs
 complete Reduce2, strict Meeko and the component audit without running P2Rank.
 The new stage also completes the unchanged quick biotin control locally,
@@ -55,3 +60,14 @@ including independent conformers, two seeds, comparisons and reference/pose
 visuals. It correctly withholds approval under the five-seed rule. This is not
 native Windows or full outer GUI/report acceptance. Native candidate results
 remain pending.
+
+The local report-only rehearsal exposed a genuine report bug: explicit detector
+`none` was indexed as a software version. Reports now distinguish the exact
+input-ligand site/prediction-not-requested case from P2Rank/fpocket, and preserve
+the historical default only for genuinely missing legacy records. Regression
+checks also cover an unfamiliar detector without substituting fpocket. Reusing
+the already completed scientific control produces its normal PDF; no redocking
+was needed. The earlier failed local report record is preserved. The pending
+native run at `dba4a7b` predates this correction and the separate positive gate;
+it cannot validate the corrected build. Failure metadata remains restricted to
+exception types and code locations, never scientific log text.

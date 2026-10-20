@@ -24,6 +24,50 @@ RUN = load('synchronized_run','libexec/docking-universal-run.py')
 
 
 class ReportSynchronizationTests(unittest.TestCase):
+    def test_ligand_only_report_records_no_detector_without_inventing_fpocket(self):
+        with tempfile.TemporaryDirectory() as directory:
+            protocol = {'pocket_detection': {'engine': 'none'}}
+            provenance = REPORT.reproducibility_record(protocol, Path(directory), None)
+            definition = next(row for row in provenance['software']
+                              if row['role'] == 'Docking-region definition')
+            self.assertEqual(definition['software'], 'Exact input-ligand site')
+            self.assertEqual(definition['version'], 'Pocket prediction not requested')
+            self.assertFalse(any(row['role'] == 'Ligand-free cavity detection'
+                                 for row in provenance['software']))
+            self.assertIn('Not requested', provenance['methods']['cavity_detection'])
+            used = REPORT.retain_used_report_methods(provenance, None, has_docking=True)
+            self.assertIn(definition, used['software'])
+            self.assertFalse(any('Fpocket:' in row['citation'] or 'P2Rank:' in row['citation']
+                                 for row in used['references']))
+
+    def test_retained_cavity_methods_use_the_recorded_predictor_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cavity = root / 'preparation/target_receptor_prep/cavity'
+            cavity.mkdir(parents=True)
+            self.fixture(cavity)
+            provenance = REPORT.reproducibility_record(
+                {'pocket_detection': {'engine': 'p2rank'}, 'software': {'p2rank': '2.5.1'}}, root, None)
+            self.assertIn('P2Rank pocket detection', provenance['methods']['cavity_detection'])
+
+    def test_unrecognized_detector_is_reported_without_legacy_detector_substitution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            provenance = REPORT.reproducibility_record(
+                {'pocket_detection': {'engine': 'custom-detector'}}, Path(directory), None)
+            detector = next(row for row in provenance['software']
+                            if row['role'] == 'Ligand-free cavity detection')
+            self.assertEqual(detector['software'], 'custom-detector')
+            self.assertEqual(detector['version'], 'not recorded')
+
+    def test_missing_legacy_detector_record_preserves_historical_fpocket_default(self):
+        with tempfile.TemporaryDirectory() as directory:
+            provenance = REPORT.reproducibility_record(
+                {'software': {'fpocket': 'legacy-version'}}, Path(directory), None)
+            detector = next(row for row in provenance['software']
+                            if row['role'] == 'Ligand-free cavity detection')
+            self.assertEqual(detector['software'], 'fpocket')
+            self.assertEqual(detector['version'], 'legacy-version')
+
     def test_reused_detector_version_comes_from_locked_protocol_not_screening_runtime(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

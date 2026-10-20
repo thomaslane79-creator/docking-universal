@@ -2,7 +2,8 @@
 
 The control gate is enabled ONLY in this disposable installation's configuration
 and restored after closing/reaping its host. No user study or scientific default
-is changed. A quick tier must NOT authorize screening (two seeds, minimum five).
+is changed. Quick tiers must NOT authorize screening (two seeds, minimum five);
+separate five-seed fixtures exercise the approved-protocol path without override.
 """
 from __future__ import annotations
 import argparse
@@ -11,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import sys
 import time
 import traceback
@@ -19,6 +21,22 @@ import urllib.request
 
 class GateError(RuntimeError):
     pass
+
+
+def runtime_failure_metadata(root):
+    """Retain code locations/types only, never log text or scientific values."""
+    exceptions, locations = set(), []
+    for path in Path(root).rglob('*.log'):
+        for line in path.read_text(encoding='utf-8', errors='replace').splitlines():
+            match = re.match(r'^([A-Za-z_]\w*(?:Error|Exception)):', line)
+            if match:
+                exceptions.add(match.group(1))
+            match = re.match(r'\s*File "([^"]+)", line (\d+), in ([\w<>]+)', line)
+            if match:
+                name = match.group(1).replace('\\', '/').rsplit('/', 1)[-1]
+                if re.fullmatch(r'[A-Za-z0-9_.-]+\.py', name):
+                    locations.append({'file': name, 'line': int(match.group(2)), 'function': match.group(3)})
+    return {'runtime_exception_types': sorted(exceptions), 'runtime_traceback_locations': locations[-16:]}
 
 
 def main():
@@ -114,9 +132,11 @@ def main():
                 application.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
                 application.processEvents()
                 window = None
-        for engine, prediction in (('vina', False), ('qvinaw', True)):
-            study = 'control-' + engine
-            case = {'engine': engine, 'additional_p2rank': prediction, 'status': 'running', 'phase': 'setup'}
+        for engine, prediction, tier in (('vina', False, 'quick'), ('qvinaw', True, 'quick'),
+                                        ('vina', False, 'repeatability'), ('qvinaw', True, 'repeatability')):
+            study = 'control-' + engine + '-' + tier
+            case = {'engine': engine, 'additional_p2rank': prediction, 'tier': tier,
+                    'status': 'running', 'phase': 'setup'}
             status['cases'].append(case); save()
             started = time.monotonic()
             client.request(study, 'create_study', {'name': 'Disposable public control fixture ' + engine})
@@ -126,12 +146,12 @@ def main():
                                  viewer_coordinator=viewer, viewer_widget=widget)
             window.show(); application.processEvents()
             window.input_pdb.setText(str(source))
-            window.output_directory.setText(str(out / ('Control Ω ' + engine)))
+            window.output_directory.setText(str(out / ('Control Ω ' + engine + ' ' + tier)))
             window.study_pathway.setCurrentIndex(window.study_pathway.findData('control'))
             window.study_setup_panel.pdb_evidence.setChecked(False)
             window.study_setup_panel.predict_with_ligand.setChecked(prediction)
             window.control_engine.setCurrentIndex(window.control_engine.findData(engine))
-            window.control_tier.setCurrentIndex(window.control_tier.findData('quick'))
+            window.control_tier.setCurrentIndex(window.control_tier.findData(tier))
             window.detect_bound_ligands(quiet=True)
             combo = window.ligand_resname
             index = next((i for i in range(combo.count()) if (combo.itemData(i) or {}).get('resname') == 'BTN'
@@ -167,23 +187,36 @@ def main():
             case['phase'] = 'redocking'; save()
             state = wait(study, lambda s: not s.active_job and bool(s.workflow_data.get('latest_control_status')), seconds=1200)
             control_output = Path(state.workflow_data['latest_control_output'])
-            protocols = list((control_output / 'control/04_redocking' / engine / 'quick').glob('protocol.json'))
+            protocols = list((control_output / 'control/04_redocking' / engine / tier).glob('protocol.json'))
             if len(protocols) != 1:
-                raise GateError('Native control did not retain its shared quick-tier protocol record')
+                raise GateError('Native control did not retain its shared selected-tier protocol record')
             protocol = json.loads(protocols[0].read_text(encoding='utf-8'))
-            if (protocol.get('unknown_docking_allowed') or state.workflow_data['latest_control_status'] != 'not_approved'
-                    or protocol['acceptance']['seed_requirement_pass']):
-                raise GateError('Two-seed quick control improperly authorized a five-seed approval requirement')
+            approved = tier == 'repeatability'
+            if (bool(protocol.get('unknown_docking_allowed')) != approved
+                    or state.workflow_data['latest_control_status'] != ('approved' if approved else 'not_approved')
+                    or bool(protocol['acceptance']['seed_requirement_pass']) != approved):
+                raise GateError('Native control did not preserve the real quick/five-seed approval outcome; no criterion changed')
             if any(sha256(Path(path)) != expected for path, expected in protected.items()):
                 raise GateError('Control changed the reviewed source/receptor/box or repeated preparation')
-            if any(a.kind == 'protocol_bundle' for a in state.artifacts):
-                raise GateError('Unapproved quick control published an approved screening bundle')
+            bundles = [Path(a.path) for a in state.artifacts if a.kind == 'protocol_bundle']
+            if bool(bundles) != approved:
+                raise GateError('Native control bundle publication disagrees with its actual approval outcome')
+            if approved:
+                from docking_universal_bundle import extract_bundle, resolve_locked_path
+                restored = extract_bundle(bundles[0])
+                portable = json.loads(restored.read_text(encoding='utf-8'))
+                if portable['engine'] != engine or not portable['unknown_docking_allowed']:
+                    raise GateError('Approved portable protocol lost its engine or real control authority')
+                for key in ('receptor', 'receptor_pdb', 'box'):
+                    asset = resolve_locked_path(restored, portable['locked_inputs'][key])
+                    if sha256(asset) != portable['locked_inputs'][key + '_sha256']:
+                        raise GateError('Approved portable protocol failed its retained input checksums')
             reports = [Path(a.path) for a in state.artifacts if a.kind == 'final_report']
             if not reports or not all(p.read_bytes().startswith(b'%PDF-') for p in reports):
                 raise GateError('Native control did not retain its ordinary report PDF')
             case.update(status='passed', phase='completed', seconds=round(time.monotonic()-started, 3),
                         review_before_search=True, reviewed_inputs_unchanged=True, minimum_seed_gate_preserved=True,
-                        report_pdf=True, no_approved_bundle=True)
+                        report_pdf=True, approved_bundle=approved, portable_inputs_verified=approved)
             save(); close_window()
         reader = client._reader; client.close()
         if reader.is_alive():
@@ -199,6 +232,7 @@ def main():
                       locations=[{'file': Path(f.filename).name, 'function': f.name, 'line': f.lineno}
                                  for f in traceback.extract_tb(exc.__traceback__)[-8:]])
         (out / 'error.local.log').write_text(traceback.format_exc(), encoding='utf-8')
+        status.update(runtime_failure_metadata(out))
     finally:
         if client is not None:
             try:
