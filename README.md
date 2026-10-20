@@ -80,7 +80,17 @@ cancellation and reopening gate **passed at `00e2241`** in
 All eight general CI jobs also pass, including Linux/macOS CLI checks.
 This bounded fixture validation is not a full desktop-release claim. Unsupported
 methods remain disabled and rejected before scientific-state mutation.
-Interactive PyMOL, ligand controls, other engines and GPU acceptance are separate.
+The installed Windows viewer and both CPU-engine GUI workflows subsequently
+**passed at `92cd4aa`** in
+[native acceptance 39435014818](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39435014818).
+Fresh installs now enable QuickVina-W and embedded/detachable PyMOL, including
+linked 2D/3D docking-pose review, labels, contacts and image/ray exports. Windows
+uses its private Mesa **CPU software graphics**, not GPU-accelerated docking or
+a replacement system driver. Its Qt6/Python 3.12 viewer stays separate from the
+scientific Python 3.9 environment. The default-launch/private-browser rerun
+remains a separate final check. Known-ligand controls, native AD4 GPU docking
+and pristine consumer-machine acceptance are still open; this is a bounded
+native exploratory workflow, not a full Windows release claim.
 
 Windows compatibility fixes preserve scientific versions/methods: private
 ASCII-safe Java/P2Rank placement, a separately hashed UTF-8 argument adapter,
@@ -94,6 +104,11 @@ coordinates or search settings. Windows state readers also join the writer's
 transaction to avoid a file-sharing race during live polling; the complete
 bounded native workflow now passes with these corrections. Direct versus adapted P2Rank
 prediction/residue tables match byte-for-byte in local and native Windows tests.
+QuickVina-W uses the same byte-preserving filename transport; it is never
+silently replaced by Vina. The application viewer wrapper also releases the
+stopped upstream PyMOL singleton's native handle before another study starts,
+preventing a reproduced stop/reopen failure. The pinned upstream PyMOL source
+and scientific methods are unchanged; these are application integration fixes.
 Profiles with whitespace/non-ASCII still need an explicit space-free ASCII
 `-ManagerRoot`; the application/study folders themselves support spaces/Unicode.
 The private-browser fallback and complete desktop release need further native

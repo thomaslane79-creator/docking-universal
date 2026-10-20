@@ -37,7 +37,7 @@ def main():
     sys.path.insert(0, str(app))
     status = {"status": "running", "native_windows": True, "steps": [],
               "interactive_pymol_accepted": False, "gpu_accepted": False,
-              "scope": "installed Qt-to-host exploratory P2Rank/Vina fixture workflow, not docking accuracy"}
+              "scope": "installed Qt-to-host exploratory P2Rank/CPU-engine fixture workflow, not docking accuracy"}
     client = window = None
     dialogs, callback_errors = [], []
 
@@ -57,8 +57,6 @@ def main():
         return result
 
     try:
-        if args.engine == 'qvinaw':
-            os.environ['DOCKING_UNIVERSAL_QVINAW_ACCEPTANCE'] = '1'
         import docking_universal
         if not Path(docking_universal.__file__).resolve().is_relative_to(app):
             raise GateError("GUI acceptance imported checkout code instead of installed application")
@@ -301,8 +299,18 @@ def main():
             adapter = window.viewer_coordinator.adapter
             if popup is None or adapter.cmd.count_atoms('du_review_pose') == 0:
                 raise GateError('Paired window did not load the matching docked ligand')
-            for action in popup.contact_type_actions.values():
-                action.setChecked(False); action.setChecked(True)
+            status['paired_contact_type_count'] = len(popup.contact_type_actions)
+            status['paired_contact_residue_count'] = len(popup._residues)
+            for kind, action in popup.contact_type_actions.items():
+                original_types = dict(adapter._plip_types_visible)
+                action.setChecked(False)
+                if adapter._plip_types_visible != {**original_types, kind: False}:
+                    raise GateError('A contact-type action changed other interaction types')
+                action.setChecked(True)
+                if adapter._plip_types_visible != original_types:
+                    raise GateError('Contact-type visibility was not restored')
+                if adapter.cmd.count_states('du_review_plip_contacts') != 1:
+                    raise GateError('Contact-type toggling appended stale native CGO states')
             if popup._residues:
                 popup.labels.setChecked(True)
                 if not adapter.has_review_residue_labels():

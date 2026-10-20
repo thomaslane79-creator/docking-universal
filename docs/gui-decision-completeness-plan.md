@@ -1,5 +1,12 @@
 # Complete interactive GUI workflow plan
 
+Completed 2026-10-20 at `92cd4aa`: installed native Windows software viewer
+passes 20 checks; both Vina and QuickVina-W pass all 11 actual Qt/host workflow
+steps in CI 39435014818. All eight general jobs pass in 39435014877. The fresh
+installer now enables these exact accepted capabilities; the enabled-default
+launch/private-browser rerun is a separate final gate. Controls, consumer
+profiles/machines and AD4 hardware remain open, with no Mac/study/default change.
+
 Active 2026-10-20 implementation follow-up: the user requests continuing to
 native support. First correct QuickVina filename transport, then package the
 tested source-built Qt6 viewer and process-local software graphics with owned

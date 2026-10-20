@@ -4,6 +4,14 @@ Status: active scope-control record, established 2026-09-24.
 
 ### No-prerequisite Windows installation (authorized 2026-10-18)
 
+- Installed viewer/CPU-engine milestone passed 2026-10-20 at `92cd4aa`: native
+  CI 39435014818 passes both jobs, the 20-check viewer and two 11-step real GUI
+  workflows (Vina/QuickVina-W). All eight general jobs pass in 39435014877.
+  Fresh installs enable the exact owned Qt6/software-graphics viewer and pinned
+  QuickVina-W; the temporary acceptance environment bypass is removed. The
+  enabled-default/private-browser rerun remains separate. No transfer of this
+  evidence to GPU docking, controls or pristine consumer-machine acceptance.
+
 - User authorization 2026-10-20: continue implementation until the native path
   is supported. Integrate the proved byte-preserving QuickVina filename carrier
   and package the pinned Qt6 PyMOL/software-rendering candidate without requiring
@@ -13,6 +21,10 @@ Status: active scope-control record, established 2026-09-24.
   No working Mac install/study change, main merge, automatic hardware-graphics
   retry, or transfer of Apple AD4 acceptance to Windows is authorized by this.
   Actual GPU/consumer-machine evidence remains an explicit external boundary.
+  The no-dependencies acceptance also exercises the existing private Chromium
+  acquisition branch rather than borrowing hosted Chrome/Edge. A setup-only
+  `-PrivateBrowser` override makes this branch explicit and reproducible; it is
+  not a new GUI feature or a network rendering service.
 
 - Remaining-validation results 2026-10-20: native baseline installation/science/
   real Qt workflow reruns pass at `20e96a7` (CI 39416428076), as do all eight

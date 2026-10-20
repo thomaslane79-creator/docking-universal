@@ -77,6 +77,10 @@ def main():
                    "-Destination", str(destination), "-AcceptDevelopmentPreview"]
         if not args.with_scientific:
             command.append("-BootstrapOnly")
+        else:
+            # Exercise the branch required by machines with no Chrome/Edge.
+            # Existing-browser discovery already has a separate passed record.
+            command.append('-PrivateBrowser')
         installer_environment = dict(os.environ)
         if args.without_prerequisites:
             # This driver uses setup-python, but the actual PowerShell child
@@ -122,6 +126,13 @@ def main():
         app = destination / "app"
         entry = app / "docking-universal-native.py"
         configuration = json.loads((app / "native-preview.json").read_text(encoding="utf-8"))
+        if args.with_scientific:
+            receipt = json.loads((destination / configuration['scientific_receipt']).read_text(encoding='utf-8'))
+            browser_root = (destination / 'share/playwright-browsers').resolve()
+            if receipt.get('browser_mode') != 'application_private' or not Path(receipt['browser']).resolve().is_relative_to(browser_root):
+                raise ValueError('No-browser acceptance did not use the requested owned Chromium dependency')
+            status['renderer_browser'] = 'application_private'
+            status['checks'].append('private_renderer_browser_installed_without_existing_chrome_or_edge')
         gui = destination / configuration['gui_python']
         scientific_python = destination / configuration["scientific_python"] if args.with_scientific else host
         for launcher in (destination / "bin/docking-universal.ps1", destination / "bin/docking-universal.cmd"):

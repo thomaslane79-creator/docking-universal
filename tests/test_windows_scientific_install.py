@@ -7,11 +7,54 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from docking_universal.windows_scientific_install import extract_p2rank, install_scientific_runtime
+from docking_universal.windows_scientific_install import extract_p2rank, install_scientific_runtime, local_render_browser
 from docking_universal.windows_scientific_runtime import owned_scientific_python, require_vina_options, stage_command
 
 
 class ScientificInstallationTests(unittest.TestCase):
+    def test_private_browser_fallback_is_owned_and_process_local(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(); app = root / 'app'
+            browser = root / 'share/playwright-browsers/revision/chrome.exe'
+            browser.parent.mkdir(parents=True); browser.touch()
+            environment = {'KEEP': 'original'}
+            calls = []
+            def run(name, command, **options):
+                calls.append((name, command, options))
+                return str(browser) if options.get('capture') else None
+            with patch('docking_universal.browser_runtime.find_chromium', return_value=None):
+                result = local_render_browser(app=app, renderer=app / 'renderer', node='owned-node',
+                    environment=environment, run=run)
+            self.assertEqual(result, (browser, 'application_private'))
+            self.assertEqual(environment, {'KEEP': 'original'})
+            self.assertEqual(calls[0][1][-2:], ['install', 'chromium'])
+            self.assertEqual(calls[0][2]['env']['PLAYWRIGHT_BROWSERS_PATH'], str(root / 'share/playwright-browsers'))
+
+    def test_existing_browser_is_not_downloaded_unless_private_was_requested(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(); browser = root / 'existing.exe'; browser.touch()
+            private = root / 'share/playwright-browsers/revision/chrome.exe'
+            private.parent.mkdir(parents=True); private.touch()
+            with patch('docking_universal.browser_runtime.find_chromium', return_value=browser) as find, \
+                 patch('docking_universal.windows_scientific_install.subprocess.run') as unwanted:
+                def never(*args, **kwargs):
+                    self.fail('An existing local browser triggered a dependency download')
+                options = dict(app=root / 'app', renderer=root / 'renderer', node='owned-node', environment={})
+                self.assertEqual(local_render_browser(**options, run=never), (browser, 'existing_local'))
+                find.reset_mock()
+                self.assertEqual(local_render_browser(**options, private=True,
+                    run=lambda name, command, **kw: str(private) if kw.get('capture') else None),
+                    (private, 'application_private'))
+                find.assert_not_called(); unwanted.assert_not_called()
+
+    def test_private_browser_path_cannot_escape_into_another_installation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(); foreign = root / 'foreign.exe'; foreign.touch()
+            with self.assertRaisesRegex(ValueError, 'escaped its owned'):
+                local_render_browser(app=root / 'app', renderer=root / 'renderer', node='owned-node',
+                    environment={}, private=True,
+                    run=lambda name, command, **kw: str(foreign) if kw.get('capture') else None)
+
     def test_archive_members_are_all_checked_before_any_extraction(self):
         for unsafe in ("root/../escape", "/absolute", "root/C:/escape", "root/..\\escape", "link"):
             with self.subTest(unsafe=unsafe), tempfile.TemporaryDirectory() as temporary:
@@ -100,6 +143,20 @@ class InstalledScientificDispatcherTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "receipt changed"):
             stage_command(self.app, self.configuration, "dock", [], {})
 
+    def test_changed_private_render_browser_is_rejected_without_local_browser_fallback(self):
+        browser = self.root / 'share/playwright-browsers/revision/chrome.exe'
+        browser.parent.mkdir(parents=True); browser.write_bytes(b'private-browser')
+        receipt = self.root / self.configuration['scientific_receipt']
+        item = json.loads(receipt.read_text(encoding='utf-8'))
+        item.update(browser_mode='application_private', browser=str(browser),
+                    browser_sha256=hashlib.sha256(browser.read_bytes()).hexdigest())
+        receipt.write_text(json.dumps(item), encoding='utf-8')
+        self.configuration['scientific_receipt_sha256'] = hashlib.sha256(receipt.read_bytes()).hexdigest()
+        stage_command(self.app, self.configuration, 'dock', [], {})
+        browser.write_bytes(b'changed-browser')
+        with self.assertRaisesRegex(ValueError, 'Owned rendering browser changed'):
+            stage_command(self.app, self.configuration, 'dock', [], {})
+
     def test_installed_quickvina_selection_never_becomes_vina_and_stays_gated(self):
         from docking_universal.windows_qvinaw import PROFILE
         executable = self.root / 'runtimes/qvinaw/Library/bin/qvinaw.exe'
@@ -113,8 +170,11 @@ class InstalledScientificDispatcherTests(unittest.TestCase):
             qvinaw_receipt_sha256=hashlib.sha256(receipt.read_bytes()).hexdigest())
         with self.assertRaisesRegex(ValueError, 'no engine substitution'):
             stage_command(self.app, self.configuration, 'dock', ['--engine', 'qvinaw'], {})
-        command, environment = stage_command(self.app, self.configuration, 'dock', ['--engine=qvinaw'],
-                                             {'DOCKING_UNIVERSAL_QVINAW_ACCEPTANCE': '1'})
+        with self.assertRaisesRegex(ValueError, 'no engine substitution'):
+            stage_command(self.app, self.configuration, 'dock', ['--engine=qvinaw'],
+                          {'DOCKING_UNIVERSAL_QVINAW_ACCEPTANCE': '1'})
+        self.configuration['qvinaw_supported'] = True
+        command, environment = stage_command(self.app, self.configuration, 'dock', ['--engine=qvinaw'], {})
         self.assertEqual(command[-6:], ['--engine', 'qvinaw', '--engine-command', str(executable), '--vina-backend', 'cli'])
         self.assertEqual(environment['DOCKING_UNIVERSAL_QVINAW'], str(executable))
 

@@ -37,10 +37,9 @@ def record(app, configuration):
 
 
 def supported_engines(configuration, environment):
-    # The environment exception is used only by the isolated acceptance driver
-    # before promotion. Normal launchers never set it or approve any study.
-    enabled = configuration.get('qvinaw_candidate_installed') and (
-        configuration.get('qvinaw_supported') or environment.get('DOCKING_UNIVERSAL_QVINAW_ACCEPTANCE') == '1')
+    # Only an accepted installation record enables this engine. Old candidate
+    # or inherited validation environment variables do not promote an install.
+    enabled = configuration.get('qvinaw_candidate_installed') and configuration.get('qvinaw_supported')
     return ('vina', 'qvinaw') if enabled else ('vina',)
 
 

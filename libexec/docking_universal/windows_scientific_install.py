@@ -67,8 +67,28 @@ def extract_p2rank(archive: Path, destination: Path):
                     shutil.copyfileobj(source, stream)
 
 
+def local_render_browser(*, app, renderer, node, environment, run, private=False):
+    """Use local Chromium or acquire only the pinned renderer's private revision."""
+    from .browser_runtime import find_chromium
+    browser = None if private else find_chromium(environment=environment, system='Windows')
+    if browser is not None:
+        return browser, 'existing_local'
+    # No structures are sent: this is dependency acquisition during installation.
+    # Playwright's exact lockfile package selects the Chromium revision; this is
+    # not an independently SHA-pinned browser archive or a system installation.
+    selected = dict(environment, PLAYWRIGHT_BROWSERS_PATH=str(app.parent / 'share/playwright-browsers'))
+    run('private_chromium', [node, renderer / 'node_modules/playwright/cli.js', 'install', 'chromium'], env=selected)
+    value = run('private_chromium_path', [node, '-e',
+        'process.stdout.write(require(process.argv[1]).chromium.executablePath())',
+        renderer / 'node_modules/playwright'], env=selected, capture=True).strip()
+    browser = Path(value)
+    if not browser.is_file() or not browser.resolve().is_relative_to((app.parent / 'share/playwright-browsers').resolve()):
+        raise ValueError('Private Chromium escaped its owned directory or is missing')
+    return browser, 'application_private'
+
+
 def install_scientific_runtime(*, conda: Path, prefix: Path, app: Path,
-                               source_assets: Path, work: Path, environment=None):
+                               source_assets: Path, work: Path, environment=None, private_browser=False):
     """Fresh prefix + pinned packages/assets, without granting workflow support."""
     if prefix.exists() or work.exists():
         raise FileExistsError("Scientific setup requires fresh runtime and audit directories")
@@ -163,20 +183,11 @@ def install_scientific_runtime(*, conda: Path, prefix: Path, app: Path,
             raise ValueError("Declared Node/npm is missing from the owned scientific prefix")
         renderer = app / "docking_universal/poseedit_renderer"
         run("pinned_local_renderer", [node, npm, "ci", "--prefix", renderer, "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"], env=runtime_env)
-        from .browser_runtime import find_chromium
-        browser = find_chromium(environment=runtime_env, system="Windows")
-        if browser is None:
-            # Revision is selected by the exact integrity-pinned Playwright
-            # package. Download only a private browser; no system registration.
-            runtime_env["PLAYWRIGHT_BROWSERS_PATH"] = str(app.parent / "share/playwright-browsers")
-            run("private_chromium", [node, renderer / "node_modules/playwright/cli.js", "install", "chromium"], env=runtime_env)
-            value = run("private_chromium_path", [node, "-e", "process.stdout.write(require(process.argv[1]).chromium.executablePath())",
-                renderer / "node_modules/playwright"], env=runtime_env, capture=True).strip()
-            browser = Path(value)
-            if not browser.is_file() or not browser.resolve().is_relative_to((app.parent / "share/playwright-browsers").resolve()):
-                raise ValueError("Private Chromium escaped its owned directory or is missing")
+        browser, browser_mode = local_render_browser(app=app, renderer=renderer, node=node,
+            environment=runtime_env, run=run, private=private_browser)
         receipt.update(status="dependencies_installed", python=str(python), p2rank=str(p2rank), java=str(java),
-                       node=str(node), browser=str(browser), browser_sha256=hashlib.sha256(browser.read_bytes()).hexdigest(),
+                       node=str(node), browser=str(browser), browser_mode=browser_mode,
+                       browser_sha256=hashlib.sha256(browser.read_bytes()).hexdigest(),
                        renderer_lock_sha256=hashlib.sha256((renderer / "package-lock.json").read_bytes()).hexdigest())
     except Exception as exc:
         receipt.update(status="failed", error=str(exc)); save()

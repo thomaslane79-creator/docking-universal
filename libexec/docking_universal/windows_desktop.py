@@ -55,6 +55,16 @@ def installed_capabilities(app, environment):
     capabilities['supported_engines'] = list(supported_engines(configuration, environment))
     if 'qvinaw' in capabilities['supported_engines']:
         record(app, configuration)
+    if configuration.get('viewer_supported'):
+        from .windows_viewer_runtime import viewer_record, owned_gui_python
+        # This is the scientific host advertising a GUI capability, not loading
+        # Qt/OpenGL into the chemistry process. Verify the exact GUI receipt;
+        # the GUI itself also checks its executing interpreter before loading.
+        if viewer_record(app, configuration,
+                         executing_python=owned_gui_python(app, configuration)) is None:
+            raise ValueError('Accepted native viewer is missing its owned installation receipt')
+        capabilities['interactive_viewer_accepted'] = True
+        capabilities['viewer_graphics'] = 'CPU software graphics (not GPU docking)'
     return capabilities
 
 

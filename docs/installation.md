@@ -64,6 +64,13 @@ and a new installation folder, but does not need administrator access or change
 system Python/PATH. It must not overwrite an existing installation. Launch the
 installed `bin/docking-universal.cmd` with the desired subcommand. The optional
 expert `-BootstrapOnly` mode intentionally skips the scientific dependencies.
+The renderer can use an existing local Chrome/Edge, or download its own private
+Chromium if neither is available. `-PrivateBrowser` explicitly selects the
+private browser even when one is installed. This download is only a setup
+dependency: rendering and inspection stay local, and no structures are sent.
+The lockfile-pinned Playwright package chooses the browser revision; its archive
+is not independently SHA-pinned. The installed private executable is hashed and
+checked before use, without registering it as a system/default browser.
 Profiles with spaces/non-ASCII currently need an explicit ASCII, space-free
 `-ManagerRoot`; application and study paths may contain spaces/Unicode. Follow
 the compatibility record before treating this preview as a supported full GUI.

@@ -58,7 +58,7 @@ permissions:
 
 jobs:
   installed-scientific-gate:
-    name: Native Windows installed science and Qt workflow (not interactive viewer acceptance)
+    name: Native Windows installed exploratory GUI, viewer and CPU engines
     runs-on: windows-2022
     timeout-minutes: 65
     steps:

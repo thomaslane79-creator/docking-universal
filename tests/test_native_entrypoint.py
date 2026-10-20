@@ -60,6 +60,13 @@ class NativeEntrypointTests(unittest.TestCase):
             with self.subTest(flag=flag), self.assertRaisesRegex(ValueError, "engine overrides"):
                 launch_command(self.app, self.config, ["dock", flag])
 
+    def test_accepted_viewer_is_default_but_can_be_explicitly_disabled(self):
+        self.config['viewer_supported'] = True
+        command, _environment = launch_command(self.app, self.config, ['desktop'])
+        self.assertEqual(command[command.index('--viewer-backend') + 1], 'embedded')
+        command, _environment = launch_command(self.app, self.config, ['desktop', '--viewer-backend', 'none'])
+        self.assertEqual(command[-2:], ['--viewer-backend', 'none'])
+
     def test_pinned_prepared_input_dock_is_a_python_command_not_a_batch_file(self):
         command, environment = launch_command(self.app, self.config, ["dock", "--receptor", "a & b.pdbqt"])
         self.assertEqual(command[0], str(self.root / self.config["host_python"]))

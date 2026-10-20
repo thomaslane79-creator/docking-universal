@@ -16,9 +16,10 @@ from .runtime_layout import executable_directories
 
 
 PREVIEW_NOTICE = (
-    "Native Windows development preview. Scientific CLI commands require the "
-    "owned scientific dependency installation; scientific desktop integration "
-    "and interactive PyMOL/GPU acceptance are unfinished. This is not a full validated release."
+    "Native Windows development preview. Scientific commands require the owned "
+    "dependency installation; check-install lists its enabled capabilities. "
+    "Known-ligand controls, GPU docking and full consumer-machine acceptance "
+    "remain incomplete. This is not a full validated release."
 )
 
 
@@ -107,7 +108,12 @@ def main(arguments=None, *, app: Path | None = None) -> int:
             if configuration.get("scientific_dependencies_installed"):
                 from .windows_scientific_runtime import scientific_environment
                 scientific_environment(app, configuration, os.environ)
-                print("Owned scientific dependency receipt: verified. Scientific GUI/viewer acceptance: NOT COMPLETE.")
+                from .windows_desktop import installed_capabilities
+                capabilities = installed_capabilities(app, os.environ)
+                print('Owned scientific dependency receipt: verified. Enabled engines: '
+                      + ', '.join(capabilities['supported_engines']) + '.')
+                print('Interactive viewer: ' + (capabilities.get('viewer_graphics', 'enabled')
+                      if capabilities['interactive_viewer_accepted'] else 'not accepted/enabled in this installation') + '.')
             print("Bootstrap files: present. Full scientific installation: NOT COMPLETE.")
             return 1 if "--full" in arguments else 0
         command_line, environment = launch_command(app, configuration, arguments)

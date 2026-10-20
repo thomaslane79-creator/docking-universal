@@ -111,6 +111,7 @@ def main():
     parser.add_argument("--owned-manager", action="store_true", help="Validated handoff from the fresh PowerShell bootstrap only")
     parser.add_argument("--manager-root", type=Path)
     parser.add_argument("--bootstrap-only", action="store_true", help="Transport-only acceptance; skip scientific dependencies explicitly")
+    parser.add_argument('--private-browser', action='store_true', help='Install an application-private renderer browser even if Chrome/Edge is already present')
     args = parser.parse_args()
     if platform.system() != "Windows" or platform.machine().lower() not in {"amd64", "x86_64"}:
         parser.error("This preview requires native x64 Windows, not an emulated platform")
@@ -164,7 +165,8 @@ def main():
             if manager["mode"] == "application_owned":
                 configuration["scientific_manager"] = {key: manager[key] for key in ("prefix", "install_id", "asset")}
             receipt = install_scientific_runtime(conda=args.conda, prefix=science_prefix,
-                app=app, source_assets=app / "installation-assets", work=destination / ".bootstrap/scientific-setup")
+                app=app, source_assets=app / "installation-assets", work=destination / ".bootstrap/scientific-setup",
+                private_browser=args.private_browser)
             receipt_path = destination / ".bootstrap/scientific-setup/scientific-install.json"
             configuration.update(scientific_python=str(science_prefix / "python.exe"),
                                  scientific_dependencies_installed=True,
@@ -177,7 +179,8 @@ def main():
             viewer_work = destination / '.bootstrap/viewer-setup'
             install_viewer_runtime(gui=prefixes['gui'], app=app, source_assets=app / 'installation-assets', work=viewer_work)
             viewer_receipt = viewer_work / 'viewer-install.json'
-            configuration.update(viewer_profile=PROFILE, viewer_candidate_installed=True, viewer_supported=False,
+            # Installed native GUI/viewer acceptance: 92cd4aa / 39435014818.
+            configuration.update(viewer_profile=PROFILE, viewer_candidate_installed=True, viewer_supported=True,
                 viewer_receipt=str(viewer_receipt.relative_to(destination).as_posix()),
                 viewer_receipt_sha256=hashlib.sha256(viewer_receipt.read_bytes()).hexdigest())
             from docking_universal.windows_qvinaw import install as install_qvinaw
@@ -186,7 +189,7 @@ def main():
             install_qvinaw(conda=args.conda, prefix=qvinaw_prefix, app=app,
                           source_assets=app / 'installation-assets', work=qvinaw_work)
             qvinaw_receipt = qvinaw_work / 'qvinaw-install.json'
-            configuration.update(qvinaw_candidate_installed=True, qvinaw_supported=False,
+            configuration.update(qvinaw_candidate_installed=True, qvinaw_supported=True,
                 qvinaw_receipt=str(qvinaw_receipt.relative_to(destination).as_posix()),
                 qvinaw_receipt_sha256=hashlib.sha256(qvinaw_receipt.read_bytes()).hexdigest())
         (app / "native-preview.json").write_text(json.dumps(configuration, indent=2) + "\n", encoding="utf-8")

@@ -1,5 +1,27 @@
 # Older macOS, Linux and native Windows compatibility
 
+## Current native Windows scope — 2026-10-20
+
+The records below are chronological; an earlier pass is not acceptance of a
+later or broader capability. Current boundaries are:
+
+| Capability | Evidence / activation boundary |
+| --- | --- |
+| Owned no-prerequisite installer; strict Meeko/Reduce2/P2Rank and exploratory Vina workflow | Installed CLI and real Qt workflow passed; no accuracy or pristine consumer-VM claim |
+| QuickVina-W | Prepared-input repeats, Unicode output equality, skip-existing and all 11 installed GUI steps pass at `92cd4aa`; enabled for fresh installs |
+| Interactive PyMOL | Installed process-local Mesa software viewing passes 20 checks and both 11-step engine GUI workflows; enabled for fresh installs |
+| Default/system graphics | Crashes on the hosted runner; never silently retried as a fallback |
+| No installed Chrome/Edge | Private Chromium acquisition branch implemented; forced installed rendering acceptance pending |
+| Known-ligand controls / preparation interventions | Not enabled in this Windows slice; pending decisions are preserved |
+| AD4 GPU docking | Requires accepted Windows build plus real supported OpenCL device; software viewing does not satisfy this |
+| Consumer Windows/profile coverage | Hosted Server 2022/x64 is not Windows 10/11 consumer-machine acceptance; special profiles still need an explicit ASCII manager folder |
+
+The working Mac installation, saved studies and scientific defaults are not
+changed by these isolated validations. See the linked record for failed checks
+and exact native run identities.
+The capability-enabled default-launch/private-browser fresh-install rerun is a
+separate final check, not implied by the earlier explicitly enabled candidate.
+
 Remaining 2026-10-20 native viewer/engine validation is tracked separately in
 [the Windows viewer/engine record](windows-viewer-engine-validation.md), including
 failed checks. A successful source build or ASCII-path engine run does not

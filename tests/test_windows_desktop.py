@@ -8,7 +8,7 @@ from docking_universal.application import StudyController
 from docking_universal.host import CommandDispatcher
 from docking_universal.state import JsonStudyStore
 from docking_universal.viewer.messages import Command
-from docking_universal.windows_desktop import WORKFLOW, installed_host, preparation_options, workflow_guard
+from docking_universal.windows_desktop import WORKFLOW, installed_host, installed_capabilities, preparation_options, workflow_guard
 
 
 class NativeDesktopGuardTests(unittest.TestCase):
@@ -70,6 +70,22 @@ class NativeDesktopGuardTests(unittest.TestCase):
             self.assertEqual(installed_host(app, executing_python=python)[0], script)
             with self.assertRaisesRegex(ValueError, "exact installation-owned"):
                 installed_host(app, executing_python=self.root / "foreign/python.exe")
+
+    def test_accepted_viewer_capability_requires_owned_gui_receipt_without_importing_qt(self):
+        app = self.root / 'app'; app.mkdir()
+        configuration = {'viewer_supported': True}
+        (app / 'native-preview.json').write_text(json.dumps(configuration), encoding='utf-8')
+        gui = self.root / 'owned-gui/python.exe'
+        with patch('docking_universal.windows_viewer_runtime.owned_gui_python', return_value=gui), \
+             patch('docking_universal.windows_viewer_runtime.viewer_record', return_value=({}, 'owned.dll')) as verify:
+            capabilities = installed_capabilities(app, {})
+            self.assertTrue(capabilities['interactive_viewer_accepted'])
+            self.assertIn('not GPU docking', capabilities['viewer_graphics'])
+            verify.assert_called_once_with(app, configuration, executing_python=gui)
+        with patch('docking_universal.windows_viewer_runtime.owned_gui_python', return_value=gui), \
+             patch('docking_universal.windows_viewer_runtime.viewer_record', return_value=None):
+            with self.assertRaisesRegex(ValueError, 'missing its owned'):
+                installed_capabilities(app, {})
 
 
 if __name__ == "__main__":

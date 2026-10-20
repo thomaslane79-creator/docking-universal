@@ -61,6 +61,12 @@ def scientific_environment(app: Path, configuration: dict, inherited: dict):
         executable = Path(receipt[name]).resolve()
         if not executable.is_relative_to(python.parent) or not executable.is_file():
             raise ValueError(f"Owned scientific executable is missing: {name}")
+    if receipt.get('browser_mode') == 'application_private':
+        browser = Path(receipt['browser']).resolve()
+        if (not browser.is_relative_to((root / 'share/playwright-browsers').resolve())
+                or not browser.is_file()
+                or hashlib.sha256(browser.read_bytes()).hexdigest() != receipt.get('browser_sha256')):
+            raise ValueError('Owned rendering browser changed or escaped its installation; no fallback was attempted')
     if Path(receipt["p2rank"]).resolve() != (python.parent.parent.parent / "share/p2rank-2.5.1").resolve():
         raise ValueError("P2Rank escaped the owned installation")
     transport = receipt.get("java_argument_transport")

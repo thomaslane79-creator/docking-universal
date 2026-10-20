@@ -8,10 +8,10 @@ from docking_universal.windows_qvinaw import PROFILE, record, supported_engines,
 
 
 class OwnedQuickVinaTests(unittest.TestCase):
-    def test_candidate_is_not_enabled_without_explicit_acceptance_or_promotion(self):
+    def test_only_accepted_installation_enables_engine_not_an_inherited_test_flag(self):
         config = {'qvinaw_candidate_installed': True, 'qvinaw_supported': False}
         self.assertEqual(supported_engines(config, {}), ('vina',))
-        self.assertEqual(supported_engines(config, {'DOCKING_UNIVERSAL_QVINAW_ACCEPTANCE': '1'}), ('vina', 'qvinaw'))
+        self.assertEqual(supported_engines(config, {'DOCKING_UNIVERSAL_QVINAW_ACCEPTANCE': '1'}), ('vina',))
         self.assertEqual(supported_engines({'qvinaw_supported': True}, {}), ('vina',))
         config['qvinaw_supported'] = True
         self.assertEqual(supported_engines(config, {}), ('vina', 'qvinaw'))

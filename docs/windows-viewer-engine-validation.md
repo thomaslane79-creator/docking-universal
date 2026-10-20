@@ -191,10 +191,44 @@ current and guards late timer/display-scale callbacks. A real Mac Qt6/OpenGL
 regression now covers render → detach/return → export → stop → replacement
 render, and passes; native Windows acceptance must pass independently.
 
-Until those installed workflow tests pass, `viewer_supported` and
-`qvinaw_supported` remain false in the installer. Candidate tests exercise them
-explicitly. Neither candidate packaging nor the isolated viewer success is
-represented as a full Windows release. Windows AD4 still requires a native
+At those failed checkpoints, `viewer_supported` and `qvinaw_supported` remained
+false in the installer; candidate tests exercised them explicitly. Neither
+packaging nor isolated viewer success was represented as a full Windows
+release. Windows AD4 still requires a native
 build and actual supported OpenCL device validation; Mesa viewing cannot
 satisfy it. Known-ligand controls and consumer-machine acceptance also remain
 separate, gated work.
+
+### Installed native viewer and both CPU engines passed
+
+At `92cd4aa`, both native jobs in
+[39435014818](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39435014818)
+**pass**. The installed viewer passes all **20** checks, including native
+framebuffer, full-PyMOL detach/return, unchanged camera, ray export, Qt5/Qt6 DLL
+separation and stop/replacement rendering. Both Vina and QuickVina-W pass all
+**11** real Qt/host workflow steps: preparation → site review → explicit fixture
+approval → final protocol → compound selection/screening/results → exact docked
+pose paired 2D/3D review → pending/completed reopening → cancellation/cleanup.
+Neither workflow produces a failure dialog, and both release the host lease.
+All **eight** general jobs also pass in
+[39435014877](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39435014877).
+Separate native source/software viewer validation passes 19 checks in
+[39435014843](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39435014843);
+the known failing system-graphics path remains an explicit failed record.
+
+This evidence permits the fresh installer to enable the exact owned software
+viewer and pinned QuickVina-W runtime. The temporary environment-variable
+acceptance bypass is removed: only an accepted installation record enables
+QuickVina. Existing candidate installs and the working Mac install are not
+silently updated. Receipt validation is required before advertising either
+capability; no graphics libraries are loaded into the scientific host.
+
+The final enabled-default launch is rechecked from a fresh installation, now
+forcing the already implemented private Chromium branch to prove rendering
+without hosted Chrome/Edge. `-PrivateBrowser` is a setup-only selection; normal
+setup still discovers a local browser or acquires the private revision when
+none is present. No structures leave the runner. This final rerun remains
+pending until its own result, and does not cover consumer Windows or real GPU
+hardware. Evidence: `validation/runs/windows-support-20261020/92cd4aa/installed/`
+and `92cd4aa/viewer/`. Local checks at that checkpoint: 683 Python cases,
+21 shell checks, 168 targeted Qt/viewer cases, plus native Mac stop/reopen.
