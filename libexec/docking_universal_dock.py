@@ -542,6 +542,9 @@ def run_docking(
 ) -> DockBatchResult:
     """Run every prepared ligand, retaining successful jobs after failures."""
 
+    if options.engine == 'qvinaw':
+        from docking_universal.windows_qvinaw import engine_environment
+        environment = engine_environment(environment, invocation.command)
     if options.engine == 'adgpu':
         from docking_universal.ad4_gpu import run_prepared_batch, Ad4Settings
         try:

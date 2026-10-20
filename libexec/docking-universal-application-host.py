@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import sys
+from functools import partial
 from pathlib import Path
 
 from docking_universal.application import StudyController
@@ -23,14 +24,14 @@ def main() -> int:
     guard = None
     capabilities = {"scientific_stages_supported": os.name != "nt"}
     if os.name == "nt":
-        from docking_universal.windows_desktop import installed_host, workflow_guard, CAPABILITIES
+        from docking_universal.windows_desktop import installed_host, workflow_guard, installed_capabilities
         try:
             native = installed_host(Path(__file__).resolve().parent)
             if native is not None:
                 preparation, environment, _receipt = native
                 os.environ.update(environment)
-                guard = workflow_guard
-                capabilities = CAPABILITIES
+                capabilities = installed_capabilities(Path(__file__).resolve().parent, environment)
+                guard = partial(workflow_guard, supported_engines=tuple(capabilities['supported_engines']))
         except (OSError, ValueError, KeyError, TypeError) as exc:
             print(json.dumps({"type": "fatal", "error": str(exc)}), file=sys.stderr)
             return 2

@@ -28,6 +28,7 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--structure", type=Path, required=True)
     parser.add_argument("--ligand", type=Path, required=True)
+    parser.add_argument('--engine', choices=('vina', 'qvinaw'), default='vina')
     args = parser.parse_args()
     if platform.system() != "Windows":
         parser.error("Native Windows and a real Qt window are required")
@@ -56,12 +57,15 @@ def main():
         return result
 
     try:
+        if args.engine == 'qvinaw':
+            os.environ['DOCKING_UNIVERSAL_QVINAW_ACCEPTANCE'] = '1'
         import docking_universal
         if not Path(docking_universal.__file__).resolve().is_relative_to(app):
             raise GateError("GUI acceptance imported checkout code instead of installed application")
         from docking_universal.windows_scientific_runtime import scientific_environment
         from docking_universal.native_entrypoint import isolated_environment
         configuration = json.loads((app / "native-preview.json").read_text(encoding="utf-8"))
+        status['interactive_pymol_accepted'] = bool(configuration.get('viewer_supported'))
         scientific, inherited, _receipt = scientific_environment(app, configuration, os.environ)
         # GUI Qt6 DLLs first. The real host client constructs the separate
         # scientific Qt5/DLL environment for its Python 3.9 child.
@@ -100,7 +104,8 @@ def main():
         client = ApplicationHostClient(root, app / "docking-universal-application-host.py",
                                        python_executable=scientific, timeout_seconds=30)
         stage("owned_scientific_host_startup", client.start)
-        if not client.runtime.get("native_scientific_preview") or client.runtime.get("supported_engines") != ["vina"]:
+        expected_engines = ['vina', 'qvinaw'] if args.engine == 'qvinaw' or configuration.get('qvinaw_supported') else ['vina']
+        if not client.runtime.get("native_scientific_preview") or client.runtime.get("supported_engines") != expected_engines:
             raise GateError("Installed host did not advertise the bounded native workflow")
         client.request("desktop-fixture", "create_study", {"name": "Disposable public Qt fixture Ω"})
         settings = QtCore.QSettings(str(out / "desktop.ini"), QtCore.QSettings.Format.IniFormat)
@@ -166,7 +171,7 @@ def main():
                 raise GateError("Unaccepted native control remains enabled in the Qt form")
             enabled = {window.protocol_engine.itemData(i) for i in range(window.protocol_engine.count())
                        if window.protocol_engine.model().item(i).isEnabled()}
-            if enabled != {"vina"}:
+            if enabled != set(expected_engines):
                 raise GateError("Qt form offers an unaccepted native engine")
         stage("unsupported_methods_rejected_without_state_mutation", rejection_gate)
         inputs = out / "Inputs Ω 日本語"; inputs.mkdir()
@@ -232,6 +237,7 @@ def main():
 
         def finalize():
             window.final_output_directory.setText(str(out / "Protocol Ω"))
+            window.protocol_engine.setCurrentIndex(window.protocol_engine.findData(args.engine))
             for field, value in ((window.protocol_ph, 7.4), (window.protocol_conformers, 1),
                 (window.protocol_seeds, 1), (window.protocol_base_seed, 41001),
                 (window.protocol_exhaustiveness, 1), (window.protocol_modes, 3), (window.protocol_energy_range, 8)):
@@ -242,6 +248,10 @@ def main():
             report = next(Path(a.path) for a in state.artifacts if a.kind == "final_report")
             if not report.read_bytes().startswith(b"%PDF-") or not window.open_final_report_button.isEnabled():
                 raise GateError("Qt finalization did not retain an accessible protocol PDF")
+            from docking_universal.services.protocol_import import inspect_protocol_bundle
+            bundle = next(a.path for a in state.artifacts if a.kind == 'protocol_bundle')
+            if inspect_protocol_bundle(bundle)['engine'] != args.engine:
+                raise GateError('Final protocol did not retain the explicitly selected engine')
         stage("qt_protocol_finalization_pdf_and_bundle", finalize)
 
         def screen():
@@ -264,6 +274,10 @@ def main():
                 raise GateError("Qt screen did not register clusters and local interaction evidence")
             if not all(Path(a.path).is_file() for a in state.artifacts):
                 raise GateError("A registered fixture artifact is missing after screening")
+            manifests = list((out / 'Screen Ω').rglob('run_manifest.tsv'))
+            if not manifests or any('engine\t' + args.engine + '\n' not in p.read_text(encoding='utf-8') for p in manifests):
+                raise GateError('Screening substituted or failed to record the selected engine')
+            status['screening_engine'] = args.engine
             status["completed_job_count"] = sum(j.status.value == "completed" for j in state.jobs)
         stage("qt_compound_selection_preview_screening_and_results", screen)
 
@@ -346,7 +360,8 @@ def main():
             pass
         status.update(status="passed", gui_qt=QtCore.qVersion(), gui_python=platform.python_version(),
                       host_python=client.python_executable.name, lease_released=True,
-                      fixture_approval_only=True, failure_dialog_count=len(dialogs))
+                      fixture_approval_only=True, failure_dialog_count=len(dialogs),
+                      installed_interactive_viewer_fixture_passed=with_viewer)
     except BaseException as exc:
         status.update(status="failed", error_type=type(exc).__name__,
                       error=str(exc) if isinstance(exc, GateError) else "Desktop acceptance raised an exception; full detail retained locally",

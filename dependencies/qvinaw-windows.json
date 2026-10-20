@@ -1,0 +1,13 @@
+{
+  "channel": "conda-forge",
+  "subdir": "win-64",
+  "name": "qvina",
+  "version": "2.1.0",
+  "build": "he453025_8",
+  "sha256": "354cdf5dcc9f2105999b7fd64d85fa7b3f8c57cea15dcc20e322dfe4ace1f5cc",
+  "executable_sha256": "89509afc51bd1576ab73c8684986991178f8ceec9438796073f2499a90594d1d",
+  "executable_version": "QuickVina-W 1.1 (24 Dec, 2017)",
+  "source": "https://github.com/QVina/qvina",
+  "license": "Apache-2.0",
+  "native_prepared_input_acceptance": "https://github.com/thomaslane79-creator/docking-universal/actions/runs/39429574702"
+}

@@ -194,6 +194,14 @@ def main():
                     env=environment, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=1500)
             status["checks"].append("installed_real_qt_buttons_scientific_host_review_finalize_screen_cancel_reopen")
             status["installed_desktop_workflow"] = "passed"
+            if configuration.get('qvinaw_candidate_installed'):
+                with (out / 'qvinaw-desktop-workflow.local.log').open('w', encoding='utf-8') as log:
+                    subprocess.run([str(gui), str(ROOT / 'validation/native_windows_desktop_workflow.py'),
+                        '--app', str(app), '--out', str(out / 'qvinaw-desktop-workflow'), '--engine', 'qvinaw',
+                        '--structure', str(fixtures / '2R8N.cif'), '--ligand', str(fixtures / 'synthetic_carbamate.sdf')],
+                        env=environment, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=1500)
+                status['checks'].append('installed_real_qt_quickvina_protocol_screening_viewer_and_lifecycle')
+                status['installed_qvinaw_desktop_workflow'] = 'passed'
         status["status"] = "passed"
     except Exception as exc:
         status.update(status="failed", error=str(exc))

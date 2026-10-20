@@ -8,6 +8,8 @@ on:
       - tools/install_native_windows.py
       - environments/windows-gui.yml
       - libexec/docking_universal/windows_viewer_runtime.py
+      - libexec/docking_universal/windows_qvinaw.py
+      - dependencies/qvinaw-windows.json
       - libexec/docking_universal/viewer/**
       - libexec/docking_universal/gui/interaction_review_window.py
       - libexec/docking-universal-desktop.py
@@ -80,6 +82,7 @@ jobs:
             ${{ runner.temp }}/du-installed-scientific/installed-scientific/summary.json
             ${{ runner.temp }}/du-installed-scientific/desktop-workflow/summary.json
             ${{ runner.temp }}/du-installed-scientific/installed-viewer/summary.json
+            ${{ runner.temp }}/du-installed-scientific/qvinaw-desktop-workflow/summary.json
 
   scientific-dependency-gate:
     name: Native Windows pinned scientific dependencies (not full workflow)

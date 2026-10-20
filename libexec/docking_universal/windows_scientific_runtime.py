@@ -86,24 +86,29 @@ def scientific_environment(app: Path, configuration: dict, inherited: dict):
         DOCKING_UNIVERSAL_NODE=receipt["node"], DOCKING_UNIVERSAL_CHROME=receipt["browser"],
         DOCKING_UNIVERSAL_NATIVE_STAGING_ROOT=str(python.parent / 'share/docking-universal/native-staging'),
         DOCKING_UNIVERSAL_P2RANK_DIR=receipt["p2rank"])
+    if configuration.get('qvinaw_candidate_installed'):
+        from .windows_qvinaw import record
+        engine = record(app, configuration)
+        environment['DOCKING_UNIVERSAL_QVINAW'] = engine['executable']
+        environment['DOCKING_UNIVERSAL_QVINAW_RUNTIME'] = engine['prefix']
     return python, environment, receipt
 
 
-def require_vina_options(options):
+def require_vina_options(options, engines=('vina',)):
     """Never reinterpret another engine or an API request as native Vina CLI."""
     for index, value in enumerate(options):
         name, separator, selected = value.partition("=")
         if not separator and name in {"--engine", "--vina-backend"}:
             selected = options[index + 1] if index + 1 < len(options) else ""
-        if name == "--engine" and selected != "vina":
-            raise ValueError("This native scientific preview supports Vina only; no engine substitution")
+        if name == "--engine" and selected not in engines:
+            raise ValueError("This native scientific preview cannot use the selected engine; no engine substitution")
         if name == "--vina-backend" and selected != "cli":
             raise ValueError("This native scientific preview supports the pinned Vina CLI, not an API substitution")
         if name in {"--engine-command", "--engine-env"}:
             raise ValueError("Native scientific preview engine-path/environment overrides require separate acceptance")
 
 
-def protocol_preflight(command, options):
+def protocol_preflight(command, options, engines=('vina',)):
     """Check locked engine authority before an outer runner creates any output."""
     protocol = None
     for index, value in enumerate(options):
@@ -126,17 +131,26 @@ def protocol_preflight(command, options):
         else:
             from .services.screening import read_protocol_record
             record = read_protocol_record(source)
-        if record.get("engine") != "vina":
+        if record.get("engine") not in engines:
             raise ValueError("This native scientific preview cannot run the protocol's engine; no Vina substitution or job was started")
 
 
 def stage_command(app: Path, configuration: dict, command: str, options: list[str], inherited: dict):
     if command not in STAGES:
         raise ValueError("Unsupported native scientific command; no shell fallback")
-    require_vina_options(options)
-    protocol_preflight(command, options)
+    from .windows_qvinaw import supported_engines
+    engines = supported_engines(configuration, inherited)
+    require_vina_options(options, engines)
+    protocol_preflight(command, options, engines)
     python, environment, _receipt = scientific_environment(app, configuration, inherited)
     arguments = list(options)
     if command == "dock":
-        arguments.extend(["--engine", "vina", "--engine-command", environment["DOCKING_UNIVERSAL_VINA"], "--vina-backend", "cli"])
+        selected = 'vina'
+        for index, value in enumerate(options):
+            if value == '--engine':
+                selected = options[index + 1]
+            elif value.startswith('--engine='):
+                selected = value.partition('=')[2]
+        executable = environment['DOCKING_UNIVERSAL_VINA' if selected == 'vina' else 'DOCKING_UNIVERSAL_QVINAW']
+        arguments.extend(["--engine", selected, "--engine-command", executable, "--vina-backend", "cli"])
     return [str(python), str(app / STAGES[command]), *arguments], environment

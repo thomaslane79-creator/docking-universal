@@ -24,14 +24,14 @@ def preparation_guard(payload):
         raise ValueError("Native Windows preparation supports P2Rank only; no detector substitution")
 
 
-def workflow_guard(command, controller):
+def workflow_guard(command, controller, *, supported_engines=('vina',)):
     operation, payload = command.operation, command.payload
     if operation == "start_control_validation":
         raise ValueError("Known-ligand control is not accepted in the native Windows preview; no job was created")
     if operation == "start_receptor_preparation":
         preparation_guard(payload)
-    if operation == "start_protocol_finalization" and payload.get("engine", "vina") != "vina":
-        raise ValueError("Native Windows finalization supports Vina only; no engine substitution")
+    if operation == "start_protocol_finalization" and payload.get("engine", "vina") not in supported_engines:
+        raise ValueError("Native Windows finalization cannot use the selected engine; no engine substitution")
     if operation in {"import_protocol_bundle", "start_screening"}:
         from .services.protocol_import import inspect_protocol_bundle
         if operation == "import_protocol_bundle":
@@ -39,13 +39,23 @@ def workflow_guard(command, controller):
         else:
             state = controller.get_study(command.study_id)
             bundle = next((item.path for item in state.artifacts if item.kind == "protocol_bundle"), "")
-        if bundle and inspect_protocol_bundle(bundle)["engine"] != "vina":
+        if bundle and inspect_protocol_bundle(bundle)["engine"] not in supported_engines:
             raise ValueError("This native Windows preview cannot use the protocol's engine; no job/state change was made")
     if operation == "resolve_decision":
         state = controller.get_study(command.study_id)
         decision = next((item for item in state.pending_decisions if item.id == payload.get("decision_id")), None)
         if decision and decision.kind != "select_pockets":
             raise ValueError("This preparation intervention needs separate native acceptance; its pending decision was preserved")
+
+
+def installed_capabilities(app, environment):
+    configuration = json.loads((Path(app) / 'native-preview.json').read_text(encoding='utf-8'))
+    from .windows_qvinaw import supported_engines, record
+    capabilities = dict(CAPABILITIES)
+    capabilities['supported_engines'] = list(supported_engines(configuration, environment))
+    if 'qvinaw' in capabilities['supported_engines']:
+        record(app, configuration)
+    return capabilities
 
 
 def installed_host(app, *, executing_python=None, inherited=None):

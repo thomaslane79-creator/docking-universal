@@ -80,7 +80,7 @@ def copy_application(source: Path, target: Path) -> dict[str, str]:
     for name in ("VERSION", "LICENSE"):
         shutil.copyfile(source / name, target / name)
         hashes[name] = hashlib.sha256((target / name).read_bytes()).hexdigest()
-    for name in ("environment.yml", "dependencies/vina-windows.json", "dependencies/p2rank.json"):
+    for name in ("environment.yml", "dependencies/vina-windows.json", "dependencies/p2rank.json", 'dependencies/qvinaw-windows.json'):
         original = source / name
         if original.is_file():
             destination = target / "installation-assets" / name
@@ -180,6 +180,15 @@ def main():
             configuration.update(viewer_profile=PROFILE, viewer_candidate_installed=True, viewer_supported=False,
                 viewer_receipt=str(viewer_receipt.relative_to(destination).as_posix()),
                 viewer_receipt_sha256=hashlib.sha256(viewer_receipt.read_bytes()).hexdigest())
+            from docking_universal.windows_qvinaw import install as install_qvinaw
+            qvinaw_prefix = science_prefix.parent / 'qvinaw'
+            qvinaw_work = destination / '.bootstrap/qvinaw-setup'
+            install_qvinaw(conda=args.conda, prefix=qvinaw_prefix, app=app,
+                          source_assets=app / 'installation-assets', work=qvinaw_work)
+            qvinaw_receipt = qvinaw_work / 'qvinaw-install.json'
+            configuration.update(qvinaw_candidate_installed=True, qvinaw_supported=False,
+                qvinaw_receipt=str(qvinaw_receipt.relative_to(destination).as_posix()),
+                qvinaw_receipt_sha256=hashlib.sha256(qvinaw_receipt.read_bytes()).hexdigest())
         (app / "native-preview.json").write_text(json.dumps(configuration, indent=2) + "\n", encoding="utf-8")
         launchers = destination / "bin"
         launchers.mkdir()

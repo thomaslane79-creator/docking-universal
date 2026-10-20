@@ -100,6 +100,24 @@ class InstalledScientificDispatcherTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "receipt changed"):
             stage_command(self.app, self.configuration, "dock", [], {})
 
+    def test_installed_quickvina_selection_never_becomes_vina_and_stays_gated(self):
+        from docking_universal.windows_qvinaw import PROFILE
+        executable = self.root / 'runtimes/qvinaw/Library/bin/qvinaw.exe'
+        executable.parent.mkdir(parents=True); executable.write_bytes(b'pinned-qvina')
+        receipt = self.root / '.bootstrap/qvinaw-install.json'
+        receipt.write_text(json.dumps({'status': 'installed', 'profile': PROFILE,
+            'prefix': str(self.root / 'runtimes/qvinaw'), 'executable': str(executable),
+            'executable_sha256': hashlib.sha256(executable.read_bytes()).hexdigest()}), encoding='utf-8')
+        self.configuration.update(qvinaw_candidate_installed=True, qvinaw_supported=False,
+            qvinaw_receipt=str(receipt.relative_to(self.root)),
+            qvinaw_receipt_sha256=hashlib.sha256(receipt.read_bytes()).hexdigest())
+        with self.assertRaisesRegex(ValueError, 'no engine substitution'):
+            stage_command(self.app, self.configuration, 'dock', ['--engine', 'qvinaw'], {})
+        command, environment = stage_command(self.app, self.configuration, 'dock', ['--engine=qvinaw'],
+                                             {'DOCKING_UNIVERSAL_QVINAW_ACCEPTANCE': '1'})
+        self.assertEqual(command[-6:], ['--engine', 'qvinaw', '--engine-command', str(executable), '--vina-backend', 'cli'])
+        self.assertEqual(environment['DOCKING_UNIVERSAL_QVINAW'], str(executable))
+
     def test_changed_unicode_transport_stops_before_any_job(self):
         launcher = self.root / "share/p2rank-2.5.1/docking-universal-launcher/NativeArguments.class"
         launcher.write_bytes(b"changed")
