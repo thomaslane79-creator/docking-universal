@@ -97,7 +97,15 @@ Strict reviewed-site known-ligand controls now also **pass at `ba85d2f`** in
 both CPU engines preserve the short-run rejection rule and produce verified
 approved protocols after the real five-repeat control. PDFs, explicit site
 review, unchanged inputs and host cleanup pass. Fresh installations now enable
-this accepted control path; its final enabled-default rerun is pending. See the
+this accepted control path. The final **normal-default rerun also passes at
+`73054b9`** in
+[39512043939](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39512043939),
+without a capability override or installation-configuration rewrite; both
+engines' four control cases, installed viewer and exploratory GUI workflows pass.
+All eight companion general jobs pass in
+[39512043826](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39512043826).
+This accepts the bounded native Server 2022/x64 CPU/control installation profile.
+See the
 [control acceptance record](docs/windows-control-validation.md), including the
 report-provenance fixes and earlier failures. Native AD4 GPU docking, broader
 chemistry interventions and pristine consumer-machine acceptance remain open;

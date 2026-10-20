@@ -25,7 +25,12 @@ The later installed gates also accept QuickVina-W, private Chromium and
 embedded/detachable PyMOL with process-local CPU software graphics. The strict
 reviewed-site control gate passes all four Vina/QuickVina-W short/five-repeat
 cases at `ba85d2f`, including PDFs and verified approved bundles. Fresh installs
-now enable that control capability; its final enabled-default rerun is pending.
+now enable that control capability. Its final enabled-default run at `73054b9`
+passes [native acceptance 39512043939](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39512043939),
+with no test-only capability override or configuration rewrite; all eight
+[general checks 39512043826](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39512043826)
+pass too. This accepts the bounded Server 2022/x64 CPU/control profile, not all
+Windows machines. A real Windows 11 Home/Intel test remains next.
 This does not change sampling/approval criteria or reapprove existing studies.
 Broader chemistry interventions, consumer VM/profile coverage and native GPU
 support remain separate acceptance work. See

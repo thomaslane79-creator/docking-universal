@@ -4,6 +4,17 @@ Status: active scope-control record, established 2026-09-24.
 
 ### No-prerequisite Windows installation (authorized 2026-10-18)
 
+- Completed normal-default acceptance at `73054b9`: native 39512043939 passes
+  both jobs and all four controls with `production_control_enabled=true`, no
+  fixture override/configuration rewrite, unchanged reviewed inputs, PDFs,
+  portable approved bundles for the five-seed cases and clean host shutdown.
+  The private installer/browser, 20-check viewer, five installed CLI stages
+  and both 11-step exploratory engine workflows pass. All eight general jobs
+  pass in 39512043826. The bounded Server 2022/x64 CPU/control profile is
+  accepted; preserve earlier failed records. The offered Windows 11 Home/Intel
+  machine is the next consumer check, not accepted hardware yet. No new GUI
+  option, chemistry intervention, GPU claim or working-install/study change.
+
 - Reviewed-control candidate gate passed at `ba85d2f` in native 39479026877;
   all eight general jobs pass in 39479026589. Both engines' quick cases reject
   approval as required; both real five-seed cases produce PDFs and verified

@@ -1,5 +1,19 @@
 # Complete interactive GUI workflow plan
 
+Completed enabled-default acceptance 2026-10-20 at `73054b9`: native
+[39512043939](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39512043939)
+passes both jobs, all four strict reviewed controls, the 20-check software
+viewer, five installed CLI stages and both 11-step exploratory GUI workflows.
+All eight general jobs pass in
+[39512043826](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39512043826).
+Controls use normal installer defaults, no fixture override and no configuration
+rewrite. Quick cases withhold approval; five-seed cases retain PDFs and verified
+approved bundles. Local checks pass 735 Python/21 shell/110 targeted Qt cases;
+696 protected files match with only the pre-existing stale ReportLab metadata
+exception. The bounded Server 2022/x64 CPU/control profile is accepted. Next is
+the offered Windows 11 Home/Intel machine test; no consumer/GPU/chemistry-
+intervention acceptance is inferred, and no working Mac install/study changed.
+
 Completed candidate gate 2026-10-20 at `ba85d2f`: native 39479026877 passes both
 jobs and all four actual GUI controls (Vina/QuickVina-W quick rejection plus
 five-seed approval, PDFs, verified portable inputs, unchanged reviewed assets

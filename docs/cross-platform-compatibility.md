@@ -12,7 +12,7 @@ later or broader capability. Current boundaries are:
 | Interactive PyMOL | Installed process-local Mesa software viewing passes 20 checks and both 11-step engine GUI workflows; enabled for fresh installs |
 | Default/system graphics | Crashes on the hosted runner; never silently retried as a fallback |
 | No installed Chrome/Edge | Fresh private-Chromium installation and all installed rendering/report/GUI checks pass at `50a8ef2` |
-| Known-ligand controls | Both engines pass quick rejection and real five-repeat approved-bundle/PDF cases at `ba85d2f`; enabled in new installer, final enabled-default verification pending |
+| Known-ligand controls | Both engines pass quick rejection and real five-repeat approved-bundle/PDF cases; final normally enabled fresh installation passes at `73054b9`, without override/configuration rewrite |
 | Preparation interventions | Not enabled in this Windows slice; pending decisions are preserved |
 | AD4 GPU docking | Requires accepted Windows build plus real supported OpenCL device; software viewing does not satisfy this |
 | Consumer Windows/profile coverage | Hosted Server 2022/x64 is not Windows 10/11 consumer-machine acceptance; special profiles still need an explicit ASCII manager folder |
@@ -32,9 +32,17 @@ and all eight companion general jobs pass in
 Both short controls withhold approved bundles; both real five-seed controls
 publish portable protocols with verified input hashes and PDFs. The installed
 host/viewer/CPU workflows also pass, with no control failure dialogs and released
-host lease. The fresh installer enables this accepted capability, but a final
-normal-default run must pass without a fixture override before declaring that
-activation verified. See [the control record](windows-control-validation.md).
+host lease. The final normally enabled fresh installation independently passes
+at `73054b9` in
+[39512043939](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39512043939),
+with all eight general jobs passing in
+[39512043826](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39512043826).
+Its four controls, 16 outer checks, 20 viewer checks, five installed CLI stages
+and both 11-step exploratory GUI workflows pass. Controls are enabled by the
+normal installer with no fixture override and byte-identical installation
+configuration through cleanup. The bounded Server 2022/x64 CPU/control profile
+is accepted; the user's Windows 11 Home/Intel machine remains an untested next
+consumer-machine check. See [the control record](windows-control-validation.md).
 
 Remaining 2026-10-20 native viewer/engine validation is tracked separately in
 [the Windows viewer/engine record](windows-viewer-engine-validation.md), including
@@ -299,7 +307,7 @@ scientific defaults remain unchanged while the port is developed.
 | Apple Silicon, current Mac | Fresh installer, embedded/full PyMOL and accepted AD4 build tested | Identical results on all Apple GPUs/drivers |
 | macOS 15 candidate GPU host | Same patched source compiled with minimum target 15.0; kernel unchanged; two synthetic repeats exactly match the accepted build on the current Mac | Older-OS native GPU execution and scientific acceptance; candidate is not activated |
 | Linux | Existing Unix installer/environment and CI path; restored a failing test import | Complete release-level desktop/GPU acceptance across distributions |
-| Native Windows | No-prerequisite private installer, private browser, real installed Qt/host preparation/review, both CPU engines, software PyMOL, screening/local reports and lifecycle checks pass on Server 2022/x64; four reviewed-control cases pass at ba85d2f | Final control-enabled-default rerun, consumer VM/profile coverage, full release, broader chemistry interventions and native GPU acceptance |
+| Native Windows | No-prerequisite private installer, private browser, installed Qt/host preparation/review, both CPU engines, software PyMOL, screening/local reports and lifecycle checks pass on Server 2022/x64; four reviewed-control cases pass with normal enabled defaults at 73054b9 | Consumer Windows 10/11/profile coverage, full release, broader chemistry interventions and native GPU acceptance |
 
 The minimum operating-system field in an executable is a build setting, not a
 proof of driver compatibility. The accepted Mac GPU runtime still requires

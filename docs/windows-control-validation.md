@@ -1,13 +1,31 @@
-# Native Windows reviewed-control port — candidate passed, default verification pending
+# Native Windows reviewed-control port — enabled-default acceptance passed
 
 Final enabled-default build: `73054b9`, pushed only to the existing `github`
 feature branch. Native run
 [39512043939](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39512043939)
 and general run
 [39512043826](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39512043826)
-are active; do not launch duplicates. This build includes the report-origin and
-detector-version fixes. Final activation evidence is pending, not inferred from
-the candidate's fixture-only override.
+both passed: two native jobs and all eight general jobs. This build includes
+the report-origin and detector-version fixes. Final activation is verified
+without the candidate's fixture-only override. The installed job took about
+27 minutes including installation and all workflow/control checks; this is not
+an installation-only timing or a performance promise for other machines.
+
+The final status verifies `installed_control_workflow=passed_enabled_defaults`,
+`production_control_enabled=true`, `candidate_configuration_only=false`,
+`capability_override_used=false` and `installation_configuration_unchanged=true`.
+All four controls pass, with zero failure dialogs and released host lease.
+Both quick cases withhold approval; both five-seed cases produce ordinary PDFs
+and verified portable approved bundles. Every case preserves reviewed inputs
+and explicit site review. The 16 outer checks, 20 viewer checks, five installed
+CLI stages and both 11-step exploratory GUI workflows pass as well.
+
+Only the named status metadata artifact was retrieved, under
+`validation/runs/windows-support-20261020/73054b9/installed/`; scientific outputs
+and logs remain on the original runner. This accepts the bounded native
+Server 2022/x64 CPU/control profile for fresh installations, not a full Windows
+release or prospective accuracy/GPU claim. The user's Windows 11 Home/Intel
+machine is the next real consumer-machine check; it is not yet validated.
 
 The exploratory Vina/QuickVina-W GUI, private renderer and interactive software
 viewer passed at `50a8ef2`; see [the completed gate](windows-viewer-engine-validation.md).
@@ -24,7 +42,7 @@ The installed science/viewer and both exploratory engine GUI paths pass too.
 Both earlier failed native runs below remain failed records.
 
 Fresh full installers now enable only this accepted strict reviewed-control
-capability. The final enabled-default rerun is pending: its driver now refuses
+capability. The final enabled-default rerun passed: its driver refuses
 a disabled installation, never overrides or writes the installation
 configuration, and requires it to remain byte-identical through cleanup.
 The baseline host probe now checks an actually unsupported GPU-engine request,
@@ -34,7 +52,7 @@ fail-before-state-mutation checks, including incomplete control requests.
 Chemistry interventions and GPU support remain separately gated. Historical
 candidate notes below describe the earlier disabled/fixture-override stage.
 
-The next bounded port removes Bash orchestration only. It reuses the existing
+The completed bounded port removes Bash orchestration only. It reuses the existing
 strict coordinate-free CCD chemistry helper, independent conformer generator,
 Meeko preparation/export, Vina-family adapters, calibration tiers, no-fit
 crystal RMSD evaluation, approval rules and ordinary reports. The experimental
@@ -81,7 +99,7 @@ locations are retained outside the runner. Structures, poses, diagrams, reports,
 scientific logs and numerical structural evidence remain runner-local. No
 completed user study or working Mac installation is changed.
 
-Local evidence so far: 732 Python cases/21 shell checks pass, including the
+At the detector-version candidate checkpoint, 732 Python cases/21 shell checks passed, including the
 report-synchronization regressions now in the normal test target;
 extended scientific-host discovery also passes 885 cases (111 expected runtime
 skips), and separate GUI regressions pass 185 cases. The initial unsplit
@@ -133,13 +151,13 @@ Report correctness checks now also prevent a ligand-only site from acquiring a
 fictitious `none score`/fpocket descriptor or a ligand-free-cavity heading.
 Retained passed/unapproved controls are described as performed site-specific
 controls, not as though no control was run. Related-site scope restrictions
-remain intact. These semantics have dedicated regressions; the corrected native
-four-case gate has not passed and normal installations still disable controls.
-The corrected feature-branch build is `f8ef36a`; native run
+remain intact. These semantics have dedicated regressions. At the historical
+`f8ef36a` checkpoint, the corrected native four-case gate had not passed and
+normal installations still disabled controls. That build's native run
 [39473514519](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39473514519)
 and companion general run
 [39473514518](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39473514518)
-are the relevant gates, not the earlier failed run. The companion general run
+record the next attempt, not the earlier failed run. The companion general run
 completed successfully with all eight jobs passing. The native dependency/source
 job passed, but the installed gate failed: Vina's ligand-only quick control now
 passes including its PDF; QuickVina-W's quick control with P2Rank reaches the
@@ -181,8 +199,8 @@ Future native failures can also retain a fixed provenance-error code and an
 allowlisted missing-software name from that specific error. No scientific log
 message, target identifier or structural value is exported. This makes a later
 native failure diagnosable without retrieving private scientific logs. The
-corrected build still requires its own complete four-case native gate; controls
-remain disabled in normal installations.
+corrected build required its own complete four-case native gate; controls
+remained disabled in normal installations until the candidate pass below.
 
 The corrected detector-version build passes the complete local 732-case/21-shell
 suite and all 64 focused report/control checks. The 697-file protection audit
@@ -204,8 +222,8 @@ Only status metadata was retrieved into
 `validation/runs/windows-support-20261020/ba85d2f/installed/`. Scientific results
 and logs remain runner-local. This is native Server 2022/x64 workflow evidence,
 not prospective docking accuracy, a consumer Windows VM or GPU acceptance.
-The bounded fresh-install capability activation follows this independent pass;
-its separate normal-default acceptance must now complete without an override.
+The bounded fresh-install capability activation followed this independent pass;
+its separate normal-default acceptance subsequently passed at `73054b9`, above.
 
 ## Enabled-default build checks
 
