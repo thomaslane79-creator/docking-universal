@@ -1,5 +1,12 @@
 # Complete interactive GUI workflow plan
 
+Completed 2026-10-20 at `50a8ef2`: enabled-default native Windows launch and
+application-private browser pass the fresh no-prerequisite install, 20 viewer
+checks, five installed CLI stages and both 11-step real GUI workflows in
+39437705394. All eight general jobs pass in 39437705306; local full checks pass
+689 Python cases/21 shell checks. Next inspect the still-gated known-ligand
+control path without transferring exploratory approval or changing defaults.
+
 Completed 2026-10-20 at `92cd4aa`: installed native Windows software viewer
 passes 20 checks; both Vina and QuickVina-W pass all 11 actual Qt/host workflow
 steps in CI 39435014818. All eight general jobs pass in 39435014877. The fresh

@@ -4,6 +4,14 @@ Status: active scope-control record, established 2026-09-24.
 
 ### No-prerequisite Windows installation (authorized 2026-10-18)
 
+- Final enabled-default/private-browser rerun passed at `50a8ef2`: native
+  39437705394 passes setup, viewer, installed CLI and both real CPU-engine GUI
+  workflows; all eight general jobs pass in 39437705306. Local full checks pass
+  689 Python cases/21 shell checks. The user's continuation requests keep the
+  remaining native control/chemistry/hardware boundaries in scope, but they
+  remain disabled until independently accepted. Inspect the shell-based control
+  stage next; do not replace pose-recovery validation with exploratory docking.
+
 - Installed viewer/CPU-engine milestone passed 2026-10-20 at `92cd4aa`: native
   CI 39435014818 passes both jobs, the 20-check viewer and two 11-step real GUI
   workflows (Vina/QuickVina-W). All eight general jobs pass in 39435014877.

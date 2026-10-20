@@ -11,7 +11,7 @@ later or broader capability. Current boundaries are:
 | QuickVina-W | Prepared-input repeats, Unicode output equality, skip-existing and all 11 installed GUI steps pass at `92cd4aa`; enabled for fresh installs |
 | Interactive PyMOL | Installed process-local Mesa software viewing passes 20 checks and both 11-step engine GUI workflows; enabled for fresh installs |
 | Default/system graphics | Crashes on the hosted runner; never silently retried as a fallback |
-| No installed Chrome/Edge | Private Chromium acquisition branch implemented; forced installed rendering acceptance pending |
+| No installed Chrome/Edge | Fresh private-Chromium installation and all installed rendering/report/GUI checks pass at `50a8ef2` |
 | Known-ligand controls / preparation interventions | Not enabled in this Windows slice; pending decisions are preserved |
 | AD4 GPU docking | Requires accepted Windows build plus real supported OpenCL device; software viewing does not satisfy this |
 | Consumer Windows/profile coverage | Hosted Server 2022/x64 is not Windows 10/11 consumer-machine acceptance; special profiles still need an explicit ASCII manager folder |
@@ -19,8 +19,10 @@ later or broader capability. Current boundaries are:
 The working Mac installation, saved studies and scientific defaults are not
 changed by these isolated validations. See the linked record for failed checks
 and exact native run identities.
-The capability-enabled default-launch/private-browser fresh-install rerun is a
-separate final check, not implied by the earlier explicitly enabled candidate.
+The enabled-default/private-browser rerun also passes independently at `50a8ef2`
+in [39437705394](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39437705394).
+All eight companion general jobs pass in
+[39437705306](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39437705306).
 
 Remaining 2026-10-20 native viewer/engine validation is tracked separately in
 [the Windows viewer/engine record](windows-viewer-engine-validation.md), including

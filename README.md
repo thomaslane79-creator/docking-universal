@@ -87,8 +87,12 @@ Fresh installs now enable QuickVina-W and embedded/detachable PyMOL, including
 linked 2D/3D docking-pose review, labels, contacts and image/ray exports. Windows
 uses its private Mesa **CPU software graphics**, not GPU-accelerated docking or
 a replacement system driver. Its Qt6/Python 3.12 viewer stays separate from the
-scientific Python 3.9 environment. The default-launch/private-browser rerun
-remains a separate final check. Known-ligand controls, native AD4 GPU docking
+scientific Python 3.9 environment. The normal-launch/private-browser fresh-install
+rerun **also passes at `50a8ef2`** in
+[39437705394](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39437705394),
+with all eight general jobs passing in
+[39437705306](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39437705306).
+Known-ligand controls, native AD4 GPU docking
 and pristine consumer-machine acceptance are still open; this is a bounded
 native exploratory workflow, not a full Windows release claim.
 
@@ -111,8 +115,8 @@ preventing a reproduced stop/reopen failure. The pinned upstream PyMOL source
 and scientific methods are unchanged; these are application integration fixes.
 Profiles with whitespace/non-ASCII still need an explicit space-free ASCII
 `-ManagerRoot`; the application/study folders themselves support spaces/Unicode.
-The private-browser fallback and complete desktop release need further native
-acceptance. See the compatibility record for failed attempts, provenance,
+The private-browser path is now accepted for the bounded native fixture; the
+complete consumer desktop release needs further acceptance. See the compatibility record for failed attempts, provenance,
 ownership checks and exact boundaries. Structural outputs stay local.
 
 In the GUI, a locally accepted runtime adds **AutoDock-GPU (AD4, experimental)**

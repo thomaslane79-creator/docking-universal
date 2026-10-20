@@ -232,3 +232,27 @@ pending until its own result, and does not cover consumer Windows or real GPU
 hardware. Evidence: `validation/runs/windows-support-20261020/92cd4aa/installed/`
 and `92cd4aa/viewer/`. Local checks at that checkpoint: 683 Python cases,
 21 shell checks, 168 targeted Qt/viewer cases, plus native Mac stop/reopen.
+
+### Enabled defaults and no-browser fresh install passed
+
+At `50a8ef2`, both native jobs in
+[39437705394](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39437705394)
+**pass** with the ordinary launcher defaults and requested private Chromium.
+All 15 outer setup checks, 20 installed viewer checks, five installed scientific
+CLI stages and both 11-step real GUI workflows pass again. The renderer browser
+is explicitly recorded as `application_private`; neither hosted Chrome nor
+Edge supplies the rendering executable. Interactive viewer acceptance is true
+for both engine workflows. Vina's paired fixture has one contact type/two
+residues; QuickVina-W has two types/six residues, so the native independent-type
+toggle check actually exercises multiple types. Native CGO remains one state;
+the retained 2D diagram is unchanged. These are bounded integration checks,
+not an exhaustive PLIP-classification or scientific-accuracy benchmark.
+
+All eight general jobs pass in
+[39437705306](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39437705306).
+The final local full suite passes **689 Python cases** and **21 shell checks**;
+the earlier 168 targeted Qt/viewer cases also pass. Metadata-only evidence is
+under `validation/runs/windows-support-20261020/50a8ef2/installed/`.
+Known-ligand controls/preparation interventions, consumer Windows/profile tests
+and native AD4/GPU hardware remain separate unsupported boundaries, not silently
+covered by these successful exploratory CPU workflows.
