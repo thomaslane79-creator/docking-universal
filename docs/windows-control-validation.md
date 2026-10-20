@@ -50,7 +50,7 @@ locations are retained outside the runner. Structures, poses, diagrams, reports,
 scientific logs and numerical structural evidence remain runner-local. No
 completed user study or working Mac installation is changed.
 
-Local evidence so far: 728 Python cases/21 shell checks pass, including the
+Local evidence so far: 732 Python cases/21 shell checks pass, including the
 report-synchronization regressions now in the normal test target;
 extended scientific-host discovery also passes 885 cases (111 expected runtime
 skips), and separate GUI regressions pass 185 cases. The initial unsplit
@@ -103,17 +103,57 @@ fictitious `none score`/fpocket descriptor or a ligand-free-cavity heading.
 Retained passed/unapproved controls are described as performed site-specific
 controls, not as though no control was run. Related-site scope restrictions
 remain intact. These semantics have dedicated regressions; the corrected native
-four-case gate remains pending and normal installations still disable controls.
+four-case gate has not passed and normal installations still disable controls.
 The corrected feature-branch build is `f8ef36a`; native run
 [39473514519](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39473514519)
 and companion general run
 [39473514518](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39473514518)
 are the relevant gates, not the earlier failed run. The companion general run
-has completed successfully with all eight jobs passing; the installed native
-gate is still active. Its dependency/source-workflow job has already passed.
+completed successfully with all eight jobs passing. The native dependency/source
+job passed, but the installed gate failed: Vina's ligand-only quick control now
+passes including its PDF; QuickVina-W's quick control with P2Rank reaches the
+ordinary-PDF check but has no PDF. Neither five-seed case was reached. The normal
+disabled capability was restored. This is partial progress, not acceptance.
+Its status-only files are retained under
+`validation/runs/windows-support-20261020/f8ef36a/installed/`.
 
 The no-prediction wording also follows the actual selected region(s): another
 structure's aligned ligand and mixed input/evidence selections are not labeled
 as though every box came from the exact input ligand. The original preparation
 mode alone is insufficient to make that claim. These additional report-only
 regressions pass locally; they do not change docking inputs or acceptance rules.
+
+## P2Rank version handoff correction
+
+The failed native metadata identifies missing PDF retention, not its underlying
+generator message. The matching control metadata condition is reproducible
+locally: P2Rank 2.5.1 is correctly retained as
+`pocket_detection.engine_version`, but the report used only the separate control
+software inventory. That inventory does not rerun/list the earlier detector.
+The report consequently labeled the used P2Rank version `not recorded` and
+correctly refused incomplete provenance. Do not weaken that guard.
+
+The report now takes the version from the actual retained detector operation,
+then falls back to retained software inventories only when needed. It never
+queries today's installed detector or substitutes a guessed version. A genuine
+missing version still fails. Dedicated regressions cover the control handoff,
+the operation-versus-inventory priority, and the missing-version rejection.
+
+A local report-only check additionally ran actual P2Rank prediction on the
+unchanged public biotin fixture receptor and reused the completed five-seed
+Vina control. With the fix, its PDF includes the retained 2.5.1 version. This
+post hoc predictor run is explicitly marked as a report-compatibility fixture,
+not evidence that prediction was used to select the original control site. No
+control search or preparation was repeated, and no user result was changed.
+
+Future native failures can also retain a fixed provenance-error code and an
+allowlisted missing-software name from that specific error. No scientific log
+message, target identifier or structural value is exported. This makes a later
+native failure diagnosable without retrieving private scientific logs. The
+corrected build still requires its own complete four-case native gate; controls
+remain disabled in normal installations.
+
+The corrected detector-version build passes the complete local 732-case/21-shell
+suite and all 64 focused report/control checks. The 697-file protection audit
+still matches 696 files with only the previously recorded stale ReportLab conda
+metadata exception. No working installation or completed user study changed.

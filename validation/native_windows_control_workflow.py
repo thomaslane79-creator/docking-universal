@@ -25,9 +25,14 @@ class GateError(RuntimeError):
 
 def runtime_failure_metadata(root):
     """Retain code locations/types only, never log text or scientific values."""
-    exceptions, locations = set(), []
+    exceptions, locations, report_errors, missing_versions = set(), [], set(), set()
     for path in Path(root).rglob('*.log'):
         for line in path.read_text(encoding='utf-8', errors='replace').splitlines():
+            if 'PDF report error: complete version provenance is required for every software component used.' in line:
+                report_errors.add('incomplete_used_software_provenance')
+                for label in ('P2Rank', 'fpocket', 'Meeko', 'RDKit', 'PLIP', 'Open Babel', 'QuickVina-W', 'AutoDock Vina'):
+                    if label + ': not recorded' in line or label + ': not detected' in line:
+                        missing_versions.add(label)
             match = re.match(r'^([A-Za-z_]\w*(?:Error|Exception)):', line)
             if match:
                 exceptions.add(match.group(1))
@@ -36,7 +41,8 @@ def runtime_failure_metadata(root):
                 name = match.group(1).replace('\\', '/').rsplit('/', 1)[-1]
                 if re.fullmatch(r'[A-Za-z0-9_.-]+\.py', name):
                     locations.append({'file': name, 'line': int(match.group(2)), 'function': match.group(3)})
-    return {'runtime_exception_types': sorted(exceptions), 'runtime_traceback_locations': locations[-16:]}
+    return {'runtime_exception_types': sorted(exceptions), 'runtime_traceback_locations': locations[-16:],
+            'report_failure_codes': sorted(report_errors), 'missing_version_software': sorted(missing_versions)}
 
 
 def main():

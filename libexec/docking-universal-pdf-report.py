@@ -1136,10 +1136,17 @@ def reproducibility_record(protocol, study, control):
             "version": "Pocket prediction not requested",
         }
     else:
+        # Detection belongs to the retained preparation, not the later control
+        # software inventory (which need not run or list P2Rank again).
+        detection = (protocol or {}).get("pocket_detection") or {}
+        detector_versions = [detection.get("engine_version"), recorded.get(detector_key), run_versions.get(detector_key)]
+        detector_version = next((str(value).strip() for value in detector_versions
+                                 if value and str(value).strip() and str(value).strip().lower() not in
+                                 {"unknown", "not recorded", "not detected"}), "not recorded")
         detector_software = {
             "role": "Ligand-free cavity detection",
             "software": {"p2rank": "P2Rank", "fpocket": "fpocket"}.get(detector_key, detector_key),
-            "version": recorded.get(detector_key) or run_versions.get(detector_key, "not recorded"),
+            "version": detector_version,
         }
     detector_name = detector_software["software"]
     software = [

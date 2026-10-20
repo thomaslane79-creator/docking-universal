@@ -26,6 +26,18 @@ class NativeControlTests(unittest.TestCase):
             self.assertNotIn('private', json.dumps(result))
             self.assertNotIn('-12.345', json.dumps(result))
 
+    def test_native_pdf_failure_classification_never_exports_the_diagnostic_payload(self):
+        from validation.native_windows_control_workflow import runtime_failure_metadata
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'private.log').write_text(
+                'WARNING: PDF report could not be generated: PDF report error: complete version provenance is required '
+                'for every software component used. Recover or record versions for: P2Rank: not recorded; PRIVATE target\n')
+            result = runtime_failure_metadata(root)
+            self.assertEqual(result['report_failure_codes'], ['incomplete_used_software_provenance'])
+            self.assertEqual(result['missing_version_software'], ['P2Rank'])
+            self.assertNotIn('PRIVATE', json.dumps(result))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

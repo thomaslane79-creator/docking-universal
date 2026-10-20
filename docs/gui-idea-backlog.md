@@ -4,6 +4,15 @@ Status: active scope-control record, established 2026-09-24.
 
 ### No-prerequisite Windows installation (authorized 2026-10-18)
 
+- Follow-through at `f8ef36a`: all eight general jobs pass and the existing
+  installed Windows CLI/viewer/exploratory engine paths pass. The native Vina
+  quick control now passes its report; the QuickVina-W/P2Rank quick control
+  still fails PDF retention, before either positive five-seed case. A matching
+  local reproduction identifies a lost detector-version handoff. Fix only the
+  report's use of retained operation provenance, preserve the completeness
+  guard, and rerun native acceptance before enabling controls. No new GUI,
+  scientific defaults, GPU claim or working-install change is part of this fix.
+
 - Native reviewed-control candidate follow-through: real local control/report
   reuse exposed and corrected the explicit no-detector PDF failure. Preserve
   the failed record. Acceptance now also requires the real five-seed approved

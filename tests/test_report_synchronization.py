@@ -24,6 +24,34 @@ RUN = load('synchronized_run','libexec/docking-universal-run.py')
 
 
 class ReportSynchronizationTests(unittest.TestCase):
+    def test_control_uses_retained_detector_version_even_without_a_control_software_entry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            protocol = {'engine': 'qvinaw', 'control_status': 'failed',
+                        'pocket_detection': {'engine': 'p2rank', 'engine_version': '2.5.1'},
+                        'docking_regions': [{'box_label': 'B1', 'site_source': 'input_bound_ligand', 'geometry': {}}]}
+            provenance = REPORT.reproducibility_record(protocol, Path(directory), None)
+            detector = next(row for row in provenance['software'] if row['software'] == 'P2Rank')
+            self.assertEqual(detector['version'], '2.5.1')
+            REPORT.require_complete_used_versions({'software': [detector]})
+
+    def test_detector_version_is_the_retained_operation_not_later_runtime_or_inventory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); (root / 'report').mkdir()
+            (root / 'report/study_summary.json').write_text(json.dumps({'scientific_software': {'p2rank': 'later'}}))
+            protocol = {'pocket_detection': {'engine': 'p2rank', 'engine_version': '2.5.1'},
+                        'software': {'p2rank': 'not recorded'}}
+            provenance = REPORT.reproducibility_record(protocol, root, None)
+            detector = next(row for row in provenance['software'] if row['software'] == 'P2Rank')
+            self.assertEqual(detector['version'], '2.5.1')
+
+    def test_absent_detector_version_still_fails_complete_provenance_guard(self):
+        with tempfile.TemporaryDirectory() as directory:
+            protocol = {'pocket_detection': {'engine': 'p2rank', 'engine_version': 'not recorded'}}
+            provenance = REPORT.reproducibility_record(protocol, Path(directory), None)
+            detector = next(row for row in provenance['software'] if row['software'] == 'P2Rank')
+            with self.assertRaisesRegex(SystemExit, 'P2Rank: not recorded'):
+                REPORT.require_complete_used_versions({'software': [detector]})
+
     def test_ligand_only_site_table_has_no_prediction_measurement_or_fpocket_descriptor(self):
         region = {'box_label': 'B1', 'site_source': 'input_bound_ligand', 'geometry': {}}
         cavity = REPORT.inherited_protocol_cavity_record(
