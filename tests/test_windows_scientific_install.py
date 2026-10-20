@@ -143,6 +143,17 @@ class InstalledScientificDispatcherTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "receipt changed"):
             stage_command(self.app, self.configuration, "dock", [], {})
 
+    def test_control_commands_remain_disabled_until_their_own_acceptance(self):
+        for command in ('control', 'control-stage', 'calibrate'):
+            with self.subTest(command=command), self.assertRaisesRegex(ValueError, 'control is not accepted'):
+                stage_command(self.app, self.configuration, command, [], {})
+        self.configuration['native_control_supported'] = True  # isolated candidate fixture only
+        with self.assertRaisesRegex(ValueError, 'sealed reviewed-site'):
+            stage_command(self.app, self.configuration, 'control', ['--non-interactive'], {})
+        options = ['--non-interactive', '--reviewed-control-inputs', 'fixture.json', '--reviewed-control-inputs-sha256', 'fixture']
+        command, _ = stage_command(self.app, self.configuration, 'control', options, {})
+        self.assertEqual(command[1:], [str(self.app / 'docking-universal-run.py'), 'control', *options])
+
     def test_changed_private_render_browser_is_rejected_without_local_browser_fallback(self):
         browser = self.root / 'share/playwright-browsers/revision/chrome.exe'
         browser.parent.mkdir(parents=True); browser.write_bytes(b'private-browser')

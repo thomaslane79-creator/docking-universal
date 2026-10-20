@@ -91,7 +91,7 @@ def meeko_command(source: Path, prefix: Path, pdbqt: Path, *, templates="",
 def prepare_native_candidate(options: ReceptorPreparationOptions, *,
                              p2rank: Path | None = None, java: Path | None = None,
                              libexec: Path | None = None,
-                             runner: Callable = subprocess.run) -> Path:
+                             runner: Callable = subprocess.run, allow_ligand=False) -> Path:
     """Prepare into a fresh directory, without a shell or implicit approval.
 
     This bounded candidate does not replace the Unix product Bash route.
@@ -101,13 +101,15 @@ def prepare_native_candidate(options: ReceptorPreparationOptions, *,
     options.validate()
     if options.preparation_backend == "adfr" or options.pocket_engine == "fpocket":
         raise ValueError("This native candidate supports strict Meeko and explicit P2Rank only; no method substitution")
-    if options.site_mode != "pockets" and not options.predict_pockets_with_ligand:
+    if options.site_mode != "pockets" and not allow_ligand:
         # The exact bound ligand can be selected independently in site review;
         # legacy fpocket ligand-context generation has not been ported here.
         raise ValueError("Native ligand-only artifact acceptance is not complete; no fallback detector was selected")
-    if p2rank is None or java is None:
+    predict = options.site_mode == 'pockets' or options.predict_pockets_with_ligand
+    if predict and (p2rank is None or java is None):
         raise ValueError("Explicit native P2Rank installation and Java executable are required")
-    java_invocation(p2rank, java, ["-v"])
+    if predict:
+        java_invocation(p2rank, java, ["-v"])
     if not importlib.util.find_spec("meeko"):
         raise ValueError("Pinned Meeko is unavailable in this scientific Python")
     if options.protonation == "required":
@@ -159,7 +161,7 @@ def prepare_native_candidate(options: ReceptorPreparationOptions, *,
     def retain_status(status, **extra):
         (root / "native-preparation.json").write_text(json.dumps({
             "status": status, "candidate_only": True, "source": str(source),
-            "attempts": attempts, **extra,
+            "attempts": attempts, "site_mode": options.site_mode, "pocket_prediction_requested": predict, **extra,
         }, indent=2) + "\n", encoding="utf-8")
 
     def review(message):
@@ -179,13 +181,14 @@ def prepare_native_candidate(options: ReceptorPreparationOptions, *,
         raise PreparationReviewRequired(message)
 
     try:
-        version_command, version_environment = java_invocation(p2rank, java, ["-v"], environment=environment)
-        environment.update(version_environment)
-        if not execute("p2rank_version", version_command):
-            raise RuntimeError("The explicit P2Rank runtime did not start")
-        version_text = (receptor / "p2rank_version.process.log").read_text(encoding="utf-8", errors="replace")
-        if not re.search(r"\bP2Rank\s+2\.5\.1\b", version_text):
-            raise ValueError("The native candidate requires primary P2Rank 2.5.1; no version substitution")
+        if predict:
+            version_command, version_environment = java_invocation(p2rank, java, ["-v"], environment=environment)
+            environment.update(version_environment)
+            if not execute("p2rank_version", version_command):
+                raise RuntimeError("The explicit P2Rank runtime did not start")
+            version_text = (receptor / "p2rank_version.process.log").read_text(encoding="utf-8", errors="replace")
+            if not re.search(r"\bP2Rank\s+2\.5\.1\b", version_text):
+                raise ValueError("The native candidate requires primary P2Rank 2.5.1; no version substitution")
         normalized = normalize_structure_input(source, root / "source-input")
         from docking_universal_region import validate_protein_pdb
         validate_protein_pdb(normalized.engine_pdb_path)
@@ -249,6 +252,16 @@ def prepare_native_candidate(options: ReceptorPreparationOptions, *,
                 chain[0].add(line[22:27]); chain[1] += 1
         (root / "chain_summary.tsv").write_text("".join(f"{key}\t{len(value[0])}\t{value[1]}\n"
             for key, value in sorted(chains.items())), encoding="utf-8")
+        if not predict:
+            # The host creates the exact input-ligand box only after verifying
+            # the retained source. Do not invent a detector cavity or score.
+            (cavity / 'pocket_detection_provenance.json').write_text(json.dumps({
+                'engine': 'none', 'site_definition': 'input_bound_ligand',
+                'pocket_prediction_requested': False, 'independent_evidence': False}, indent=2) + '\n', encoding='utf-8')
+            retain_status('prepared', route=route, reduce2_used=reduce_used,
+                          box_policy='exact input-ligand site is constructed during explicit host review; no detector or score')
+            log('Native ligand-free receptor completed; exact bound-site review remains required')
+            return root
         command, java_env = java_invocation(p2rank, java, ["predict", "-f", str(pdb), "-c", "default",
                                                                   "-visualizations", "0", "-o", str(cavity / "p2rank_output")],
                                            environment=environment)

@@ -12,6 +12,31 @@ from docking_universal.services.preparation import ReceptorPreparationOptions
 
 
 class NativePreparationTests(unittest.TestCase):
+    def test_ligand_only_candidate_never_starts_java_or_invents_a_pocket_score(self):
+        fixture = Path(__file__).resolve().parents[1] / 'examples/tutorials/02_ligand_free_cavity/inputs/2R8N.pdb'
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / 'bound.pdb'; source.write_bytes(fixture.read_bytes())
+            options = ReceptorPreparationOptions(source, root / 'outputs', 'ligand',
+                ligand_resname='MK1', ligand_chain_id='B', ligand_residue_number='902', reduce2='off')
+            calls = []
+            def runner(command, **kwargs):
+                calls.append(command)
+                if 'meeko.cli.mk_prepare_receptor' in command:
+                    Path(command[command.index('-p') + 1]).write_text('synthetic receptor fixture\n')
+                return subprocess.CompletedProcess(command, 0)
+            with patch('docking_universal.native_preparation.importlib.util.find_spec', return_value=object()), \
+                 patch('docking_universal.native_preparation.java_invocation', side_effect=AssertionError('Unrequested detector')):
+                output = prepare_native_candidate(options, runner=runner, allow_ligand=True)
+            record = json.loads((output / 'native-preparation.json').read_text())
+            self.assertEqual(record['status'], 'prepared')
+            self.assertFalse(record['pocket_prediction_requested'])
+            self.assertFalse(list((output / 'cavity').glob('*.conf')))
+            provenance = json.loads((output / 'cavity/pocket_detection_provenance.json').read_text())
+            self.assertEqual(provenance['engine'], 'none')
+            self.assertFalse(provenance['independent_evidence'])
+            self.assertFalse(any('predict' in c or '-v' in c for c in calls))
+
     def test_meeko_boundary_has_no_implicit_deletion_or_altloc(self):
         command = meeko_command(Path("native source.cif"), Path("output"), Path("receptor.pdbqt"))
         self.assertEqual(command[:4], [sys.executable, "-m", "meeko.cli.mk_prepare_receptor", "--read_with_prody"])

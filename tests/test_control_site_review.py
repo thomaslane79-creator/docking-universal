@@ -106,6 +106,20 @@ class ControlSiteReviewTests(unittest.TestCase):
         self.assertEqual(state.workflow_data["study_setup"]["pdb_pocket_evidence"], "off")
         self.assertTrue(state.pending_decisions)
 
+    def test_native_ligand_only_handoff_builds_only_exact_unscored_input_site(self):
+        text = '\n'.join(line for line in self.executable.read_text().splitlines()
+                         if '_pocket1.conf' not in line)
+        text += '\nprintf \'{"site_mode":"ligand","status":"prepared"}\\n\' > "$root/native-preparation.json"\n'
+        self.executable.write_text(text)
+        state, lookup = self.prepare(online=False)
+        lookup.assert_not_called()
+        candidates = state.workflow_data['pocket_candidates']
+        self.assertEqual([row['id'] for row in candidates], ['B1'])
+        self.assertEqual(candidates[0]['evidence']['source'], 'input_bound_ligand')
+        self.assertIn('not independent supporting evidence', candidates[0]['evidence']['evidence_role'])
+        self.assertFalse(state.selected_pocket_ids)
+        self.assertFalse(any(job.stage == 'control_validation' for job in state.jobs))
+
     def test_control_can_predict_additional_pockets_even_with_lookup_off(self):
         self.payload["predict_pockets_with_ligand"] = True
         self.payload["pocket_engine"] = "p2rank"

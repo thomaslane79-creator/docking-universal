@@ -47,6 +47,16 @@ class NativeDesktopGuardTests(unittest.TestCase):
         self.assertEqual(response.status, "rejected")
         self.assertEqual(self.store.path_for("native").read_bytes(), prior)
 
+    def test_candidate_control_continuation_checks_retained_engine_before_mutation(self):
+        def retained(state):
+            state.workflow_data['study_setup'] = {'engine': 'qvinaw', 'site_review_first': True}
+        self.store.update('native', retained)
+        prior = self.store.path_for('native').read_bytes()
+        command = Command('native', 'session', 'resume', 'start_control_validation', {}, self.store.load('native').revision)
+        with self.assertRaisesRegex(ValueError, 'no engine substitution'):
+            workflow_guard(command, self.controller, known_ligand_control_supported=True)
+        self.assertEqual(self.store.path_for('native').read_bytes(), prior)
+
     def test_preparation_options_keep_original_mmcif_and_reviewed_options(self):
         original = self.root / "original Ω.cif"
         template = self.root / "reviewed.json"
@@ -59,6 +69,15 @@ class NativeDesktopGuardTests(unittest.TestCase):
         self.assertEqual(options.reduce2, "required")
         self.assertEqual(options.meeko_templates, "A:41=HIE")
         self.assertEqual(options.meeko_template_file, template)
+
+    def test_candidate_bound_site_preserves_exact_identity_without_enabling_it_by_environment(self):
+        values = {'DOCKING_UNIVERSAL_SITE_MODE': 'ligand', 'DOCKING_UNIVERSAL_LIGAND_RESNAME': 'MK1',
+            'DOCKING_UNIVERSAL_LIGAND_CHAIN': 'B', 'DOCKING_UNIVERSAL_LIGAND_RESSEQ': '902'}
+        with self.assertRaisesRegex(ValueError, 'ligand-guided/control'):
+            preparation_options(self.root / 'source.cif', self.root / 'work', values)
+        options = preparation_options(self.root / 'source.cif', self.root / 'work', values, allow_ligand=True)
+        self.assertEqual((options.ligand_resname, options.ligand_chain_id, options.ligand_residue_number), ('MK1', 'B', '902'))
+        self.assertFalse(options.predict_pockets_with_ligand)
 
     def test_host_requires_exact_owned_scientific_python_and_receipt(self):
         app = self.root / "app"; app.mkdir()

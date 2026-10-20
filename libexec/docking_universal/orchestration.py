@@ -1191,11 +1191,15 @@ class ProtocolWorkflowRunner:
         boxes = tuple(ordered_pocket_boxes(cavity))
         state = self.controller.get_study(study_id)
         setup = state.workflow_data.get("study_setup") or {}
-        if not boxes and not setup.get("predict_pockets_with_ligand"):
+        native_record = output_root / 'native-preparation.json'
+        native_bound = (setup.get('site_mode') == 'ligand' and native_record.is_file()
+                        and json.loads(native_record.read_text(encoding='utf-8')).get('site_mode') == 'ligand')
+        bound_review = setup.get('predict_pockets_with_ligand') or native_bound
+        if not boxes and not bound_review:
             raise FileNotFoundError(f"Preparation produced no retained docking boxes in {cavity}")
         evidence = cavity / "pdb_site_evidence" / "pdb_ligand_site_evidence.json"
         scenes = sorted(cavity.glob("*_all_retained_pockets_review.pml"))
-        if setup.get("predict_pockets_with_ligand"):
+        if bound_review:
             source = next((row for row in state.artifacts if row.kind == "normalized_receptor_input"), None)
             if not source or sha256(Path(source.path)) != source.sha256 or Path(source.path) != Path(setup["input_pdb"]):
                 raise ValueError("Input structure changed before bound-ligand site review")
@@ -1205,7 +1209,7 @@ class ProtocolWorkflowRunner:
             boxes=boxes,
             pocket_evidence_record=evidence if evidence.is_file() else None,
             review_scene=scenes[0] if scenes else None,
-            bound_ligand_setup=setup if setup.get("predict_pockets_with_ligand") else None,
+            bound_ligand_setup=setup if bound_review else None,
         ))
 
     def _register_final_outputs(self, study_id: str, paths) -> None:

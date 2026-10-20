@@ -11,6 +11,11 @@ Status: active scope-control record, established 2026-09-24.
   remaining native control/chemistry/hardware boundaries in scope, but they
   remain disabled until independently accepted. Inspect the shell-based control
   stage next; do not replace pose-recovery validation with exploratory docking.
+  Implementation gate: port only the already reviewed-input, noninteractive
+  control stage and exact-ligand/native preparation handoff. Reuse the existing
+  strict chemistry helper and calibrator, with unchanged tiers/thresholds and
+  withheld experimental coordinates. Do not port legacy one-conformer/inferred
+  chemistry fallbacks or enable the control capability before native acceptance.
 
 - Installed viewer/CPU-engine milestone passed 2026-10-20 at `92cd4aa`: native
   CI 39435014818 passes both jobs, the 20-check viewer and two 11-step real GUI

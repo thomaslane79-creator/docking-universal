@@ -31,7 +31,9 @@ def main() -> int:
                 preparation, environment, _receipt = native
                 os.environ.update(environment)
                 capabilities = installed_capabilities(Path(__file__).resolve().parent, environment)
-                guard = partial(workflow_guard, supported_engines=tuple(capabilities['supported_engines']))
+                guard = partial(workflow_guard, supported_engines=tuple(capabilities['supported_engines']),
+                    supported_site_modes=tuple(capabilities['supported_site_modes']),
+                    known_ligand_control_supported=capabilities['known_ligand_control_supported'])
         except (OSError, ValueError, KeyError, TypeError) as exc:
             print(json.dumps({"type": "fatal", "error": str(exc)}), file=sys.stderr)
             return 2

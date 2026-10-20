@@ -77,8 +77,8 @@ class StartExploratoryRequested(Exception):
     """Signal that interactive screening should continue without control approval."""
 
 
-def run(command, cwd=None):
-    return run_checked(command, cwd=cwd)
+def run(command, cwd=None, env=None):
+    return run_checked(command, cwd=cwd, env=env)
 
 
 def require_complete_batch(failures):
@@ -1651,7 +1651,11 @@ def main():
         if args.no_visuals:
             command.append("--no-visuals")
         try:
-            run(command)
+            if os.name == 'nt':
+                # Preserve the child-local assignment without Bash/WSL or env.
+                run(command[2:], env=dict(os.environ, BOX_SIZE=box_size))
+            else:
+                run(command)
         except subprocess.CalledProcessError as exc:
             raise SystemExit(f"Control workflow stopped (exit status {exc.returncode}). Review the concise error above; completed files were retained in {study / 'control'}.") from None
         if default_control_output:

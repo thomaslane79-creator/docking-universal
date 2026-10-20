@@ -21,6 +21,7 @@ import re
 import shutil
 import subprocess
 from docking_universal.tool_commands import locate_script_tool, script_command
+from docking_universal.meeko_export import export_sdf
 from docking_universal.sdf_io import read_sdf, sdf_writer, write_pdb
 import tempfile
 from docking_universal.pose_visuals import RANK_COLORS
@@ -236,19 +237,7 @@ def load_from_docking(root, ligand_work, exporter, engine, export_root):
         if not source_sdf.is_file():
             raise SystemExit(f"No typed source SDF for {pdbqt.name}: {source_sdf}")
         destination = export_root / f"{seed_from_path(pdbqt)}_{ligand_id}.sdf"
-        if os.name == "nt":
-            # Meeko's pinned exporter also creates an RDKit writer internally.
-            # Keep its file boundary local/ASCII, then copy the exact output;
-            # no molecule, geometry or score is transformed by this staging.
-            with tempfile.TemporaryDirectory(prefix="du-meeko-export-") as temporary:
-                staged_input = Path(temporary) / "input.pdbqt"
-                staged_output = Path(temporary) / "output.sdf"
-                shutil.copyfile(pdbqt, staged_input)
-                result = subprocess.run(script_command(exporter, staged_input, "-s", staged_output), capture_output=True, text=True)
-                if result.returncode == 0 and staged_output.is_file():
-                    shutil.copyfile(staged_output, destination)
-        else:
-            result = subprocess.run(script_command(exporter, pdbqt, "-s", destination), capture_output=True, text=True)
+        result = export_sdf(exporter, pdbqt, destination)
         if result.returncode or not destination.is_file():
             raise SystemExit(f"Meeko export failed for {pdbqt}: {result.stderr or result.stdout}")
         scores = parse_scores(pdbqt)

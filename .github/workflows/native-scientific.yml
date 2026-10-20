@@ -42,6 +42,15 @@ on:
       - validation/p2rank_argument_transport.py
       - validation/native_science_dispatch.py
       - libexec/docking_universal/native_preparation.py
+      - libexec/docking_universal/native_control.py
+      - libexec/docking-universal-control-native.py
+      - libexec/docking_universal/meeko_export.py
+      - libexec/docking-universal-redock-compare.py
+      - libexec/docking-universal-cluster-poses.py
+      - libexec/docking-universal-run.py
+      - validation/native_windows_control_workflow.py
+      - tests/test_native_control.py
+      - tests/test_meeko_export.py
       - libexec/docking_universal/p2rank_runtime.py
       - libexec/docking_universal/tool_commands.py
       - libexec/docking_universal/plip_runtime.py
@@ -83,6 +92,7 @@ jobs:
             ${{ runner.temp }}/du-installed-scientific/desktop-workflow/summary.json
             ${{ runner.temp }}/du-installed-scientific/installed-viewer/summary.json
             ${{ runner.temp }}/du-installed-scientific/qvinaw-desktop-workflow/summary.json
+            ${{ runner.temp }}/du-installed-scientific/control-candidate/summary.json
 
   scientific-dependency-gate:
     name: Native Windows pinned scientific dependencies (not full workflow)

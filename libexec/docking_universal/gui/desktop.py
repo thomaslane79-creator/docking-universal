@@ -154,13 +154,10 @@ if QtWidgets is not None:
                     # never relabel its engine as Vina by removing its item.
                     combo.model().item(index).setEnabled(combo.itemData(index) in values)
             panel = self.study_setup_panel
-            panel.redock_ligand.setEnabled(False)
-            panel.redock_ligand.setToolTip("Known-ligand control is awaiting native Windows acceptance; it is not silently replaced by exploratory docking.")
-            panel.predict_with_ligand.setEnabled(False)
             # Preserve the serialized choice for read-only older-study review.
             index = self.study_pathway.findData("control")
             if index >= 0:
-                self.study_pathway.model().item(index).setEnabled(False)
+                self.study_pathway.model().item(index).setEnabled(bool(runtime.get('known_ligand_control_supported')))
             panel.set_native_capabilities(runtime)
 
         def _show_runtime_identity(self) -> None:

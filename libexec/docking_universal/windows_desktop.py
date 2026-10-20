@@ -15,8 +15,9 @@ CAPABILITIES = {"scientific_stages_supported": True, "native_scientific_preview"
     "preparation_interventions_supported": False, "interactive_viewer_accepted": False}
 
 
-def preparation_guard(payload):
-    if payload.get("site_mode", "pockets") != "pockets" or payload.get("predict_pockets_with_ligand"):
+def preparation_guard(payload, *, supported_site_modes=('pockets',)):
+    if (payload.get("site_mode", "pockets") not in supported_site_modes
+            or payload.get("predict_pockets_with_ligand") and 'ligand' not in supported_site_modes):
         raise ValueError("Native Windows ligand-guided/control preparation needs separate acceptance; no job was created")
     if payload.get("preparation_backend", "auto") not in {"auto", "meeko"}:
         raise ValueError("Native Windows preparation supports strict Meeko only; no backend substitution")
@@ -24,12 +25,18 @@ def preparation_guard(payload):
         raise ValueError("Native Windows preparation supports P2Rank only; no detector substitution")
 
 
-def workflow_guard(command, controller, *, supported_engines=('vina',)):
+def workflow_guard(command, controller, *, supported_engines=('vina',),
+                   supported_site_modes=('pockets',), known_ligand_control_supported=False):
     operation, payload = command.operation, command.payload
-    if operation == "start_control_validation":
+    if operation == "start_control_validation" and not known_ligand_control_supported:
         raise ValueError("Known-ligand control is not accepted in the native Windows preview; no job was created")
+    if operation == 'start_control_validation':
+        engine = payload.get('engine', 'vina') if payload else (
+            controller.get_study(command.study_id).workflow_data.get('study_setup') or {}).get('engine', 'vina')
+        if engine not in supported_engines:
+            raise ValueError('Native Windows control cannot use the selected engine; no engine substitution')
     if operation == "start_receptor_preparation":
-        preparation_guard(payload)
+        preparation_guard(payload, supported_site_modes=supported_site_modes)
     if operation == "start_protocol_finalization" and payload.get("engine", "vina") not in supported_engines:
         raise ValueError("Native Windows finalization cannot use the selected engine; no engine substitution")
     if operation in {"import_protocol_bundle", "start_screening"}:
@@ -55,6 +62,9 @@ def installed_capabilities(app, environment):
     capabilities['supported_engines'] = list(supported_engines(configuration, environment))
     if 'qvinaw' in capabilities['supported_engines']:
         record(app, configuration)
+    if configuration.get('native_control_supported'):
+        capabilities['known_ligand_control_supported'] = True
+        capabilities['supported_site_modes'] = ['pockets', 'ligand']
     if configuration.get('viewer_supported'):
         from .windows_viewer_runtime import viewer_record, owned_gui_python
         # This is the scientific host advertising a GUI capability, not loading
@@ -85,14 +95,19 @@ def installed_host(app, *, executing_python=None, inherited=None):
     return script, environment, receipt
 
 
-def preparation_options(source, working, environment):
+def preparation_options(source, working, environment, *, allow_ligand=False):
     from .services.preparation import ReceptorPreparationOptions
     original = environment.get("DOCKING_UNIVERSAL_SOURCE_MMCIF") or source
     values = dict(input_pdb=Path(original), working_directory=Path(working),
         site_mode=environment.get("DOCKING_UNIVERSAL_SITE_MODE", "pockets"),
         preparation_backend=environment.get("DOCKING_UNIVERSAL_PREP_BACKEND", "auto"),
         pocket_engine=environment.get("DOCKING_UNIVERSAL_POCKET_ENGINE", "auto"))
-    preparation_guard(values)
+    preparation_guard(values, supported_site_modes=('pockets', 'ligand') if allow_ligand else ('pockets',))
+    if values['site_mode'] == 'ligand':
+        for field, variable in (('ligand_resname', 'DOCKING_UNIVERSAL_LIGAND_RESNAME'),
+            ('ligand_chain_id', 'DOCKING_UNIVERSAL_LIGAND_CHAIN'), ('ligand_residue_number', 'DOCKING_UNIVERSAL_LIGAND_RESSEQ'),
+            ('ligand_insertion_code', 'DOCKING_UNIVERSAL_LIGAND_ICODE'), ('ligand_altloc', 'DOCKING_UNIVERSAL_LIGAND_ALTLOC')):
+            values[field] = environment.get(variable, '')
     for field, variable, default in (("feedback_level", "FEEDBACK_LEVEL", "guided"),
         ("center_mode", "DOCKING_UNIVERSAL_CENTER_MODE", "deepest"),
         ("pdbfixer", "DOCKING_UNIVERSAL_PDBFIXER", "auto"),

@@ -174,6 +174,9 @@ def main():
                                  scientific_receipt_sha256=hashlib.sha256(receipt_path.read_bytes()).hexdigest())
             from docking_universal.windows_desktop import WORKFLOW
             configuration["scientific_desktop_workflow"] = WORKFLOW
+            # Keep the reviewed-control candidate disabled until independently
+            # accepted; exploratory CPU/viewer acceptance does not transfer.
+            configuration['native_control_supported'] = False
             record["scientific_dependencies"] = {key: receipt.get(key) for key in ("status", "imports", "steps", "scientific_gui_enabled", "interactive_viewer_accepted", "gpu_accepted")}
             from docking_universal.windows_viewer_runtime import install_viewer_runtime, PROFILE
             viewer_work = destination / '.bootstrap/viewer-setup'

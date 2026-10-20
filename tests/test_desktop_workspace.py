@@ -16,6 +16,22 @@ from docking_universal.state import JsonStudyStore
 
 @unittest.skipIf(QT_IMPORT_ERROR is not None, "selected Qt 6 binding is unavailable")
 class DesktopWorkspaceTests(unittest.TestCase):
+    def test_native_control_candidate_uses_capability_instead_of_unconditional_disable(self):
+        from types import SimpleNamespace
+        from docking_universal.windows_desktop import CAPABILITIES
+        runtime = {**CAPABILITIES, 'known_ligand_control_supported': True,
+                   'supported_site_modes': ['pockets', 'ligand']}
+        self.window.host_client = SimpleNamespace(runtime=runtime, connected=False)
+        self.window._apply_runtime_capabilities()
+        panel = self.window.study_setup_panel
+        panel.set_locked(False)
+        self.assertTrue(panel.redock_ligand.isEnabled())
+        index = self.window.study_pathway.findData('control')
+        self.assertTrue(self.window.study_pathway.model().item(index).isEnabled())
+        self.window.study_pathway.setCurrentIndex(index)
+        self.assertTrue(panel.predict_with_ligand.isEnabled())
+        self.window.host_client = None
+
     def test_native_fresh_study_button_submits_preparation_without_a_viewer(self):
         from types import SimpleNamespace
         from unittest.mock import Mock

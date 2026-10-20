@@ -11,6 +11,9 @@ from .runtime_layout import executable_directories
 
 
 STAGES = {
+    'control': 'docking-universal-run.py',
+    'control-stage': 'docking-universal-control-native.py',
+    'calibrate': 'docking-universal-calibrate.py',
     "_screen-stage": "docking-universal-screen.py",
     "depict2d": "docking-universal-depict2d.py",
     "ligands": "docking_universal_ligands.py",
@@ -144,12 +147,19 @@ def protocol_preflight(command, options, engines=('vina',)):
 def stage_command(app: Path, configuration: dict, command: str, options: list[str], inherited: dict):
     if command not in STAGES:
         raise ValueError("Unsupported native scientific command; no shell fallback")
+    if command in {'control', 'control-stage', 'calibrate'} and not configuration.get('native_control_supported'):
+        raise ValueError('Known-ligand control is not accepted in this native installation; no job was started')
+    if command == 'control' and not all(any(value == flag or value.startswith(flag + '=') for value in options)
+            for flag in ('--reviewed-control-inputs', '--reviewed-control-inputs-sha256')):
+        raise ValueError('Native control requires sealed reviewed-site inputs; no output was created')
     from .windows_qvinaw import supported_engines
     engines = supported_engines(configuration, inherited)
     require_vina_options(options, engines)
     protocol_preflight(command, options, engines)
     python, environment, _receipt = scientific_environment(app, configuration, inherited)
     arguments = list(options)
+    if command == 'control':
+        arguments.insert(0, 'control')
     if command == "dock":
         selected = 'vina'
         for index, value in enumerate(options):

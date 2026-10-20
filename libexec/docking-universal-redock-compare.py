@@ -12,6 +12,8 @@ import shutil
 import subprocess
 from pathlib import Path
 from docking_universal.sdf_io import read_sdf, sdf_writer, write_pdb, read_pdb
+from docking_universal.tool_commands import locate_script_tool
+from docking_universal.meeko_export import export_sdf
 
 
 def first_sdf_molecule(path, remove_hs=False):
@@ -328,18 +330,14 @@ def main():
         if not path.expanduser().is_file():
             parser.error(f"input does not exist: {path}")
 
-    exporter = shutil.which(args.mk_export) if Path(args.mk_export).name == args.mk_export else args.mk_export
+    exporter = locate_script_tool(args.mk_export) if Path(args.mk_export).name == args.mk_export else args.mk_export
     if not exporter or not Path(exporter).is_file():
         parser.error(f"Meeko exporter not found: {args.mk_export}")
 
     output_dir = args.out.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     exported_sdf = output_dir / "docked_poses.sdf"
-    export_result = subprocess.run(
-        [str(exporter), str(args.docked_pdbqt.expanduser().resolve()), "-s", str(exported_sdf)],
-        capture_output=True,
-        text=True,
-    )
+    export_result = export_sdf(exporter, args.docked_pdbqt.expanduser().resolve(), exported_sdf)
     (output_dir / "mk_export.log").write_text(
         f"RETURN CODE: {export_result.returncode}\n\nSTDOUT:\n{export_result.stdout}\n\nSTDERR:\n{export_result.stderr}\n"
     )
