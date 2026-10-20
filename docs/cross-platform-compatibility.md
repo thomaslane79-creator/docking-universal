@@ -47,6 +47,20 @@ the tests import path and failed to load one test module; the corrected
 invocation runs all 165 successfully. No product change was needed for that
 test-harness invocation mistake.
 
+Diagnostic follow-up `adee8db` / run 39343663769 again passes all eight general
+jobs and the scientific source/installed CLI gates, but the GUI preparation
+still times out with one running, process-identified job, no pending decision,
+no orchestration exception and no completed native-preparation record. That
+rules out the suspected hidden intervention/failed-review handoff as the cause
+of this observed wait. The next candidate closes scientific child stdin with
+`DEVNULL`: these supervised services are non-interactive and must never inherit
+the authoritative host's open JSON command stream. A regression keeps that
+parent stream open while a child reads stdin and requires immediate EOF.
+Additional exported diagnostics contain only fixed service/step markers and
+phase enums, never raw scientific output. This is a specific input-isolation
+correction under validation, not a confirmed explanation for the entire native
+hang or a scientific-method/default change.
+
 ### Installed scientific-runtime gate (2026-10-18, passed at 492de40)
 
 The next Windows installer candidate installs the same scientific package pins

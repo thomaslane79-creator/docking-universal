@@ -107,6 +107,10 @@ class ProcessRunner:
             process = spawn(command,
                 cwd=Path(request.cwd) if request.cwd is not None else None,
                 env=dict(request.environment) if request.environment is not None else None,
+                # Scientific services are non-interactive. Never let a child
+                # read/consume the authoritative host's JSON command pipe or
+                # wait for a GUI user on an inherited terminal stream.
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,

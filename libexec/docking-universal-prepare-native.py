@@ -12,12 +12,14 @@ def main():
     if os.name != "nt" or len(sys.argv) != 2:
         raise ValueError("This internal service requires native Windows and one structure argument")
     app = Path(__file__).resolve().parent
+    print("Native preparation service: verifying runtime", flush=True)
     runtime = installed_host(app)
     if runtime is None:
         raise ValueError("The native desktop scientific workflow is not configured")
     _script, environment, receipt = runtime
     options = preparation_options(sys.argv[1], Path.cwd(), os.environ)
     os.environ.update(environment)
+    print("Native preparation service: starting preparation", flush=True)
     prepare_native_candidate(options, p2rank=Path(receipt["p2rank"]), java=Path(receipt["java"]), libexec=app)
     return 0
 

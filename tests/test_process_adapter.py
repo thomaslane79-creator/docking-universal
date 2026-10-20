@@ -1,4 +1,6 @@
 import sys
+import os
+import subprocess
 import tempfile
 import threading
 import time
@@ -14,6 +16,30 @@ from docking_universal.processes import (
 
 
 class ProcessAdapterTests(unittest.TestCase):
+    def test_scientific_child_cannot_inherit_an_open_host_command_pipe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code = (
+                "import sys; from docking_universal.processes import ProcessRunner,ProcessRequest; "
+                "r=ProcessRunner().run(ProcessRequest((sys.executable,'-c',"
+                "\"import sys; assert sys.stdin.read()==''; print('eof')\"),"
+                f"{directory!r},'stdin',timeout_seconds=2,check=False)); "
+                "print(r.status.value,flush=True)"
+            )
+            # Keep the supervisor's command pipe OPEN throughout the wait.
+            # Closing it with communicate() would hide the old inheritance bug.
+            process = subprocess.Popen([sys.executable, '-c', code], stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                env={**os.environ, 'PYTHONPATH': str(Path(__file__).resolve().parents[1] / 'libexec')})
+            try:
+                process.wait(timeout=12)
+                self.assertEqual(process.returncode, 0, process.stderr.read())
+                self.assertEqual(process.stdout.read().strip(), 'completed')
+            finally:
+                if process.poll() is None:
+                    process.kill(); process.wait(timeout=5)
+                for stream in (process.stdin, process.stdout, process.stderr):
+                    stream.close()
+
     def test_captures_streams_and_retains_complete_separate_logs(self):
         with tempfile.TemporaryDirectory() as directory:
             seen = []

@@ -274,6 +274,7 @@ def main():
             status['study_states'] = [{
                 'completion_status': s.completion_status.value,
                 'jobs': [{'stage': j.stage, 'status': j.status.value,
+                          'progress_phase': j.progress_phase,
                           'process_identity_recorded': j.process_id is not None} for j in s.jobs],
                 'pending_kinds': [d.kind for d in s.pending_decisions],
                 'orchestration_errors': [{'type': e.technical.get('error_type'),
@@ -281,8 +282,16 @@ def main():
                                          if e.technical.get('component') == 'ProtocolWorkflowRunner'],
             } for s in store.list_studies()]
         exceptions, locations = set(), []
+        native_steps, service_markers = [], []
         for path in out.rglob('*.log'):
             for line in path.read_text(encoding='utf-8', errors='replace').splitlines():
+                for step in ('p2rank_version', 'native-receptor', 'reduce2', 'receptor_backend',
+                             'pdbfixer', 'receptor_after_pdbfixer', 'ccd_audit', 'p2rank'):
+                    if line.strip() == 'Running ' + step:
+                        native_steps.append(step)
+                for marker in ('verifying runtime', 'starting preparation'):
+                    if line.strip() == 'Native preparation service: ' + marker:
+                        service_markers.append(marker)
                 match = re.match(r'^(\w*(?:Error|Exception)):', line)
                 if match:
                     exceptions.add(match.group(1))  # type only, never message/coordinates
@@ -291,6 +300,8 @@ def main():
                     locations.append({'file': Path(match.group(1)).name,
                                       'line': int(match.group(2)), 'function': match.group(3)})
         status['runtime_exception_types'] = sorted(exceptions)
+        status['native_step_markers'] = native_steps
+        status['native_service_markers'] = service_markers
         status['runtime_traceback_locations'] = locations[-16:]
         status['preparation_attempts'] = []
         for path in out.rglob('native-preparation.json'):
