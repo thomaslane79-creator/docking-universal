@@ -4,6 +4,18 @@ Status: active scope-control record, established 2026-09-24.
 
 ### No-prerequisite Windows installation (authorized 2026-10-18)
 
+- Remaining-validation results 2026-10-20: native baseline installation/science/
+  real Qt workflow reruns pass at `20e96a7` (CI 39416428076), as do all eight
+  general CI jobs (39416428246). Local full checks pass 671 Python cases/21
+  shell checks; targeted GUI/viewer/guards pass 108 cases. Isolated native Qt6
+  PyMOL passes all 17 checks with pinned process-local Mesa, but default graphics
+  crashes; do not enable it from the software-only result. Native QuickVina-W
+  repeats match but Unicode paths fail; a separate byte-preserving path control
+  matches exact output, not a production fix. AD4 is blocked by missing native
+  accepted build/OpenCL GPU hardware. Keep consumer/profile/browser and control
+  gates open. See `docs/windows-viewer-engine-validation.md` for failures and
+  exact evidence. No working-install, study/default change or main merge.
+
 - Follow-up authorized 2026-10-20: validate the remaining native Windows viewer
   and engine boundaries. First build the existing pinned PyMOL source in a fresh
   Qt6 candidate and test a real framebuffer, full detachment/return, camera and

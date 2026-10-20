@@ -1,9 +1,15 @@
 # Complete interactive GUI workflow plan
 
-Active 2026-10-20 follow-up: remaining native Windows validation, beginning with
-an isolated real Qt6/PyMOL gate using the same pinned upstream source. No working
-installation, study, scientific setting or production capability is changed by
-this validation. Native other-engine and consumer-GPU evidence remain separate.
+2026-10-20 validation follow-up completed with explicit remaining blockers:
+baseline native installer/scientific/real Qt workflow and all eight general CI
+jobs pass at `20e96a7`; local full checks pass 671 Python cases/21 shell checks.
+The isolated native Qt6/PyMOL software path passes 17 checks, but default graphics
+crashes. QuickVina-W repeats match; Unicode paths fail, with an exact-output
+diagnostic path-carrier remedy not enabled in production. AD4 still requires an
+accepted Windows build and actual GPU hardware. No working installation, study,
+scientific setting or production capability was changed by this validation.
+See `docs/windows-viewer-engine-validation.md`; consumer/profile/browser and
+known-ligand control coverage remain separate acceptance gates.
 
 Completed 2026-10-20 at `00e2241`: the bounded native Windows installed Qt-to-host
 workflow passes all nine real-button/lifecycle steps in CI 39348681324, alongside

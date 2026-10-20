@@ -1,5 +1,10 @@
 # Older macOS, Linux and native Windows compatibility
 
+Remaining 2026-10-20 native viewer/engine validation is tracked separately in
+[the Windows viewer/engine record](windows-viewer-engine-validation.md), including
+failed checks. A successful source build or ASCII-path engine run does not
+enable an installed backend or establish consumer-GPU compatibility.
+
 ### Native scientific desktop gate (2026-10-20, passed at 00e2241)
 
 The bounded installed Qt-to-scientific-host gate **passes** in
