@@ -82,7 +82,11 @@ Interactive PyMOL, ligand controls, other engines and GPU acceptance are separat
 Windows compatibility fixes preserve scientific versions/methods: private
 ASCII-safe Java/P2Rank placement, a separately hashed UTF-8 argument adapter,
 audited OpenCL activation quoting, Unicode-safe RDKit/Meeko/PLIP I/O, explicit
-tool discovery and portable protocol paths. Direct versus adapted P2Rank
+tool discovery and portable protocol paths. Non-interactive scientific workers
+now receive closed input rather than the host's JSON command pipe; native
+acceptance confirms this clears the preparation hang. A byte-preserving Vina
+path wrapper is being tested for non-ASCII study folders; it does not modify
+the executable, coordinates or search settings. Direct versus adapted P2Rank
 prediction/residue tables match byte-for-byte in local and native Windows tests.
 Profiles with whitespace/non-ASCII still need an explicit space-free ASCII
 `-ManagerRoot`; the application/study folders themselves support spaces/Unicode.

@@ -10,6 +10,7 @@ import math
 import os
 from pathlib import Path
 import platform
+import shutil
 import subprocess
 import sys
 import urllib.request
@@ -78,6 +79,34 @@ def main():
                 'output_sha256': hashlib.sha256(content).hexdigest()})
         if outputs[0] != outputs[1]:
             raise ValueError('Same-seed native CPU synthetic repeats differ')
+        unicode_inputs = out / 'Inputs Ω 日本語'; unicode_inputs.mkdir()
+        unicode_receptor = unicode_inputs / receptor.name
+        unicode_box = unicode_inputs / box.name
+        unicode_ligands = unicode_inputs / 'Ligands Ω'; unicode_ligands.mkdir()
+        unicode_ligand = unicode_ligands / 'fragment Ω.pdbqt'
+        for source, target in ((receptor, unicode_receptor), (box, unicode_box),
+                               (ligands / 'fragment.pdbqt', unicode_ligand)):
+            shutil.copyfile(source, target)
+        # Diagnose the pinned binary itself, never call a raw failure success.
+        raw_output = unicode_inputs / 'raw Ω.pdbqt'
+        with (out / 'raw-unicode-vina.local.log').open('wb') as stream:
+            raw = subprocess.run([str(executable), '--receptor', str(unicode_receptor),
+                '--ligand', str(unicode_ligand), '--config', str(unicode_box), '--out', str(raw_output),
+                '--seed', '41001', '--cpu', '1', '--exhaustiveness', '1', '--num_modes', '3'],
+                stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT, timeout=60)
+        state['raw_unicode_cli'] = {'returncode': raw.returncode,
+            'output_created': raw_output.is_file(),
+            'exact_ascii_output': raw_output.is_file() and raw_output.read_bytes() == outputs[0]}
+        unicode_target = out / 'Results Ω 日本語'
+        command = [*dispatcher, '--receptor', str(unicode_receptor), '--ligands', str(unicode_ligands),
+            '--config', str(unicode_box), '--out', str(unicode_target), '--seed', '41001',
+            '--cpu', '1', '--exhaustiveness', '1', '--num-modes', '3']
+        with (out / 'unicode-adapter.local.log').open('wb') as stream:
+            subprocess.run(command, env=env, stdin=subprocess.DEVNULL, stdout=stream,
+                           stderr=subprocess.STDOUT, check=True, timeout=90)
+        if (unicode_target / 'fragment Ω_vina.pdbqt').read_bytes() != outputs[0]:
+            raise ValueError('Unicode native transport changed complete Vina pose output')
+        state['unicode_paths_exact_ascii_output'] = True
         state.update(status='passed', exact_same_seed_repeat=True, native_version=version,
                      installed_dispatcher=bool(args.installed_entry))
     except BaseException as exc:

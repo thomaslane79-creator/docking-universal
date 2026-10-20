@@ -598,6 +598,11 @@ def run_docking(
             if options.engine == 'vina':
                 print('Vina execution: CLI — ' + str(exc), file=stdout, flush=True)
     options.output_dir.mkdir(parents=True, exist_ok=True)
+    from docking_universal.vina_cli import needs_native_transport, run_native_vina
+    if os.name == 'nt' and selected is None:
+        execution['cli_path_transport'] = ('windows-ascii-relative-staging-v1'
+            if options.engine == 'vina' and any(needs_native_transport(_engine_arguments(options, ligand,
+                options.output_dir / f'{ligand.stem}_vina.pdbqt')) for ligand in ligands) else 'direct')
     _write_manifest(options, invocation, version, execution)
     if selected is not None:
         print('Vina execution: persistent API batch (one seed, in-memory maps reused)', file=stdout, flush=True)
@@ -617,12 +622,14 @@ def run_docking(
         print(f"run   {base}", file=stdout)
         with log_file.open("wb") as log_stream:
             try:
-                completed = subprocess.run(
-                    [*invocation.command, *_engine_arguments(options, ligand, output)],
-                    stdout=log_stream,
-                    stderr=subprocess.STDOUT,
-                    env=dict(environment),
-                )
+                arguments = _engine_arguments(options, ligand, output)
+                if options.engine == 'vina' and needs_native_transport(arguments):
+                    completed = run_native_vina(invocation.command, arguments,
+                                                environment=environment, log=log_stream)
+                else:
+                    completed = subprocess.run(
+                        [*invocation.command, *arguments], stdout=log_stream,
+                        stderr=subprocess.STDOUT, env=dict(environment))
                 returncode = completed.returncode
             except OSError as error:
                 log_stream.write(f"{error}\n".encode())

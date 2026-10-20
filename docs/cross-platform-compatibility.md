@@ -61,6 +61,22 @@ phase enums, never raw scientific output. This is a specific input-isolation
 correction under validation, not a confirmed explanation for the entire native
 hang or a scientific-method/default change.
 
+At `356c78c` / run 39345262317, input isolation clears that observed native
+preparation hang: Qt mmCIF preparation reaches the three-candidate review in
+18.6 seconds, pending review survives a window/host restart, explicit approval
+passes, and protocol PDF/bundle finalization passes in 52.2 seconds. The screen
+then fails at the Vina launch, after ligand preparation; it is not a fully
+passing desktop run. The earlier installed CLI fixture had ASCII/ANSI-compatible
+screening paths, whereas this GUI case uses Greek output and input folders.
+The next candidate therefore tests the official pinned Vina binary directly
+with Greek/Japanese paths and compares the complete pose output of a
+byte-preserving ASCII-relative-path transport against the ASCII reference.
+Staging never retries a search or changes a flag, coordinate, charge, score,
+binary or scientific default. Its private working directory is under the owned
+ASCII-safe scientific runtime; files return byte-for-byte to the selected study.
+Unix and ASCII-only CLI invocations retain their original execution path. This
+path diagnosis/transport remains under native validation, not yet accepted.
+
 ### Installed scientific-runtime gate (2026-10-18, passed at 492de40)
 
 The next Windows installer candidate installs the same scientific package pins

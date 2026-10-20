@@ -83,6 +83,7 @@ def scientific_environment(app: Path, configuration: dict, inherited: dict):
         DOCKING_UNIVERSAL_LIBEXEC=str(app), DOCKING_UNIVERSAL_CLI=str(app / "docking-universal-native.py"),
         DOCKING_UNIVERSAL_VINA=str(engine), DOCKING_UNIVERSAL_VINA_BACKEND="cli",
         DOCKING_UNIVERSAL_NODE=receipt["node"], DOCKING_UNIVERSAL_CHROME=receipt["browser"],
+        DOCKING_UNIVERSAL_NATIVE_STAGING_ROOT=str(python.parent / 'share/docking-universal/native-staging'),
         DOCKING_UNIVERSAL_P2RANK_DIR=receipt["p2rank"])
     return python, environment, receipt
 
