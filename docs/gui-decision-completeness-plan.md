@@ -1,5 +1,10 @@
 # Complete interactive GUI workflow plan
 
+Active 2026-10-20 follow-up: remaining native Windows validation, beginning with
+an isolated real Qt6/PyMOL gate using the same pinned upstream source. No working
+installation, study, scientific setting or production capability is changed by
+this validation. Native other-engine and consumer-GPU evidence remain separate.
+
 Completed 2026-10-20 at `00e2241`: the bounded native Windows installed Qt-to-host
 workflow passes all nine real-button/lifecycle steps in CI 39348681324, alongside
 all eight general jobs in 39348681322. Preparation, explicit site approval,

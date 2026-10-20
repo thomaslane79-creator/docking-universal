@@ -1,0 +1,19 @@
+# Validation candidate only: does not alter the Windows installer or enable a backend.
+# Build the same pinned PyMOL source as the accepted Mac viewer against Qt6.
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12
+  - pyqt6
+  - gemmi
+  - numpy>=2.0
+  - glew=2.3.0
+  - freetype>=2.14
+  - libpng>=1.6
+  - glm
+  - cmake>=3.13
+  - setuptools>=69.2
+  - wheel
+  - pip
+  - pillow

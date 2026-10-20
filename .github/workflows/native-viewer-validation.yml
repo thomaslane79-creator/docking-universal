@@ -1,0 +1,40 @@
+name: native-windows-viewer-validation
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/native-viewer-validation.yml
+      - environments/windows-viewer-validation.yml
+      - validation/native_windows_viewer.py
+      - validation/native_viewer_probe.py
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-viewer:
+    name: Native Windows Qt6 PyMOL build and real viewer (not consumer GPU acceptance)
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          activate-environment: ''
+          auto-activate: false
+          conda-remove-defaults: true
+      - name: Build the pinned source and exercise real native rendering and detach/return
+        shell: powershell
+        run: |
+          & "$env:CONDA\python.exe" validation/native_windows_viewer.py --conda "$env:CONDA\Scripts\conda.exe" --out "$env:RUNNER_TEMP\du-native-viewer"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Retain status only; never images, sessions or viewer logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-windows-viewer-status
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/du-native-viewer/summary.json

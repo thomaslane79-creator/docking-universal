@@ -4,6 +4,13 @@ Status: active scope-control record, established 2026-09-24.
 
 ### No-prerequisite Windows installation (authorized 2026-10-18)
 
+- Follow-up authorized 2026-10-20: validate the remaining native Windows viewer
+  and engine boundaries. First build the existing pinned PyMOL source in a fresh
+  Qt6 candidate and test a real framebuffer, full detachment/return, camera and
+  export. Do not enable the installer backend from a build/import-only success.
+  Keep structures/images/logs runner-local; publish status metadata only. Other
+  engines require native executable/hardware evidence, not Mac approval transfer.
+
 - Bounded desktop slice completed 2026-10-20 at `00e2241`: native CI 39348681324
   passes the fresh installer/installed science and all nine real Qt/host workflow
   steps, including explicit approvals, screening/results, cancellation and both
