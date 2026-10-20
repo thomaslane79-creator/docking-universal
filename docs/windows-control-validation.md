@@ -1,5 +1,14 @@
 # Native Windows reviewed-control port — candidate passed, default verification pending
 
+Final enabled-default build: `73054b9`, pushed only to the existing `github`
+feature branch. Native run
+[39512043939](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39512043939)
+and general run
+[39512043826](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39512043826)
+are active; do not launch duplicates. This build includes the report-origin and
+detector-version fixes. Final activation evidence is pending, not inferred from
+the candidate's fixture-only override.
+
 The exploratory Vina/QuickVina-W GUI, private renderer and interactive software
 viewer passed at `50a8ef2`; see [the completed gate](windows-viewer-engine-validation.md).
 That success does not validate the separate known-ligand control path.
