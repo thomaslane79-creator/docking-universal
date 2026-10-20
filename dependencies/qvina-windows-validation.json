@@ -1,0 +1,9 @@
+{
+  "scope": "isolated validation only; not an enabled installed engine",
+  "channel": "conda-forge",
+  "subdir": "win-64",
+  "name": "qvina",
+  "version": "2.1.0",
+  "build": "he453025_8",
+  "sha256": "354cdf5dcc9f2105999b7fd64d85fa7b3f8c57cea15dcc20e322dfe4ace1f5cc"
+}

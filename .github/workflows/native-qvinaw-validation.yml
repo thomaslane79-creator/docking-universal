@@ -1,0 +1,38 @@
+name: native-windows-qvinaw-validation
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/native-qvinaw-validation.yml
+      - validation/native_windows_qvinaw.py
+      - dependencies/qvina-windows-validation.json
+
+permissions:
+  contents: read
+
+jobs:
+  prepared-engine:
+    name: Native Windows QuickVina-W prepared-input gate (not GUI acceptance)
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          activate-environment: ''
+          auto-activate: false
+          conda-remove-defaults: true
+      - name: Install pinned native engine and test repeats and Unicode paths
+        shell: powershell
+        run: |
+          & "$env:CONDA\python.exe" validation/native_windows_qvinaw.py --conda "$env:CONDA\Scripts\conda.exe" --out "$env:RUNNER_TEMP\du-native-qvinaw"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Retain execution status only; no molecular input, pose or scientific log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-windows-qvinaw-status
+          retention-days: 7
+          path: ${{ runner.temp }}/du-native-qvinaw/summary.json
