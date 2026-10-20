@@ -39,3 +39,12 @@ jobs:
           retention-days: 7
           path: |
             ${{ runner.temp }}/du-native-viewer/summary.json
+      - name: Retain only the source-built upstream library wheel for installation validation
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-windows-pymol-library
+          retention-days: 7
+          # An exact file allowlist, never a run directory. No generated model,
+          # pose, session, image, report, scientific log or study is included.
+          path: ${{ runner.temp }}/du-native-viewer/wheels/pymol-*.whl

@@ -190,6 +190,38 @@ class DockRunnerCharacterizationTests(unittest.TestCase):
         self.assertIn("Successful docking jobs: 1\n", completed.stdout)
         self.assertIn("Failed docking jobs: 1\n", completed.stdout)
 
+    def test_quickvina_native_transport_keeps_engine_identity_and_output_names(self):
+        import io
+        from docking_universal_dock import DockOptions, EngineInvocation, run_docking
+        from docking_universal.vina_cli import run_native_vina
+        output = self.root / 'Results Ω'
+        options = DockOptions(engine='qvinaw', receptor=self.receptor, ligand_dir=self.ligands,
+                              config=self.config, output_dir=output, seed='41001', cpu='1')
+        environment = dict(os.environ, DOCK_ARGUMENT_LOG=str(self.argument_log))
+        with patch('docking_universal.vina_cli.needs_native_transport', return_value=True), \
+                patch('docking_universal.vina_cli.run_native_vina', wraps=run_native_vina) as transport:
+            result = run_docking(options, EngineInvocation((str(self.engine),), 'explicit executable'),
+                                 environment, io.StringIO(), io.StringIO())
+        self.assertEqual((result.successful, result.failed), (2, 0))
+        self.assertEqual(transport.call_count, 2)
+        self.assertTrue(all(call.args[0] == (str(self.engine),) for call in transport.call_args_list))
+        self.assertTrue((output / 'alpha_qvinaw.pdbqt').is_file())
+        self.assertIn('engine\tqvinaw\n', (output / 'run_manifest.tsv').read_text())
+        self.assertTrue(all('--seed' in line and '41001' in line for line in self.argument_log.read_text().splitlines()))
+
+    def test_quickvina_native_failure_still_removes_staged_partial_outputs(self):
+        import io
+        from docking_universal_dock import DockOptions, EngineInvocation, run_docking
+        output = self.root / 'Failed Ω'
+        options = DockOptions(engine='qvinaw', receptor=self.receptor, ligand_dir=self.ligands,
+                              config=self.config, output_dir=output, cpu='1')
+        environment = dict(os.environ, DOCK_ARGUMENT_LOG=str(self.argument_log), DOCK_FAIL_LIGAND='ligand')
+        with patch('docking_universal.vina_cli.needs_native_transport', return_value=True):
+            result = run_docking(options, EngineInvocation((str(self.engine),), 'explicit executable'),
+                                 environment, io.StringIO(), io.StringIO())
+        self.assertEqual((result.successful, result.failed), (0, 2))
+        self.assertFalse(list(output.glob('*.pdbqt')))
+
     def test_missing_inputs_fail_before_creating_output(self):
         output = self.root / "not-created"
         completed = subprocess.run(

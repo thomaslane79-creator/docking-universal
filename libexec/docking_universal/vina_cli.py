@@ -1,4 +1,8 @@
-"""Byte-preserving path transport for the pinned native Windows Vina CLI."""
+"""Byte-preserving path transport for native Windows Vina/QuickVina-W CLI.
+
+The historical function name is retained for callers. It runs the selected
+executable without changing engine identity, scientific flags or molecular bytes.
+"""
 from __future__ import annotations
 
 import os

@@ -601,8 +601,8 @@ def run_docking(
     from docking_universal.vina_cli import needs_native_transport, run_native_vina
     if os.name == 'nt' and selected is None:
         execution['cli_path_transport'] = ('windows-ascii-relative-staging-v1'
-            if options.engine == 'vina' and any(needs_native_transport(_engine_arguments(options, ligand,
-                options.output_dir / f'{ligand.stem}_vina.pdbqt')) for ligand in ligands) else 'direct')
+            if options.engine in {'vina', 'qvinaw'} and any(needs_native_transport(_engine_arguments(options, ligand,
+                options.output_dir / f'{ligand.stem}_{options.engine}.pdbqt')) for ligand in ligands) else 'direct')
     _write_manifest(options, invocation, version, execution)
     if selected is not None:
         print('Vina execution: persistent API batch (one seed, in-memory maps reused)', file=stdout, flush=True)
@@ -623,7 +623,7 @@ def run_docking(
         with log_file.open("wb") as log_stream:
             try:
                 arguments = _engine_arguments(options, ligand, output)
-                if options.engine == 'vina' and needs_native_transport(arguments):
+                if options.engine in {'vina', 'qvinaw'} and needs_native_transport(arguments):
                     completed = run_native_vina(invocation.command, arguments,
                                                 environment=environment, log=log_stream)
                 else:

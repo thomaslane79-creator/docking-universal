@@ -1,5 +1,12 @@
 # Complete interactive GUI workflow plan
 
+Active 2026-10-20 implementation follow-up: the user requests continuing to
+native support. First correct QuickVina filename transport, then package the
+tested source-built Qt6 viewer and process-local software graphics with owned
+receipts/checksums. Complete installed GUI acceptance before enabling either
+capability. Keep Vina/scientific defaults, Mac installations and studies intact;
+native GPU/consumer hardware checks cannot be replaced by software rendering.
+
 2026-10-20 validation follow-up completed with explicit remaining blockers:
 baseline native installer/scientific/real Qt workflow and all eight general CI
 jobs pass at `20e96a7`; local full checks pass 671 Python cases/21 shell checks.

@@ -4,6 +4,16 @@ Status: active scope-control record, established 2026-09-24.
 
 ### No-prerequisite Windows installation (authorized 2026-10-18)
 
+- User authorization 2026-10-20: continue implementation until the native path
+  is supported. Integrate the proved byte-preserving QuickVina filename carrier
+  and package the pinned Qt6 PyMOL/software-rendering candidate without requiring
+  users to install a compiler. Validate the installed chronological GUI workflow,
+  not just isolated libraries. Preserve all scientific pins/defaults, explicit
+  decisions, unsupported engine/chemistry guards and local-only structures.
+  No working Mac install/study change, main merge, automatic hardware-graphics
+  retry, or transfer of Apple AD4 acceptance to Windows is authorized by this.
+  Actual GPU/consumer-machine evidence remains an explicit external boundary.
+
 - Remaining-validation results 2026-10-20: native baseline installation/science/
   real Qt workflow reruns pass at `20e96a7` (CI 39416428076), as do all eight
   general CI jobs (39416428246). Local full checks pass 671 Python cases/21

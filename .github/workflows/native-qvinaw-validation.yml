@@ -7,6 +7,8 @@ on:
       - .github/workflows/native-qvinaw-validation.yml
       - validation/native_windows_qvinaw.py
       - dependencies/qvina-windows-validation.json
+      - libexec/docking_universal_dock.py
+      - libexec/docking_universal/vina_cli.py
 
 permissions:
   contents: read

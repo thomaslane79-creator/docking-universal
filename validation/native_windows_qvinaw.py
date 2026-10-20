@@ -72,12 +72,12 @@ def main():
         box = inputs / 'box.conf'
         box.write_text('center_x = 0\ncenter_y = 0\ncenter_z = 0\nsize_x = 10\nsize_y = 10\nsize_z = 10\n', encoding='utf-8')
 
-        def invoke(name, rec, ligdir, config):
+        def invoke(name, rec, ligdir, config, extra=()):
             target = out / name
             command = [sys.executable, str(ROOT / 'libexec/docking_universal_dock.py'), '--engine', 'qvinaw',
                 '--engine-command', str(executable), '--receptor', str(rec), '--ligands', str(ligdir),
                 '--config', str(config), '--out', str(target), '--seed', '41001', '--cpu', '1',
-                '--exhaustiveness', '1', '--num-modes', '3']
+                '--exhaustiveness', '1', '--num-modes', '3', *extra]
             with (out / (name + '.local.log')).open('wb') as log:
                 result = subprocess.run(command, env=env, stdin=subprocess.DEVNULL, stdout=log,
                                         stderr=subprocess.STDOUT, timeout=90)
@@ -106,6 +106,16 @@ def main():
         output = target / 'fragment_qvinaw.pdbqt'
         state['unicode_paths'] = {'returncode': code, 'output_created': output.is_file(),
             'exact_ascii_output': code == 0 and output.is_file() and output.read_bytes() == outputs[0]}
+        if state['unicode_paths']['exact_ascii_output']:
+            before = output.read_bytes()
+            code, _ = invoke('unicode-result', unicode / receptor.name, unicode_ligands, unicode / box.name,
+                             extra=['--skip-existing'])
+            if code or output.read_bytes() != before:
+                raise ValueError('QuickVina skip-existing changed a retained pose')
+            manifest = (target / 'run_manifest.tsv').read_text(encoding='utf-8')
+            if 'engine\tqvinaw\n' not in manifest or 'cli_path_transport\twindows-ascii-relative-staging-v1\n' not in manifest:
+                raise ValueError('Native QuickVina engine/path provenance is missing')
+            state['skip_preserves_output_and_engine_provenance'] = True
         # An explicit, separate diagnostic control tests the already-existing
         # byte-preserving Vina path carrier with this executable. This does NOT
         # modify/accept the production QuickVina adapter or erase its failure.
