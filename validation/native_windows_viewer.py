@@ -16,6 +16,7 @@ import subprocess
 import sys
 import time
 import traceback
+import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -39,7 +40,7 @@ def main():
     def save():
         (out / 'summary.json').write_text(json.dumps(status, indent=2) + '\n', encoding='utf-8')
 
-    def run(name, command, *, cwd=None, timeout=1200):
+    def run(name, command, *, cwd=None, timeout=1200, allow_failure=False):
         item = {'name': name, 'status': 'running'}
         status['steps'].append(item); save()
         started = time.monotonic()
@@ -49,8 +50,9 @@ def main():
                                     timeout=timeout)
         item.update(status='passed' if result.returncode == 0 else 'failed',
                     returncode=result.returncode, seconds=round(time.monotonic() - started, 3)); save()
-        if result.returncode:
+        if result.returncode and not allow_failure:
             raise RuntimeError('Validation stage failed: ' + name)
+        return result.returncode
 
     save()
     try:
@@ -88,12 +90,32 @@ def main():
         app = out / 'Application Ω 日本語 with spaces' / 'app'
         hashes = installer.copy_application(ROOT, app)
         status['copied_application_files'] = len(hashes)
-        run('real_qt6_opengl_detach_return_export', [python, ROOT / 'validation/native_viewer_probe.py',
-                                                   '--app', app, '--out', out / 'viewer-probe'], timeout=180)
-        probe = json.loads((out / 'viewer-probe/summary.json').read_text(encoding='utf-8'))
-        if probe['status'] != 'passed':
-            raise ValueError('Real viewer probe did not finish successfully')
-        status.update(status='passed', viewer=probe)
+        run('system_qt6_opengl_detach_return_export', [python, ROOT / 'validation/native_viewer_probe.py',
+            '--app', app, '--out', out / 'viewer-probe'], timeout=180, allow_failure=True)
+        status['system_viewer'] = json.loads((out / 'viewer-probe/summary.json').read_text(encoding='utf-8'))
+        # Test a separate explicit SOFTWARE path too. Never relabel this as GPU
+        # acceptance or erase a failure of the default graphics path.
+        mesa = json.loads((ROOT / 'dependencies/mesa-windows-validation.json').read_text(encoding='utf-8'))
+        with urllib.request.urlopen(mesa['url'], timeout=120) as response:
+            data = response.read()
+        if hashlib.sha256(data).hexdigest() != mesa['sha256']:
+            raise ValueError('Pinned software-graphics archive checksum mismatch')
+        archive_path = out / mesa['filename']; archive_path.write_bytes(data)
+        seven_zip = Path(os.environ['ProgramFiles']) / '7-Zip/7z.exe'
+        if not seven_zip.is_file():
+            raise FileNotFoundError('The validation runner lacks its declared archive extractor')
+        run('unpack_isolated_software_graphics', [seven_zip, 'x', '-y', '-o' + str(out / 'mesa'), archive_path])
+        dlls = [p for p in (out / 'mesa').rglob('opengl32.dll') if p.parent.name == 'x64']
+        if len(dlls) != 1:
+            raise ValueError('Ambiguous pinned x64 software OpenGL library')
+        status['mesa'] = mesa
+        run('software_qt6_opengl_detach_return_export', [python, ROOT / 'validation/native_viewer_probe.py',
+            '--app', app, '--out', out / 'software-viewer-probe', '--opengl-dll', dlls[0]], timeout=180)
+        status['software_viewer'] = json.loads((out / 'software-viewer-probe/summary.json').read_text(encoding='utf-8'))
+        if status['software_viewer']['status'] != 'passed':
+            raise ValueError('Software viewer probe did not finish successfully')
+        status['status'] = ('passed_both_graphics_paths' if status['system_viewer']['status'] == 'passed'
+                            else 'completed_with_system_graphics_failure')
     except Exception as exc:
         status.update(status='failed', error_type=type(exc).__name__,
                       code_locations=[{'file': Path(f.filename).name, 'function': f.name, 'line': f.lineno}
@@ -106,8 +128,11 @@ def main():
         probe = out / 'viewer-probe/summary.json'
         if probe.is_file():
             status['viewer'] = json.loads(probe.read_text(encoding='utf-8'))
+        probe = out / 'software-viewer-probe/summary.json'
+        if probe.is_file():
+            status['software_viewer'] = json.loads(probe.read_text(encoding='utf-8'))
     save()
-    return 0 if status['status'] == 'passed' else 1
+    return 0 if status['status'] in {'passed_both_graphics_paths', 'completed_with_system_graphics_failure'} else 1
 
 
 if __name__ == '__main__':
