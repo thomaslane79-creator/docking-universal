@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from .qt import QtCore, QtWidgets
 from .protocol_help import SETTINGS_HELP, INLINE_HELP, settings_guide_html
+from ..reproducibility import DOCKING_REPRODUCIBILITY_NOTICE
 
 
 def _path_row(field, button_text):
@@ -198,6 +199,10 @@ class StudySetupPanel(QtWidgets.QWidget):
         form.addRow("Bound ligand", ligand_row)
         form.addRow("Control docking engine", self.control_engine)
         form.addRow("Initial control sampling", self.control_tier)
+        self.reproducibility_notice = QtWidgets.QLabel(DOCKING_REPRODUCIBILITY_NOTICE)
+        self.reproducibility_notice.setObjectName('control_reproducibility_notice')
+        self.reproducibility_notice.setWordWrap(True)
+        form.addRow(self.reproducibility_notice)
         form.addRow(buttons)
         QtWidgets.QWidget.setTabOrder(self.output_directory, self.input_pdb)
         input_button.clicked.connect(self.chooseInputRequested)
@@ -351,6 +356,7 @@ class StudySetupPanel(QtWidgets.QWidget):
             self._form.setRowVisible(widget, not reuse)
         for widget in (self.control_engine, self.control_tier):
             self._form.setRowVisible(widget, control)
+        self._form.setRowVisible(self.reproducibility_notice, control)
         self._form.setRowVisible(self.ligand_resname.parentWidget(), ligand_site)
         self.site_mode.setEnabled(not control and not self._locked)
         self.pocket_engine.setEnabled(not reuse and prediction and not self._locked)
@@ -826,6 +832,10 @@ class ScreeningSetupPanel(QtWidgets.QWidget):
             self.inline_explanations[key] = note
             widget.setToolTip(explanation)
             widget.setAccessibleDescription(explanation)
+        self.reproducibility_notice = QtWidgets.QLabel(DOCKING_REPRODUCIBILITY_NOTICE)
+        self.reproducibility_notice.setObjectName('screening_reproducibility_notice')
+        self.reproducibility_notice.setWordWrap(True)
+        form.addRow(self.reproducibility_notice)
         for widget in (self.preview_button, self.run_button, self.status): form.addRow(widget)
         file_button.clicked.connect(self.chooseFileRequested); directory_button.clicked.connect(self.chooseDirectoryRequested); output_button.clicked.connect(self.chooseOutputRequested); self.preview_button.clicked.connect(self.previewRequested); self.run_button.clicked.connect(self.runRequested); self.approval.toggled.connect(self.approvalChanged)
         self.ligands.textChanged.connect(self.inputsChanged); self.output.textChanged.connect(self.inputsChanged); self.analysis.currentIndexChanged.connect(self.inputsChanged); self.representatives.valueChanged.connect(self.inputsChanged); self.cluster_rmsd.valueChanged.connect(self.inputsChanged)

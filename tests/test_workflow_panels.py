@@ -9,6 +9,17 @@ class WorkflowPanelTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls): cls.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 
+    def test_control_reproducibility_notice_is_shown_at_the_control_engine_choice(self):
+        panel = StudySetupPanel()
+        initial = panel.pathway.currentIndex()
+        panel.pathway.setCurrentIndex(panel.pathway.findData('control'))
+        self.assertTrue(panel._form.isRowVisible(panel.reproducibility_notice))
+        self.assertIn('API/CLI backends', panel.reproducibility_notice.text())
+        self.assertTrue(panel.reproducibility_notice.wordWrap())
+        panel.pathway.setCurrentIndex(initial)
+        self.assertFalse(panel._form.isRowVisible(panel.reproducibility_notice))
+        panel.close()
+
     def test_site_review_and_parameterization_are_separate_explicit_actions(self):
         panel = StudySetupPanel()
         panel._coordinate_review_supported = True
@@ -239,6 +250,9 @@ class WorkflowPanelTests(unittest.TestCase):
         self.assertTrue(changed)
         self.assertFalse(launched or approved)
         self.assertFalse(panel.approval.isChecked())
+        self.assertIn('operating systems', panel.reproducibility_notice.text())
+        self.assertIn('same seed', panel.reproducibility_notice.text())
+        self.assertTrue(panel.reproducibility_notice.wordWrap())
         self.assertIn('does not regroup completed results', panel.cluster_preset.toolTip())
         panel.close()
 

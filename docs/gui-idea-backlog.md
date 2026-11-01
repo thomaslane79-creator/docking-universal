@@ -2,6 +2,20 @@
 
 Status: active scope-control record, established 2026-09-24.
 
+### Cross-system reproducibility disclosure (authorized 2026-11-01)
+
+The user requests explicit software disclosure after matched-input Mac/API and
+Windows/CLI searches produced different poses and scores. This is a concrete
+scientific interpretation/provenance issue (gate 1), not proof that the OS alone
+caused the difference. The bounded correction is one shared notice beside the
+existing control/screening controls and in reports, plus retained OS, release,
+host architecture, backend and CPU-setting facts. Preserve missing historical
+facts as unrecorded; never replace them with the report-generation host.
+Acceptance covers immutable inputs/settings, API/CLI dispatch, portable control
+provenance, legacy-report behavior and passive Qt disclosure. This adds no
+setting, approval, dependency or cross-platform equivalence verdict. It extends
+the current recovery/CI follow-up before the final handoff package is refreshed.
+
 ### Four-area completion follow-up (authorized 2026-10-23)
 
 User's clarified functional target (2026-10-24): at least 90% of proteins in a

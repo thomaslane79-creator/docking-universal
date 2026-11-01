@@ -461,6 +461,7 @@ def _engine_version(invocation: EngineInvocation, environment: Mapping[str, str]
 
 def _write_manifest(options: DockOptions, invocation: EngineInvocation, version: str,
                     execution: Mapping[str, str] | None = None) -> None:
+    from docking_universal.reproducibility import runtime_facts
     manifest_values = (
         ("engine", options.engine),
         ("engine_version", version),
@@ -476,6 +477,7 @@ def _write_manifest(options: DockOptions, invocation: EngineInvocation, version:
         ("seed", options.seed or "engine_random"),
         ("cpu", options.cpu if options.cpu is not None else "engine_default"),
         ("cpu_source", options.cpu_source),
+        *runtime_facts().items(),
         *((execution or {}).items()),
     )
     (options.output_dir / "run_manifest.tsv").write_text(

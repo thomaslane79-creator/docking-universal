@@ -1,5 +1,26 @@
 # Older macOS, Linux and native Windows compatibility
 
+## Docking reproducibility across systems — 2026-11-01
+
+Matching a seed and engine version does not, by itself, establish identical
+scores or poses across execution environments. The recovered 1STP comparison
+verified identical prepared inputs, yet Mac Vina's persistent API and Windows
+Vina's CLI produced top-score differences of 0.016–0.026 kcal/mol and top-pose
+heavy-atom RMSDs of 0.127–0.450 Å. The execution backends/builds also differ, so
+this does not isolate an operating-system cause. A controlled follow-up should
+match the backend and prepared files as well as all search settings.
+
+The control/screening forms and PDF/HTML/Markdown reports disclose this limit.
+New docking manifests retain OS, kernel release, host architecture, backend and
+CPU setting; control protocols carry those recorded fields. Historical reports
+show absent fields as `not recorded`, rather than substituting the current
+report host. The existing same-version check compares recorded software
+versions and does not certify identical docking outputs. No search parameter,
+scientific approval rule or numerical equivalence tolerance is changed.
+
+See the [Vina reproducibility FAQ](https://autodock-vina.readthedocs.io/en/latest/faq.html)
+and the [recovery comparison](recovery-checkpoint-20261101.md#focused-macwindows-comparison).
+
 ## Current native Windows scope — 2026-10-20
 
 The records below are chronological; an earlier pass is not acceptance of a

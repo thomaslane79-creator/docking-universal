@@ -308,6 +308,7 @@ def run_tier(args, tier_name, cli, libexec, tier_root):
             "screening_authority": "control-approved",
         })
     engine_manifest = read_tsv_manifest(tier_root / f"seed_{seeds[0]}" / "docking" / "run_manifest.tsv")
+    from docking_universal.reproducibility import recorded_runtime_fields
     result["software"] = {
         "docking_universal": package_version(),
         "python": platform.python_version(),
@@ -318,6 +319,7 @@ def run_tier(args, tier_name, cli, libexec, tier_root):
         "engine": engine_manifest.get("engine", args.engine),
         "engine_version": engine_manifest.get("engine_version", "unknown"),
         "engine_source": engine_manifest.get("engine_source", "unknown"),
+        **recorded_runtime_fields(engine_manifest),
     }
     receptor_dir = args.receptor_pdbqt.parent
     pdbfixer_audit = receptor_dir / "pdbfixer_audit.json"

@@ -1,5 +1,13 @@
 # GUI implementation roadmap
 
+### Cross-system reproducibility disclosure (2026-11-01)
+
+Expose the demonstrated pose/score variability in existing control/screening
+forms and reports, and retain the actual execution OS/architecture/backend.
+Do not attribute the observed API/CLI comparison solely to OS differences or
+infer historical runtime facts from a newly generated report. See the bounded
+[scope record](gui-idea-backlog.md#cross-system-reproducibility-disclosure-authorized-2026-11-01).
+
 ### Exact reviewed side-chain candidate handoff (2026-10-25)
 
 Finish the demonstrated beta2 preparation blocker within the existing model

@@ -1146,6 +1146,8 @@ def reproducibility_record(protocol, study, control):
     figure_manifest = read_json(study / "report" / "report_figure_manifest.json")
     clustering = read_json(first(study, ["compounds/*/pose_analysis/clustering_manifest.json", "**/clustering_manifest.json"]))
     docking_manifest = read_key_value_tsv(first(study, ["compounds/*/seed_*/docking/run_manifest.tsv", "**/docking/run_manifest.tsv"]))
+    from docking_universal.reproducibility import retained_runtime_context
+    execution_context = retained_runtime_context(docking_manifest, summary.get('scientific_software'), recorded)
     receptor_preparation = receptor_preparation_record(study, control, protocol)
     # Protocol-only reports have no screening summary handoff.  Their finalized
     # protocol retains the preparation result even when the receptor directory
@@ -1279,6 +1281,7 @@ def reproducibility_record(protocol, study, control):
         "receptor_preparation": receptor_preparation,
         "control_to_new_run_version_check": compare_scientific_versions(recorded, run_versions, docking_engine_name) if protocol else None,
         "report_generation": report_runtime,
+        "execution_context": execution_context,
         "methods": {
             "cavity_detection": (
                 "Not requested; " + detector_name if detector_key == "none" else
@@ -1449,6 +1452,11 @@ def reproducibility_summary(provenance, cavity, has_docking):
             + ("RDKit, " if pocket_evidence_used else "")
             + "and ReportLab generated this report."
         )
+    from docking_universal.reproducibility import DOCKING_REPRODUCIBILITY_NOTICE, format_runtime_context
+    from html import escape
+    sentences.append('<b>Reproducibility across systems.</b> ' + DOCKING_REPRODUCIBILITY_NOTICE)
+    if has_docking:
+        sentences.append(escape(format_runtime_context(provenance.get('execution_context', {}))))
     return " ".join(sentences)
 
 
@@ -2459,7 +2467,7 @@ def main():
         if version_check:
             verdict = version_check["overall"]
             verdict_text = (
-                "Checked: no software version differences detected."
+                "Checked: no software version differences detected. This does not establish identical docking outputs."
                 if verdict == "SAME" else
                 "Checked: software version differences detected."
                 if verdict == "NOT THE SAME" else
@@ -2747,7 +2755,7 @@ def main():
     if version_check:
         verdict = version_check["overall"]
         verdict_text = (
-            "Checked: no software version differences detected."
+            "Checked: no software version differences detected. This does not establish identical docking outputs."
             if verdict == "SAME" else
             "Checked: software version differences detected."
             if verdict == "NOT THE SAME" else

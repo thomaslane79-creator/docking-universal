@@ -134,6 +134,7 @@ def scientific_software_record(engine_version="not recorded"):
     record stays with the study so regenerating a PDF in a newer environment
     cannot rewrite the historical control-to-new-run comparison.
     """
+    from docking_universal.reproducibility import runtime_facts
     openbabel = command_version(["obabel", "-V"])
     if openbabel.startswith("Open Babel "):
         openbabel = openbabel.removeprefix("Open Babel ").split()[0]
@@ -148,6 +149,7 @@ def scientific_software_record(engine_version="not recorded"):
         "openbabel": openbabel,
         "plip": installed_version("plip"),
         "engine_version": engine_version,
+        **runtime_facts(),
     }
 
 
@@ -1308,7 +1310,9 @@ def write_reports(study, manifest, compounds):
         or receptor_preparation_summary(study)
     )
     removal_warning = manifest.get("protocol_receptor_modification_warning") or study_removal_warning(study)
-    report = {**manifest, "receptor_preparation": preparation_summary,
+    from docking_universal.reproducibility import DOCKING_REPRODUCIBILITY_NOTICE, retained_runtime_context, format_runtime_context
+    execution_context = retained_runtime_context(manifest.get('scientific_software'))
+    report = {**manifest, "execution_context": execution_context, "receptor_preparation": preparation_summary,
               "receptor_modification_warning": removal_warning, "compounds": rows}
     (report_dir / "study_summary.json").write_text(json.dumps(report, indent=2) + "\n")
 
@@ -1323,6 +1327,8 @@ def write_reports(study, manifest, compounds):
     ]
     if removal_warning:
         lines += [f"> **Receptor-model warning:** {removal_warning}", ""]
+    lines += ['## Reproducibility across systems', '', DOCKING_REPRODUCIBILITY_NOTICE, '',
+              format_runtime_context(execution_context), '']
     from docking_universal.services.receptor_model_history import normalize_preparation
     reference_review = normalize_preparation(manifest.get('protocol_receptor_preparation')).get('site_reference_review')
     if reference_review:
@@ -1368,6 +1374,7 @@ def write_reports(study, manifest, compounds):
 <body><h1>{html.escape(manifest['study_name'])}</h1><p>Scientific status: <code>{manifest['study_status']}</code><br>Completion status: <code>{manifest.get('completion_status','UNKNOWN')}</code></p>
 <div class="note">{warning_html or 'Target-specific protocol gate passed. This remains computational evidence, not experimental validation.'}</div>
 <h2>Receptor preparation</h2><p>{html.escape(preparation_summary)}. PDBFixer is used only after strict Meeko rejects the filtered receptor.</p>
+<h2>Reproducibility across systems</h2><p>{html.escape(DOCKING_REPRODUCIBILITY_NOTICE)}</p><p>{html.escape(format_runtime_context(execution_context))}</p>
 {configured_html}<h2>Compound summary</h2><table><thead><tr>{''.join(f'<th>{html.escape(field)}</th>' for field in overview[0])}</tr></thead><tbody>{html_rows}</tbody></table>
 <h2>Scientific limits</h2><p>Scores are ranking outputs. Pose clustering and seed support describe search convergence and require structural and experimental interpretation.</p></body></html>"""
     (report_dir / "index.html").write_text(document)
@@ -2103,6 +2110,9 @@ def main():
     )
     if completed_engine_version:
         manifest["scientific_software"]["engine_version"] = completed_engine_version
+    if completed_run_manifest:
+        from docking_universal.reproducibility import recorded_runtime_fields
+        manifest['scientific_software'].update(recorded_runtime_fields(read_key_value_tsv(completed_run_manifest)))
     (study / "study_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     write_screening_progress(study, 'report', 'Compound processing finished; generating library figures and the final report…',
                              failed_compounds=failures)
