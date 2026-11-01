@@ -31,6 +31,7 @@ def require_enabled_controls(configuration):
 def runtime_failure_metadata(root):
     """Retain code locations/types only, never log text or scientific values."""
     exceptions, locations, report_errors, missing_versions = set(), [], set(), set()
+    subprocess_codes, engine_codes = set(), set()
     for path in Path(root).rglob('*.log'):
         for line in path.read_text(encoding='utf-8', errors='replace').splitlines():
             if 'PDF report error: complete version provenance is required for every software component used.' in line:
@@ -38,15 +39,23 @@ def runtime_failure_metadata(root):
                 for label in ('P2Rank', 'fpocket', 'Meeko', 'RDKit', 'PLIP', 'Open Babel', 'QuickVina-W', 'AutoDock Vina'):
                     if label + ': not recorded' in line or label + ': not detected' in line:
                         missing_versions.add(label)
-            match = re.match(r'^([A-Za-z_]\w*(?:Error|Exception)):', line)
+            match = re.match(r'^(?:[A-Za-z_]\w*\.)*([A-Za-z_]\w*(?:Error|Exception)):', line)
             if match:
                 exceptions.add(match.group(1))
+            match = re.match(r'^(?:subprocess\.)?CalledProcessError: .* returned non-zero exit status (-?\d+)\.$', line)
+            if match:
+                subprocess_codes.add(int(match.group(1)))
+            match = re.match(r'^ERROR: (vina|qvinaw) failed for .*; exit code (-?\d+); see ', line)
+            if match:
+                engine_codes.add((match.group(1), int(match.group(2))))
             match = re.match(r'\s*File "([^"]+)", line (\d+), in ([\w<>]+)', line)
             if match:
                 name = match.group(1).replace('\\', '/').rsplit('/', 1)[-1]
                 if re.fullmatch(r'[A-Za-z0-9_.-]+\.py', name):
                     locations.append({'file': name, 'line': int(match.group(2)), 'function': match.group(3)})
     return {'runtime_exception_types': sorted(exceptions), 'runtime_traceback_locations': locations[-16:],
+            'runtime_subprocess_exit_codes': sorted(subprocess_codes),
+            'runtime_engine_failures': [{'engine': engine, 'exit_code': code} for engine, code in sorted(engine_codes)],
             'report_failure_codes': sorted(report_errors), 'missing_version_software': sorted(missing_versions)}
 
 

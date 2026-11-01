@@ -127,6 +127,29 @@ explicit scientific approvals and all outputs. Before continuing, inspect
 continuation for unaffected unstarted original cases; do not silently retry
 completed science, replace targets or adjust the denominator.
 
+## Windows control failure investigation
+
+The installed Windows job in run `41343057428` failed during QuickVina-W's
+two-seed biotin control, after its Vina control and both exploratory GUI
+workflows passed. Its status artifact retained the Python call sites but not
+the engine exit code. The underlying cause cannot be established from that
+artifact.
+
+An isolated local reproduction using the same public 1STP fixture, optional
+P2Rank preparation, engine and quick-tier settings passed in 159 seconds on
+the staged reproducibility candidate. All six searches, the report, reviewed
+input checks and cleanup passed. The two-seed tier remained unapproved under
+the existing five-seed requirement. This passing attempt does not erase or
+explain the earlier CI failure.
+
+Engine failures now print their exit code in local diagnostics. The CI status
+parser retains only engine identity and numeric exit codes, and recognizes
+module-qualified Python exception types. Commands, paths, ligand identities,
+structures and raw scientific logs remain local. A simulated native engine
+crash verifies exit-code transport, partial-output removal and absence of
+scientific values in the status summary. No retry, scientific setting or
+acceptance criterion changed.
+
 ## On the new Mac
 
 Clone this branch, or clone its self-contained recovery Git bundle with

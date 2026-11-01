@@ -37,6 +37,22 @@ class NativeControlTests(unittest.TestCase):
             self.assertNotIn('private', json.dumps(result))
             self.assertNotIn('-12.345', json.dumps(result))
 
+    def test_native_failure_retains_nested_exit_codes_without_commands_or_ligands(self):
+        from validation.native_windows_control_workflow import runtime_failure_metadata
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'private.log').write_text(
+                "subprocess.CalledProcessError: Command ['PRIVATE path', '--ligand', 'PRIVATE molecule'] returned non-zero exit status 1.\n"
+                'ERROR: qvinaw failed for PRIVATE molecule; exit code 3221225477; see PRIVATE path\n'
+                'ERROR: qvinaw failed for PRIVATE molecule; exit code 3221225477; see PRIVATE path\n'
+                'ERROR: unknown failed for PRIVATE molecule; exit code 7; see PRIVATE path\n')
+            result = runtime_failure_metadata(root)
+            self.assertEqual(result['runtime_exception_types'], ['CalledProcessError'])
+            self.assertEqual(result['runtime_subprocess_exit_codes'], [1])
+            self.assertEqual(result['runtime_engine_failures'], [{'engine': 'qvinaw', 'exit_code': 3221225477}])
+            self.assertNotIn('PRIVATE', json.dumps(result))
+            self.assertNotIn('unknown', json.dumps(result))
+
     def test_native_pdf_failure_classification_never_exports_the_diagnostic_payload(self):
         from validation.native_windows_control_workflow import runtime_failure_metadata
         with tempfile.TemporaryDirectory() as directory:
@@ -71,6 +87,33 @@ class NativeControlTests(unittest.TestCase):
         self.argv = ['--complex', str(self.source), '--ligand-id', 'LIG:A:101', '--out', str(self.root / 'control'),
             '--reviewed-inputs', str(self.record), '--reviewed-inputs-sha256', hashlib.sha256(self.record.read_bytes()).hexdigest(),
             '--non-interactive', '--no-visuals']
+
+    def test_engine_exit_code_survives_native_transport_and_partial_output_cleanup(self):
+        import io
+        from subprocess import CompletedProcess
+        from docking_universal_dock import DockOptions, EngineInvocation, run_docking
+        ligands = self.root / 'ligands'
+        ligands.mkdir()
+        (ligands / 'private_ligand.pdbqt').write_text('fixture')
+        output = self.root / 'output'
+        options = DockOptions(engine='qvinaw', receptor=self.root / 'prepared.pdbqt',
+                              config=self.root / 'site.conf', ligand_dir=ligands, output_dir=output, cpu='1')
+        def failed_engine(*args, **kwargs):
+            (output / 'private_ligand_qvinaw.pdbqt').write_text('partial')
+            return CompletedProcess(args[0], 3221225477)
+        error = io.StringIO()
+        with patch('docking_universal_dock._engine_version', return_value='QuickVina-W fixture'), \
+                patch('docking_universal.vina_cli.needs_native_transport', return_value=True), \
+                patch('docking_universal.vina_cli.run_native_vina', side_effect=failed_engine) as execute:
+            result = run_docking(options, EngineInvocation(('qvinaw.exe',), 'fixture'), {}, io.StringIO(), error)
+        self.assertEqual((result.successful, result.failed), (0, 1))
+        execute.assert_called_once()
+        self.assertFalse(list(output.glob('*.pdbqt')))
+        (self.root / 'engine.local.log').write_text(error.getvalue())
+        from validation.native_windows_control_workflow import runtime_failure_metadata
+        metadata = runtime_failure_metadata(self.root)
+        self.assertEqual(metadata['runtime_engine_failures'], [{'engine': 'qvinaw', 'exit_code': 3221225477}])
+        self.assertNotIn('private_ligand', json.dumps(metadata))
 
     def test_port_reuses_chemistry_and_calibrator_without_repreparing_or_crystal_pose_seeding(self):
         args = parse_args(self.argv)

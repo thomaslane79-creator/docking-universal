@@ -186,7 +186,7 @@ class DockRunnerCharacterizationTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 1)
         self.assertFalse((output / "alpha_qvinaw.pdbqt").exists())
         self.assertTrue((output / "beta_qvinaw.pdbqt").is_file())
-        self.assertIn("ERROR: qvinaw failed for alpha", completed.stderr)
+        self.assertIn("ERROR: qvinaw failed for alpha; exit code 7;", completed.stderr)
         self.assertIn("Successful docking jobs: 1\n", completed.stdout)
         self.assertIn("Failed docking jobs: 1\n", completed.stdout)
 

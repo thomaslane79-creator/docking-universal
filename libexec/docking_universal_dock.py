@@ -640,7 +640,7 @@ def run_docking(
                 log_stream.write(f"{error}\n".encode())
                 returncode = 1
         if returncode != 0:
-            print(f"ERROR: {options.engine} failed for {base}; see {log_file}", file=stderr)
+            print(f"ERROR: {options.engine} failed for {base}; exit code {returncode}; see {log_file}", file=stderr)
             failed += 1
             output.unlink(missing_ok=True)
             continue
