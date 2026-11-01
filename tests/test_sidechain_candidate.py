@@ -40,8 +40,8 @@ class SidechainCandidateTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.source = self.root / 'source.pdb'
-        self.source.write_text('REMARK original evidence\n' + backbone()
-                               + atom(15, 'C1', 'NAG', 200, record='HETATM', xyz=(9, 9, 9)) + 'END\n')
+        self.source.write_bytes(('REMARK original evidence\n' + backbone()
+                                + atom(15, 'C1', 'NAG', 200, record='HETATM', xyz=(9, 9, 9)) + 'END\n').encode())
         self.choices = {'exclusions': [dict(resname='NAG', chain='A', number='200', insertion_code='')]}
         _, parent = preview_changes(self.source, self.choices, context={})
         self.receipt, self.model, self.record = fixture(self.root, parent)
@@ -51,7 +51,7 @@ class SidechainCandidateTests(unittest.TestCase):
         return preview_changes(self.source, self.choices, context={'selected_regions': ['exact-box']})
 
     def edit_model(self, transform):
-        self.model.write_text(transform(self.model.read_text()))
+        self.model.write_bytes(transform(self.model.read_text()).encode())
         self.record['model_sha256'] = sha256(self.model)
         self.receipt.write_text(json.dumps(self.record))
 

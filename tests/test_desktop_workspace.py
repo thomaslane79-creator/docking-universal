@@ -94,9 +94,12 @@ class DesktopWorkspaceTests(unittest.TestCase):
                               if combo.model().item(i).isEnabled()}, values)
         self.assertFalse(self.window.study_pathway.model().item(self.window.study_pathway.findData("control")).isEnabled())
         index = self.window.protocol_engine.findData('adgpu')
-        self.window.protocol_engine.setCurrentIndex(index)
-        self.window._apply_runtime_capabilities()
-        self.assertEqual(self.window.protocol_engine.currentData(), 'adgpu')
+        if index >= 0:
+            self.window.protocol_engine.setCurrentIndex(index)
+            self.window._apply_runtime_capabilities()
+            self.assertEqual(self.window.protocol_engine.currentData(), 'adgpu')
+        else:
+            self.assertEqual(self.window.protocol_engine.currentData(), 'vina')
         self.window.host_client = None
 
     def test_screening_cpu_choice_reaches_launch_payload_without_changing_state(self):
@@ -1727,7 +1730,7 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.assertTrue(self.window.full_synopsis_button.isEnabled())
         with patch.object(QtGui.QDesktopServices, "openUrl", return_value=True) as opened:
             self.window.show_full_synopsis_report()
-        self.assertEqual(opened.call_args.args[0].toLocalFile(), str(report.resolve()))
+        self.assertEqual(Path(opened.call_args.args[0].toLocalFile()).resolve(), report.resolve())
 
     def test_preparation_intervention_is_presented_as_its_own_required_action(self):
         state = self.store.load("desktop")
@@ -1989,7 +1992,7 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.assertTrue(self.window.open_interaction_diagram_button.isEnabled())
         with patch.object(QtGui.QDesktopServices, "openUrl", return_value=True) as opened:
             self.window.open_selected_pose_session()
-        self.assertEqual(opened.call_args.args[0].toLocalFile(), str(session.resolve()))
+        self.assertEqual(Path(opened.call_args.args[0].toLocalFile()).resolve(), session.resolve())
         with patch.object(self.window, '_activate_interaction_ligand') as linked, \
                 patch.object(QtGui.QDesktopServices, 'openUrl') as opened:
             self.window.open_selected_interaction_diagram()

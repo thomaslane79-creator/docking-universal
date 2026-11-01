@@ -2,6 +2,10 @@
 
 **v0.7.0 · Research preview**
 
+Recovery branch: the [2026-11-01 source and validation checkpoint](docs/recovery-checkpoint-20261101.md)
+identifies the recovered Mac working copy, Windows checks, focused Mac/Windows
+output comparison and the saved 100-target campaign resumption point.
+
 Docking Universal provides fully guided, interactive docking workflows on Ubuntu and macOS, from selecting inputs through generating scientific PDF reports. It supports AutoDock Vina and QuickVina-W alongside established open-source tools for receptor and ligand preparation, site selection, docking, analysis, and visualization. Its central purpose is to gather and preserve the evidence needed for the user to make an informed, scientifically defensible docking decision.
 
 **A docking engine performs the search; Docking Universal manages and documents the surrounding workflow.** Vina remains the default; the optional experimental AD4 GPU integration is described below.

@@ -695,3 +695,24 @@ v15 are **eleven distinct completed targets and twenty actual searches across
 builds**; those are not a one-candidate >90% result. The queue continues under
 the user's skip/collect-errors direction, with exact cleanup required before
 each further unstarted subset.
+
+## Recovery inspection — 2026-11-01
+
+The saved v15 summary is later than the launch description above. Its internal
+update time is October 27 at 09:09 EDT, and its supervisor status is
+`attention_required`: 4ZZN and 7B7R are recorded as passed, 6Q49 is recorded as
+interrupted after an unexpected worker exit, and 83 cases remain unrun,
+including six reference holds. A complete paginated listing of the backed-up
+`validation/runs` folder found no later numbered protein-panel continuation.
+
+Combined with the eleven earlier documented completions, this is thirteen
+recorded distinct completions across development builds. It is not a measured
+single-candidate success rate, a new terminal hash audit of every v15 output,
+or evidence that the at-least-91/100 goal was achieved. The three earlier
+failed/unsupported targets and interrupted 6Q49 remain in the original
+denominator. No cohort docking was repeated during recovery.
+
+Inspect the retained 6Q49 worker evidence and cleanup state before resuming
+unaffected unstarted original cases. Preserve the earlier results and exact
+scientific approvals. See the [recovery checkpoint](recovery-checkpoint-20261101.md)
+for source identity, focused Windows validation and new-Mac restoration.

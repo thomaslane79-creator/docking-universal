@@ -54,6 +54,8 @@ class PreparationIssueDiagnosticTests(unittest.TestCase):
 
 class SiteFirstWorkflowTests(unittest.TestCase):
     def setUp(self):
+        if os.name == 'nt':
+            self.skipTest('This fixture exercises the POSIX preparation script; native Windows has separate workflow gates')
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
