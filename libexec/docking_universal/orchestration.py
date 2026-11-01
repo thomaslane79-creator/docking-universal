@@ -315,6 +315,8 @@ class ProtocolWorkflowRunner:
             raise ActiveStageError(
                 "Receptor preparation is already complete for this study; resume its current workflow stage"
             )
+        if any(job.stage == 'site_exploration' and job.status.value == 'completed' for job in state.jobs):
+            raise ActiveStageError('Site exploration is already complete; prepare the reviewed receptor instead')
         self._assert_no_active_stage()
         allowed = {
             "input_pdb", "working_directory", "site_mode", "ligand_resname",
@@ -327,11 +329,17 @@ class ProtocolWorkflowRunner:
             "geostd_library",
             "pdb_pocket_evidence",
             "predict_pockets_with_ligand",
+            "explore_sites_first",
         }
         unknown = set(payload) - allowed
         if unknown:
             raise ValueError(f"Unknown preparation options: {', '.join(sorted(unknown))}")
         values = dict(payload)
+        explore_first = values.pop('explore_sites_first', False)
+        if not isinstance(explore_first, bool):
+            raise ValueError('Explore sites first must be a boolean')
+        if explore_first and control_setup:
+            raise ValueError('Coordinate-first control validation has not been accepted yet')
         for name in ("input_pdb", "working_directory"):
             if name not in values:
                 raise ValueError(f"Preparation option is required: {name}")
@@ -345,6 +353,11 @@ class ProtocolWorkflowRunner:
             raise ValueError("PDB pocket evidence must be related-structures or off")
         options = ReceptorPreparationOptions(**values)
         plan = build_receptor_preparation_plan(self.preparation_executable, options)
+        if explore_first:
+            from .services.site_exploration import exploration_request, exploration_root
+            exploration_request(plan, options)  # Validate worker/engine before locking setup.
+            if exploration_root(plan).exists():
+                raise ValueError('Site-review output already exists and will not be overwritten')
         setup_record = {
             "input_pdb": str(plan.structure_input.engine_pdb_path),
             "input_structure": str(plan.structure_input.source_path),
@@ -377,6 +390,8 @@ class ProtocolWorkflowRunner:
             "pdb_pocket_evidence": evidence_mode,
             "accepted_at_revision": state.revision,
         }
+        if explore_first:
+            setup_record['explore_sites_first'] = True
         if control_setup:
             setup_record.update(control_setup)
 
@@ -406,14 +421,22 @@ class ProtocolWorkflowRunner:
 
         def work() -> None:
             try:
-                result = ReceptorPreparationService(self.controller).run(
-                    study_id, plan, cancel_event=cancellation,
-                    request_id=request_id, expected_revision=preparation_revision,
-                )
+                if explore_first:
+                    from .services.site_exploration import SiteExplorationService, exploration_root
+                    result = SiteExplorationService(self.controller).run(
+                        study_id, plan, options, cancel_event=cancellation,
+                        request_id=request_id, expected_revision=preparation_revision)
+                    review_root = exploration_root(plan)
+                else:
+                    result = ReceptorPreparationService(self.controller).run(
+                        study_id, plan, cancel_event=cancellation,
+                        request_id=request_id, expected_revision=preparation_revision,
+                    )
+                    review_root = plan.output_root
                 if result.status.value == "completed":
                     if evidence_mode == "related-structures":
-                        self._collect_pdb_pocket_evidence(study_id, plan)
-                    self._start_review(study_id, plan.output_root)
+                        self._collect_pdb_pocket_evidence(study_id, replace(plan, output_root=review_root))
+                    self._start_review(study_id, review_root)
             except Exception as exc:
                 self._record_orchestration_failure(study_id, exc)
             finally:
@@ -433,11 +456,270 @@ class ProtocolWorkflowRunner:
             latest = self.controller.get_study(study_id)
             job = next((item for item in latest.jobs if item.request_id == request_id), None)
             if job:
-                return {"job_id": job.id, "stage": job.stage, "output_root": str(plan.output_root)}
+                return {"job_id": job.id, "stage": job.stage,
+                        "output_root": str(exploration_root(plan) if explore_first else plan.output_root)}
             if not thread.is_alive():
                 break
             time.sleep(0.01)
         raise RuntimeError("Preparation worker did not persist its job start")
+
+    def preview_receptor_changes(self, study_id, choices, *, expected_revision):
+        """Inspect exact proposed changes without writing files or approving science."""
+        from .services.receptor_model_review import preview_changes, inspect_source
+        from .protocol_finalization import approved_regions_from_study
+        state = self.controller.get_study(study_id)
+        if state.revision != expected_revision:
+            from .state import RevisionConflictError
+            raise RevisionConflictError('Study changed before receptor-model review')
+        self._assert_no_active_stage()
+        if (not (state.workflow_data.get('study_setup') or {}).get('explore_sites_first')
+                or state.pending_decisions or state.workflow_data.get('receptor_parameterization_status')
+                not in {'not_started', 'failed'}):
+            raise ValueError('Review sites first; model changes require an unprepared or safely failed receptor')
+        regions, _ = approved_regions_from_study(state)
+        from .services.site_exploration import read_exploration
+        read_exploration(Path(state.workflow_data['site_exploration_root']))
+        sources = {a.kind: a for a in state.artifacts if a.kind in {
+            'source_receptor_structure', 'normalized_receptor_input'}}
+        if len(sources) != 2 or any(not a.sha256 or sha256(Path(a.path)) != a.sha256 for a in sources.values()):
+            raise ValueError('Original receptor input changed before model review')
+        context = {'study_id': study_id, 'revision': state.revision,
+                   'original_input_sha256': sources['source_receptor_structure'].sha256,
+                   'selected_regions': [{'label': r['box_label'], 'sha256': r['box_sha256']} for r in regions]}
+        preview, derivative = preview_changes(sources['normalized_receptor_input'].path, choices, context=context)
+        preview['source_path'] = sources['normalized_receptor_input'].path
+        # Coordinates and distances are local review evidence, not an exclusion recommendation.
+        from .services.preparation_site_issues import for_box
+        _, _, atoms, _ = inspect_source(sources['normalized_receptor_input'].path)
+        selected_rows = list(choices.get('exclusions', [])) + list(choices.get('alternate_locations', []))
+        selected_rows.extend(row for change in preview['changes'] for row in change.get('generated_atoms', []))
+        selected_rows.extend(row for change in preview['changes'] for row in change.get('rejected_inferred_edges', []))
+        selected_rows.extend(endpoint for change in preview['changes']
+                             for edge in change.get('rejected_inferred_interresidue_edges', [])
+                             for endpoint in (edge['first'], edge['second']))
+        selected = {tuple(row.get(k, '') for k in ('resname', 'chain', 'number', 'insertion_code'))
+                    for row in selected_rows}
+        residues = [{'residue': key[0], 'chain': key[1], 'number': key[2] + key[3],
+                     'coordinates': [tuple(float(line[i:i+8]) for i in (30, 38, 46)) for line in lines]}
+                    for key, lines in atoms.items() if key in selected]
+        generated = {(tuple(row.get(k, '') for k in ('resname', 'chain', 'number', 'insertion_code')), row['atom_name'])
+                     for change in preview['changes'] for row in change.get('generated_atoms', [])}
+        for line in derivative.decode('utf-8').splitlines():
+            if not line.startswith(('ATOM  ', 'HETATM')):
+                continue
+            key = (line[17:20].strip(), line[21:22].strip(), line[22:26].strip(), line[26:27].strip())
+            if (key, line[12:16].strip()) in generated:
+                row = next(r for r in residues if (r['residue'], r['chain'], r['number']) ==
+                           (key[0], key[1], key[2] + key[3]))
+                row['coordinates'].append(tuple(float(line[i:i+8]) for i in (30, 38, 46)))
+        if preview.get('connectivity_execution'):
+            from .services.reviewed_connectivity import validate_review
+            from .services.receptor_model_review import inspect_source_data, digest
+            execution = preview['connectivity_execution']
+            review, graph_change = validate_review(execution['path'], preview['model_input_sha256'])
+            if graph_change['review_sha256'] != execution['sha256']:
+                raise ValueError('Connectivity review changed during box preview')
+            retained = review['retained_stage_files'][review['backend_input']]
+            data = Path(retained['path']).read_bytes()
+            if digest(data) != retained['sha256']:
+                raise ValueError('Saved coordinate stage changed during box preview')
+            _, _, backend_atoms, _ = inspect_source_data(data)
+            graph_keys = {tuple(row[k] for k in ('resname', 'chain', 'number', 'insertion_code')) for row in review['edges']}
+            endpoint_names = {}
+            for edge in review.get('inter_residue_edges', []):
+                for endpoint in (edge['first'], edge['second']):
+                    key = tuple(endpoint[k] for k in ('resname', 'chain', 'number', 'insertion_code'))
+                    graph_keys.add(key); endpoint_names.setdefault(key, set()).add(endpoint['atom_name'])
+            for key in graph_keys:
+                row = next(r for r in residues if (r['residue'], r['chain'], r['number']) ==
+                           (key[0], key[1], key[2] + key[3]))
+                row['coordinates'] = [tuple(float(line[i:i+8]) for i in (30, 38, 46))
+                                      for line in backend_atoms[key] if line[76:78].strip().upper() not in {'H', 'D'}
+                                      or line[12:16].strip() in endpoint_names.get(key, set())]
+            preview['connectivity_coordinate_source_sha256'] = retained['sha256']
+        preview['selected_box_review'] = [{**for_box({'residues': residues}, r['geometry']), 'label': r['box_label'],
+            'warning': 'Distances describe the proposed changes relative to each reviewed box; they do not grant permission to ignore them.'}
+            for r in regions]
+        return preview
+
+    def prepare_reviewed_receptor(self, study_id, *, request_id, expected_revision, model_changes=None):
+        """Explicit second stage: selected sites survive a preparation failure."""
+        from dataclasses import fields
+        from .services.site_exploration import read_exploration, parameterization_plan
+        state = self.controller.get_study(study_id)
+        prior = next((j for j in state.jobs if j.request_id == request_id), None)
+        if prior:
+            return {'job_id': prior.id, 'stage': prior.stage, 'replayed': True}
+        if state.revision != expected_revision:
+            from .state import RevisionConflictError
+            raise RevisionConflictError('Study changed before preparing the reviewed receptor')
+        setup = state.workflow_data.get('study_setup') or {}
+        if not setup.get('explore_sites_first') or not state.selected_pocket_ids or state.pending_decisions:
+            raise ValueError('Review and approve docking regions before receptor preparation')
+        self._assert_no_active_stage()
+        preparation_status = state.workflow_data.get('receptor_parameterization_status')
+        if preparation_status != 'not_started' and not (model_changes and preparation_status == 'failed'):
+            raise ValueError('Preparation was already attempted; review its retained evidence before any new attempt')
+        root = Path(state.workflow_data['site_exploration_root'])
+        from .protocol_finalization import approved_regions_from_study
+        approved_regions_from_study(state)
+        for artifact in state.artifacts:
+            if artifact.kind in {'source_receptor_structure', 'normalized_receptor_input',
+                                  'site_review_receptor_structure', 'site_exploration_record'}:
+                if not artifact.sha256 or sha256(Path(artifact.path)) != artifact.sha256:
+                    raise ValueError('Registered site-review input changed before preparation')
+        read_exploration(root)
+        keys = {f.name for f in fields(ReceptorPreparationOptions)}
+        values = {key: value for key, value in setup.items() if key in keys}
+        # Keep the original mmCIF handoff/identity, rather than treating its
+        # normalized legacy PDB as a newly chosen deposited input.
+        values['input_pdb'] = setup.get('input_structure', values['input_pdb'])
+        for key in ('input_pdb', 'working_directory', 'geostd_library', 'meeko_template_file'):
+            if values.get(key):
+                values[key] = Path(values[key])
+        plan = parameterization_plan(build_receptor_preparation_plan(
+            self.preparation_executable, ReceptorPreparationOptions(**values)))
+        model_record = model_root = model_record_sha256 = None
+        if model_changes is not None:
+            from .services.receptor_model_review import preview_changes, write_model
+            if (not isinstance(model_changes, dict) or set(model_changes) != {
+                    'choices', 'preview_sha256', 'actor', 'rationale'}
+                    or any(not isinstance(model_changes[k], str) or not model_changes[k].strip()
+                           for k in ('preview_sha256', 'actor', 'rationale'))):
+                raise ValueError('Exact preview, actor and rationale are required for receptor changes')
+            preview = self.preview_receptor_changes(study_id, model_changes['choices'], expected_revision=expected_revision)
+            if preview['preview_sha256'] != model_changes['preview_sha256']:
+                raise ValueError('Receptor changes differ from the reviewed preview')
+            if not preview['changes']:
+                raise ValueError('No model changes were selected; use the ordinary preparation action')
+            _, derivative = preview_changes(preview['source_path'], model_changes['choices'], context=preview['context'])
+            model_root = Path(setup['working_directory']) / '.docking-universal-reviewed-models' / uuid4().hex
+            model, model_record = write_model(model_root, plan.receptor_pdb.name, preview, derivative,
+                actor=model_changes['actor'], rationale=model_changes['rationale'])
+            model_record_sha256 = sha256(model_root / 'reviewed_model.json')
+            values.update(input_pdb=model, working_directory=model_root / 'preparation',
+                          pdbfixer='off', preparation_backend='meeko')
+            plan = parameterization_plan(build_receptor_preparation_plan(
+                self.preparation_executable, ReceptorPreparationOptions(**values)))
+            environment = dict(plan.request.environment)
+            environment.update(DOCKING_UNIVERSAL_REVIEWED_MODEL_ONLY='1', MEEKO_DEFAULT_ALTLOC='')
+            plan = replace(plan, request=replace(plan.request, environment=environment))
+            if model_record.get('connectivity_execution'):
+                helper = Path(self.preparation_executable).with_name('docking-universal-reviewed-connectivity.py')
+                if not helper.is_file():
+                    raise ValueError('Reviewed-connectivity preparation adapter is unavailable')
+                plan = replace(plan, request=replace(plan.request, command=(sys.executable, str(helper),
+                    '--record', str(model_root / 'reviewed_model.json'), '--record-sha256', model_record_sha256,
+                    '--out', str(plan.output_root))))
+        if plan.output_root.exists():
+            raise ValueError('Preparation output already exists; it will not be overwritten or retried automatically')
+        pins = {}
+        for path in root.rglob('*'):
+            if path.is_symlink():
+                raise ValueError('Site-review evidence may not contain symbolic links')
+            if path.is_file():
+                pins[str(path.relative_to(root))] = sha256(path)
+        def mark(latest):
+            latest.workflow_data['receptor_parameterization_status'] = 'running'
+            if model_record:
+                latest.workflow_data.setdefault('reviewed_receptor_models', []).append({
+                    'request_id': request_id, 'record': str(model_root / 'reviewed_model.json'),
+                    'preview_sha256': model_record['preview_sha256'], 'status': 'preparing',
+                    'actor': model_record['actor'], 'rationale': model_record['rationale']})
+                for suffix, kind, path in (
+                    ('record', 'reviewed_receptor_model', model_root / 'reviewed_model.json'),
+                    ('input', 'reviewed_receptor_input', Path(model_record['model_path']))):
+                    latest.artifacts.append(ArtifactRecord('reviewed-model-' + model_root.name + '-' + suffix,
+                        kind, str(path), sha256(path), 'Explicit exploratory receptor change; not a validated control'))
+        retained, _ = self.controller.store.update(study_id, mark, expected_revision=expected_revision)
+        cancellation = threading.Event()
+        def work():
+            try:
+                result = ReceptorPreparationService(self.controller).run(
+                    study_id, plan, cancel_event=cancellation, request_id=request_id,
+                    expected_revision=retained.revision, allow_template_decision=False,
+                    stage='receptor_parameterization')
+                if result.status.value == 'completed':
+                    read_exploration(root)
+                    if any(not (root / name).is_file() or sha256(root / name) != digest
+                           for name, digest in pins.items()):
+                        raise ValueError('Reviewed site evidence changed during preparation')
+                    shutil.copytree(root / 'cavity', plan.output_root / 'cavity', dirs_exist_ok=True)
+                    if model_record:
+                        from .services.receptor_model_history import SCHEMA, normalize_preparation
+                        if sha256(Path(model_record['model_path'])) != model_record['model_input_sha256']:
+                            raise ValueError('Reviewed receptor model changed during parameterization')
+                        if sha256(model_root / 'reviewed_model.json') != model_record_sha256:
+                            raise ValueError('Receptor change approval record changed during parameterization')
+                        history = {'schema_name': SCHEMA, 'schema_version': 1,
+                            'original_input_sha256': model_record['context']['original_input_sha256'],
+                            'model_input_sha256': model_record['model_input_sha256'],
+                            'prepared_receptor_sha256': sha256(plan.receptor_pdbqt),
+                            'review_record_sha256': model_record_sha256,
+                            'changes': [dict(change, actor=model_record['actor'], rationale=model_record['rationale'])
+                                        for change in model_record['changes']]}
+                        normalize_preparation({'model_change_history': history}, sha256(plan.receptor_pdbqt))
+                        (plan.output_root / 'receptor/receptor_model_history.json').write_text(json.dumps(history, indent=2) + '\n')
+                def finish(latest):
+                    latest.workflow_data['receptor_parameterization_status'] = result.status.value
+                    latest.workflow_data['site_review_source_hashes'] = pins
+                    latest.workflow_data['receptor_parameterization_attempt_root'] = str(plan.output_root)
+                    latest.workflow_data.setdefault('receptor_preparation_attempts', []).append({
+                        'request_id': request_id, 'root': str(plan.output_root), 'status': result.status.value,
+                        'reviewed_model': str(model_root) if model_record else None})
+                    if model_record:
+                        for review in latest.workflow_data['reviewed_receptor_models']:
+                            if review['request_id'] == request_id:
+                                review['status'] = result.status.value
+                        if result.status.value == 'completed':
+                            history_path = plan.output_root / 'receptor/receptor_model_history.json'
+                            latest.artifacts.append(ArtifactRecord('receptor-model-history', 'receptor_model_history',
+                                str(history_path), sha256(history_path), 'Portable record of explicitly reviewed receptor changes'))
+                    if result.status.value == 'failed':
+                        from .services.preparation_site_issues import collect_site_issues, for_box
+                        issues = collect_site_issues(plan.output_root, plan.structure_input.engine_pdb_path)
+                        latest.workflow_data['preparation_site_issues'] = issues
+                        known = {a.id for a in latest.artifacts}
+                        evidence_paths = [Path(p) for p in issues['diagnostic_logs']]
+                        evidence_paths.extend(plan.output_root / 'receptor' / name for name in (
+                            'preparation_intervention.json', 'receptor_failure_diagnosis.txt', 'pdbfixer_audit.json'))
+                        for path in evidence_paths:
+                            identity = 'parameterization-evidence-' + path.name
+                            if path.is_file() and identity not in known:
+                                latest.artifacts.append(ArtifactRecord(identity, 'preparation_diagnostic',
+                                    str(path.resolve()), sha256(path),
+                                    'Retained failed preparation evidence; not an approved model change'))
+                                known.add(identity)
+                        for candidate in latest.workflow_data.get('pocket_candidates', []):
+                            geometry = candidate.get('evidence', {}).get('geometry')
+                            if geometry:
+                                candidate['evidence']['receptor_preparation_review'] = for_box(issues, geometry)
+                self.controller.store.update(study_id, finish)
+            except Exception as exc:
+                self.controller.store.update(study_id, lambda latest:
+                    latest.workflow_data.update(receptor_parameterization_status='failed'))
+                self._record_orchestration_failure(study_id, exc)
+            finally:
+                with self._guard:
+                    self._cancellations.pop(study_id, None)
+                    self._threads.pop(study_id, None)
+        thread = threading.Thread(target=work, name=f'du-parameterize-{study_id}', daemon=True)
+        with self._guard:
+            if self._threads:
+                raise ActiveStageError('Another scientific workflow is already running')
+            self._threads[study_id] = thread
+            self._cancellations[study_id] = cancellation
+            thread.start()
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            latest = self.controller.get_study(study_id)
+            job = next((j for j in latest.jobs if j.request_id == request_id), None)
+            if job:
+                return {'job_id': job.id, 'stage': job.stage, 'output_root': str(plan.output_root)}
+            if not thread.is_alive():
+                break
+            time.sleep(.01)
+        raise RuntimeError('Parameterization worker did not persist its job start')
 
     def resume_after_decision(self, study_id: str, decision, approval) -> dict[str, Any] | None:
         """Resume a supported preparation checkpoint using the recorded response."""
@@ -1191,10 +1473,12 @@ class ProtocolWorkflowRunner:
         boxes = tuple(ordered_pocket_boxes(cavity))
         state = self.controller.get_study(study_id)
         setup = state.workflow_data.get("study_setup") or {}
-        native_record = output_root / 'native-preparation.json'
-        native_bound = (setup.get('site_mode') == 'ligand' and native_record.is_file()
-                        and json.loads(native_record.read_text(encoding='utf-8')).get('site_mode') == 'ligand')
-        bound_review = setup.get('predict_pockets_with_ligand') or native_bound
+        bound_review = setup.get("site_mode") == "ligand"
+        reference_only = bound_review and not setup.get("predict_pockets_with_ligand")
+        # Legacy pocket context is not requested prediction evidence for a
+        # reference-only input-ligand box.
+        if reference_only:
+            boxes = ()
         if not boxes and not bound_review:
             raise FileNotFoundError(f"Preparation produced no retained docking boxes in {cavity}")
         evidence = cavity / "pdb_site_evidence" / "pdb_ligand_site_evidence.json"
@@ -1204,11 +1488,11 @@ class ProtocolWorkflowRunner:
             if not source or sha256(Path(source.path)) != source.sha256 or Path(source.path) != Path(setup["input_pdb"]):
                 raise ValueError("Input structure changed before bound-ligand site review")
         PocketReviewService(self.controller).start(study_id, PocketReviewInputs(
-            target=output_root.name.removesuffix("_receptor_prep"),
+            target=output_root.name.removesuffix('-site-review').removesuffix("_receptor_prep"),
             cavity_directory=cavity,
             boxes=boxes,
             pocket_evidence_record=evidence if evidence.is_file() else None,
-            review_scene=scenes[0] if scenes else None,
+            review_scene=scenes[0] if scenes and not reference_only else None,
             bound_ligand_setup=setup if bound_review else None,
         ))
 

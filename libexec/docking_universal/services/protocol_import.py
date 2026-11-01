@@ -108,6 +108,13 @@ def inspect_protocol_bundle(source):
         raise ValueError('Invalid protocol bundle: ' + str(exc)) from None
     if _digest(source) != before:
         raise ValueError('Protocol bundle changed during verification')
+    from .receptor_model_history import normalize_preparation
+    preparation = normalize_preparation(record.get('receptor_preparation'), locked['receptor_sha256'])
+    reference_review = preparation.get('site_reference_review')
+    if reference_review:
+        if (protocol_type(record) == 'control-validated' or len(regions) != 1
+                or regions[0]['box_sha256'] != reference_review['review']['box_sha256']):
+            raise ValueError('Reviewed incomplete reference cannot transfer to a control or another site')
     parameters = record.get('parameters') or {}
     if int(parameters.get('conformers_per_state', 0)) < 1 or not parameters.get('seeds'):
         raise ValueError('Protocol lacks complete conformer and repeat settings')
@@ -118,7 +125,8 @@ def inspect_protocol_bundle(source):
         'regions': regions, 'verified_files': len(inventory),
         'exploratory_authorization_required': protocol_type(record) != 'control-validated',
         'receptor_sha256': locked['receptor_sha256'], 'box_sha256': locked['box_sha256'],
-        'receptor_modification_warning': (record.get('receptor_preparation') or {}).get('receptor_modification_warning'),
+        'receptor_modification_warning': preparation.get('receptor_modification_warning'),
+        'site_reference_warning': reference_review['warning'] if reference_review else None,
         'scientific_software': record.get('software') or {},
     }
 

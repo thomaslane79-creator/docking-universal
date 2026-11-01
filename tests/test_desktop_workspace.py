@@ -16,6 +16,30 @@ from docking_universal.state import JsonStudyStore
 
 @unittest.skipIf(QT_IMPORT_ERROR is not None, "selected Qt 6 binding is unavailable")
 class DesktopWorkspaceTests(unittest.TestCase):
+    def test_site_only_approval_cannot_enable_finalization_and_failure_keeps_review(self):
+        from unittest.mock import Mock
+        controller = StudyController(self.store)
+        state = self.store.load('desktop')
+        controller.resolve_decision('desktop', state.pending_decisions[0].id, ('P1',),
+            actor='test-scientist', expected_revision=state.revision)
+        state = self.store.load('desktop')
+        state.workflow_data['study_setup'] = {'explore_sites_first': True}
+        state.workflow_data['receptor_parameterization_status'] = 'not_started'
+        self.store.save(state)
+        with patch.object(self.window, 'host_controller', Mock(available=True)):
+            self.window.exploratory_approval.setChecked(True)
+            self.window.refresh()
+            self.assertFalse(self.window.finalize_button.isEnabled())
+            self.assertTrue(self.window.protocol_finalization_panel.prepare_reviewed_button.isEnabled())
+            state = self.store.load('desktop')
+            state.workflow_data['receptor_parameterization_status'] = 'failed'
+            self.store.save(state)
+            self.window.refresh()
+            self.assertFalse(self.window.finalize_button.isEnabled())
+            self.assertFalse(self.window.protocol_finalization_panel.prepare_reviewed_button.isEnabled())
+            self.assertEqual(self.window.candidates.rowCount(), 1)
+            self.assertIn('boxes remain available', self.window.finalization_status.text())
+
     def test_native_control_candidate_uses_capability_instead_of_unconditional_disable(self):
         from types import SimpleNamespace
         from docking_universal.windows_desktop import CAPABILITIES
@@ -95,6 +119,32 @@ class DesktopWorkspaceTests(unittest.TestCase):
             self.assertEqual(payload['cluster_rmsd'], 1.5)
             self.assertEqual(payload['representatives'], 3)
             self.assertEqual(self.store.path_for('desktop').read_bytes(), original)
+
+    def test_clustering_presets_send_the_exact_numeric_launch_value(self):
+        from unittest.mock import Mock
+        original = self.store.path_for('desktop').read_bytes()
+        panel = self.window.screening_setup_panel
+        for index, expected in ((0, 1.0), (1, 1.5), (2, 2.0), (3, 1.25)):
+            panel.cluster_preset.setCurrentIndex(index)
+            if index == 3:
+                panel.cluster_rmsd.setValue(expected)
+            self.window._screening_plan = {'compound_count': 1}
+            host = Mock(available=True)
+            with patch.object(self.window, 'host_controller', host), patch.object(self.window, 'refresh'):
+                self.window.start_screening()
+            self.assertEqual(host.start_screening.call_args.args[0]['cluster_rmsd'], expected)
+            self.assertEqual(self.store.path_for('desktop').read_bytes(), original)
+
+    def test_clustering_category_restores_from_saved_numeric_cutoff_without_study_mutation(self):
+        original = self.store.path_for('desktop').read_bytes()
+        for value, index in ((1.0, 0), (2.0, 2), (1.25, 3), (1.5, 1)):
+            self.window.screen_cluster_rmsd.setValue(value)
+            self.window.close()
+            self.window = StudyWindow(self.store, 'desktop', settings=self.settings)
+            self.assertEqual(self.window.screen_cluster_rmsd.value(), value)
+            self.assertEqual(self.window.screening_setup_panel.cluster_preset.currentIndex(), index)
+            self.assertEqual(self.store.path_for('desktop').read_bytes(), original)
+            self.assertFalse(self.window.screen_exploratory_approval.isChecked())
 
     def test_expanded_pose_mode_clears_cluster_contacts_and_forces_reloading_on_return(self):
         from unittest.mock import Mock
@@ -1930,8 +1980,8 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.store.save(state)
         self.window.refresh()
         self.assertEqual(self.window.screening_results.rowCount(), 1)
-        values = [self.window.screening_results.item(0, column).text() for column in range(6)]
-        self.assertEqual(values, ["ligand_a", "EXPLORATORY_NO_CONTROL", "2", "30", "-7.2", "2"])
+        values = [self.window.screening_results.item(0, column).text() for column in range(7)]
+        self.assertEqual(values, ["ligand_a", "EXPLORATORY_NO_CONTROL", "2", "30", "-7.2", "Not recorded", "2"])
         self.assertTrue(self.window.open_screen_report_button.isEnabled())
         self.window.screening_results.selectRow(0)
         self.assertEqual(self.window.interaction_diagram_choice.count(), 1)

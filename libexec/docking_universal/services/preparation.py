@@ -144,6 +144,7 @@ def build_receptor_preparation_plan(
         # Predict on the prepared, ligand-removed receptor. The host retains
         # the exact input-ligand box separately; it is not a predicted cavity.
         "DOCKING_UNIVERSAL_SITE_MODE": "pockets" if options.predict_pockets_with_ligand else options.site_mode,
+        "DOCKING_UNIVERSAL_REFERENCE_SITE_ONLY": "1" if options.site_mode == "ligand" and not options.predict_pockets_with_ligand else "0",
         "DOCKING_UNIVERSAL_CAVITY_MODE": str(options.cavity_mode),
         "DOCKING_UNIVERSAL_MAX_POCKETS": str(options.max_pockets),
         "DOCKING_UNIVERSAL_CENTER_MODE": options.center_mode,
@@ -206,10 +207,13 @@ class ReceptorPreparationService:
         Path(plan.request.cwd).mkdir(parents=True, exist_ok=True)
         resume_job_id = run_options.pop("resume_job_id", None)
         stage = run_options.pop("stage", "preparation_and_pocket_detection")
+        allow_template_decision = run_options.pop('allow_template_decision', True)
         if resume_job_id is not None and stage != "preparation_and_pocket_detection":
             raise ValueError("A resumed preparation keeps its original scientific stage")
 
         def intervention_probe():
+            if not allow_template_decision:
+                return None
             if not plan.intervention_record.is_file():
                 return None
             decision = decision_from_intervention(
@@ -262,6 +266,8 @@ class ReceptorPreparationService:
                                ("pdb2pqr.log", "protonation_log"),
                                ("reduce2_audit.json", "reduce2_audit"),
                                ("reduce2.log", "reduce2_log"),
+                               ("connectivity_override_audit.json", "connectivity_override_audit"),
+                               ("coordinate_stage_reuse.json", "coordinate_stage_reuse"),
                                (f"{plan.receptor_pdb.stem}_reduce2H.pdb", "reduce2_receptor"),
                                (f"{plan.receptor_pdb.stem}_protonated.pdb", "protonated_receptor"),
                                (f"{plan.receptor_pdb.stem}.pqr", "protonated_receptor_pqr"),

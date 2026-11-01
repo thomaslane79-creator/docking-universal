@@ -205,6 +205,7 @@ def build_labeled_candidate_mappings(
     boxes: list[Path],
     pocket_evidence: dict[str, Any] | None,
     cavity: Path | str,
+    *, include_predicted: bool = True,
 ) -> list[dict[str, Any]]:
     """Create the same selectable P#, consolidated P#/P#, and L# boxes."""
     cavity = Path(cavity)
@@ -225,7 +226,7 @@ def build_labeled_candidate_mappings(
         if pocket:
             groups_by_pocket.setdefault(str(pocket), []).append(group)
     available = {path.resolve() for path in boxes}
-    for fallback_index, path in enumerate(ordered_pocket_boxes(cavity), 1):
+    for fallback_index, path in enumerate(ordered_pocket_boxes(cavity) if include_predicted else (), 1):
         if available and path.resolve() not in available:
             continue
         match = re.search(r"_pocket(\d+)\.conf$", path.name)
@@ -269,7 +270,7 @@ def build_labeled_candidate_mappings(
         })
 
     diagnostics = cavity / "pocket_selection_diagnostics.tsv"
-    if diagnostics.is_file():
+    if include_predicted and diagnostics.is_file():
         with diagnostics.open(newline="") as handle:
             retained = [
                 row for row in csv.DictReader(handle, delimiter="\t")
@@ -295,7 +296,7 @@ def build_labeled_candidate_mappings(
     for group in ligand_groups:
         identity = group.get("site_identity") or {}
         matching_pocket = (group.get("pocket_recovery") or group.get("fpocket_recovery") or {}).get("best_matching_pocket")
-        if matching_pocket:
+        if matching_pocket and include_predicted:
             continue
         label = identity.get("canonical_label", f"L{group.get('site_number', '?')}")
         path = write_box_files(
@@ -307,7 +308,8 @@ def build_labeled_candidate_mappings(
         candidates.append({
             "label": label,
             "path": path,
-            "description": f"ligand-defined box without a corresponding {detector} cavity",
+            "description": (f"ligand-defined box without a corresponding {detector} cavity" if include_predicted
+                            else "ligand-defined box from independent related-structure evidence; pocket prediction not requested"),
             "requires_homolog_approval": requires_homolog_approval,
             "evidence": {
                 "kind": "ligand_defined",
@@ -370,6 +372,7 @@ class PocketReviewService:
             [Path(path) for path in inputs.boxes],
             evidence,
             cavity,
+            include_predicted=not (inputs.bound_ligand_setup and not inputs.bound_ligand_setup.get("predict_pockets_with_ligand")),
         )
         if inputs.bound_ligand_setup:
             bound = input_ligand_candidate(inputs.target, cavity, inputs.bound_ligand_setup)

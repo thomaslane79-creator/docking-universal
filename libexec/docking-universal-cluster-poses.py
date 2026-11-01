@@ -16,6 +16,7 @@ support are reported but do not prove a pose is correct.
 import argparse
 import csv
 import json
+import math
 import os
 import re
 import shutil
@@ -277,17 +278,31 @@ conformer support are reported separately as measures of search repeatability.
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--comparison-root", type=Path, help="existing redocking comparison tree containing typed pose SDFs")
     source.add_argument("--docking-root", type=Path, help="raw cross-seed docking tree to export and cluster")
+    source.add_argument("--retained-analysis", type=Path, help="recluster an existing pose analysis into a NEW directory, without exporting or docking again")
     parser.add_argument("--ligand-work", type=Path, help="typed per-conformer SDF directory; required with --docking-root")
     parser.add_argument("--engine", choices=("vina", "qvinaw", "adgpu"), default="vina", help="Engine-specific output suffix; AD4 energies remain distinct")
-    parser.add_argument("--receptor", required=True, type=Path, help="fixed receptor-frame PDB used for nearby residues and scenes")
+    parser.add_argument("--receptor", type=Path, help="fixed receptor-frame PDB; retained analyses use their recorded receptor")
     parser.add_argument("--out", required=True, type=Path, help="cluster tables, all-pose SDF, representatives, and PyMOL scripts")
     parser.add_argument("--cluster-rmsd", type=float, default=1.5, help="symmetry-aware no-fit heavy-atom RMSD cutoff in A (default: 1.5)")
     parser.add_argument("--representatives", type=int, default=3, help="number of lowest-energy distinct clusters selected (default: 3)")
     parser.add_argument("--contact-cutoff", type=float, default=5.0, help="receptor neighborhood shown around representatives in A (default: 5.0)")
     parser.add_argument("--mk-export", default="mk_export.py", help="Meeko PDBQT-to-SDF pose exporter")
     args = parser.parse_args()
-    if args.cluster_rmsd <= 0 or args.representatives < 1:
+    if not math.isfinite(args.cluster_rmsd) or args.cluster_rmsd <= 0 or args.representatives < 1:
         parser.error("cluster RMSD and representative count must be positive")
+    if not math.isfinite(args.contact_cutoff) or args.contact_cutoff <= 0:
+        parser.error("contact cutoff must be finite and positive")
+    retained_hashes = None
+    if args.retained_analysis:
+        args.retained_analysis = args.retained_analysis.expanduser().resolve()
+        recorded_receptor = args.retained_analysis / 'receptor.pdb'
+        if args.receptor and args.receptor.expanduser().resolve().read_bytes() != recorded_receptor.read_bytes():
+            parser.error('Reclustering cannot change the retained receptor')
+        args.receptor = recorded_receptor
+        if args.out.expanduser().resolve().exists():
+            parser.error('Reclustering requires a new output directory; original results are never overwritten')
+    if not args.receptor:
+        parser.error('--receptor is required unless using --retained-analysis')
     if not args.receptor.expanduser().is_file():
         parser.error("receptor PDB not found")
     if args.docking_root and not args.ligand_work:
@@ -298,9 +313,11 @@ conformer support are reported separately as measures of search repeatability.
     from rdkit.ML.Cluster import Butina
 
     output = args.out.expanduser().resolve()
-    output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="docking-universal-cluster-") as tmp:
-        if args.comparison_root:
+        if args.retained_analysis:
+            from docking_universal.services.reclustering import load_retained_records
+            records, retained_hashes = load_retained_records(args.retained_analysis, args.engine)
+        elif args.comparison_root:
             records = load_from_comparisons(args.comparison_root.expanduser().resolve())
         else:
             exporter = locate_script_tool(args.mk_export) if Path(args.mk_export).name == args.mk_export else args.mk_export
@@ -312,6 +329,7 @@ conformer support are reported separately as measures of search repeatability.
             )
     if not records:
         raise SystemExit("No scored poses were found")
+    output.mkdir(parents=True, exist_ok=False if args.retained_analysis else True)
 
     # Separate incompatible chemical states before RMSD clustering.
     groups = defaultdict(list)
@@ -386,6 +404,10 @@ conformer support are reported separately as measures of search repeatability.
         molecule.SetDoubleProp("DockingUniversal_Energy", record["energy"])
         all_writer.write(molecule)
     all_writer.close()
+    if args.retained_analysis:
+        # Preserve the original coordinate/energy records byte-for-byte rather
+        # than round-trip serialization during an analysis-only revision.
+        shutil.copy2(args.retained_analysis / 'all_poses.sdf', output / 'all_poses.sdf')
 
     for rank, cluster in enumerate(selected, 1):
         cluster_dir = output / f"cluster_{cluster['cluster_id']:03d}"
@@ -409,12 +431,21 @@ conformer support are reported separately as measures of search repeatability.
     browser = write_browser(output, args.receptor.expanduser().resolve(), selected, args.contact_cutoff)
     report = {
         "method": "RDKit symmetry-aware heavy-atom CalcRMS without fitting; Butina clustering",
+        "engine": args.engine,
+        "scoring_function": "AD4" if args.engine == 'adgpu' else 'Vina',
         "cluster_rmsd_angstrom": args.cluster_rmsd,
         "pose_count": len(records), "chemical_state_count": len(groups),
         "cluster_count": len(clusters), "selected_representative_count": len(selected),
         "selected_cluster_ids": [cluster["cluster_id"] for cluster in selected],
         "representative_browser": str(browser),
     }
+    if args.retained_analysis:
+        from docking_universal.services.reclustering import input_hashes
+        if input_hashes(args.retained_analysis) != retained_hashes:
+            raise RuntimeError('Source analysis changed during reclustering; revision is not accepted')
+        report.update(analysis_operation='recluster_retained_poses', new_docking_jobs=0,
+                      source_analysis=str(args.retained_analysis), source_input_sha256=retained_hashes,
+                      original_pose_order_preserved=True, original_coordinates_and_energies_unchanged=True)
     (output / "clustering_manifest.json").write_text(json.dumps(report, indent=2) + "\n")
     print(f"Clustered {len(records)} poses into {len(clusters)} distinct clusters at {args.cluster_rmsd:.2f} A")
     for rank, cluster in enumerate(selected, start=1):

@@ -15,6 +15,8 @@ class StageTransition:
 
 
 SITE_GUIDED_PROTOCOL = (
+    StageTransition('site_exploration', 'pocket_review'),
+    StageTransition('receptor_parameterization', 'final_report'),
     StageTransition("receptor_input", "receptor_preparation"),
     StageTransition("receptor_preparation", "pocket_detection"),
     StageTransition("preparation_and_pocket_detection", "pocket_review"),

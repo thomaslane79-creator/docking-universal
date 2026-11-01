@@ -7,6 +7,8 @@ from pathlib import Path
 
 from pdbfixer import PDBFixer
 from openmm.app import PDBFile
+from docking_universal.services.repair_geometry import introduced_heavy_atom_overlaps
+from docking_universal.services.preparation_atom_inventory import missing_atom_inventory
 
 
 def atom_count(residues):
@@ -50,6 +52,21 @@ def main():
 
     fixer.findMissingAtoms()
     missing_heavy_atoms = atom_count(fixer.missingAtoms)
+    missing_inventory = missing_atom_inventory(fixer.missingAtoms)
+    if any(row['missing_backbone_atom_names'] for row in missing_inventory):
+        # Existing partial residues can be missing backbone atoms even though
+        # missingResidues was cleared. Do not disguise backbone construction as
+        # the previously documented side-chain-only fallback.
+        audit = {'status': 'review_required_missing_backbone_atoms',
+                 'input_structure': str(source.resolve()), 'input_format': input_format,
+                 'missing_atom_inventory': missing_inventory,
+                 'nonstandard_residue_replacements_not_adopted': replacements,
+                 'missing_residue_segments_detected_not_built': missing_residues,
+                 'missing_heavy_atoms_added': 0, 'output_created': False,
+                 'policy': {'missing_backbone_atoms': 'not built; explicit external model review required',
+                            'missing_residues': 'reported but not built'}}
+        Path(args.audit_json).write_text(json.dumps(audit, indent=2) + '\n')
+        raise RuntimeError('Observed partial residues require missing backbone atoms; automatic backbone completion is disabled. Review the retained missing-atom inventory.')
     missing_terminals = atom_count(fixer.missingTerminals)
     # Meeko assigns receptor termini itself. PDBFixer's terminal additions can
     # create OXT/CONECT combinations that RDKit reads as invalid oxygen valence.
@@ -70,18 +87,25 @@ def main():
         "missing_residue_segments_detected_not_built": missing_residues,
         "nonstandard_residue_replacements": replacements,
         "missing_heavy_atoms_added": missing_heavy_atoms,
+        "missing_atom_inventory": missing_inventory,
         "missing_terminal_atoms_detected_not_added": missing_terminals,
         "policy": {
             "alternate_locations": "PDBFixer selected one location",
             "missing_residues": "reported but not built",
             "nonstandard_residues": "recognized mappings replaced",
             "missing_sidechain_atoms": "added",
+            "missing_backbone_atoms": "not built",
             "missing_terminal_atoms": "reported but not added",
             "hydrogens": "left for the receptor backend",
         },
     }
+    overlaps = introduced_heavy_atom_overlaps(source, output)
+    audit['introduced_gross_heavy_atom_overlaps'] = overlaps
+    audit['status'] = 'rejected_generated_geometry' if overlaps else 'completed_conservative_repair'
     Path(args.audit_json).write_text(json.dumps(audit, indent=2) + "\n")
     print(json.dumps(audit, indent=2))
+    if overlaps:
+        raise RuntimeError('PDBFixer generated sub-Angstrom heavy-atom overlaps; repair is retained for review but not accepted for parameterization')
 
 
 if __name__ == "__main__":

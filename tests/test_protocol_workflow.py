@@ -145,6 +145,10 @@ class ProtocolWorkflowTests(unittest.TestCase):
         self.assertIsNotNone(request.receptor_pdbqt_sha256)
 
     def test_ligand_guided_preparation_collects_related_pdb_evidence(self):
+        # Exact ligand-site review requires the selected instance to exist.
+        # A protein-only fixture cannot represent successful ligand-guided review.
+        self.input.write_text(self.input.read_text() +
+            'HETATM    2  C1  LIG A 101       1.000   2.000   3.000  1.00 10.00           C\n')
         self.controller.create_study("ligand-workflow", "Ligand workflow")
         runner = ProtocolWorkflowRunner(self.controller, self.executable())
         state = self.store.load("ligand-workflow")

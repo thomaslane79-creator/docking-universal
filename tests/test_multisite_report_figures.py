@@ -15,6 +15,26 @@ SPEC.loader.exec_module(FIGURES)
 
 
 class MultiSiteReportFigureTests(unittest.TestCase):
+    def test_ligand_box_approval_is_separate_from_p2rank_score(self):
+        import matplotlib.pyplot as plt
+        with tempfile.TemporaryDirectory() as temporary:
+            cavity = Path(temporary)
+            diagnostics = cavity / 'pockets.tsv'
+            diagnostics.write_text('rank_order\tpocket_file\tscore\tdecision\tpocket_engine\n'
+                                   '1\tpocket1_atm.pdb\t17.47\tselected\tp2rank\n')
+            with mock.patch.object(plt, 'close'):
+                FIGURES.plot_cavity_selection(diagnostics, 'target_bound_ligand.conf', cavity / 'panel.png',
+                    ['target_bound_ligand.conf'],
+                    approved_region_note=FIGURES.approved_region_plot_note([
+                        {'box_label': 'B1', 'site_source': 'input_bound_ligand'}]))
+                axis = plt.gcf().axes[0]
+                notes = '\n'.join(text.get_text() for text in axis.texts)
+                self.assertIn('Approved box B1 = input ligand; no prediction score', notes)
+                self.assertIn('P2Rank predictions', notes)
+                self.assertNotIn('selected P1', notes)
+                self.assertEqual(axis.collections[0].get_offsets().tolist(), [[1., 17.47]])
+            plt.close('all')
+
     def test_p2rank_score_contract_drives_the_same_ranking_panel(self):
         with tempfile.TemporaryDirectory() as temporary:
             cavity = Path(temporary)

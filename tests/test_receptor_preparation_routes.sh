@@ -64,7 +64,7 @@ done
 
 succeed=0
 case "${PREP_ROUTE_CASE:?}" in
-  strict|ligand) succeed=1 ;;
+  strict|ligand|parameterize) succeed=1 ;;
   pdbfixer) [ "$count" -ge 2 ] && succeed=1 ;;
   disulfide) case "$args" in *CYX*) succeed=1 ;; esac ;;
   histidine)
@@ -102,6 +102,9 @@ write_adfr_mock() {
   cat > "$1" <<'EOF'
 #!/usr/bin/env bash
 set -eu
+# The application probes startup before sending a receptor. A usable backend
+# fixture must support help without trying to write an unspecified output.
+case "${1:-}" in -h|--help) printf 'usage: prepare_receptor -r receptor -o output\n'; exit 0 ;; esac
 out=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -160,6 +163,8 @@ run_route() {
 
   site_mode=pockets
   requested_ligand=""
+  parameterization_only=0
+  [ "$route_case" != parameterize ] || parameterization_only=1
   if [ "$route_case" = ligand ]; then
     site_mode=ligand
     requested_ligand=LIG
@@ -171,6 +176,7 @@ run_route() {
     FEEDBACK_LEVEL=concise
     DOCKING_UNIVERSAL_LOG_MODE=file
     DOCKING_UNIVERSAL_SITE_MODE="$site_mode"
+    DOCKING_UNIVERSAL_PARAMETERIZATION_ONLY="$parameterization_only"
     DOCKING_UNIVERSAL_LIGAND_RESNAME="$requested_ligand"
     DOCKING_UNIVERSAL_CAVITY_MODE=1
     DOCKING_UNIVERSAL_POCKET_ENGINE=fpocket
@@ -244,12 +250,26 @@ PY
 }
 
 assert_route strict strict_meeko
+assert_route parameterize strict_meeko
 assert_route ligand strict_meeko
 assert_route pdbfixer pdbfixer_then_strict_meeko
 assert_route disulfide meeko_disulfide_templates
 assert_route histidine guided_histidine_template $'1\n1\n'
 assert_route adfr adfr_legacy_linked_component_fallback
 assert_route removal meeko_user_approved_component_removal $'y\n'
+
+# A reviewed derivative must stop after its one strict backend attempt. The
+# generic mock rejects this case; ordinary automatic retries must not rescue it.
+if (DOCKING_UNIVERSAL_REVIEWED_MODEL_ONLY=1 run_route reviewed) > "$tmp/reviewed-expected-failure.log" 2>&1; then
+  fail "reviewed derivative unexpectedly passed the rejecting strict backend"
+fi
+[ "$(cat "$tmp/reviewed/meeko.count")" = 1 ] || fail "reviewed derivative ran an unapproved backend retry"
+grep -q 'no additional repair' "$tmp/reviewed/reviewed_receptor_prep/run.log" || fail "reviewed strict-stop reason missing"
+
+parameterized_root="$tmp/parameterize/parameterize_receptor_prep"
+[ -s "$parameterized_root/receptor/parameterize.pdbqt" ] || fail "parameterization-only receptor missing"
+[ ! -e "$parameterized_root/cavity/parameterize_pocket1.conf" ] || fail "parameterization repeated pocket detection"
+grep -q 'retained site review is unchanged' "$parameterized_root/run.log" || fail "parameterization-only completion missing"
 
 # A successful strict route must leave the complete review and reuse surface,
 # not merely a receptor PDBQT. This inventory protects the contract used by the

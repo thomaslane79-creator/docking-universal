@@ -1,5 +1,16 @@
 # GUI implementation roadmap
 
+### Exact reviewed side-chain candidate handoff (2026-10-25)
+
+Finish the demonstrated beta2 preparation blocker within the existing model
+review step: inspect a local, hash-bound candidate, verify only the explicitly
+listed missing side-chain additions and unchanged observed records, preserve
+prior exclusions, and retain permanent reconstruction/generation warnings.
+Strict preparation and a new native full workflow are required before claiming
+application acceptance. No automatic backbone construction, new molecular
+choices or working-installation changes are authorized. See the bounded
+[implementation gate](gui-idea-backlog.md).
+
 ### Older-macOS and cross-platform compatibility (2026-10-18)
 
 User authorizes an older-target GPU build and Windows/Linux portability work.

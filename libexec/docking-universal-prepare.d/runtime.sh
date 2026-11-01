@@ -23,6 +23,7 @@ load_prepare_runtime_defaults() {
   HYBRID_COMPARE_FP_MODE="${HYBRID_COMPARE_FP_MODE:-1}"
   SITE_MODE="${DOCKING_UNIVERSAL_SITE_MODE:-ask}"
   POCKET_ENGINE="${DOCKING_UNIVERSAL_POCKET_ENGINE:-auto}"
+  REFERENCE_SITE_ONLY="${DOCKING_UNIVERSAL_REFERENCE_SITE_ONLY:-0}"
   REQUESTED_LIGAND="${DOCKING_UNIVERSAL_LIGAND_RESNAME:-}"
   REQUESTED_LIGAND_CHAIN="${DOCKING_UNIVERSAL_LIGAND_CHAIN:-}"
   REQUESTED_LIGAND_RESSEQ="${DOCKING_UNIVERSAL_LIGAND_RESSEQ:-}"
@@ -33,6 +34,10 @@ load_prepare_runtime_defaults() {
     *) echo "ERROR: DOCKING_UNIVERSAL_SITE_MODE must be ask, ligand, or pockets" >&2; return 2 ;;
   esac
   case "$POCKET_ENGINE" in auto|p2rank|fpocket) ;; *) echo "ERROR: DOCKING_UNIVERSAL_POCKET_ENGINE must be auto, p2rank, or fpocket" >&2; return 2 ;; esac
+  case "$REFERENCE_SITE_ONLY" in 0|1) ;; *) echo "ERROR: DOCKING_UNIVERSAL_REFERENCE_SITE_ONLY must be 0 or 1" >&2; return 2 ;; esac
+  if [ "$REFERENCE_SITE_ONLY" = 1 ] && [ "$SITE_MODE" != ligand ]; then
+    echo "ERROR: Reference-site-only preparation requires explicit ligand mode" >&2; return 2
+  fi
 }
 
 # Resolve the executable backends once and publish the selected preparation
@@ -54,7 +59,9 @@ resolve_prepare_runtime_tools() {
     fi
   fi
   P2RANK_BIN="${DOCKING_UNIVERSAL_P2RANK:-$(command -v prank 2>/dev/null || command -v prank.bat 2>/dev/null || printf '%s' "$installed_p2rank")}"
-  if [ "$POCKET_ENGINE" = auto ]; then
+  if [ "${DOCKING_UNIVERSAL_PARAMETERIZATION_ONLY:-0}" = 1 ] || [ "$REFERENCE_SITE_ONLY" = 1 ]; then
+    POCKET_ENGINE=none
+  elif [ "$POCKET_ENGINE" = auto ]; then
     if [ -n "$P2RANK_BIN" ] && "$P2RANK_BIN" -v >/dev/null 2>&1; then POCKET_ENGINE=p2rank; else POCKET_ENGINE=fpocket; fi
   fi
   PREP_BACKEND="${DOCKING_UNIVERSAL_PREP_BACKEND:-auto}"
@@ -87,7 +94,7 @@ resolve_prepare_runtime_tools() {
   if [ "$POCKET_ENGINE" = p2rank ]; then
     [ -n "$P2RANK_BIN" ] && [ -x "$P2RANK_BIN" ] || { echo "ERROR: P2Rank launcher not found" >&2; return 1; }
     "$P2RANK_BIN" -v >/dev/null 2>&1 || { echo "ERROR: P2Rank could not start; verify its Java 17+ runtime" >&2; return 1; }
-  else
+  elif [ "$POCKET_ENGINE" != none ]; then
     [ -n "$FPOCKET_BIN" ] && [ -x "$FPOCKET_BIN" ] || { echo "ERROR: fpocket not found (run 'docking-universal doctor')" >&2; return 1; }
   fi
   [ -n "$PREP_RECEPTOR_BIN" ] && [ -x "$PREP_RECEPTOR_BIN" ] || { echo "ERROR: receptor preparation backend not found (install Meeko or configure ADFRsuite)" >&2; return 1; }

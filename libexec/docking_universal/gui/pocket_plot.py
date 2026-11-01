@@ -28,7 +28,7 @@ class PocketScorePlot(QtWidgets.QWidget):
         self.conformations = {}
 
     def set_study(self, state):
-        root = state.workflow_data.get("preparation_root")
+        root = state.workflow_data.get("preparation_root") or state.workflow_data.get('site_exploration_root')
         scores = {}
         if root:
             try:

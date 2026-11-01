@@ -430,6 +430,9 @@ def request_from_study(
     exploratory_use_approved: bool,
 ) -> ProtocolFinalizationRequest:
     """Build a finalization request only from persisted approved study state."""
+    if ((state.workflow_data.get('study_setup') or {}).get('explore_sites_first')
+            and state.workflow_data.get('receptor_parameterization_status') != 'completed'):
+        raise ValueError('Docking regions are reviewable, but the receptor is not parameterized for docking')
     regions, approval = approved_regions_from_study(state)
 
     def artifact_record(kind: str):
@@ -444,6 +447,15 @@ def request_from_study(
     source_record = artifact_record("source_receptor_structure")
     receptor_pdb_record = artifact_record("prepared_receptor_structure")
     receptor_pdbqt_record = artifact_record("prepared_receptor")
+    if any(a.kind == 'receptor_model_history' for a in state.artifacts):
+        history_artifact = artifact_record('receptor_model_history')
+        from .services.receptor_model_history import validate_history
+        history = validate_history(json.loads(Path(history_artifact.path).read_text()), receptor_pdbqt_record.sha256)
+        if history.get('review_record_sha256'):
+            review = next((a for a in state.artifacts if a.kind == 'reviewed_receptor_model'
+                           and a.sha256 == history['review_record_sha256']), None)
+            if not review or not Path(review.path).is_file() or sha256(review.path) != review.sha256:
+                raise ValueError('Reviewed receptor-change approval is missing or changed')
 
     preparation_root = state.workflow_data.get("preparation_root")
     if not preparation_root:

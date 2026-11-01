@@ -38,7 +38,43 @@ class ResultsReviewModelTests(unittest.TestCase):
         self.assertEqual(result.name, "ligand_a")
         self.assertEqual(result.best_score, -8.4)
         self.assertEqual(result.cluster_count, 1)
+        self.assertEqual(result.scoring_function, "Not recorded")
         self.assertEqual(self.state.to_dict(), before)
+
+    def test_scoring_identity_comes_from_each_retained_manifest_not_current_settings(self):
+        manifest = self.compound / "screen_manifest.json"
+        for engine, expected in (("vina", "Vina"), ("qvinaw", "Vina"),
+                                 ("adgpu", "AD4"), ("unknown", "Not recorded")):
+            with self.subTest(engine=engine):
+                manifest.write_text(json.dumps({"engine": engine}))
+                before = manifest.read_bytes()
+                self.state.workflow_data['study_setup'] = {'engine': 'adgpu' if engine != 'adgpu' else 'vina'}
+                result = ResultsReviewModel.compounds(self.state)[0]
+                self.assertEqual(result.scoring_function, expected)
+                self.assertEqual(result.best_score, -8.4)
+                self.assertEqual(manifest.read_bytes(), before)
+
+    def test_real_collector_energy_column_for_every_engine(self):
+        manifest = self.compound / "screen_manifest.json"
+        scores = self.compound / "all_scores.csv"
+        for engine, label in (("vina", "Vina"), ("qvinaw", "Vina"), ("adgpu", "AD4")):
+            with self.subTest(engine=engine):
+                manifest.write_text(json.dumps({"engine": engine}))
+                scores.write_text(
+                    "site,seed,score_format,affinity_kcal_per_mol,rmsd_lower_bound,rmsd_upper_bound\n"
+                    f"1,123,{engine},-7.25,0,0\n1,123,{engine},-6.50,1,2\n"
+                )
+                before = scores.read_bytes()
+                result = ResultsReviewModel.compounds(self.state)[0]
+                self.assertEqual(result.best_score, -7.25)
+                self.assertEqual(result.scoring_function, label)
+                self.assertEqual(scores.read_bytes(), before)
+
+    def test_canonical_energy_precedes_legacy_aliases(self):
+        (self.compound / "all_scores.csv").write_text(
+            "affinity_kcal_per_mol,affinity,score\n-6.1,-9,-10\n"
+        )
+        self.assertEqual(ResultsReviewModel.compounds(self.state)[0].best_score, -6.1)
 
     def test_cluster_projection_orders_by_energy_rank(self):
         diagrams = []

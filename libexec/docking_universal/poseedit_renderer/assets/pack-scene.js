@@ -14,8 +14,12 @@ window.packScene = function(scene) {
   }
   function geometry(s) {
     const atoms=new Map(s.atoms.map(a=>[a.id,a]));
+    // Residue-name glyphs can be left/right anchored by the drawer rather than
+    // centered on their R atom. Reserve both extents, not half their width;
+    // otherwise a nominally clear label can cover a ligand ring after drawing.
     return s.atoms.map(a=>rect(a.coordinates.x,a.coordinates.y,
-      a.label && a.element!=='C' ? Math.max(8,textWidth(a.label)+4):7,textHeight)).concat(
+      a.label && a.element!=='C' ? Math.max(8, textWidth(a.label) * (a.label.length > 3 ? 2 : 1)+12):7,
+      a.label && a.label.length > 3 ? textHeight+6 : textHeight)).concat(
       s.bonds.flatMap(b=>line(atoms.get(b.from).coordinates,atoms.get(b.to).coordinates).map(pointBox)));
   }
   const contourBoxes=scene.hydrophobicContacts.flatMap(c=>c.controlPoints.slice(1).flatMap((p,i)=>line(c.controlPoints[i],p).map(pointBox)));
@@ -44,6 +48,7 @@ window.packScene = function(scene) {
         const boxes=geometry(s);
         let collisions=0;
         for(const box of boxes) if(occupied.some(o=>hit(box,o))) collisions++;
+        const geometryHits=collisions;
         const route=line(source,target);
         for(const p of route.filter(p=>Math.hypot(p.x-target.x,p.y-target.y)>(pi?25:13))) {
           if(boxes.some(o=>hit(pointBox(p),o)))collisions++;
@@ -54,15 +59,16 @@ window.packScene = function(scene) {
         for(const p of route.filter(p=>Math.hypot(p.x-source.x,p.y-source.y)>27)) {
           if(occupied.some(o=>hit(pointBox(p),o))) collisions++;
         }
-        const score=collisions*100000+radius+Math.abs(target.y)*0.06;
-        if(!best||score<best.score)best={score,collisions,coords:s.atoms.map(a=>({...a.coordinates})),route,boxes};
+        const score=geometryHits*1000000+(collisions-geometryHits)*1000+radius+Math.abs(target.y)*0.06;
+        if(!best||score<best.score)best={score,collisions,geometryHits,coords:s.atoms.map(a=>({...a.coordinates})),route,boxes};
       }
       if(best.collisions===0)break;
     }
     s.atoms.forEach((a,i)=>a.coordinates=best.coords[i]);
     occupied.push(...best.boxes,...best.route.slice(14).map(pointBox));
     connectors.push(...best.route);
-    records.push({structure:s.structureLabel,remainingGeometryHits:best.collisions});
+    records.push({structure:s.structureLabel,remainingGeometryHits:best.geometryHits,
+      connectorCrossings:best.collisions-best.geometryHits});
   } }
   placeResidues();
   const labelRecords=[];

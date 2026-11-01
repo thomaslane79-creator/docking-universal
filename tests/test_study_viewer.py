@@ -94,6 +94,17 @@ class StudyViewerTests(unittest.TestCase):
             "box", [1, 2, 3], [20, 22, 24], "red", "candidate_box_P1", (), (),
         ))
 
+    def test_coordinate_review_has_its_own_identity_without_preparation_claim(self):
+        from dataclasses import replace
+        original = self.state.artifacts[0]
+        self.state.artifacts[0] = replace(original, kind='site_review_receptor_structure')
+        self.viewer.open(self.state)
+        structure = self.adapter.calls[1][1]
+        self.assertEqual(structure.identity.model, 'coordinate_site_review')
+        self.assertEqual(self.adapter.context, original.sha256)
+        self.state.artifacts.append(replace(original, id='prepared', sha256='c' * 64))
+        self.assertEqual(self.viewer.set_context(self.state), 'c' * 64)
+
     def test_candidate_highlight_keeps_the_report_palette_color(self):
         self.state.workflow_data["pocket_candidates"].append({
             "id": "P2", "rank": 2, "evidence": {"geometry": {

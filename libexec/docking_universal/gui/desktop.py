@@ -142,6 +142,8 @@ if QtWidgets is not None:
         def _apply_runtime_capabilities(self) -> None:
             """Do not offer unaccepted Windows methods as if they were usable."""
             runtime = getattr(self.host_client, "runtime", {}) or {}
+            self.study_setup_panel._coordinate_review_supported = bool(runtime.get('coordinate_site_review_supported'))
+            self.study_setup_panel._update_mode()
             if not runtime.get("native_scientific_preview"):
                 return
             allowed = ((self.protocol_engine, runtime["supported_engines"]),
@@ -633,6 +635,8 @@ if QtWidgets is not None:
 
         def _build_finalization_dock(self) -> None:
             panel = self.protocol_finalization_panel = ProtocolFinalizationPanel()
+            panel.prepareReviewedRequested.connect(self.prepare_reviewed_receptor)
+            panel.reviewModelChangesRequested.connect(self.review_receptor_changes)
             aliases = {
                 "final_output_directory": "output_directory", "protocol_engine": "engine",
                 "protocol_ph": "ph", "protocol_conformers": "conformers",
@@ -1085,7 +1089,7 @@ if QtWidgets is not None:
             # placeholder rows into an automatic error dialog or launch a
             # companion process. The normal coordinator validates provenance.
             if not any(
-                artifact.kind in {"prepared_receptor_structure", "report_view_session"}
+                artifact.kind in {"prepared_receptor_structure", "site_review_receptor_structure", "report_view_session"}
                 and artifact.sha256 and Path(artifact.path).is_file()
                 for artifact in self.state.artifacts
             ):
@@ -1529,7 +1533,7 @@ if QtWidgets is not None:
             panel = self.preparation_progress_panel
             jobs = [
                 job for job in state.jobs
-                if job.stage in {"preparation_and_pocket_detection", "control_validation"}
+                if job.stage in {"preparation_and_pocket_detection", "control_validation", 'site_exploration', 'receptor_parameterization'}
             ]
             job = jobs[-1] if jobs else None
             pending_review = any(
@@ -1559,6 +1563,8 @@ if QtWidgets is not None:
                 panel.progress.setFormat("Paused — scientific decision required")
             elif pending_review:
                 panel.status.setText(
+                    'Coordinate-only site exploration completed. Review docking regions first; receptor parameterization has not run.'
+                    if (state.workflow_data.get('study_setup') or {}).get('explore_sites_first') else
                     "Preparation and site detection completed. Candidate regions and experimental "
                     "evidence are retained and awaiting scientific review."
                 )
@@ -1601,7 +1607,7 @@ if QtWidgets is not None:
             retained = []
             for artifact in state.artifacts:
                 if artifact.kind in {
-                    "prepared_receptor_structure", "pocket_coordinates", "pocket_evidence",
+                    "prepared_receptor_structure", "site_review_receptor_structure", "pocket_coordinates", "pocket_evidence",
                     "preliminary_report", "run_log",
                 }:
                     retained.append(f"• {artifact.description or artifact.kind}: {Path(artifact.path).name}")
@@ -2255,8 +2261,20 @@ if QtWidgets is not None:
             self.protocol_finalization_panel.set_control_mode(needs_control, description)
             self.finalize_button.setEnabled(bool(
                 self.host_controller.available and approved_regions and not active and not has_bundle
+                and (not setup.get('explore_sites_first') or
+                     state.workflow_data.get('receptor_parameterization_status') == 'completed')
                 and (control_preview if needs_control else self.exploratory_approval.isChecked())
             ))
+            site_first = bool(setup.get('explore_sites_first'))
+            preparation_status = state.workflow_data.get('receptor_parameterization_status')
+            self.protocol_finalization_panel.prepare_reviewed_button.setVisible(site_first and preparation_status != 'completed')
+            self.protocol_finalization_panel.prepare_reviewed_button.setEnabled(bool(
+                site_first and approved_regions and not active and preparation_status == 'not_started'))
+            review_supported = bool((getattr(self.host_client, 'runtime', {}) or {}).get('reviewed_receptor_changes_supported'))
+            self.protocol_finalization_panel.review_model_button.setVisible(bool(
+                site_first and review_supported and preparation_status in {'not_started', 'failed'}))
+            self.protocol_finalization_panel.review_model_button.setEnabled(bool(
+                approved_regions and not active and not has_bundle and preparation_status in {'not_started', 'failed'}))
             if has_bundle:
                 bundle = next(artifact for artifact in state.artifacts if artifact.kind == "protocol_bundle")
                 self.finalization_status.setText(f"Reusable protocol complete: {bundle.path}")
@@ -2269,6 +2287,14 @@ if QtWidgets is not None:
                     f"Finalization {state.jobs[-1].status.value}: "
                     f"{state.jobs[-1].error or 'inspect the retained logs before retrying.'}"
                 )
+            elif site_first and preparation_status != 'completed':
+                self.finalization_status.setText(
+                    'Docking regions are available; receptor parameterization has not run. Review sites first, then prepare the receptor.'
+                    if preparation_status == 'not_started' else
+                    'Receptor preparation is running; reviewed boxes are retained.'
+                    if preparation_status == 'running' else
+                    'Receptor preparation did not complete. Your boxes remain available; select a box to inspect the recorded issues. '
+                    'Review the retained diagnostics and any explicit model changes before another strict preparation attempt.')
             elif approved_regions:
                 self.finalization_status.setText(
                     control_error or "Sites approved. Start the disclosed site-specific control when ready."
@@ -2782,8 +2808,11 @@ if QtWidgets is not None:
                 return
             ligand_resname = self.study_setup_panel.ligand_value()
             ligand_identity = self.study_setup_panel.ligand_identity()
-            geostd_library = self.prepare_geostd_library(input_text, output_text)
-            if not geostd_library:
+            site_first = bool((getattr(self.host_client, 'runtime', {}) or {}).get('coordinate_site_review_supported')
+                              and self.study_pathway.currentData() != 'control'
+                              and self.pocket_engine.currentData() in {'auto', 'p2rank'})
+            geostd_library = None if site_first else self.prepare_geostd_library(input_text, output_text)
+            if not site_first and not geostd_library:
                 return
             if self.study_pathway.currentData() == "control":
                 if not all((ligand_resname, ligand_identity.get("chain_id"),
@@ -2855,10 +2884,35 @@ if QtWidgets is not None:
                     "related-structures" if self.study_setup_panel.pdb_evidence.isChecked() else "off"
                 ),
             }
+            if site_first:
+                payload['explore_sites_first'] = True
             try:
                 self.host_controller.start_preparation(payload, self.state.revision)
             except Exception as exc:
                 QtWidgets.QMessageBox.critical(self, "Preparation could not start", str(exc))
+            self.refresh()
+
+        def prepare_reviewed_receptor(self):
+            try:
+                self.host_controller.prepare_reviewed_receptor(self.state.revision)
+            except Exception as exc:
+                QtWidgets.QMessageBox.critical(self, 'Receptor preparation could not start', str(exc))
+            self.refresh()
+
+        def review_receptor_changes(self):
+            from .receptor_model_review import ReceptorModelReviewDialog
+            revision = self.state.revision
+            try:
+                initial = self.host_controller.preview_receptor_changes(
+                    {'exclusions': [], 'alternate_locations': []}, revision)
+                dialog = ReceptorModelReviewDialog(initial,
+                    lambda choices: self.host_controller.preview_receptor_changes(choices, revision), self)
+                if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+                    return
+                choices, preview_sha256, rationale = dialog.approved_change()
+                self.host_controller.prepare_receptor_changes(choices, preview_sha256, rationale, revision)
+            except Exception as exc:
+                QtWidgets.QMessageBox.critical(self, 'Receptor-model review stopped', str(exc))
             self.refresh()
 
         def cancel_active_job(self) -> None:
@@ -3280,7 +3334,8 @@ if QtWidgets is not None:
             candidate = candidates[rows[0].row()]
             self.pocket_score_plot.selected = str(candidate["id"])
             self.pocket_score_plot.update()
-            self.pocket_evidence_panel.set_candidate(candidate)
+            from ..services.preparation_site_issues import candidate_with_model_change_review
+            self.pocket_evidence_panel.set_candidate(candidate_with_model_change_review(self.state, candidate))
             if not self.viewer_coordinator:
                 return
             if not self.viewer_coordinator.connected:
@@ -3770,8 +3825,10 @@ if QtWidgets is not None:
 
         def _render_candidates(self, state: StudyState) -> None:
             # Polling repaints evidence; only user navigation should reload 3D.
+            from ..services.preparation_site_issues import candidate_with_model_change_review
             fingerprint = json.dumps({
-                "candidates": state.workflow_data.get("pocket_candidates", []),
+                "candidates": [candidate_with_model_change_review(state, candidate)
+                               for candidate in state.workflow_data.get("pocket_candidates", [])],
                 "root": state.workflow_data.get("preparation_root"),
             }, sort_keys=True)
             if fingerprint == getattr(self, "_candidate_table_fingerprint", None):
@@ -3799,6 +3856,8 @@ if QtWidgets is not None:
                     item = QtWidgets.QTableWidgetItem(str(value))
                     if column == 3:
                         item.setToolTip(evidence_tooltip)
+                    if column == 2 and evidence.get('reviewed_incomplete_reference'):
+                        item.setToolTip(evidence['reviewed_incomplete_reference']['warning'])
                     self.candidates.setItem(row, column, item)
             header = self.candidates.horizontalHeader()
             header.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
@@ -3818,7 +3877,8 @@ if QtWidgets is not None:
                 self.candidates.selectRow(0)
                 rows = self.candidates.selectionModel().selectedRows()
             self.pocket_evidence_panel.set_candidate(
-                values[rows[0].row()] if rows and rows[0].row() < len(values) else None
+                candidate_with_model_change_review(state, values[rows[0].row()])
+                if rows and rows[0].row() < len(values) else None
             )
             self.pocket_score_plot.selected = (
                 str(values[rows[0].row()]["id"])
@@ -3900,7 +3960,7 @@ if QtWidgets is not None:
             for row, result in enumerate(results):
                 values = (
                     result.name, result.status, result.site_count, result.planned_jobs,
-                    result.best_score, result.cluster_count,
+                    result.best_score, result.scoring_function, result.cluster_count,
                 )
                 for column, value in enumerate(values):
                     item = QtWidgets.QTableWidgetItem(str(value))

@@ -32,6 +32,11 @@ def filtered_mmcif(source, filtered_pdb, destination):
     if found != wanted:
         raise ValueError("Filtered receptor identities do not map to the retained mmCIF")
     original.make_mmcif_document().write_file(str(destination))
+    # ProDy's mmCIF reader excludes the final atom when the atom-site loop ends
+    # at EOF. A trailing CIF comment prevents that reader bug without changing
+    # an atom, coordinate, identifier, occupancy or model selection.
+    with Path(destination).open('a') as handle:
+        handle.write('\n#\n')
 
 
 if __name__ == "__main__":

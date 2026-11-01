@@ -30,6 +30,11 @@ check_case nucleic 'DNA/RNA or mixed protein-nucleic-acid template conflict' "$t
 grep -q 'Detected DNA/RNA residues: B:7=DA' "$tmp/nucleic.txt" || fail "nucleic-acid detail changed"
 
 check_case altloc 'Alternate-location and residue-template conflict' "$base" "$base" $'Requested altlocs not found\nTemplate matching failed for: ALA'
+check_case altloc_only 'Explicit alternate-location selection required' "$base" "$base" "- Residues with alternate location: ['A:634', 'A:667']"
+grep -q 'A:634' "$tmp/altloc_only.txt" || fail 'altloc-only identities lost from diagnosis'
+check_case backbone 'Incomplete deposited backbone requires review' "$base" "$base" $'Template matching failed\nObserved partial residues require missing backbone atoms; automatic backbone completion is disabled.'
+check_case native_parser 'Preparation backend mmCIF parsing error' "$base" "$base" $'File "/env/prody/proteins/ciffile.py", line 503\nIndexError: boolean index did not match indexed array along dimension 0'
+check_case format_guard 'Preparation coordinate-format handling error' "$base" "$base" $'File "/app/services/repair_geometry.py", line 16\nValueError: could not convert string to float: ? 198.24'
 
 cp "$base" "$tmp/modified.pdb"
 printf 'MODRES 1ABC CSO A   2   CYS  S-HYDROXYCYSTEINE\n' >> "$tmp/modified.pdb"

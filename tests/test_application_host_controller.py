@@ -15,6 +15,19 @@ class Client:
 
 
 class ApplicationHostControllerTests(unittest.TestCase):
+    def test_reviewed_preparation_uses_saved_inputs_and_current_revision(self):
+        client = Client()
+        ApplicationHostController('study', lambda: client).prepare_reviewed_receptor(8)
+        self.assertEqual(client.calls, [(('study', 'prepare_reviewed_receptor', {}), {'expected_revision': 8})])
+
+    def test_model_change_execution_is_explicit_and_revisioned(self):
+        client = Client()
+        controller = ApplicationHostController('study', lambda: client)
+        choices = {'exclusions': [], 'alternate_locations': []}
+        controller.prepare_receptor_changes(choices, 'a' * 64, 'Reviewed exact changes', 9)
+        self.assertEqual(client.calls, [(('study', 'prepare_receptor_changes', {
+            'choices': choices, 'preview_sha256': 'a' * 64, 'actor': 'desktop-user',
+            'rationale': 'Reviewed exact changes'}), {'expected_revision': 9})])
     def test_routes_revisioned_mutations_through_one_boundary(self):
         client = Client()
         controller = ApplicationHostController("study-1", lambda: client)

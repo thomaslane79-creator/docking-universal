@@ -717,16 +717,25 @@ def print_selected_protocol(record):
     warning = protocol_removal_warning(record)
     if warning:
         print(f"  WARNING: {warning}")
+    from docking_universal.services.receptor_model_history import normalize_preparation
+    reference_review = normalize_preparation(record.get('receptor_preparation')).get('site_reference_review')
+    if reference_review:
+        print('  WARNING: ' + reference_review['warning'])
 
 
 def removal_warning_from_preparation(preparation):
     """Return a persistent warning for an explicitly altered receptor model."""
-    if not preparation.get("user_approved_component_removal"):
+    from docking_universal.services.receptor_model_history import normalize_preparation
+    preparation = normalize_preparation(preparation)
+    if not preparation.get("user_approved_component_removal") and not preparation.get('receptor_modification_warning'):
         return None
     warning = preparation.get("receptor_modification_warning") or build_receptor_modification_warning(
         preparation.get("user_approved_removed_components") or []
     )
-    return warning["summary"]
+    summary = warning['summary']
+    if warning.get('severity') == 'high' and 'high-severity' not in summary.lower():
+        return 'High-severity receptor-model warning: ' + summary
+    return summary
 
 
 def protocol_removal_warning(record):
@@ -1314,6 +1323,10 @@ def write_reports(study, manifest, compounds):
     ]
     if removal_warning:
         lines += [f"> **Receptor-model warning:** {removal_warning}", ""]
+    from docking_universal.services.receptor_model_history import normalize_preparation
+    reference_review = normalize_preparation(manifest.get('protocol_receptor_preparation')).get('site_reference_review')
+    if reference_review:
+        lines += ['> **Reviewed incomplete site reference:** ' + reference_review['warning'], '']
     if manifest["study_status"] == "EXPLORATORY_NO_CONTROL":
         lines += ["> **Exploratory result:** no approved bound-ligand pose-recovery control was available. Generated poses and scores are hypotheses for structural review.", ""]
     configured = protocol.get('parameters') or manifest.get('configured_docking_parameters') or {}

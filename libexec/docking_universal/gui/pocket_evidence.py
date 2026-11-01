@@ -175,6 +175,12 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
         self.lookup_status.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
         self.lookup_status.hide()
         layout.addWidget(self.lookup_status)
+        self.preparation_issues = QtWidgets.QPlainTextEdit()
+        self.preparation_issues.setObjectName('box_receptor_preparation_issues')
+        self.preparation_issues.setReadOnly(True)
+        self.preparation_issues.setFixedHeight(self.fontMetrics().lineSpacing() * 5 + 16)
+        self.preparation_issues.hide()
+        layout.addWidget(self.preparation_issues)
         summary_layout.setSpacing(4)
         summary_layout.addWidget(self.evidence_header)
         summary_layout.addWidget(self.heading)
@@ -324,6 +330,25 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
         previous_paths = self._selected_paths()
         blocker = QtCore.QSignalBlocker(self.table)
         evidence = (candidate or {}).get("evidence", {})
+        issues = evidence.get('receptor_model_review') or evidence.get('receptor_preparation_review') or {}
+        lines = [issues['warning']] if issues.get('warning') else []
+        reference_review = evidence.get('reviewed_incomplete_reference') or {}
+        if reference_review:
+            lines.insert(0, reference_review['warning'])
+        if issues.get('category'):
+            lines.append(issues['category'])
+        if issues.get('scientific_concern'):
+            lines.append(issues['scientific_concern'])
+        for row in issues.get('residues', []):
+            distance = row['minimum_distance_to_box_angstrom']
+            location = 'inside this box' if row['inside_box'] else f'{distance:.2f} Å from this box'
+            lines.append(f"{row['residue']} {row['chain']}:{row['number']} — {location}")
+        if issues and not issues.get('residues'):
+            lines.append('Distances to this box are not retained; the model-change warning still applies.'
+                         if evidence.get('receptor_model_review') else
+                         'No backend-named residue could be located in the deposited coordinates; inspect the retained preparation logs.')
+        self.preparation_issues.setPlainText('\n'.join(lines))
+        self.preparation_issues.setVisible(bool(issues or reference_review))
         experimental = evidence.get("experimental_ligand_evidence") or {}
         observations = experimental.get("observations") or []
         label = (candidate or {}).get("label") or (candidate or {}).get("id") or "No candidate"

@@ -362,7 +362,10 @@ class StudySetupPanel(QtWidgets.QWidget):
         self.detect_ligands_button.setEnabled(ligand_site and not self._locked)
         self.prepare_button.setText(
             "Review and import protocol" if reuse else
-            "Prepare and review sites before control" if control else "Prepare receptor and detect pockets"
+            "Prepare and review sites before control" if control else
+            'Find and review docking regions' if getattr(self, '_coordinate_review_supported', False)
+                and self.pocket_engine.currentData() in {'auto', 'p2rank'} else
+            "Prepare receptor and detect pockets"
         )
 
     def ligand_value(self):
@@ -437,9 +440,27 @@ class ProtocolImportDialog(QtWidgets.QDialog):
         )
         verification.setWordWrap(True)
         layout.addWidget(verification)
+        if preview.get('site_reference_warning'):
+            warning = QtWidgets.QPlainTextEdit()
+            warning.setObjectName('protocol_site_reference_warning')
+            warning.setReadOnly(True)
+            warning.setPlainText('Reviewed incomplete site reference\n' + preview['site_reference_warning'])
+            warning.setFixedHeight(warning.fontMetrics().lineSpacing() * 5 + 16)
+            warning.setStyleSheet('QPlainTextEdit {background:#fff1b8;color:#392600;border:1px solid #a85b00;}')
+            layout.addWidget(warning)
         if preview.get('receptor_modification_warning'):
-            warning = QtWidgets.QLabel(str(preview['receptor_modification_warning']))
-            warning.setWordWrap(True)
+            record = preview['receptor_modification_warning']
+            summary = (record.get('summary') or 'Recorded receptor changes require review of the retained inventory.'
+                       if isinstance(record, dict) else str(record))
+            high = isinstance(record, dict) and record.get('severity') == 'high'
+            warning = QtWidgets.QPlainTextEdit()
+            warning.setObjectName('protocol_model_change_warning')
+            warning.setReadOnly(True)
+            warning.setPlainText(('High-severity receptor-model warning' if high else 'Receptor-model warning') + '\n' + summary)
+            warning.setFixedHeight(warning.fontMetrics().lineSpacing() * 5 + 16)
+            warning.setStyleSheet('QPlainTextEdit {background:#fff1b8;color:#392600;border:1px solid #a85b00;}'
+                                 if not high else 'QPlainTextEdit {background:#fff0f0;color:#651919;border:1px solid #a52222;}')
+            warning.setToolTip('The complete model-change inventory remains in the imported bundle. Import does not validate the altered model or approve screening.')
             layout.addWidget(warning)
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Close if read_only else
@@ -500,6 +521,8 @@ class PreparationProgressPanel(QtWidgets.QWidget):
 
 
 class ProtocolFinalizationPanel(QtWidgets.QWidget):
+    prepareReviewedRequested = QtCore.pyqtSignal()
+    reviewModelChangesRequested = QtCore.pyqtSignal()
     chooseOutputRequested = QtCore.pyqtSignal()
     finalizeRequested = QtCore.pyqtSignal()
     openReportRequested = QtCore.pyqtSignal()
@@ -521,6 +544,22 @@ class ProtocolFinalizationPanel(QtWidgets.QWidget):
         introduction_row.addWidget(self.introduction, 1)
         introduction_row.addWidget(self.guide_button, 0, QtCore.Qt.AlignmentFlag.AlignTop)
         form.addRow(introduction_row)
+        self.prepare_reviewed_button = QtWidgets.QPushButton('Prepare receptor for the reviewed docking boxes')
+        self.prepare_reviewed_button.setObjectName('prepare_reviewed_receptor_button')
+        self.prepare_reviewed_button.setToolTip(
+            'Pocket discovery uses coordinates, not force-field parameters. This next step attempts strict '
+            'receptor preparation without predicting pockets again. A failure leaves your sites available for review; '
+            'it never authorizes omission or repair of residues.')
+        self.prepare_reviewed_button.clicked.connect(self.prepareReviewedRequested)
+        self.prepare_reviewed_button.hide()
+        form.addRow(self.prepare_reviewed_button)
+        self.review_model_button = QtWidgets.QPushButton('Review an explicit receptor-model change…')
+        self.review_model_button.setObjectName('review_receptor_model_changes_button')
+        self.review_model_button.setToolTip('Preview exact component exclusions or alternate locations before a new strict preparation attempt. '
+                                          'The original input, previous failures, reviewed boxes and model-change warnings are retained.')
+        self.review_model_button.clicked.connect(self.reviewModelChangesRequested)
+        self.review_model_button.hide()
+        form.addRow(self.review_model_button)
         self.output_directory = QtWidgets.QLineEdit()
         output_row, output_button = _path_row(self.output_directory, "Browse…")
         self.engine = QtWidgets.QComboBox(); self.engine.addItem("AutoDock Vina", "vina"); self.engine.addItem("QuickVina-W", "qvinaw")
@@ -690,6 +729,18 @@ class ScreeningSetupPanel(QtWidgets.QWidget):
         self.analysis = QtWidgets.QComboBox(); self.analysis.addItem("Representative poses + interactions", "representatives"); self.analysis.addItem("Cluster summary only", "summary"); self.analysis.addItem("Docking outputs only", "none")
         self.representatives = QtWidgets.QSpinBox(); self.representatives.setRange(1,100); self.representatives.setValue(3)
         self.cluster_rmsd = QtWidgets.QDoubleSpinBox(); self.cluster_rmsd.setRange(.1,20); self.cluster_rmsd.setValue(1.5); self.cluster_rmsd.setSuffix(" Å")
+        self.cluster_preset = QtWidgets.QComboBox()
+        self.cluster_preset.setObjectName('screening_cluster_preset')
+        for title, cutoff in (('Tight (1.0 Å)', 1.0), ('Default (1.5 Å)', 1.5),
+                              ('Loose (2.0 Å)', 2.0), ('Custom — edit cutoff', None)):
+            self.cluster_preset.addItem(title, cutoff)
+        self.cluster_preset.setCurrentIndex(1)
+        self.cluster_rmsd.setObjectName('screening_cluster_cutoff')
+        cluster_row = QtWidgets.QWidget()
+        cluster_layout = QtWidgets.QHBoxLayout(cluster_row)
+        cluster_layout.setContentsMargins(0, 0, 0, 0)
+        cluster_layout.addWidget(self.cluster_preset, 1)
+        cluster_layout.addWidget(self.cluster_rmsd)
         self.cpu = QtWidgets.QComboBox()
         self.cpu.setObjectName('screening_cpu_mode')
         self.cpu.addItem('Application default (recommended)', 'default')
@@ -739,13 +790,13 @@ class ScreeningSetupPanel(QtWidgets.QWidget):
                  'Default: Vina uses up to 8 threads on Apple Silicon, unless an environment or saved box setting overrides it; other systems/programs keep engine automatic. Automatic lets the engine choose (0). Custom sets a count for this screen only and overrides those settings. More threads can be slower; 8 was a good balance in our Mac tests, not a universal optimum. This does not change search effort or run compounds simultaneously.'),
                 ('representatives', 'Representative clusters', self.representatives,
                  'How many lowest-energy pose groups per compound receive detailed output. Each representative is its group’s lowest-energy pose; this is not a compound or total-pose limit.'),
-                ('cluster_rmsd', 'Clustering cutoff', self.cluster_rmsd,
-                 'Group similar poses using symmetry-aware heavy-atom RMSD in the protein’s coordinate frame, without realignment. Smaller values separate more groups; larger values merge more. This is not RMSD to an experimental pose.'),
+                ('cluster_rmsd', 'Pose-clustering RMSD', cluster_row,
+                 'Tight (1.0 Å) separates more pose groups; Default (1.5 Å) is the usual setting; Loose (2.0 Å) merges more. Custom: edit the number. Group similar poses using symmetry-aware heavy-atom RMSD in the protein’s coordinate frame, without realignment. This is not RMSD to an experimental pose or a measure of accuracy. Applies to the next screening analysis; changing it does not regroup completed results.'),
         )):
             label = QtWidgets.QLabel(title)
             label.setBuddy(getattr(self, key))
             label.setWordWrap(True)
-            widget.setMaximumWidth(330 if key in ('output', 'analysis', 'cpu') else 140)
+            widget.setMaximumWidth(330 if key in ('output', 'analysis', 'cpu', 'cluster_rmsd') else 140)
             note = QtWidgets.QLabel(explanation)
             note.setObjectName('screening_explain_' + key)
             note.setWordWrap(True)
@@ -758,6 +809,9 @@ class ScreeningSetupPanel(QtWidgets.QWidget):
             field = getattr(self, key)
             field.setToolTip(explanation)
             field.setAccessibleDescription(explanation)
+            if key == 'cluster_rmsd':
+                self.cluster_preset.setToolTip(explanation)
+                self.cluster_preset.setAccessibleDescription(explanation)
         form.addRow(settings_grid)
         for key, widget, explanation in (
                 ('stop_on_error', self.stop_on_error,
@@ -777,6 +831,24 @@ class ScreeningSetupPanel(QtWidgets.QWidget):
         self.ligands.textChanged.connect(self.inputsChanged); self.output.textChanged.connect(self.inputsChanged); self.analysis.currentIndexChanged.connect(self.inputsChanged); self.representatives.valueChanged.connect(self.inputsChanged); self.cluster_rmsd.valueChanged.connect(self.inputsChanged)
         self.cpu.currentIndexChanged.connect(self._cpu_mode_changed)
         self.cpu_count.valueChanged.connect(self.inputsChanged)
+        self.cluster_preset.currentIndexChanged.connect(self._cluster_preset_changed)
+        self.cluster_rmsd.valueChanged.connect(self._cluster_cutoff_changed)
+
+    def _cluster_preset_changed(self, *_args):
+        cutoff = self.cluster_preset.currentData()
+        if cutoff is not None:
+            self.cluster_rmsd.setValue(cutoff)
+
+    def _cluster_cutoff_changed(self, cutoff):
+        # The saved numeric value remains authoritative, including old/custom
+        # cutoffs. A category is presentation, never a second scientific setting.
+        index = next((i for i in range(3)
+                      if abs(cutoff - self.cluster_preset.itemData(i)) < 1e-9), 3)
+        previous = self.cluster_preset.blockSignals(True)
+        try:
+            self.cluster_preset.setCurrentIndex(index)
+        finally:
+            self.cluster_preset.blockSignals(previous)
 
     def _cpu_mode_changed(self, *_args):
         self.cpu_count.setVisible(self._engine != 'adgpu' and self.cpu.currentData() == 'custom')

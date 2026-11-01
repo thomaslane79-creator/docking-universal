@@ -1,6 +1,7 @@
 """Contact geometry from the exact PLIP report; no new chemical perception."""
 import math
 import xml.etree.ElementTree as ET
+from ..plip_sites import retained_binding_site
 
 # The first three colors match the retained 2D renderer legend.
 STYLES = {
@@ -16,9 +17,7 @@ STYLES = {
 
 
 def contacts(path):
-    sites = ET.parse(path).getroot().findall('bindingsite')
-    if len(sites) != 1:
-        raise ValueError('3D contacts require exactly one identified ligand site')
+    site = retained_binding_site(ET.parse(path).getroot())
     def coord(item, name):
         node = item.find(name)
         if node is None:
@@ -28,7 +27,7 @@ def contacts(path):
             raise ValueError('Non-finite PLIP contact coordinates')
         return point
     result = []
-    for item in sites[0].findall('interactions/*/*'):
+    for item in site.findall('interactions/*/*'):
         if item.tag not in STYLES:
             continue
         first, second = ('metalcoo', 'targetcoo') if item.tag == 'metal_complex' else ('ligcoo', 'protcoo')

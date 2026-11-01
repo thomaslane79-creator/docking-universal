@@ -6,6 +6,67 @@ Docking Universal provides fully guided, interactive docking workflows on Ubuntu
 
 **A docking engine performs the search; Docking Universal manages and documents the surrounding workflow.** Vina remains the default; the optional experimental AD4 GPU integration is described below.
 
+Development validation: the [systematic local validation framework](docs/validation-system.md)
+plans a multi-example/engine matrix, runs pinned cases sequentially, preserves
+failures and completed evidence, and separates workflow, experimental-pose and
+visual acceptance. The example catalogue is planned coverage, not a claim that
+every target/engine has passed. Scientific outputs remain local.
+The [GUI/pipeline confidence gates](docs/gui-pipeline-acceptance.md) distinguish
+the 100-scenario functional foundation from raw-input end-to-end and molecular
+accuracy validation.
+
+The broader actual-docking cohort found additional software and preparation
+boundaries. [The defect-repair and Mac installation checkpoint](docs/software-defect-repairs-20261023.md)
+records tested corrections and unresolved preparation/dependency cases separately.
+The tested application repairs are now applied to the working Mac installation,
+including qualitative clustering choices: Tight (1.0 Å), Default (1.5 Å), Loose
+(2.0 Å), or Custom. The number remains visible and saved choices are preserved.
+This is not a claim that all 100 workflows succeeded; the unresolved receptor
+cases and broader report/platform validation remain separate work.
+
+New **development-source-only** corrections separate coordinate-based site
+review from receptor parameterization and preserve explicitly recorded model-change
+warnings through protocol export/import and shared reports. Hash-bound history
+rejects a warning attached to a different prepared receptor; the GUI displays a
+readable summary rather than a raw record. These follow-up changes are not yet
+installed or accepted on native Windows/Linux. Extensive incomplete-model cases
+such as 1FM6 remain failed; missing sequence segments are not built automatically.
+See [the active follow-up and limits](docs/four-area-completion-20261023.md).
+
+The next development increment adds explicit review of exact component
+exclusions and deposited alternate conformations, with a current preview,
+per-box distances, separate strict preparation attempts and permanent warnings.
+It also corrects the old fallback's misleading side-chain-only assumption:
+missing backbone atoms in a partial residue now stop for review. A private Mac
+1A4G/Vina workflow completed with two approved sugar exclusions, and a separate
+4EY7/Vina workflow completed with seven exclusions and six exact deposited
+alternate locations. An ordinary mmCIF/P2Rank/QuickVina-W path also completed.
+Original failures remain recorded, and presentation gates remain separate.
+This is **not installed**, broad protein
+coverage or pose-accuracy acceptance. See the [review flow, evidence and remaining work](docs/preparation-review-20261025.md).
+
+The [new prospective 100-protein panel](docs/protein-panel-100-20261025.md)
+requires more than 90% completion (at least 91/100), rather than counting repeated
+scenarios as independent proteins. Its first ten baseline workflows produced
+three functional completions and seven preparation stops; the other ninety have
+not launched. Development-only corrections now read mmCIF correctly in the
+repair-geometry guard, terminate generated native mmCIF with a comment to avoid
+ProDy dropping the final atom at EOF, and retain backend-named alternate-location
+and component identities in box-review warnings. These format/diagnostic fixes
+do not choose conformations, change coordinates or bypass strict preparation.
+The original failures remain recorded; saved-input parser/geometry checks are
+not new completed docks. The working installation is unchanged by these fixes.
+The two corrected-build PDE5A/HDAC1 retests subsequently completed full native
+workflows, adding seven actual searches across their generated chemical states.
+This brings development evidence to five distinct pilot proteins completing
+across separate builds, not a >90% acceptance claim. Shared report corrections
+also preserve all twenty energy-ranked clusters when some RMSDs are unavailable:
+those points appear in a separate N/A strip, with their original rank/colors,
+and the table does not invent distances. Repair notes retain the recorded
+alternate-location policy even when zero atoms were added. These report changes
+passed 65 focused checks and were checked on a separately regenerated copy of
+retained results; no docking was repeated to fix a report.
+
 ## What Docking Universal adds beyond Vina
 
 AutoDock Vina and QuickVina-W are the supported docking engines: each searches an already defined box using already prepared receptor and ligand files, then returns scored poses. Docking Universal turns that calculation into a guided, reproducible scientific workflow. It prepares and checks the inputs, gathers evidence about where docking should occur, identifies agreement and disagreement between evidence sources, tests whether a protocol can recover a known pose when a control is available, analyzes the resulting poses and interactions, and retains an audit trail of how every result was produced.
@@ -15,7 +76,7 @@ AutoDock Vina and QuickVina-W are the supported docking engines: each searches a
 | **Structure and component records** | RCSB PDB retrieval, deposited-component inventories, ligand identifiers, Chemical Component Dictionary checks, and retained source records. |
 | **Protein preparation** | Iterative Meeko preparation, conditional PDBFixer repair, diagnosed compatibility fallbacks, prepared receptor PDBQT output, and an explicit stop for review before any model-changing component removal. |
 | **Ligand preparation** | SDF validation and splitting, molecular-graph handling, protonation and tautomer enumeration, conformer generation and pruning, charge assignment, and one prepared ligand PDBQT per compound. |
-| **Site and docking-box selection** | fpocket cavity detection, descriptor collection, candidate filtering and ranking, optional related-structure ligand evidence, aligned same-site grouping, numbered and color-matched PyMOL review, one- or multi-box generation, and explicit user selection. |
+| **Site and docking-box selection** | P2Rank primary prediction, fpocket fallback with detector-specific scores/descriptors, optional related-structure ligand evidence, aligned same-site grouping, numbered and color-matched PyMOL review, one- or multi-box generation, and explicit user selection. |
 | **Experimental control** | Bound-ligand pose-recovery redocking, multi-conformer and independent-seed sampling, symmetry-aware RMSD evaluation, reproducibility criteria, and failure-closed screening authorization. |
 | **Reusable protocols** | Control-validated, ligand-guided exploratory, and site-guided exploratory protocols that lock the prepared receptor, selected box, search settings, evidence status, and supporting records in a portable Docking Universal `.duprotocol` bundle. |
 | **Screening execution** | Guided single- or multi-compound screening with AutoDock Vina or QuickVina-W, isolated per-compound outputs, partial-failure retention, a nonzero final status when any compound fails, and normalized score collection. |

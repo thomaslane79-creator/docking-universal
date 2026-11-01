@@ -25,4 +25,5 @@ runs/*
 /output/
 /tmp/
 /validation/runs/
+/validation/local/
 /tests/fixtures/*.xlsx.inspect.ndjson

@@ -39,6 +39,16 @@ class ApplicationHostController:
     def start_preparation(self, payload, revision):
         return self._request("start_receptor_preparation", payload, revision)
 
+    def prepare_reviewed_receptor(self, revision):
+        return self._request('prepare_reviewed_receptor', {}, revision)
+
+    def preview_receptor_changes(self, choices, revision):
+        return self._request('preview_receptor_changes', {'choices': choices}, revision)['result']['preview']
+
+    def prepare_receptor_changes(self, choices, preview_sha256, rationale, revision):
+        return self._request('prepare_receptor_changes', {'choices': choices,
+            'preview_sha256': preview_sha256, 'actor': 'desktop-user', 'rationale': rationale}, revision)
+
     def inspect_protocol_bundle(self, source):
         return self._request("inspect_protocol_bundle", {"protocol_bundle": str(source)})["result"]["protocol"]
 

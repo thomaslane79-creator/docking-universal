@@ -102,7 +102,7 @@ class CavityReportTests(unittest.TestCase):
                 "user_approved_component_removal_log": "retained.log",
                 "user_approved_component_removal_manifest": str(manifest),
             }, Path(temporary), styles)
-            self.assertIn("1 other residue/component was removed", note[0].text)
+            self.assertIn("1 other residue/component was removed", note[0]._content[0].getPlainText())
 
     def test_removal_note_flags_standard_amino_acids_as_high_severity(self):
         styles = __import__("reportlab.lib.styles", fromlist=["getSampleStyleSheet"]).getSampleStyleSheet()
@@ -112,8 +112,8 @@ class CavityReportTests(unittest.TestCase):
                 {"chain": "A", "residue_number": "305", "residue_name": "SER", "atom_count": "5"},
             ],
         }, Path("."), styles)
-        self.assertIn("1 standard amino-acid residue was removed", note[0].text)
-        self.assertIn("High-severity structural warning", note[0].text)
+        self.assertIn("1 standard amino-acid residue was removed", note[0]._content[0].getPlainText())
+        self.assertIn("High-severity structural warning", note[0]._content[0].getPlainText())
 
     def test_protocol_record_propagates_removal_without_original_files(self):
         protocol = {"receptor_preparation": {

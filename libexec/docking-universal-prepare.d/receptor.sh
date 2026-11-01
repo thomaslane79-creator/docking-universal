@@ -138,6 +138,30 @@ write_receptor_failure_diagnosis() {
     category="Ambiguous histidine protonation"
     why="More than one histidine tautomer fits the coordinates; the biologically appropriate state depends on the local environment."
     next="Review nearby hydrogen bonds or catalytic chemistry, then rerun interactively or provide an explicit MEEKO_SET_TEMPLATE assignment."
+  elif grep -qs 'repair_geometry.py' "${failure_logs[@]}" && grep -qs 'could not convert string to float' "${failure_logs[@]}"; then
+    category="Preparation coordinate-format handling error"
+    why="An application geometry check could not read its coordinate input. This is a software format-handling failure, not evidence of incorrect deposited chemistry."
+    next="Retain the input, attempted derivative and traceback for format-handler correction; no molecular change or permissive matching is justified by this error."
+  elif grep -qs 'prody/.*ciffile.py' "${failure_logs[@]}" && grep -qs 'IndexError: boolean index did not match indexed array' "${failure_logs[@]}"; then
+    category="Preparation backend mmCIF parsing error"
+    why="The backend coordinate reader raised an internal indexing error before receptor-template matching. This does not establish a residue or chemistry defect."
+    next="Retain the exact mmCIF and traceback for reader-compatibility review; do not delete atoms or change residue identities to bypass the parser."
+  elif grep -qs 'automatic backbone completion is disabled' "${failure_logs[@]}"; then
+    category="Incomplete deposited backbone requires review"
+    why="An observed partial residue lacks backbone atoms. The conservative repair refused to construct them and did not create an accepted repaired model."
+    next="Review the exact missing-atom inventory and original coordinates. Backbone construction or a deliberately edited input requires a separate explicit scientific decision."
+  elif grep -qs 'PDBFixer generated sub-Angstrom heavy-atom overlaps' "${failure_logs[@]}"; then
+    category="Rejected generated repair geometry"
+    why="The generated repair introduced gross heavy-atom overlaps and was not accepted for parameterization. This is not proof that the deposited model itself has those overlaps."
+    next="Review the retained repair audit and original coordinates; no alternative repair or residue removal has been chosen automatically."
+  elif grep -qs 'Expected .* paddings.*but got' "${failure_logs[@]}"; then
+    category="Preparation backend connectivity-construction error"
+    why="The backend raised an internal error while constructing inter-residue connections. This does not by itself establish incorrect deposited chemistry."
+    next="Retain the original and repaired models and the traceback for software/connectivity review; do not delete residues or relax matching to bypass this error."
+  elif grep -qs 'AtomValenceException\|Explicit valence for atom' "${failure_logs[@]}"; then
+    category="Preparation backend valence-validation error"
+    why="The backend inferred a bond network that fails valence validation. The input coordinates, repair output and bond inference must be distinguished before changing chemistry."
+    next="Inspect the retained original/repaired atom and bond inventories and traceback; do not force permissive valence or remove components to bypass the error."
   elif grep -qs "linking fragments\|modified backbones" "${failure_logs[@]}"; then
     category="Covalently linked nonstandard residues or glycans"
     why="The receptor contains linked fragments whose attachment chemistry cannot be inferred safely by the standard templates."
@@ -154,6 +178,10 @@ write_receptor_failure_diagnosis() {
     category="Alternate-location and residue-template conflict"
     why="The structure contains competing coordinate variants together with residues that do not match the expected templates."
     next="Select biologically justified alternate locations and review the affected residue identities before preparation."
+  elif grep -qs "Requested altlocs not found\|Residues with alternate location" "${failure_logs[@]}"; then
+    category="Explicit alternate-location selection required"
+    why="The backend requires a deposited coordinate variant for the named residues. No variant has been chosen by this diagnosis."
+    next="Inspect each named residue and its deposited alternatives in the selected boxes, then explicitly review a choice; occupancy or distance alone does not prove correctness."
   elif [ -n "$nonstandard_detail" ] && grep -qs "not in residue_templates\|unknown residues\|Template matching failed" "${failure_logs[@]}"; then
     category="Unsupported non-standard amino acid"
     why="A polymer residue declared as a modified amino acid lacks a usable preparation template; automatic replacement could alter its chemistry or connectivity."
@@ -174,7 +202,10 @@ write_receptor_failure_diagnosis() {
     printf 'Recommended next step: %s\n' "$next"
     [ -z "$nucleic_detail" ] || printf 'Detected DNA/RNA residues: %s\n' "$nucleic_detail"
     [ -z "$nonstandard_detail" ] || printf 'Detected modified amino acids: %s\n' "$nonstandard_detail"
-    grep -h -m1 "^Input residues .*not in residue_templates\|Template generation failed for unknown residues\|Template matching failed for:" "${failure_logs[@]}" 2>/dev/null | head -1 | sed 's/^/Detected detail: /' || :
+    if grep -qs 'Bad CPU type\|Exec format error\|cannot execute' "${failure_logs[@]}"; then
+      printf 'Backend compatibility warning: A configured preparation executable could not run on this machine; this is separate from the retained receptor-template failure.\n'
+    fi
+    grep -h -m1 "Input residues .*not in residue_templates\|Template generation failed for unknown residues\|Template matching failed for:\|Residues with alternate location:" "${failure_logs[@]}" 2>/dev/null | head -1 | sed 's/^/Detected detail: /' || :
   } > "$output_file"
 }
 
@@ -588,6 +619,9 @@ run_safe_receptor_preparation_attempts() {
     PREP_SUCCESS=1
     PREP_ROUTE=strict_meeko
     log "Initial receptor preparation succeeded; PDBFixer was not needed"
+  elif [ "${DOCKING_UNIVERSAL_REVIEWED_MODEL_ONLY:-0}" = 1 ]; then
+    log "The explicitly reviewed receptor failed strict preparation; no additional repair, alternate-location choice, residue exclusion or legacy fallback was attempted."
+    return 0
   elif [ "$PREP_BACKEND" = "meeko" ]; then
     log "Initial Meeko preparation failed; preserving its diagnostics before attempting quick repairs"
     if [ "$PDBFIXER_MODE" != "off" ] && [ "$PDBFIXER_AVAILABLE" = "1" ]; then
@@ -696,6 +730,11 @@ EOF
     # generic rescue for glycans, nucleic acids, or metal/cofactor chemistry.
     if [ "$PREP_SUCCESS" = "0" ] && [ "$ADFR_FALLBACK" = "1" ] && [ -n "$ADFR_FALLBACK_BIN" ] && [ -x "$ADFR_FALLBACK_BIN" ] && \
        { [ -n "$RETAINED_LINKED_COMPONENTS" ] || grep -qs "linking fragments" "$RECEPTOR_BACKEND_LOG" "$PDBFIXER_MEEKO_LOG" "$RECEPTOR_RETRY_LOG" "$DISULFIDE_RETRY_LOG" 2>/dev/null; }; then
+      # Executable permission alone does not mean an old architecture-specific
+      # wrapper can start. Probe help without passing coordinates or changing
+      # preparation models. Failure must not replace the original diagnosis.
+      if "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-backend-startup.py" "$ADFR_FALLBACK_BIN" \
+          "$RECEPTOR_DIR/adfr_startup_audit.json" > "$ADFR_FALLBACK_LOG" 2>&1; then
       log "Meeko rejected linked deposited chemistry; trying the legacy ADFRsuite receptor-preparation fallback; detailed output -> $ADFR_FALLBACK_LOG"
       build_adfr_linked_fallback_command "$ADFR_FALLBACK_BIN" "$RECEPTOR_FILTERED_PDB" "$RECEPTOR_PDBQT"
       ADFR_FALLBACK_COMMAND=("${PREPARATION_COMMAND[@]}")
@@ -706,6 +745,9 @@ EOF
         log "Legacy ADFRsuite preparation succeeded after Meeko's linked-component rejection; a target-matched control is required for the control-validated designation, while explicit user-reviewed exploratory approval remains available"
       else
         log "Legacy ADFRsuite fallback did not produce a receptor PDBQT; retaining Meeko diagnostics for structural review"
+      fi
+      else
+        log "Legacy ADFRsuite fallback unavailable: startup/compatibility check failed; no receptor was passed to it. See $RECEPTOR_DIR/adfr_startup_audit.json"
       fi
     fi
   fi
@@ -720,7 +762,7 @@ handle_receptor_failure_and_removal_approval() {
 if [ "$PREP_SUCCESS" = "0" ]; then
   FAILURE_DIAGNOSIS="$RECEPTOR_DIR/receptor_failure_diagnosis.txt"
   PREPARATION_INTERVENTION="$RECEPTOR_DIR/preparation_intervention.json"
-  FAILURE_LOGS=("$ADFR_FALLBACK_LOG" "$DISULFIDE_RETRY_LOG" "$RECEPTOR_RETRY_LOG" "$PDBFIXER_MEEKO_LOG" "$RECEPTOR_BACKEND_LOG")
+  FAILURE_LOGS=("$ADFR_FALLBACK_LOG" "$DISULFIDE_RETRY_LOG" "$RECEPTOR_RETRY_LOG" "$PDBFIXER_MEEKO_LOG" "$PDBFIXER_LOG" "$RECEPTOR_BACKEND_LOG")
   write_receptor_failure_diagnosis "$INPUT_PDB" "$RECEPTOR_FILTERED_PDB" "$FAILURE_DIAGNOSIS" "${FAILURE_LOGS[@]}"
   INTERVENTION_HELPER="$LIBEXEC_DIR/docking-universal-preparation-intervention.py"
   if [ -f "$INTERVENTION_HELPER" ]; then

@@ -1211,6 +1211,8 @@ def main():
             "receptor_modification_warning": modification_warning,
     }
     from docking_universal.services.protein_identity import read_protein_identity
+    from docking_universal.services.receptor_model_history import attach_retained_history
+    receptor_preparation = attach_retained_history(receptor_preparation, prep_root, receptor_pdbqt)
     identity_source = prep_root / "source" / "structure.cif"
     protocol = build_protocol_record(ProtocolRecordInputs(
         protocol_type=kind, target=target,

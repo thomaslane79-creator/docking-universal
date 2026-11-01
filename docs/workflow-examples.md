@@ -27,7 +27,12 @@ docking-universal run exploratory \
   --out examples/tutorials/02_ligand_free_cavity/study
 ```
 
-The workflow prepares the receptor, ranks fpocket cavities, writes candidate centers and docking boxes, pauses for structural review, then asks you to select the docking box to test before docking the example compound. All results are labeled `EXPLORATORY_NO_CONTROL` because cavity ranking and repeated docking cannot replace experimental pose recovery.
+The workflow prepares the receptor, predicts candidate pockets with P2Rank
+(fpocket is the fallback), retains candidate locations and docking boxes, and
+pauses for structural review before docking. AutoDock Vina is the default
+docking engine; QuickVina-W is an explicit alternative. The desktop permits
+one or more reviewed regions. All results remain exploratory because pocket
+prediction and repeated docking cannot replace experimental pose recovery.
 
 ## Why both examples matter
 

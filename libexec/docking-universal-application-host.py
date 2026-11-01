@@ -22,7 +22,9 @@ def main() -> int:
     args = parser.parse_args()
     preparation = None if os.name == "nt" else Path(__file__).with_name("docking-universal-prepare")
     guard = None
-    capabilities = {"scientific_stages_supported": os.name != "nt"}
+    capabilities = {"scientific_stages_supported": os.name != "nt",
+                    "coordinate_site_review_supported": sys.platform == 'darwin',
+                    "reviewed_receptor_changes_supported": sys.platform == 'darwin'}
     if os.name == "nt":
         from docking_universal.windows_desktop import installed_host, workflow_guard, installed_capabilities
         try:

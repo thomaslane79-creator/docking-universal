@@ -32,6 +32,9 @@ class StudyViewerCoordinator:
             item for item in state.artifacts
             if item.kind == "prepared_receptor_structure" and item.sha256
         ), None)
+        if receptor is None:
+            receptor = next((item for item in state.artifacts
+                             if item.kind == 'site_review_receptor_structure' and item.sha256), None)
         self.structure_context = receptor.sha256 if receptor is not None else None
         if hasattr(self.adapter, "set_structure_context"):
             self.adapter.set_structure_context(self.structure_context)
@@ -75,12 +78,16 @@ class StudyViewerCoordinator:
         receptor = next(
             (item for item in state.artifacts if item.kind == "prepared_receptor_structure"), None,
         )
+        if receptor is None:
+            receptor = next((item for item in state.artifacts
+                             if item.kind == 'site_review_receptor_structure'), None)
         if receptor is None or not receptor.sha256:
             raise ValueError("Required prepared-receptor structure artifact is not available for visual review")
         if not self.connected:
             self.adapter.launch()
             self.connected = True
-        structure = StructureIdentity(receptor.id, receptor.sha256, "prepared_receptor")
+        structure = StructureIdentity(receptor.id, receptor.sha256,
+            'coordinate_site_review' if receptor.kind == 'site_review_receptor_structure' else 'prepared_receptor')
         self.adapter.register_structure(RegisteredStructure(
             structure, Path(receptor.path), "du_receptor",
         ))

@@ -68,6 +68,9 @@ class CommandDispatcher:
         "create_study", "remove_study", "start_pocket_review", "resolve_decision",
         "start_receptor_preparation", "start_protocol_finalization", "start_screening",
         "start_control_validation",
+        "prepare_reviewed_receptor",
+        "prepare_receptor_changes",
+        "review_site_reference",
         "start_pose_interaction",
         "cancel_active_job",
         "import_protocol_bundle",
@@ -186,6 +189,43 @@ class CommandDispatcher:
             cursor = int(command.payload.get("sequence", 0))
             events = [record_to_dict(event) for event in state.events if event.sequence > cursor]
             return Response(command.request_id, "applied", state.revision, {"events": events})
+        if command.operation == 'prepare_reviewed_receptor':
+            if command.expected_revision is None or self.workflow_runner is None:
+                raise ValueError('A configured host and current revision are required')
+            if command.payload:
+                raise ValueError('Reviewed preparation uses the retained setup, not replacement inputs')
+            result = self.workflow_runner.prepare_reviewed_receptor(command.study_id,
+                request_id=command.request_id, expected_revision=command.expected_revision)
+            state = self.controller.get_study(command.study_id)
+            return Response(command.request_id, 'applied', state.revision, result)
+        if command.operation in {'preview_receptor_changes', 'prepare_receptor_changes'}:
+            if os.name == 'nt':
+                raise ValueError('Native Windows receptor-model change acceptance is not established')
+            if command.expected_revision is None or self.workflow_runner is None:
+                raise ValueError('A configured host and current revision are required')
+            if command.operation == 'preview_receptor_changes':
+                if set(command.payload) != {'choices'}:
+                    raise ValueError('Only exact change choices are accepted for preview')
+                preview = self.workflow_runner.preview_receptor_changes(command.study_id, command.payload['choices'],
+                    expected_revision=command.expected_revision)
+                return Response(command.request_id, 'applied', command.expected_revision, {'preview': preview})
+            result = self.workflow_runner.prepare_reviewed_receptor(command.study_id,
+                model_changes=command.payload, request_id=command.request_id, expected_revision=command.expected_revision)
+            state = self.controller.get_study(command.study_id)
+            return Response(command.request_id, 'applied', state.revision, result)
+        if command.operation == 'review_site_reference':
+            if os.name == 'nt' or self.workflow_runner is None:
+                raise ValueError('Reviewed incomplete site anchors require the accepted local host')
+            for other in self.controller.store.list_studies():
+                if other.active_job and (other.study_id != command.study_id
+                        or other.active_job.stage != 'pocket_review'
+                        or other.active_job.status.value != 'waiting_for_decision'):
+                    raise ValueError('Another scientific stage is active during reference review')
+            from .services.site_reference_review import stage
+            record = stage(self.controller, command.study_id, command.payload,
+                           expected_revision=command.expected_revision, request_id=command.request_id)
+            state = self.controller.get_study(command.study_id)
+            return Response(command.request_id, 'applied', state.revision, {'review': record})
         if command.operation == "start_receptor_preparation":
             if command.expected_revision is None:
                 raise RevisionConflictError("A state revision is required for scientific mutations")

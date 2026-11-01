@@ -5,7 +5,8 @@ LIBEXECDIR ?= $(PREFIX)/libexec/docking-universal
 .PHONY: test test-integration test-release setup install install-conda install-launcher uninstall
 
 test:
-	PYTHONPATH="$(CURDIR)/libexec" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_report_synchronization.py
+	PYTHONPATH="$(CURDIR)/libexec" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_site_first_workflow.py tests/test_receptor_model_review.py tests/test_sidechain_candidate.py tests/test_reviewed_connectivity.py tests/test_site_reference_review.py tests/test_reclustering.py tests/test_reviewed_exclusions.py tests/test_receptor_model_history.py
+	PYTHONPATH="$(CURDIR)/libexec" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_report_synchronization.py tests/test_report_snapshot_framing.py tests/test_report_pagination.py tests/test_system_validation.py tests/test_contract_worker.py tests/test_protein_coverage.py
 	PYTHONPATH="$(CURDIR)/libexec" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_meeko_export.py
 	PYTHONPATH="$(CURDIR)/libexec" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_native_control.py
 	PYTHONPATH="$(CURDIR)/libexec" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_windows_qvinaw.py
@@ -52,6 +53,7 @@ test:
 	PYTHONPATH="$(CURDIR)/libexec$${PYTHONPATH:+:$$PYTHONPATH}" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_run_selection.py tests/test_guided_options.py tests/test_report_cavity.py tests/test_pdbfixer_preclean.py tests/test_ccd_audit.py tests/test_protonation_audit.py tests/test_protocol_types.py tests/test_protocol_region.py tests/test_protocol_finalization.py tests/test_protocol_finalization_integration.py tests/test_graphical_chooser.py tests/test_depict2d.py tests/test_retained_report_artifacts.py tests/test_process_runner.py tests/test_process_adapter.py tests/test_job_service.py tests/test_runtime_inventory.py tests/test_pymol_spike.py tests/test_pymol_adapter.py tests/test_viewer_contracts.py tests/test_state_transactions.py tests/test_application_host.py tests/test_host_client.py tests/test_application_host_controller.py tests/test_desktop_workspace.py tests/test_study_viewer.py tests/test_preparation_service.py tests/test_geostd_components.py tests/test_meeko_template_bridge.py tests/test_protocol_workflow.py tests/test_screening_service.py tests/test_screening_workflow.py tests/test_reuse_equivalence.py tests/test_dock_runner.py tests/test_pocket_evidence.py tests/test_pocket_review_service.py tests/test_structural_evidence.py tests/test_conformational_evidence.py tests/test_pocket_engines.py tests/test_p2rank_adapter.py tests/test_multisite_protocol.py tests/test_multisite_report_figures.py tests/test_application_contracts.py
 
 	PYTHONPATH="$(CURDIR)/libexec$${PYTHONPATH:+:$$PYTHONPATH}" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_evidence_interactions.py
+	PYTHONPATH="$(CURDIR)/libexec$${PYTHONPATH:+:$$PYTHONPATH}" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_cohort_software_repairs.py
 	PYTHONPATH="$(CURDIR)/libexec$${PYTHONPATH:+:$$PYTHONPATH}" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_control_site_review.py tests/test_reduce2_native_output.py
 	PYTHONPATH="$(CURDIR)/libexec$${PYTHONPATH:+:$$PYTHONPATH}" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_control_pose_landscape.py
 	PYTHONPATH="$(CURDIR)/libexec$${PYTHONPATH:+:$$PYTHONPATH}" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_mmff_variants.py

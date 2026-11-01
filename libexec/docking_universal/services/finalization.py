@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import subprocess
 import sys
@@ -174,11 +175,28 @@ def build_site_guided_protocol(
             removed, bool(removal_record),
         ),
     }
+    from .receptor_model_history import attach_retained_history
+    receptor_preparation = attach_retained_history(receptor_preparation, preparation, request.receptor_pdbqt)
+    from .site_reference_review import attach
+    receptor_preparation = attach(receptor_preparation, state,
+                                 hashlib.sha256(request.receptor_pdbqt.read_bytes()).hexdigest(), request.regions)
     version = _package_version(libexec)
     detection_path = preparation / "cavity" / "pocket_detection_provenance.json"
     pocket_detection = json.loads(detection_path.read_text()) if detection_path.is_file() else {
         "engine": "fpocket", "provenance": "legacy retained preparation",
     }
+    setup = state.workflow_data.get("study_setup") or {}
+    reference_only = setup.get("site_mode") == "ligand" and not setup.get("predict_pockets_with_ligand")
+    if reference_only:
+        # Preserve a historical unwanted detector run as history, not as the
+        # origin or supporting evidence of the approved ligand-defined site.
+        historical = pocket_detection if pocket_detection.get("engine") != "none" else None
+        pocket_detection = {"engine": "none", "site_definition": "input_bound_ligand",
+                            "prediction_requested": False, "used_for_site_definition": False}
+        if historical:
+            pocket_detection["retained_legacy_detection"] = historical
+        else:
+            pocket_detection["prediction_executed"] = False
     detector = pocket_detection.get("engine", "fpocket")
     software = {
         "docking_universal": version,
@@ -193,6 +211,9 @@ def build_site_guided_protocol(
         "engine_version": "recorded when screening runs",
     }
     scene = next((item.path for item in state.artifacts if item.kind == "pymol_scene"), None)
+    if reference_only:
+        scene = None
+        software.pop("none", None)
     labels = [region["box_label"] for region in request.regions]
     record = build_protocol_record(ProtocolRecordInputs(
         protocol_type="site-guided-exploratory",
@@ -200,12 +221,13 @@ def build_site_guided_protocol(
         site_anchor=Path(str(request.regions[0]["box"])).stem,
         evidence_basis=(
             "User-selected labeled docking boxes: " + ", ".join(labels)
-            + f". {detector} pocket predictions and related-structure ligand positions remain separately auditable."
+            + (". Pocket prediction was not requested. Input-ligand and independent related-structure sites remain separately auditable."
+               if reference_only else f". {detector} pocket predictions and related-structure ligand positions remain separately auditable.")
         ),
         created_utc=created_utc or datetime.now(timezone.utc).isoformat(),
         engine=request.settings.engine,
         software=software,
-        region_definition="predicted_pocket" if detector != "fpocket" else "fpocket",
+        region_definition="ligand_defined" if reference_only else ("predicted_pocket" if detector != "fpocket" else "fpocket"),
         fpocket_selection="reviewed" if detector == "fpocket" else None,
         pocket_evidence=evidence_record,
         selected_residues=[],

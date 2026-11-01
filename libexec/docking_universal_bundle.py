@@ -136,6 +136,13 @@ def create_bundle(
         if key in owner:
             owner[key] = annotate_regions(owner[key],base=protocol_path.parent,detector=detector)
     preparation = protocol.setdefault("receptor_preparation", {})
+    from docking_universal.services.receptor_model_history import normalize_preparation
+    preparation = normalize_preparation(preparation, sha256(Path(protocol['locked_inputs']['receptor']).expanduser().resolve()))
+    protocol['receptor_preparation'] = preparation
+    reference_review = preparation.get('site_reference_review')
+    if reference_review and (kind == CONTROL_VALIDATED or len(protocol.get('docking_regions') or []) != 1
+            or protocol['docking_regions'][0]['box_sha256'] != reference_review['review']['box_sha256']):
+        raise ValueError('Reviewed incomplete reference cannot transfer to a control or another site')
     if preparation.get("user_approved_component_removal") and not preparation.get("receptor_modification_warning"):
         preparation["receptor_modification_warning"] = build_receptor_modification_warning(
             preparation.get("user_approved_removed_components") or []
@@ -145,6 +152,11 @@ def create_bundle(
         root = Path(temporary)
         packaged_control = root / ("control" if kind == CONTROL_VALIDATED else "protocol")
         assets = packaged_control / "assets"
+        if preparation.get('model_change_history'):
+            assets.mkdir(parents=True, exist_ok=True)
+            history = assets / 'receptor_model_history.json'
+            history.write_text(json.dumps(preparation['model_change_history'], indent=2) + '\n')
+            preparation['model_change_history_record'] = 'assets/' + history.name
         receptor = Path(protocol["locked_inputs"]["receptor"]).expanduser().resolve()
         box = Path(protocol["locked_inputs"]["box"]).expanduser().resolve()
         receptor_copy = _copy(receptor, assets / receptor.name)

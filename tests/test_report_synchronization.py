@@ -24,6 +24,54 @@ RUN = load('synchronized_run','libexec/docking-universal-run.py')
 
 
 class ReportSynchronizationTests(unittest.TestCase):
+    def test_control_only_pdf_keeps_redocking_section_without_inventing_new_compounds(self):
+        try:
+            import reportlab.platypus
+        except ImportError:
+            self.skipTest('ReportLab unavailable in this runtime')
+        import subprocess
+        import sys
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'report').mkdir()
+            (root / 'report/study_summary.json').write_text(json.dumps(
+                {'workflow': 'control', 'compounds': [], 'compound_count': 0}))
+            control = root / 'control'
+            clusters = control / 'report/control_pose_analysis/cluster_summary.csv'
+            clusters.parent.mkdir(parents=True)
+            clusters.write_text('energy_rank,cluster_id\n1,2\n')
+            (control / 'protocol.json').write_text(json.dumps({'engine': 'vina',
+                'control_status': 'approved', 'unknown_docking_allowed': True,
+                'pocket_detection': {'engine': 'none'},
+                'docking_regions': [{'site_source': 'input_bound_ligand', 'geometry': {}}],
+                'parameters': {'seeds': [1, 2, 3, 4, 5]}}))
+            story = []
+            with patch.object(sys, 'argv', ['pdf-report', str(root), '--control', str(control)]), \
+                 patch.object(REPORT.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '', '')), \
+                 patch.object(REPORT, 'require_complete_used_versions'), \
+                 patch.object(REPORT, 'reproducibility_summary', wraps=REPORT.reproducibility_summary) as methods, \
+                 patch.object(reportlab.platypus.SimpleDocTemplate, 'build', side_effect=lambda items: story.extend(items)):
+                REPORT.main()
+            text = '\n'.join(item.getPlainText() for item in story if hasattr(item, 'getPlainText'))
+            self.assertIn('Experimental control redocking results', text)
+            self.assertNotIn('No docking or interaction analysis was performed', text)
+            self.assertNotIn('Ligand docking results', text)
+            self.assertTrue(methods.call_args.args[2])
+
+    def test_retained_control_is_not_mistaken_for_no_docking_or_a_prospective_screen(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            control = root / 'control'
+            clusters = control / 'report/control_pose_analysis/cluster_summary.csv'
+            clusters.parent.mkdir(parents=True)
+            self.assertFalse(REPORT.has_retained_control_results(control))
+            clusters.write_text('energy_rank,cluster_id\n')
+            self.assertFalse(REPORT.has_retained_control_results(control))
+            clusters.write_text('energy_rank,cluster_id\n1,2\n')
+            self.assertTrue(REPORT.has_retained_control_results(control))
+            self.assertFalse(REPORT.has_retained_docking_results(root))
+            self.assertFalse(REPORT.has_retained_control_results(None))
+
     def test_control_uses_retained_detector_version_even_without_a_control_software_entry(self):
         with tempfile.TemporaryDirectory() as directory:
             protocol = {'engine': 'qvinaw', 'control_status': 'failed',
@@ -87,7 +135,7 @@ class ReportSynchronizationTests(unittest.TestCase):
                               if row['role'] == 'Docking-region definition')
             self.assertEqual(definition['software'], 'Exact input-ligand site')
             self.assertEqual(definition['version'], 'Pocket prediction not requested')
-            self.assertFalse(any(row['role'] == 'Ligand-free cavity detection'
+            self.assertFalse(any(row['role'] == 'Pocket prediction'
                                  for row in provenance['software']))
             self.assertIn('Not requested', provenance['methods']['cavity_detection'])
             used = REPORT.retain_used_report_methods(provenance, None, has_docking=True)
@@ -131,7 +179,7 @@ class ReportSynchronizationTests(unittest.TestCase):
             provenance = REPORT.reproducibility_record(
                 {'pocket_detection': {'engine': 'custom-detector'}}, Path(directory), None)
             detector = next(row for row in provenance['software']
-                            if row['role'] == 'Ligand-free cavity detection')
+                            if row['role'] == 'Pocket prediction')
             self.assertEqual(detector['software'], 'custom-detector')
             self.assertEqual(detector['version'], 'not recorded')
 
@@ -140,7 +188,7 @@ class ReportSynchronizationTests(unittest.TestCase):
             provenance = REPORT.reproducibility_record(
                 {'software': {'fpocket': 'legacy-version'}}, Path(directory), None)
             detector = next(row for row in provenance['software']
-                            if row['role'] == 'Ligand-free cavity detection')
+                            if row['role'] == 'Pocket prediction')
             self.assertEqual(detector['software'], 'fpocket')
             self.assertEqual(detector['version'], 'legacy-version')
 
@@ -217,7 +265,7 @@ class ReportSynchronizationTests(unittest.TestCase):
             protocol={'pocket_detection':{'engine':'p2rank'}}
             provenance=REPORT.reproducibility_record(protocol,root,None)
             detector=next(item for item in provenance['software']
-                          if item['role']=='Ligand-free cavity detection')
+                          if item['role']=='Pocket prediction')
             self.assertEqual(detector['software'],'P2Rank')
             self.assertEqual(detector['version'],'2.5.1')
 
@@ -304,3 +352,70 @@ class ReportSynchronizationTests(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+
+
+FIGURES = load('synchronized_figures', 'libexec/docking-universal-report-figures.py')
+
+class ReportMissingRMSDTests(unittest.TestCase):
+    def test_all_top20_ranks_survive_unmappable_third_cluster_without_recoloring_fourth(self):
+        if not all(importlib.util.find_spec(name) for name in ('rdkit', 'matplotlib')):
+            self.skipTest('RDKit and Matplotlib required for real geometry/plot checks')
+        from rdkit import Chem
+        from rdkit.Geometry import Point3D
+        import matplotlib.pyplot as plt
+        from matplotlib.colors import to_rgba
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rows = ['energy_rank,cluster_id,best_energy_kcal_per_mol,pose_count']
+            for rank in range(1, 22):
+                rows.append(f'{rank},{rank},{-10 + rank / 10},1')
+                cluster = root / f'cluster_{rank:03d}'
+                cluster.mkdir()
+                mol = Chem.MolFromSmiles('CCN' if rank == 3 else 'CCO')
+                conf = Chem.Conformer(mol.GetNumAtoms())
+                for i in range(mol.GetNumAtoms()):
+                    conf.SetAtomPosition(i, Point3D(i * 1.5, rank / 10, 0))
+                mol.AddConformer(conf)
+                writer = Chem.SDWriter(str(cluster / 'representative.sdf'))
+                writer.write(mol); writer.close()
+            (root / 'cluster_summary.csv').write_text('\n'.join(rows) + '\n')
+            output = root / 'plot.png'
+            with patch.object(plt, 'close'):
+                self.assertTrue(FIGURES.plot_clusters(root, output))
+                fig = plt.gcf()
+                self.assertEqual(len(fig.axes), 2)
+                # Rank 3 is still gold in the explicitly unvalued strip.
+                self.assertEqual(tuple(fig.axes[1].collections[0].get_facecolors()[0][:3]), to_rgba(FIGURES.TOP_COLORS[2])[:3])
+                # Rank 4 must remain gray instead of inheriting rank 3's color.
+                self.assertEqual(tuple(fig.axes[0].collections[0].get_facecolors()[2][:3]), to_rgba('#b8c0c8')[:3])
+                self.assertIn('RMSD N/A', '\n'.join(t.get_text() for t in fig.axes[0].texts))
+            plt.close('all')
+            with output.with_suffix('.csv').open() as handle:
+                plotted = list(csv.DictReader(handle))
+            self.assertEqual([int(r['energy_rank']) for r in plotted], list(range(1, 21)))
+            self.assertEqual(plotted[2]['cluster_id'], '3')
+            self.assertEqual(plotted[2]['rmsd_angstrom'], 'NA')
+            self.assertEqual(plotted[2]['rmsd_status'], 'unavailable')
+            self.assertEqual(float(plotted[0]['rmsd_angstrom']), 0)
+
+    def test_zero_added_atoms_does_not_hide_recorded_alternate_location_policy(self):
+        if not importlib.util.find_spec('reportlab'):
+            self.skipTest('ReportLab required')
+        from reportlab.lib.styles import getSampleStyleSheet
+        record = {'pdbfixer_used': True, 'pdbfixer_audit': 'retained.json', 'changes': {
+            'missing_heavy_atoms_added': 0, 'missing_terminal_atoms_detected_not_added': 0,
+            'policy': {'alternate_locations': 'PDBFixer selected one location'}}}
+        notes = REPORT.pdbfixer_report_note(record, Path('.'), getSampleStyleSheet())
+        text = '\n'.join(p.getPlainText() for p in notes if hasattr(p, 'getPlainText'))
+        self.assertIn('PDBFixer selected one location', text)
+        self.assertNotIn('no structural changes', text)
+
+    def test_missing_policy_does_not_invent_unchanged_coordinates(self):
+        if not importlib.util.find_spec('reportlab'):
+            self.skipTest('ReportLab required')
+        from reportlab.lib.styles import getSampleStyleSheet
+        record = {'pdbfixer_used': True, 'pdbfixer_audit': 'retained.json', 'changes': {}}
+        notes = REPORT.pdbfixer_report_note(record, Path('.'), getSampleStyleSheet())
+        text = '\n'.join(p.getPlainText() for p in notes if hasattr(p, 'getPlainText'))
+        self.assertIn('alternate-location handling was not recorded', text)
+        self.assertNotIn('no structural changes', text)

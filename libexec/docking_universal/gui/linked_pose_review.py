@@ -11,6 +11,7 @@ import xml.etree.ElementTree as ET
 from .qt import QtCore, QtGui, QtWidgets
 from .results_review import InteractionDiagramLabel
 from ..pose_visuals import cluster_color, retained_pose_color, read_pose_view
+from ..plip_sites import retained_binding_site
 
 
 @dataclass(frozen=True)
@@ -99,11 +100,9 @@ def control_view(state) -> PoseView | None:
 def interaction_contacts(path):
     """Residue/class comparison, preserving chain identity; ambiguous sites fail closed."""
     root = ET.parse(path).getroot()
-    sites = root.findall("bindingsite")
-    if len(sites) != 1:
-        raise ValueError("Interaction comparison requires one identified ligand binding site")
+    site = retained_binding_site(root)
     contacts = Counter()
-    for item in sites[0].findall("interactions/*/*"):
+    for item in site.findall("interactions/*/*"):
         chain, number, residue = (item.findtext(key) for key in ("reschain", "resnr", "restype"))
         if number is not None and residue is not None:
             contacts[(item.tag.replace('_', ' '), chain or '', number, residue)] += 1

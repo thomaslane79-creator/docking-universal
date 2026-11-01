@@ -21,6 +21,8 @@ def rows(path):
 
 def inputs(state):
     receptor = next((a for a in state.artifacts if a.kind == 'prepared_receptor_structure'), None)
+    if receptor is None:
+        receptor = next((a for a in state.artifacts if a.kind == 'site_review_receptor_structure'), None)
     boxes = [Path(a.path) for a in state.artifacts if a.kind == 'docking_box']
     if receptor is None or not boxes:
         return None

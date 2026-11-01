@@ -850,7 +850,11 @@ def receptor_preparation_record(study, control=None, protocol=None):
     reduce2_audit_path = retained(["preparation/**/receptor/reduce2_audit.json", "**/receptor/reduce2_audit.json", "**/assets/reduce2_audit.json"])
     reduce2_log = retained(["preparation/**/receptor/reduce2.log", "**/receptor/reduce2.log", "**/assets/reduce2.log"])
     reduce2_audit = read_json(reduce2_audit_path)
-    recorded_preparation = (protocol or {}).get("receptor_preparation", {})
+    from docking_universal.services.receptor_model_history import normalize_preparation
+    summary_preparation = read_json(Path(study) / 'report/study_summary.json').get('protocol_receptor_preparation') or {}
+    recorded_preparation = normalize_preparation(
+        (protocol or {}).get('receptor_preparation') or summary_preparation,
+        ((protocol or {}).get('locked_inputs') or {}).get('receptor_sha256'))
     recorded_removal = bool(recorded_preparation.get("user_approved_component_removal"))
     recorded_rows = recorded_preparation.get("user_approved_removed_components") or []
     if (removal_log and removal_log.stat().st_size) or recorded_removal:
@@ -894,6 +898,8 @@ def receptor_preparation_record(study, control=None, protocol=None):
         "user_approved_component_removal": bool(removal_log or recorded_removal),
         "user_approved_removed_components": removed_rows,
         "receptor_modification_warning": modification_warning,
+        "model_change_history": recorded_preparation.get('model_change_history'),
+        "site_reference_review": recorded_preparation.get('site_reference_review'),
         "adfr_fallback_log": str(adfr_log) if adfr_log else None,
         "disulfide_retry_log": str(disulfide_log) if disulfide_log else None,
         "changes": audit,
@@ -933,7 +939,14 @@ def pdbfixer_report_note(record, out, styles):
             f"detected but did not add {terminal} terminal "
             f"{'atom' if terminal == 1 else 'atoms'}"
         )
-    change_text = "; ".join(changes) if changes else "no structural changes were recorded"
+    alternate_policy = (audit.get('policy') or {}).get('alternate_locations')
+    if alternate_policy:
+        from xml.sax.saxutils import escape
+        changes.append('recorded alternate-location policy: ' + escape(str(alternate_policy)))
+    change_text = "; ".join(changes) if changes else (
+        "no atom additions, replacements or gap/terminal modeling were recorded; "
+        "alternate-location handling was not recorded"
+    )
     text = f"<b>PDBFixer audit:</b> {change_text}. {disposition}"
     return [Paragraph(text, styles["BodyText"]), Spacer(1, 8)]
 
@@ -983,8 +996,33 @@ def adfr_fallback_report_note(record, out, styles):
     return [Paragraph(text, styles["BodyText"]), Spacer(1, 8)]
 
 def user_approved_removal_report_note(record, out, styles):
-    """Make model-changing component removal unambiguous in every report."""
+    """Retain distinct site-interpretation and receptor-change warnings."""
     from reportlab.platypus import Paragraph, Spacer
+    from html import escape
+    note = []
+    if record.get('site_reference_review'):
+        from docking_universal.services.site_reference_review import normalize
+        reviewed = normalize(record['site_reference_review'])
+        note = [Paragraph('<b>Reviewed incomplete site reference:</b> ' + escape(reviewed['warning']),
+                          styles['BodyText']), Spacer(1, 8)]
+    return note + _user_approved_removal_report_note(record, out, styles)
+
+
+def _user_approved_removal_report_note(record, out, styles):
+    """Make model-changing component removal unambiguous in every report."""
+    from reportlab.platypus import KeepTogether, Paragraph, Spacer
+    from html import escape
+    if record.get('model_change_history') or record.get('receptor_modification_warning'):
+        from docking_universal.services.receptor_model_history import normalize_preparation
+        record = normalize_preparation(record)
+        warning = record.get('receptor_modification_warning')
+        if warning and not record.get('user_approved_component_removal') and not record.get('user_approved_component_removal_log'):
+            heading = ('High-severity receptor-model warning' if warning.get('severity') == 'high'
+                       else 'Reviewed receptor-model changes')
+            text = ('<b>' + heading + ':</b> ' + escape(warning['summary']) +
+                ' Passing parameterization does not validate the altered structure or transfer a control result '
+                'from an unmodified receptor. Review the retained change inventory and the selected docking boxes.')
+            return [KeepTogether([Paragraph(text, styles['BodyText'])]), Spacer(1, 8)]
     if not record.get("user_approved_component_removal") and not record.get("user_approved_component_removal_log"):
         return []
     rows = record.get("user_approved_removed_components") or (
@@ -1000,7 +1038,20 @@ def user_approved_removal_report_note(record, out, styles):
     text = ("<b>User-approved receptor component removal:</b> safe preparation fallbacks failed, "
             "and the user explicitly approved Meeko's removal of unmatched components." + inventory + severity + " Inspect the complete retained removal manifest and log; a "
             "target-matched bound-ligand control is required before prospective screening.")
-    return [Paragraph(text, styles["BodyText"]), Spacer(1, 8)]
+    return [KeepTogether([Paragraph(text, styles["BodyText"])]), Spacer(1, 8)]
+
+def scientific_reference_section(references, styles):
+    """Keep a page-sized bibliography with its heading in every report path."""
+    from reportlab.platypus import KeepTogether, Paragraph
+    content = [Paragraph("Scientific and software references", styles["Heading2"])]
+    for index, reference in enumerate(references, start=1):
+        content.append(Paragraph(
+            f"{index}. {reference['citation']} <link href=\"{reference['url']}\"><font color=\"#1f4e79\">{reference['url']}</font></link>",
+            styles["ReferenceDU"],
+        ))
+    # ReportLab can still split an unusually long bibliography across pages;
+    # the ordinary reference list fits a page and should not leave a tail.
+    return [KeepTogether(content)]
 
 def ccd_modification_report_note(record, out, styles):
     """Summarize retained MODRES/CCD handling without expanding the report."""
@@ -1096,7 +1147,14 @@ def reproducibility_record(protocol, study, control):
     clustering = read_json(first(study, ["compounds/*/pose_analysis/clustering_manifest.json", "**/clustering_manifest.json"]))
     docking_manifest = read_key_value_tsv(first(study, ["compounds/*/seed_*/docking/run_manifest.tsv", "**/docking/run_manifest.tsv"]))
     receptor_preparation = receptor_preparation_record(study, control, protocol)
-    retained_preparation_summary = summary.get("protocol_receptor_preparation_summary")
+    # Protocol-only reports have no screening summary handoff.  Their finalized
+    # protocol retains the preparation result even when the receptor directory
+    # is outside the report folder; absence of a local directory is not evidence
+    # that preparation occurred outside the recorded workflow.
+    retained_preparation_summary = (
+        summary.get("protocol_receptor_preparation_summary")
+        or (protocol or {}).get("receptor_preparation_summary")
+    )
     if retained_preparation_summary and receptor_preparation.get("pdbfixer_used") is None:
         receptor_preparation["path"] = retained_preparation_summary
         if "PDBFixer was not needed" in retained_preparation_summary:
@@ -1144,7 +1202,7 @@ def reproducibility_record(protocol, study, control):
                                  if value and str(value).strip() and str(value).strip().lower() not in
                                  {"unknown", "not recorded", "not detected"}), "not recorded")
         detector_software = {
-            "role": "Ligand-free cavity detection",
+            "role": "Pocket prediction",
             "software": {"p2rank": "P2Rank", "fpocket": "fpocket"}.get(detector_key, detector_key),
             "version": detector_version,
         }
@@ -1451,6 +1509,18 @@ def has_retained_docking_results(study):
     )
 
 
+def has_retained_control_results(control):
+    """A retained control landscape is docking evidence, not a new compound screen."""
+    if control is None:
+        return False
+    clusters = Path(control) / 'report/control_pose_analysis/cluster_summary.csv'
+    try:
+        with clusters.open(newline='') as handle:
+            return any(row.get('cluster_id') not in (None, '') for row in csv.DictReader(handle))
+    except (OSError, csv.Error):
+        return False
+
+
 def discover_exploratory_protocol(study):
     """Return a retained protocol, never an unrelated study JSON document."""
     study = Path(study)
@@ -1543,7 +1613,9 @@ def main():
     styles.add(ParagraphStyle(name="SmallDU", parent=styles["BodyText"], fontSize=8, leading=10, spaceBefore=0, spaceAfter=0))
     # References remain legible but compact enough to avoid a nearly blank
     # spill page in evidence-rich protocol reports.
-    styles.add(ParagraphStyle(name="ReferenceDU", parent=styles["BodyText"], fontSize=6.8, leading=7.5, spaceBefore=0, spaceAfter=0))
+    # A tighter baseline gap avoids spilling one final reference onto an almost
+    # empty page. Keep the established font size and every citation unchanged.
+    styles.add(ParagraphStyle(name="ReferenceDU", parent=styles["BodyText"], fontSize=6.8, leading=7.1, spaceBefore=0, spaceAfter=0))
     styles.add(ParagraphStyle(name="CaptionDU", parent=styles["Heading2"], alignment=TA_CENTER, fontSize=11, leading=14, spaceBefore=8, spaceAfter=5))
 
     def image(path, width=7.0, height=4.5):
@@ -1662,6 +1734,8 @@ def main():
     # docking.  Require retained pose-cluster results before adding docking
     # sections to a preparation-only report.
     has_docking = has_retained_docking_results(args.study)
+    has_control_docking = bool(protocol) and has_retained_control_results(args.control)
+    has_any_docking = has_docking or has_control_docking
     no_pocket_prediction = bool(cavity and cavity.get("pocket_engine") == "none")
     retained_control_statement = site_control_statement(protocol)
     report_title = (
@@ -1670,8 +1744,8 @@ def main():
         else "Docking Universal - Reusable Exploratory Protocol Report" if cavity and summary_protocol_type in {
             "site-guided-exploratory", "ligand-guided-exploratory"
         } and not has_docking
-        else "Docking Universal - Ligand-Free Cavity and Docking Report" if cavity and has_docking
-        else "Docking Universal - Ligand-Free Cavity Report" if cavity
+        else "Docking Universal - Pocket Selection and Docking Report" if cavity and has_docking
+        else "Docking Universal - Pocket Selection Report" if cavity
         else "Docking Universal - Docking Study Report"
     )
     story = [Paragraph(f"{report_title}<br/><font size=\"12\">Report generator version {package_version()}</font>", styles["Title"])]
@@ -2158,7 +2232,13 @@ def main():
             story += [
                 image(cavity_a, 6.5, 3.8),
                 Paragraph(
-                    f"<b>Figure {figure_number}. Ligand-free cavity selection.</b> Eligible cavities are shown in their integer evaluation order by raw fpocket score. Gray candidates were subsequently removed because their docking boxes overlapped a higher-ranked retained box. The red point identifies the cavity selected to define the docking box. fpocket scores are geometric pocket-ranking outputs, not binding-affinity estimates.",
+                    f"<b>Figure {figure_number}. Pocket prediction and docking-region selection.</b> "
+                    f"Candidates are ordered by {pocket_engine} prediction score. Colors identify prediction candidates, "
+                    f"not independent approval. "
+                    + ("No docking region has been selected. " if review_only else
+                       f"The approved docking region is {selected_region_text}. ")
+                    + ("The input ligand defines this box and receives no pocket-prediction score. " if input_ligand_defined else "")
+                    + f"{pocket_engine} scores rank pocket predictions; they do not estimate ligand-binding affinity.",
                     styles["SmallDU"],
                 ), Spacer(1,8),
             ]
@@ -2200,7 +2280,7 @@ def main():
         story.append(Spacer(1,10))
         section_number += 1
 
-    if cavity and not has_docking:
+    if cavity and not has_any_docking:
         provenance = retain_used_report_methods(
             reproducibility_record(protocol, args.study, args.control), cavity, has_docking
         )
@@ -2226,10 +2306,9 @@ def main():
         story += ccd_modification_report_note(provenance["receptor_preparation"], out, styles)
         story += [Paragraph("Software versions used for this report", styles["Heading2"]),
             table(provenance_rows, [2.5*inch, 1.65*inch, 3.05*inch], compact=True),
-            Spacer(1,10), Paragraph("Scientific and software references", styles["Heading2"]),
+            Spacer(1,10),
         ]
-        for index, reference in enumerate(references, start=1):
-            story += [Paragraph(f"{index}. {reference['citation']} <link href=\"{reference['url']}\"><font color=\"#1f4e79\">{reference['url']}</font></link>", styles["ReferenceDU"])]
+        story += scientific_reference_section(references, styles)
         SimpleDocTemplate(str(out),pagesize=letter,leftMargin=.65*inch,rightMargin=.65*inch,topMargin=.6*inch,bottomMargin=.6*inch,title="Docking Universal ligand-free cavity report").build(story)
         print(f"PDF report: {out}")
         return
@@ -2345,7 +2424,7 @@ def main():
     # empty, scientifically misleading "Ligand docking results" page.
     if not has_docking:
         provenance = retain_used_report_methods(
-            reproducibility_record(protocol, args.study, args.control), cavity, has_docking
+            reproducibility_record(protocol, args.study, args.control), cavity, has_any_docking
         )
         require_complete_used_versions(provenance)
         (args.study / "report" / "software_versions_and_references.json").write_text(
@@ -2368,7 +2447,7 @@ def main():
         next_section = section_number + (2 if protocol and args.include_control_appendix else 1)
         story += [
             Paragraph(f"{next_section}. Reproducibility, software, and references", styles["Heading1"]),
-            Paragraph(reproducibility_summary(provenance, cavity, has_docking), styles["BodyText"]),
+            Paragraph(reproducibility_summary(provenance, cavity, has_any_docking), styles["BodyText"]),
             Spacer(1, 8),
         ]
         story += pdbfixer_report_note(provenance["receptor_preparation"], out, styles)
@@ -2396,13 +2475,9 @@ def main():
         story += [
             Paragraph("Additional software used for analysis and reporting", styles["Heading2"]),
             table(provenance_rows, [2.5*inch, 1.65*inch, 3.05*inch], compact=True),
-            Spacer(1, 6), Paragraph("Scientific and software references", styles["Heading2"]),
+            Spacer(1, 6),
         ]
-        for index, reference in enumerate(provenance["references"], start=1):
-            story += [Paragraph(
-                f"{index}. {reference['citation']} <link href=\"{reference['url']}\"><font color=\"#1f4e79\">{reference['url']}</font></link>",
-                styles["ReferenceDU"],
-            )]
+        story += scientific_reference_section(provenance["references"], styles)
         SimpleDocTemplate(str(out), pagesize=letter, leftMargin=.65*inch, rightMargin=.65*inch,
                           topMargin=.6*inch, bottomMargin=.6*inch,
                           title="Docking Universal report").build(story)
@@ -2508,6 +2583,14 @@ def main():
                 if is_cluster_plot else
                 f"<b>Figure {figure_number}. Docking pose-cluster analysis for {caption_subject}.</b> (A) Docking score versus symmetry-aware, no-fit heavy-atom RMSD from the lowest-energy cluster representative in the receptor coordinate frame; point size denotes cluster population. (B) Representative structures from the highlighted clusters, using matching cluster colors. Gray protein residues are the residues within 5 A of the displayed representative ligands."
             )
+            plot_data = args.study / 'report' / f'{asset_id}_panel_A_clusters.csv'
+            if plot_data.is_file():
+                with plot_data.open(newline='') as handle:
+                    unavailable = [r for r in csv.DictReader(handle) if r.get('rmsd_status') == 'unavailable']
+                if unavailable:
+                    caption += (f" {len(unavailable)} representatives have no evaluable RMSD and appear "
+                                "in the separate N/A strip, retaining their global energy ranks and colors. "
+                                "N/A is not zero RMSD; different chemical states may lack a compatible atom mapping.")
             story += [KeepTogether([image(panel,6.0,3.75),Paragraph(caption,styles["SmallDU"])]),Spacer(1,4)]
             figure_number += 1
         # This table is deliberately read from Panel A's exported data, not
@@ -2680,15 +2763,9 @@ def main():
     story += [
         Paragraph("Additional software used for analysis and reporting", styles["Heading2"]),
         table(provenance_rows, [2.5*inch, 1.65*inch, 3.05*inch], compact=True),
-        Spacer(1,6), Paragraph("Scientific and software references", styles["Heading2"]),
+        Spacer(1,6),
     ]
-    for index, reference in enumerate(provenance["references"], start=1):
-        story += [
-            Paragraph(
-                f"{index}. {reference['citation']} <link href=\"{reference['url']}\"><font color=\"#1f4e79\">{reference['url']}</font></link>",
-                styles["ReferenceDU"],
-            ),
-        ]
+    story += scientific_reference_section(provenance["references"], styles)
 
     SimpleDocTemplate(str(out),pagesize=letter,leftMargin=.65*inch,rightMargin=.65*inch,topMargin=.6*inch,bottomMargin=.6*inch,title="Docking Universal report").build(story)
     print(f"PDF report: {out}")

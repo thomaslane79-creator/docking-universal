@@ -5,6 +5,44 @@ settings and compound-overview tables in `docking_universal.reporting`.
 GUI generation and CLI generation use the same report paths; there is no
 engine-specific alternative production PDF template.
 
+Development-source follow-up (not installed, 2026-10-23): explicitly recorded
+receptor-model changes now have portable inline history bound to the prepared
+receptor hash. GUI and CLI finalization attach retained history; bundles preserve
+it and import rejects a mismatched receptor. Screening summaries retain the
+warning even when the original protocol/preparation directory is unavailable.
+The CLI/Markdown/HTML warning path no longer requires the legacy component-removal
+flag, and all shared PDF report branches show a generic model-change note rather
+than falsely claiming every repair used Meeko's removal fallback. A new edit does
+not inherit an earlier model's control authority.
+
+The original full history remains available; report summaries stay compact.
+High-severity manual/partial-backbone changes and standard-amino-acid exclusions
+remain prominently labeled. The saved-protocol dialog renders plain explanatory
+text rather than dumping its warning dictionary. A declaration/adoption GUI for
+new manually edited inputs and broad native end-to-end acceptance remain open; the
+software cannot infer an unrecorded manual edit from a lone replacement file.
+Local evidence is linked from [the active checkpoint](four-area-completion-20261023.md).
+
+The 2026-10-25 development review increment now exercises explicit component
+and alternate-location choices, with a new strict attempt and portable history.
+Native 1A4G/Vina and 4EY7/Vina workflows preserve their warnings in the protocol
+and screening PDFs and through reopening; the per-box warning survives
+successful preparation. A separate ordinary mmCIF/P2Rank/QuickVina-W workflow
+completed. Report review exposed warning/reference splits and a P2Rank plot
+caption that incorrectly named fpocket and implied P1 approval despite selected
+B1. Shared development-source PDF paths and ranking legends now distinguish
+predictions from the actual approved box. Corrected copies reuse retained
+scientific evidence; old PDFs and failed presentation records are preserved.
+Dense figure labels, whitespace and native-cartoon occlusion remain separate
+visual limits. Arbitrary manual-input declaration and broad platform acceptance
+remain open. See [the exact review evidence](preparation-review-20261025.md).
+
+The Mac's installed report and GUI labels were synchronized on 2026-10-22.
+Control-only reports now distinguish retained redocking from a prospective
+compound screen, preserving the control section and its method provenance
+without inventing a new-compound results page. See
+[the bounded update and verification](mac-gui-documentation-sync.md).
+
 Target headings keep the protein name and append the compact structure ID,
 for example `Pol protein [2R8N]`, without the redundant word "structure".
 The shared identity formatter also supplies protocol-creation report text.

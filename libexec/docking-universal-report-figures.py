@@ -378,11 +378,19 @@ def pocket_label_commands(pocket_path, pocket_number, color, receptor_center=Non
     ]
 
 
+def approved_region_plot_note(regions):
+    return "\n".join(
+        "Approved box " + str(region.get('box_label') or region.get('box_name') or 'unlabeled') +
+        (" = input ligand; no prediction score" if region.get('site_source') == 'input_bound_ligand' else "")
+        for region in regions
+    )
+
+
 def plot_cavity_selection(
     diagnostics, selected_config, output, selected_configs=None,
-    evidence_site_numbers=(), unmatched_ligand_region_labels=(),
+    evidence_site_numbers=(), unmatched_ligand_region_labels=(), approved_region_note="",
 ):
-    """Plot retained fpocket candidates and distinguish the approved region."""
+    """Plot prediction scores, keeping approved-region identity separate."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -523,12 +531,14 @@ def plot_cavity_selection(
         for group in shared_box_groups if len(group["numbers"]) > 1
     ]
     legend_text = (
-        f"P# = {engine} rank; colors match Panel B\n"
-        f"Gray = other retained {engine} candidates\n"
+        f"Colored P# = retained {engine} predictions\n"
+        f"Gray = other {engine} candidates\n"
         + (f"Green ring = ligand correspondence ({ligand_evidence_labels})\n" if ligand_evidence_labels else "")
         + (f"Shared proposed box = {', '.join(shared_box_labels)}\n" if shared_box_labels else "")
         + ("L# X at 0 = ligand-defined box; no detector score" if unmatched_ligand_region_labels else "")
     )
+    if approved_region_note:
+        legend_text = approved_region_note + "\n" + legend_text
     ax.text(
         .98, .97, legend_text,
         transform=ax.transAxes, ha="right", va="top", fontsize=10,
@@ -1262,6 +1272,7 @@ def build_cavity_figures(study, pymol):
     if plot_cavity_selection(
         diagnostics, selected_config, panel_a, selected_configs,
         evidence_site_numbers, unmatched_ligand_region_labels,
+        approved_region_note=approved_region_plot_note(selected_regions),
     ):
         outputs.append(str(panel_a))
     panel_b = report / "cavity_panel_B_structure.png"
@@ -1808,22 +1819,40 @@ def plot_clusters(analysis, output, reference_sdf=None, control_label=None):
         except (RuntimeError, ValueError):
             value = float("nan")
         rmsds.append(value)
-    # An unevaluable structural distance is unknown, not the median distance
-    # of other clusters. Never fabricate a point for a failed comparison.
-    evaluated = [(entry, energy, rmsd) for entry, energy, rmsd in zip(entries, energies, rmsds)
-                 if math.isfinite(energy) and math.isfinite(rmsd)]
-    excluded_count = len(entries) - len(evaluated)
-    if excluded_count:
-        print(f"Report figure warning: {excluded_count} cluster representatives have unevaluable score/RMSD", file=sys.stderr)
+    # Preserve global energy rank across chemical states. A missing RMSD has
+    # its own categorical strip, never a fabricated distance or a new rank.
+    valid_energy = [i for i, value in enumerate(energies) if math.isfinite(value)]
+    if len(valid_energy) != len(entries):
+        print("Report figure warning: nonfinite cluster energies prevent a complete ranked plot", file=sys.stderr)
+        return False
+    evaluated = [i for i, value in enumerate(rmsds) if math.isfinite(value)]
+    unavailable = [i for i, value in enumerate(rmsds) if not math.isfinite(value)]
     if not evaluated:
         return False
-    entries, energies, rmsds = map(list, zip(*evaluated))
     sizes = [70 + int(row.get("pose_count", 1)) * 8 for row, _ in entries]
-    colors = list(TOP_COLORS[:min(3, len(entries))]) + ["#b8c0c8"] * max(0, len(entries) - 3)
-
-    fig, ax = plt.subplots(figsize=(11, 6.5))
-    ax.scatter(energies, rmsds, s=sizes, c=colors, edgecolor="black", linewidth=0.7, alpha=0.9)
-    ax.set_xlabel("Estimated binding energy (kcal/mol)", fontsize=15)
+    colors = [TOP_COLORS[int(row.get('energy_rank', i + 1)) - 1]
+              if 1 <= int(row.get('energy_rank', i + 1)) <= 3 else '#b8c0c8'
+              for i, (row, _) in enumerate(entries)]
+    if unavailable:
+        fig, (ax, unknown_ax) = plt.subplots(2, 1, sharex=True, figsize=(11, 7.4),
+            gridspec_kw={'height_ratios': [5, 1], 'hspace': .09})
+        unknown_ax.scatter([energies[i] for i in unavailable], [0] * len(unavailable),
+                          s=[sizes[i] for i in unavailable], c=[colors[i] for i in unavailable],
+                          edgecolor='black', linewidth=.7, alpha=.9)
+        unknown_ax.set_ylim(-1, 1)
+        unknown_ax.set_yticks([])
+        unknown_ax.set_ylabel('RMSD\nunavailable', fontsize=11)
+        unknown_ax.set_xlabel('Estimated binding energy (kcal/mol)', fontsize=15)
+        unknown_ax.tick_params(labelsize=12)
+        unknown_ax.grid(axis='x', alpha=.25)
+        unknown_ax.text(.99, .88, 'N/A strip: no RMSD assigned', transform=unknown_ax.transAxes,
+                        ha='right', va='top', fontsize=10)
+    else:
+        fig, ax = plt.subplots(figsize=(11, 6.5))
+        ax.set_xlabel('Estimated binding energy (kcal/mol)', fontsize=15)
+    ax.scatter([energies[i] for i in evaluated], [rmsds[i] for i in evaluated],
+               s=[sizes[i] for i in evaluated], c=[colors[i] for i in evaluated],
+               edgecolor='black', linewidth=.7, alpha=.9)
     if control_label:
         ax.set_ylabel(f"No-fit heavy-atom RMSD to experimental {control_label} (A)", fontsize=13)
         ax.set_title("Top 20 control pose clusters and experimental-pose recovery", fontsize=17)
@@ -1843,7 +1872,8 @@ def plot_clusters(analysis, output, reference_sdf=None, control_label=None):
         ax.text(.95, .265, "Top clusters", transform=ax.transAxes, fontsize=12, va="top", ha="right", zorder=6)
         for y, index, color in zip((.215, .175, .135), range(min(3, len(entries))), TOP_COLORS):
             row = entries[index][0]
-            ax.text(.95, y, f"C{row['cluster_id']}: {energies[index]:.2f} kcal/mol | {rmsds[index]:.2f} A", transform=ax.transAxes, fontsize=11, va="top", ha="right", color=color, zorder=6)
+            distance = f'{rmsds[index]:.2f} A' if math.isfinite(rmsds[index]) else 'RMSD N/A'
+            ax.text(.95, y, f"C{row['cluster_id']}: {energies[index]:.2f} kcal/mol | {distance}", transform=ax.transAxes, fontsize=11, va="top", ha="right", color=color, zorder=6)
         ax.text(.95, .095, "Point size = cluster population\nRMSD reference: lowest-energy cluster representative", transform=ax.transAxes, fontsize=10, va="top", ha="right", zorder=6)
     # RMSD cannot be negative, but a small display margin below zero keeps an
     # exact 0 A reference point fully visible instead of clipping it against
@@ -1858,15 +1888,17 @@ def plot_clusters(analysis, output, reference_sdf=None, control_label=None):
     # Leave enough left margin for the long vertical RMSD label.  The compact
     # figure is embedded at reduced size in the PDF, so a default tight layout
     # can clip the first characters even when the source PNG looks acceptable.
-    fig.tight_layout(rect=[.10, .06, .99, .97])
+    if unavailable:
+        fig.subplots_adjust(left=.16, right=.99, bottom=.13, top=.94, hspace=.12)
+    else:
+        fig.tight_layout(rect=[.10, .06, .99, .97])
     fig.savefig(output, dpi=240)
     plt.close(fig)
-    # Keep a tabular record of exactly the values drawn in the cluster plot so
-    # PDF tables cannot silently diverge from their corresponding figure.
+    # Keep all ranked entries, including the explicitly unvalued N/A strip.
     with output.with_suffix(".csv").open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=[
             "energy_rank", "cluster_id", "best_energy_kcal_per_mol",
-            "rmsd_angstrom", "pose_count",
+            "rmsd_angstrom", "pose_count", "rmsd_status",
         ])
         writer.writeheader()
         for (row, _), rmsd in zip(entries, rmsds):
@@ -1874,8 +1906,9 @@ def plot_clusters(analysis, output, reference_sdf=None, control_label=None):
                 "energy_rank": row.get("energy_rank", ""),
                 "cluster_id": row.get("cluster_id", ""),
                 "best_energy_kcal_per_mol": row.get("best_energy_kcal_per_mol", ""),
-                "rmsd_angstrom": f"{rmsd:.6f}",
+                "rmsd_angstrom": f"{rmsd:.6f}" if math.isfinite(rmsd) else 'NA',
                 "pose_count": row.get("pose_count", ""),
+                "rmsd_status": 'evaluated' if math.isfinite(rmsd) else 'unavailable',
             })
     return True
 
@@ -2521,14 +2554,14 @@ def combine_cluster_snapshots(analysis, rows, output):
                 max(0, content[0] - pad), max(0, content[1] - pad),
                 min(snapshot.width, content[2] + pad), min(snapshot.height, content[3] + pad),
             ))
-        # Fill the wide report panel instead of preserving the source aspect
-        # ratio and leaving large horizontal white bands.
+        # Retain the complete labeled snapshot. Filling a wider panel with
+        # ImageOps.fit crops top/bottom callouts even though the PyMOL PNG is
+        # intact. White-only trimming above keeps the framing compact.
         inner_w = int((cell_w - 72) * 0.92)
         inner_h = int((image_h - 48) * 0.92)
-        crop_center = (0.65, 0.5) if index == 1 else (0.5, 0.5)
-        snapshot = ImageOps.fit(
+        snapshot = ImageOps.contain(
             snapshot, (inner_w, inner_h),
-            method=Image.Resampling.LANCZOS, centering=crop_center,
+            method=Image.Resampling.LANCZOS,
         )
         frame = Image.new("RGB", (cell_w, image_h), "white")
         frame.paste(snapshot, ((cell_w - snapshot.width) // 2, (image_h - snapshot.height) // 2))

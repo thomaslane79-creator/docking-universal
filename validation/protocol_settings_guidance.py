@@ -33,29 +33,39 @@ def main():
         if not condition:
             raise AssertionError(name)
     try:
-        for width, height in ((960, 760), (1280, 800), (1440, 900)):
-            window.resize(width, height)
-            window.show()
-            QTest.qWait(100)
-            window.grab().save(str(args.output / f'finalize-{width}.png'))
-            check(f'{width}: no forced horizontal scroll', scroll.horizontalScrollBar().maximum() == 0)
-            for key, explanation in panel.inline_explanations.items():
-                bounds = explanation.contentsRect()
-                needed = explanation.fontMetrics().boundingRect(bounds, QtCore.Qt.TextFlag.TextWordWrap,
-                                                               explanation.text()).height()
-                result.setdefault('text_geometry', []).append({'width': width, 'key': key,
-                    'actual': [bounds.width(), bounds.height()], 'needed_height': needed})
-                check(f'{width}: {key} explanation is fully laid out', needed <= bounds.height() + 4)
-                if key != 'approval':
-                    check(f'{width}: {key} explanation is beside its control',
-                          explanation.mapTo(panel, QtCore.QPoint(0, 0)).x() >
-                          getattr(panel, key).mapTo(panel, QtCore.QPoint(0, 0)).x())
-            scroll.verticalScrollBar().setValue(scroll.verticalScrollBar().maximum())
-            center = panel.finalize_button.mapTo(scroll.viewport(), panel.finalize_button.rect().center())
-            check(f'{width}: finalize action is reachable', panel.finalize_button.isVisibleTo(window)
-                  and scroll.viewport().rect().contains(center))
-            scroll.verticalScrollBar().setValue(0)
-            window.grab().save(str(args.output / f'finalize-{width}.png'))
+        for engine in ('vina', 'qvinaw', 'adgpu'):
+            panel.engine.setCurrentIndex(panel.engine.findData(engine))
+            for width, height in ((960, 760), (1280, 800), (1440, 900)):
+                window.resize(width, height)
+                window.show()
+                QTest.qWait(100)
+                prefix = f'{engine}/{width}'
+                check(f'{prefix}: no forced horizontal scroll', scroll.horizontalScrollBar().maximum() == 0)
+                for key in ('exhaustiveness', 'modes', 'energy_range', 'ad4_runs', 'ad4_heuristic_cap'):
+                    expected = (key.startswith('ad4_')) == (engine == 'adgpu')
+                    check(f'{prefix}: {key} visibility matches engine',
+                          panel.inline_explanations[key].isVisibleTo(window) == expected)
+                for key, explanation in panel.inline_explanations.items():
+                    # Hidden controls have no meaningful layout geometry.
+                    if not explanation.isVisibleTo(window):
+                        continue
+                    bounds = explanation.contentsRect()
+                    needed = explanation.fontMetrics().boundingRect(bounds, QtCore.Qt.TextFlag.TextWordWrap,
+                                                                   explanation.text()).height()
+                    result.setdefault('text_geometry', []).append({'engine': engine, 'width': width, 'key': key,
+                        'actual': [bounds.width(), bounds.height()], 'needed_height': needed})
+                    check(f'{prefix}: {key} explanation is fully laid out', needed <= bounds.height() + 4)
+                    if key != 'approval':
+                        check(f'{prefix}: {key} explanation is beside its control',
+                              explanation.mapTo(panel, QtCore.QPoint(0, 0)).x() >
+                              getattr(panel, key).mapTo(panel, QtCore.QPoint(0, 0)).x())
+                scroll.verticalScrollBar().setValue(scroll.verticalScrollBar().maximum())
+                center = panel.finalize_button.mapTo(scroll.viewport(), panel.finalize_button.rect().center())
+                check(f'{prefix}: finalize action is reachable', panel.finalize_button.isVisibleTo(window)
+                      and scroll.viewport().rect().contains(center))
+                scroll.verticalScrollBar().setValue(0)
+                window.grab().save(str(args.output / f'finalize-{engine}-{width}.png'))
+        panel.engine.setCurrentIndex(panel.engine.findData('vina'))
         panel.help_buttons['energy_range'].click()
         QTest.qWait(100)
         check('guide is modeless', not panel._settings_guide.isModal())

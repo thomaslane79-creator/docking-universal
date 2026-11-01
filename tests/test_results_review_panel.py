@@ -19,6 +19,9 @@ class ResultsReviewPanelTests(unittest.TestCase):
             self.assertEqual(panel.objectName(), "results_review_panel")
             self.assertEqual(panel.review_mode.count(), 2)
             self.assertEqual(panel.pose_results.columnCount(), 7)
+            self.assertEqual(panel.screening_results.columnCount(), 7)
+            self.assertEqual(panel.screening_results.horizontalHeaderItem(4).text(), "Best energy (kcal/mol)")
+            self.assertEqual(panel.screening_results.horizontalHeaderItem(5).text(), "Scoring function")
             self.assertIn("do not establish affinity", panel.findChild(
                 type(panel.session_status), "results_scientific_warning",
             ).text())

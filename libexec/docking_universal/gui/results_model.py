@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..services.pose_interactions import read_pose_inventory
+from ..reporting import scoring_function_label
 from ..state import StudyState
 
 
@@ -20,6 +21,7 @@ class CompoundResult:
     planned_jobs: object
     best_score: object
     cluster_count: int
+    scoring_function: str = "Not recorded"
 
 
 @dataclass(frozen=True)
@@ -74,7 +76,7 @@ class ResultsReviewModel:
                 try:
                     with score_path.open(newline="") as handle:
                         for row in csv.DictReader(handle):
-                            value = row.get("affinity") or row.get("score")
+                            value = row.get("affinity_kcal_per_mol") or row.get("affinity") or row.get("score")
                             if value not in {None, ""}:
                                 scores.append(float(value))
                 except (OSError, ValueError):
@@ -92,6 +94,7 @@ class ResultsReviewModel:
                 manifest.get("docking_site_count", "NA"),
                 manifest.get("docking_job_count", "NA"),
                 min(scores) if scores else "NA", clusters,
+                scoring_function_label(manifest.get("engine")),
             ))
         return tuple(results)
 

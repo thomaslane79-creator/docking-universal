@@ -95,7 +95,7 @@ class ControlSiteReviewTests(unittest.TestCase):
         self.assertFalse(state.workflow_data["study_setup"]["predict_pockets_with_ligand"])
         self.assertEqual(lookup.call_count, 1)
         self.assertEqual(Path(lookup.call_args.args[0]).resolve(), self.fixture.input.resolve())
-        self.assertEqual({row["label"] for row in state.workflow_data["pocket_candidates"]}, {"P1", "L1"})
+        self.assertEqual({row["label"] for row in state.workflow_data["pocket_candidates"]}, {"B1", "L1"})
         self.assertFalse(state.selected_pocket_ids)
         self.assertFalse(any(job.stage == "control_validation" for job in state.jobs))
         self.assertFalse((self.root / "study/control").exists())
@@ -131,6 +131,7 @@ class ControlSiteReviewTests(unittest.TestCase):
         self.assertEqual(state.workflow_data["study_setup"]["pocket_engine"], "p2rank")
         # Native detector fixture supplies P1; B1 remains an unscored exact-input site.
         self.assertIn("B1", [row["id"] for row in state.workflow_data["pocket_candidates"]])
+        self.assertIn("P1", [row["id"] for row in state.workflow_data["pocket_candidates"]])
         self.assertFalse(any(job.stage == "control_validation" for job in state.jobs))
 
     def test_downloaded_inputs_in_existing_study_folder_are_allowed(self):
@@ -162,9 +163,9 @@ class ControlSiteReviewTests(unittest.TestCase):
 
     def test_multiple_selected_sites_do_not_share_control_authority(self):
         self.prepare()
-        state = self.approve(["P1", "L1"])
+        state = self.approve(["B1", "L1"])
         preview = reviewed_control_inputs(state)
-        self.assertEqual(preview["tested_box_label"], "P1")
+        self.assertEqual(preview["tested_box_label"], "B1")
         self.assertEqual(preview["untested_box_labels"], ["L1"])
         prep_log = Path(state.workflow_data["preparation_root"]) / "run.log"
         before = sha256(prep_log)
@@ -185,7 +186,7 @@ class ControlSiteReviewTests(unittest.TestCase):
 
     def test_one_selected_tested_site_can_receive_its_own_control_bundle(self):
         self.prepare()
-        state = self.approve(["P1"])
+        state = self.approve(["B1"])
         self.runner.start_control_validation("workflow", {}, request_id="control", expected_revision=state.revision)
         state = self.wait(lambda value: bool(value.workflow_data.get("latest_control_status")))
         self.assertTrue(any(item.kind == "protocol_bundle" for item in state.artifacts))
@@ -202,7 +203,7 @@ class ControlSiteReviewTests(unittest.TestCase):
 
     def test_selected_box_changes_are_rejected_before_control(self):
         self.prepare()
-        state = self.approve(["P1", "L1"])
+        state = self.approve(["B1", "L1"])
         contract = reviewed_control_inputs(state)
         Path(contract["assets"]["box"]["path"]).write_text("changed")
         with self.assertRaises(ValueError):
@@ -210,7 +211,7 @@ class ControlSiteReviewTests(unittest.TestCase):
 
     def test_native_boundary_rechecks_contract_and_retained_files(self):
         self.prepare()
-        contract = reviewed_control_inputs(self.approve(["P1", "L1"]))
+        contract = reviewed_control_inputs(self.approve(["B1", "L1"]))
         path = self.root / "contract.json"
         path.write_text(json.dumps(contract))
         expected = sha256(path)
@@ -243,7 +244,7 @@ class ControlSiteReviewTests(unittest.TestCase):
         with Chem.SDWriter(str(template)) as writer:
             writer.write(molecule)
         self.prepare(online=False)
-        contract = reviewed_control_inputs(self.approve(["P1"]))
+        contract = reviewed_control_inputs(self.approve(["B1"]))
         record = self.root / "reviewed.json"
         record.write_text(json.dumps(contract))
         native = Path(__file__).resolve().parents[1] / "libexec/docking-universal-control"

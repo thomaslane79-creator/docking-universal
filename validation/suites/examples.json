@@ -1,0 +1,15 @@
+{
+  "schema": "docking-universal-example-catalog-v1",
+  "scope": "Public examples already used or specified in repository validation. This is planned coverage, not completed acceptance. Protease examples are overrepresented; do not infer general accuracy.",
+  "examples": [
+    {"id":"2r8n-screen", "target":"2R8N", "family":"HIV protease", "features":["ligand-free input", "P2Rank", "multiple candidate sites", "small library"], "reference":"docs/gui-real-workflow-validation.md"},
+    {"id":"1hvr-control", "target":"1HVR", "family":"HIV protease", "features":["exact deposited ligand", "XK2:A:263", "control-to-screen reuse"], "reference":"docs/gui-real-workflow-validation.md"},
+    {"id":"5ikt-repeat", "target":"5IKT", "family":"repeated-ligand assembly", "features":["multiple ligand instances", "TLF:A:601 or TLF:B:601", "explicit instance selection"], "reference":"docs/gui-real-workflow-validation.md"},
+    {"id":"2r5p-indinavir", "target":"2R5P", "family":"HIV protease", "features":["larger flexible ligand", "indinavir", "ligand-guided regions"], "reference":"docs/mac-all-engine-gui-validation.md"},
+    {"id":"2o4p-tipranavir", "target":"2O4P", "family":"HIV protease", "features":["tipranavir", "retained conformation comparisons"], "reference":"validation/conformer_ab_series.py"},
+    {"id":"1mrw-kni577", "target":"1MRW", "family":"HIV protease", "features":["KNI-577", "larger ligand", "multiple chains"], "reference":"validation/conformer_ab_series.py"},
+    {"id":"1iep-imatinib", "target":"1IEP", "family":"Abl kinase", "features":["imatinib", "flexible ligand", "different target family"], "reference":"validation/conformer_ab_series.py"},
+    {"id":"1yet-geldanamycin", "target":"1YET", "family":"HSP90", "features":["geldanamycin", "macrocycle", "engine capability boundary"], "reference":"validation/conformer_ab_series.py", "engine_exclusions":{"adgpu":"The accepted experimental AD4 path excludes macrocycles; run a dedicated rejection test instead of treating this as a successful docking case."}}
+  ],
+  "boundary_coverage": ["multi-site approval", "offline/missing public evidence", "missing P2Rank versus zero candidates", "ambiguous ligand chemistry", "modified residues", "corrupt/changed protocol", "SDF/MOL/table selection", "partial compound failure", "cancellation/restart", "GUI detach/reopen", "residue label and legend visibility", "expected unsupported AD4 requests"]
+}

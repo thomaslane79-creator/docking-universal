@@ -108,6 +108,31 @@ resolve_site_ligand_strategy() {
     [ -n "$candidate" ] && LIGANDS+=("$candidate")
   done < <(detect_bound_ligand_resnames "$INPUT_PDB" 10)
 
+  # Automatic suggestions use the size floor, not an exact GUI-approved site.
+  # Validate the same instance with the GUI detector; never substitute a copy.
+  if [ "$SITE_MODE" = ligand ] && [ -n "$REQUESTED_LIGAND" ] && \
+      { [ -n "$REQUESTED_LIGAND_CHAIN" ] || [ -n "$REQUESTED_LIGAND_RESSEQ" ]; }; then
+    "${PYTHON_COMMAND:-${DOCKING_UNIVERSAL_PYTHON:-python3}}" - "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)" \
+        "$INPUT_PDB" "$REQUESTED_LIGAND" "$REQUESTED_LIGAND_CHAIN" \
+        "$REQUESTED_LIGAND_RESSEQ" "$REQUESTED_LIGAND_ICODE" "$REQUESTED_LIGAND_ALTLOC" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+from docking_universal.services.bound_ligands import detect_bound_ligands
+path, name, chain, number, insertion, altloc = sys.argv[2:]
+if not chain or not number:
+    raise SystemExit('ERROR: exact bound-ligand selection requires both chain and residue number')
+matches = [i for c in detect_bound_ligands(path) for i in c.instances
+           if (i.resname, i.chain_id, i.residue_number, i.insertion_code) == (name, chain, number, insertion)
+           and (i.altlocs[0] if i.altlocs else '') == altloc]
+if len(matches) != 1 or matches[0].heavy_atom_count < 1:
+    raise SystemExit('ERROR: requested exact bound ligand is missing or its alternate location is ambiguous')
+PY
+    [ "$?" -eq 0 ] || return 1
+    if ! printf '%s\n' "${LIGANDS[@]}" | grep -Fxq -- "$REQUESTED_LIGAND"; then
+      LIGANDS+=("$REQUESTED_LIGAND")
+    fi
+  fi
+
   LIG_PRESENT=0
   LIG=""
   LIGX=""

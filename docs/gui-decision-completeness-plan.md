@@ -1,5 +1,38 @@
 # Complete interactive GUI workflow plan
 
+Active follow-up authorized 2026-10-23: resolve/retest remaining preparation
+issues, finish report and multi-site coverage, implement explicit retained-output
+reclustering, then run fresh-install/cross-platform checks. Preserve historical
+science and require specific review for molecular changes. Work and evidence
+are tracked in [the four-area checkpoint](four-area-completion-20261023.md).
+
+The user's 2026-10-24 objective is at least 90% functional protein completion,
+separate from accuracy. Prioritize the existing preparation decisions and native
+vertical path using the [completion plan](protein-completion-plan.md); measure
+independent targets rather than repeated engine/format scenarios.
+
+Installed 2026-10-23 after explicit authorization: cohort software repairs and
+qualitative pose-clustering presets (Tight 1.0 A / Default 1.5 A / Loose 2.0 A /
+Custom). Saved numbers, approvals and completed studies remain unchanged.
+The exact Mac runtime passes 231 targeted contracts, four shell groups and six
+native retained representative reviews. Five preparation boundaries, historical
+report review, multi-site coverage and explicit retained-output reclustering
+remain open. See [deployment and remaining work](software-defect-repairs-20261023.md).
+
+Current validation priority (authorized 2026-10-22): retain the chronological
+raw-input acceptance suite while adding the [systematic local validation
+framework](validation-system.md). Its matrix, installed protocol-reuse worker,
+scientific metrics and human visual gate complement rather than replace C1-C5
+and strict reviewed-control checks. Catalogue slots are not acceptance claims.
+
+Completed 2026-10-22: the bounded Mac report/GUI/documentation synchronization
+adds recorded Vina/AD4 identity and energy units, installs the no-prediction and
+detector-version report fixes, and repairs the control-only report dispatch
+found during rendered PDF checking. User instructions and engine-aware layout
+validation are synchronized. Only four backed-up application files changed;
+no dependencies, protocols, scientific settings or existing study/report files
+changed. See [verification and scope](mac-gui-documentation-sync.md).
+
 Completed enabled-default acceptance 2026-10-20 at `73054b9`: native
 [39512043939](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39512043939)
 passes both jobs, all four strict reviewed controls, the 20-check software

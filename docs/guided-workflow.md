@@ -1,5 +1,27 @@
 # Guided studies
 
+## Development preview: review receptor preparation changes
+
+This two-stage flow is currently validated in a private Mac development build,
+not the working installed application or native Windows/Linux. First review
+coordinate-based site proposals and approve the docking regions. Parameterization
+is a separate action, so an unresolved receptor does not hide its sites.
+
+**Review an explicit receptor-model change…** lets you inspect deposited
+alternate-location labels/occupancies or specify exact component exclusions.
+The labels A/B are not quality grades. Exclusion changes the scored receptor
+and is not recommended; standard-amino-acid exclusions need an additional
+acknowledgement. Preview shows changes and distances to the selected boxes.
+Nothing is applied until you acknowledge the current preview and explain the
+choice. Editing any choice requires a new preview.
+
+The new derivative receives strict preparation without additional automatic
+repairs or omissions. Original files and earlier failures remain intact. Even
+after success, box review, the saved protocol, screening and reports retain the
+model-change warning. Passing preparation does not show that the model or pose
+is correct. Missing backbone construction and sequence gap filling are not
+performed by this review step. See [tested behavior and limits](preparation-review-20261025.md).
+
 ## Desktop site discovery with a bound ligand
 
 **Starting point for site review** chooses initial guidance, not the final
@@ -168,12 +190,20 @@ without usable timestamps explicitly show that the duration is unavailable.
 Screening options include brief explanations beside their controls.
 **Representative clusters** sets how many lowest-energy distinct pose groups per
 compound receive detailed output, using each group's lowest-energy pose; it does
-not limit the number of compounds or total retained poses. **Clustering cutoff**
+not limit the number of compounds or total retained poses. **Pose-clustering RMSD**
 uses symmetry-aware heavy-atom RMSD in the receptor frame without realignment:
 smaller values separate more groups and larger values merge more. The default is
-1.5 Å; explicit saved choices remain unchanged. This distance is not RMSD to an
+1.5 Å. The GUI offers **Tight (1.0 Å)**, **Default (1.5 Å)**, **Loose (2.0 Å)**,
+and **Custom** with an editable number. The number stays visible; editing it
+updates the category, and saved/custom values are restored without rounding
+them to a preset. Tighter means more separate pose groups, not more accurate
+docking. Explicit saved choices remain unchanged. This distance is not RMSD to an
 experimental pose or the separate pose-recovery acceptance threshold. Analysis
-choices affect post-docking outputs, not the docking search itself.
+choices affect post-docking outputs, not the docking search itself. These
+controls apply to the next screening analysis. Changing them does not
+automatically regroup or rewrite completed results; a separate retained-output
+reclustering action has not yet been implemented. Reports retain the numeric
+cutoff actually used for their analysis, not a later GUI selection.
 
 ## Default or custom ligand ensemble
 
@@ -247,9 +277,22 @@ docking-universal run exploratory \
 
 The output is permanently marked `EXPLORATORY_NO_CONTROL`. Convergence across seeds can reveal whether the search repeatedly finds similar poses, but it cannot substitute for pose-recovery evidence or experimental validation.
 
-Exploratory protocol creation also supports four explicit region definitions: selected bound ligand, predicted fpocket pocket, selected residue/group, or whole-protein search. A whole-protein search retains fpocket cavity evidence for interpretation but defines its box from prepared-receptor bounds. QuickVina-W is the default engine for exploratory regions, including localized boxes; standard AutoDock Vina is retained for explicit overrides or compatibility requirements. Multiple evidence-backed boxes may be retained during exploratory review, and the selected engine and any override are recorded and carried into later screening.
+The desktop starts with **P2Rank — primary** for predicted pockets and **AutoDock
+Vina** for docking. QuickVina-W is an explicit alternative, not the default.
+Pocket prediction and docking are separate calculations: a P2Rank score is not
+a docking energy. You may instead start review from a selected bound ligand,
+and choose one or more evidence-backed regions before finalizing the protocol.
+The terminal preparation route's automatic detector selection prefers available
+P2Rank, otherwise fpocket; the selected detector and docking program are retained.
+Advanced terminal region definitions also include a selected residue/group or
+whole-protein search. These are not additional desktop dropdown choices.
 
-When a raw ligand-free PDB is supplied, the runner starts with conservative fpocket settings, retains candidate boxes with diagnostics, and chooses the first box deterministically only in unattended mode. It first applies the 0.10 score threshold. If no cavity survives, guided use offers a documented retry at 0.0 while retaining geometry, broad-pocket, and overlap filtering. Protocol creation also offers this retry when fewer than three cavities survive, so a single surviving cavity does not suppress alternative sites from review. Its unattended equivalent performs the retry automatically and records the threshold used. The relaxed threshold expands the hypotheses available for review; it is not evidence of biological relevance.
+The fpocket fallback has its own conservative/expanded/permissive settings and
+eligibility threshold. Its documented retry from 0.10 to 0.0 expands the
+available geometric hypotheses while retaining other filters; it is not a
+P2Rank threshold or evidence of biological relevance. Scores and descriptors
+must be interpreted using the detector that actually produced them. A predicted
+pocket or an unattended box choice never provides pose-recovery validation.
 
 Immediately before docking, a geometric preflight verifies that the chosen box contains receptor atoms. A mismatch stops before the engine is launched and usually indicates that receptor and box files from different preparations were combined. Passing this check establishes input consistency only, not that the selected region is a biologically valid binding site.
 
@@ -291,6 +334,41 @@ The PDF report stage automatically generates numbered control and compound figur
 
 New-ligand results include the three top energy-ranked cluster representatives. Ligand chemistry comes from retained SDF files and PLIP calls come from retained XML; the report-figure manifest and per-diagram manifests record these sources and coordinate mapping. Filename-only provenance suffixes such as `_pubchem` and `_pubchem_<CID>` are not presented as part of a ligand's chemical name.
 
+### Reading the cluster plots and linked views
+
+The cluster plot shows the **top 20 clusters by lowest energy**, or all clusters
+if fewer exist. All markers are circles; larger area means more poses in that
+cluster, not more compounds. The three best energy-ranked clusters are red,
+blue and gold; the others are gray. This display limit is separate from the
+three representatives receiving detailed interaction analysis by default.
+
+For a **known-ligand experimental control**, each cluster circle combines its
+lowest binding energy and lowest experimental RMSD. Those two minima may come
+from different poses; the circle is a cluster summary, not necessarily one
+actual molecular structure. The plot also always includes the actual globally
+lowest-RMSD evaluable pose **at that pose's own energy**, even if its cluster is
+outside the top 20. A green ring with a white gap identifies it. Its dot keeps
+the top-three cluster color when applicable, otherwise gray; the legend uses
+only the green ring for this role.
+
+The corresponding control 3D overlay and linked 2D/3D review include the three
+lowest-energy cluster representatives plus that exact globally closest pose
+(up to four poses; an identical pose is shown once). The closest molecule keeps
+its cluster's top-three color, otherwise green. The experimental reference is
+magenta. The prospective/unknown-ligand plot instead measures RMSD from the
+lowest-energy representative, **not** an experimental pose; its zero-RMSD point
+therefore does not demonstrate experimental correctness. See
+[pose clustering and representative analysis](pose-clustering.md) for the
+full interpretation and retained output records. The default clustering cutoff
+is 1.5 Å, separate from the 2.0 Å experimental-pose recovery threshold.
+
+The GUI results overview identifies **Best energy (kcal/mol)** with an adjacent
+**Scoring function** column. AutoDock Vina and QuickVina-W use Vina scoring;
+AutoDock-GPU uses AD4. These energy scales are not interchangeable. The label
+comes from each retained screening manifest, not today's engine selection;
+missing historical identity is shown as **Not recorded**. Values remain model
+estimates, not measured affinities.
+
 Report headings identify the protein name and annotated fragment, structure accession,
 and source species from the exact local PDB/mmCIF annotations. Source species is
 not the expression host. Multi-protein structures retain chain-specific identity
@@ -299,7 +377,16 @@ New exploratory protocol bundles retain an identity snapshot for later reports.
 No internet lookup is performed for these labels, and opening an older study does
 not silently rewrite its completed PDF or bundle.
 
-When no bound-ligand control is supplied, the generator writes a distinct **Ligand-Free Cavity and Docking Report** instead of silently omitting validation. Its summary identifies the selected pocket and fpocket druggability score; the retained technical record contains candidate ranks, fpocket score, volume, alpha-sphere count, cavity bounds, box center, dimensions, and volume. Panel A shows ranked decisions; Panel B places retained pocket hypotheses on the receptor. A following figure records the chosen pocket and docking box. These are site-selection records, not pose-recovery validation or evidence that a predicted cavity is biologically correct. A preparation-only run receives cavity results only—no empty ligand, docking, RMSD, 2D interaction, or protocol section. Missing descriptors in older runs are reported as `NA`, never reconstructed or guessed.
+When no bound-ligand control is supplied, the report explicitly identifies
+exploratory site selection rather than silently implying validation. Pocket
+tables use the actual retained detector: P2Rank score/probability for P2Rank,
+or fpocket-specific scores/descriptors for fpocket. Ligand-defined regions
+without prediction say prediction was not requested; they receive no invented
+detector score. Figures distinguish available hypotheses from the chosen
+region and docking box. These are site-selection records, not pose-recovery
+validation or proof of biological relevance. A preparation-only report has
+no invented ligand-docking results. Missing historical evidence stays explicit,
+never reconstructed or guessed from another detector.
 
 Every automatically generated PDF ends with a reproducibility section that assigns each reported quantity or visual to the program that produced it and provides primary references. The section records whether receptor conversion succeeded with strict Meeko, used conservative PDBFixer repair before retrying strict Meeko, required the documented ADFRsuite compatibility fallback, or used an explicitly user-approved removal of unmatched components after safe attempts failed. If removal is approved, the PDF states that the receptor model changed and gives the number and classification of removed residues/components. Removal of any standard amino-acid residue is labeled a high-severity structural modification. A structured `receptor_modification_warning` object—severity, summary, removal counts, and mandatory review/control flags—is stored directly in `protocol.json` and the `.duprotocol` bundle. Protocol selection and every subsequent JSON, Markdown, HTML, and PDF screening report use that recorded warning; older compatible protocols fall back to deriving it from their retained inventory. The exact inventory, approval record, and raw preparation log remain in the study artifacts and portable protocol bundle. PDBFixer is not described as having modified a receptor unless retained preparation artifacts show that it ran. When it ran, the PDF gives a short summary of added and deliberately unbuilt atoms/residues and states whether that repaired intermediate entered the final receptor. Detailed changes remain in the retained `receptor/pdbfixer_audit.json`; portable approved protocols retain the audit as `control/assets/pdbfixer_audit.json`. Every control-backed new run includes a full comparison table for Docking Universal, Python, RDKit, MolScrub, Meeko, PDBFixer, and the selected docking engine. Matching reports state `Checked: no software version differences detected`; differences or unavailable versions are identified row by row. Additional analysis/reporting tools are listed separately. The same information and preparation record are written to `report/software_versions_and_references.json`.
 
@@ -344,7 +431,8 @@ dock new ligands.
 Use **Save image…** in the main workspace or the 2D/3D review window. Available
 choices include the current customized PyMOL view, the selected 2D diagram at its
 original pixel resolution, and a clean side-by-side 2D/3D panel. The main workspace
-also saves the selected retained report figure or pocket-ranking plot. Full
+also saves its interactive pocket-ranking plot. Static report figures are viewed
+in the generated report, not in a separate GUI figure browser. Full
 PyMOL has the same **Save image…** menu for its current 3D view.
 
 Adjust orientation, zoom, residue labels, cartoon and contact visibility before

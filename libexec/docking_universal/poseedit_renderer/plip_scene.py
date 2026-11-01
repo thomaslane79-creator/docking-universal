@@ -11,6 +11,7 @@ import numpy as np
 from rdkit import Chem
 
 from docking_universal.services.residue_context import read_receptor_atoms, resolve_contact
+from docking_universal.plip_sites import select_binding_site
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--report', type=Path, required=True)
@@ -45,10 +46,7 @@ def ligand_atom(point):
 
 
 root = ET.parse(REPORT).getroot()
-site = next(
-    item for item in root.findall('.//bindingsite')
-    if (item.findtext('./identifiers/hetid') or '').strip() == args.ligand_id
-)
+site = select_binding_site(root, ligand_id=args.ligand_id)
 receptor_atoms = read_receptor_atoms(RECEPTOR)
 hbonds = []
 for call in site.findall('./interactions/hydrogen_bonds/hydrogen_bond'):

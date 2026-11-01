@@ -17,6 +17,38 @@ class PocketPlotTests(unittest.TestCase):
     def setUpClass(cls):
         cls.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 
+    def test_preparation_failures_follow_selected_box_not_a_global_clearance(self):
+        panel = PocketEvidencePanel()
+        panel.set_candidate({'id': 'B1', 'evidence': {'receptor_preparation_review': {
+            'warning': 'Receptor preparation failed. No residues were omitted.',
+            'residues': [{'residue': 'GLU', 'chain': 'A', 'number': '75',
+                          'inside_box': False, 'minimum_distance_to_box_angstrom': 4.4}]}}})
+        self.assertIn('GLU A:75', panel.preparation_issues.toPlainText())
+        self.assertIn('4.40 Å from this box', panel.preparation_issues.toPlainText())
+        height = panel.preparation_issues.height()
+        panel.set_candidate({'id': 'B2', 'evidence': {'receptor_preparation_review': {
+            'warning': 'Receptor preparation failed.',
+            'residues': [{'residue': 'GLU', 'chain': 'A', 'number': '75',
+                          'inside_box': True, 'minimum_distance_to_box_angstrom': 0}]}}})
+        self.assertIn('inside this box', panel.preparation_issues.toPlainText())
+        self.assertEqual(panel.preparation_issues.height(), height)
+        panel.set_candidate({'id': 'P1', 'evidence': {}})
+        self.assertTrue(panel.preparation_issues.isHidden())
+        self.assertEqual(panel.preparation_issues.toPlainText(), '')
+
+    def test_successful_model_override_keeps_its_warning_when_a_box_is_reopened(self):
+        panel = PocketEvidencePanel()
+        panel.set_candidate({'id': 'B1', 'evidence': {
+            'receptor_preparation_review': {'warning': 'Old failed preparation'},
+            'receptor_model_review': {'status': 'prepared_with_reviewed_model_changes',
+                'warning': 'User-approved receptor changes: NAG A:1 excluded.',
+                'residues': [{'residue': 'NAG', 'chain': 'A', 'number': '1',
+                              'minimum_distance_to_box_angstrom': 13.44, 'inside_box': False}]}}})
+        self.assertIn('NAG A:1 excluded', panel.preparation_issues.toPlainText())
+        self.assertIn('13.44 Å', panel.preparation_issues.toPlainText())
+        self.assertNotIn('Old failed', panel.preparation_issues.toPlainText())
+        self.assertFalse(panel.preparation_issues.isHidden())
+
     def test_obstruction_statuses_do_not_claim_absence_of_rotamer_changes(self):
         cases = [
             ({"status": "not_evaluated"}, "Ligand obstruction not evaluated", "No matched"),

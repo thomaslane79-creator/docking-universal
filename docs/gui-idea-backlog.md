@@ -2,6 +2,254 @@
 
 Status: active scope-control record, established 2026-09-24.
 
+### Four-area completion follow-up (authorized 2026-10-23)
+
+User's clarified functional target (2026-10-24): at least 90% of proteins in a
+representative panel should run to completion; pose accuracy is a separate
+question. This prioritizes existing preparation/workflow corrections, not new
+interface scope or automatic model changes. Use distinct protein targets rather
+than repeated engine/format scenarios, and disclose routine versus explicitly
+reviewed-change completion. See the [coverage definition](validation-system.md#protein-workflow-completion-target).
+
+The 2026-10-24 [completion plan](protein-completion-plan.md) stages common
+preparation corrections before an independent 100-protein panel. A read-only
+target-level coverage command is implemented in development source; this is
+measurement infrastructure, not a new successful docking or installed GUI change.
+
+On 2026-10-25 the user explicitly requested proceeding with the >90% goal.
+The [100-target prospective panel](protein-panel-100-20261025.md) is frozen and
+the first ten real native workflows have launched sequentially. The threshold
+is strictly greater than 90%, or at least 91/100. Ninety-two inputs passed
+reference eligibility; eight unresolved references stay blocked/in denominator.
+This acceptance work does not authorize automatic molecular decisions or new
+GUI features. Historical cohorts and the working Mac installation are preserved.
+
+Implementation continuation explicitly requested 2026-10-25: finish the native
+preparation review handoff in a development build. Exact component exclusions
+and alternate-location choices must have a current, hash-bound preview and
+explicit approval before a new strict preparation attempt. Preserve the original
+model, prior failures and approved boxes; carry warnings through finalization,
+screening and reopening. This addresses the demonstrated blocked handoff,
+not permission to add automatic repairs, backbone completion or mass deletion.
+
+The approved beta2 ASP A29 CG/OD1/OD2 trial exposes a remaining handoff gap:
+the three-atom candidate exists, but the application can review only exclusions
+and deposited conformers. This passes implementation-gate questions 2 and 3.
+The bounded correction is an optional local side-chain-candidate receipt in the
+existing review dialog. The host must verify the exact added standard side-chain
+atoms, unchanged observed records, parent/model hashes and gross-overlap guard,
+then retain generation provenance and all earlier exclusion warnings. It must
+refuse backbone additions, changed observed atoms, stale previews or extra
+changes. Acceptance requires strict preparation and the full native beta2
+workflow in a new private build. This displaces broader panel execution, already
+held for common blockers; it does not authorize general automatic modeling.
+
+The bounded beta2 import/review handoff passed strict preparation and a complete
+native workflow with permanent exact-change warnings. Eight new guards plus
+the focused scientific/Qt contracts pass. An integrated user-facing generator
+remains a separate acceptance step; this test imported the previously generated
+local candidate. The installed application is unchanged. Presentation still
+fails for small report labels/native cartoon occlusion. See the
+[terminal checkpoint](protein-panel-100-20261025.md).
+
+The explicitly approved 2026-10-26 DOT1L follow-up also requires distinguishing
+four regenerated atoms from 104 retained modeled atoms. The same review importer
+must verify the earlier model hash and unchanged retained coordinates, carry
+both generation histories and expose the full 108-atom count. This is a bounded
+provenance correction for the current acceptance case; it adds no GUI branch
+or molecular authority and does not change preparation settings.
+
+The same case exposed extra distance-inferred internal bonds in ARG A73 and
+ASN B126. The user explicitly approved rejecting only ARG CG–NE and ASN
+CB–ND2 / ND2–OD1, with all atoms/coordinates retained and strict valence checks.
+The bounded opt-in adapter must bind the saved hydrogen-stage hashes, preserve
+the complete 108-atom model history plus a separate connectivity warning, and
+leave every other residue/edge on the original strict reader. No default bond
+policy, installed package, additional molecular choice or geometry is changed.
+Acceptance is a new versioned strict/native continuation from saved stages,
+with the prior failed run retained. This satisfies gate questions 2 and 3.
+
+The user separately approved three additional distance-inferred links at
+GLU A56/TYR A58 and VAL A59/LYS A77. The scoped adapter retains every other
+link and every atom/coordinate. The new private DOT1L continuation passed strict
+preparation and one full native docking/results/reopening workflow, with all
+108 modeled-atom flags and six exact connectivity overrides portable. The
+installed application remains unchanged, close contacts remain unvalidated,
+and presentation failed independently. This accepts the bounded reviewed
+continuation, not a general connectivity repair policy or integrated generator.
+
+The user approved the exact 6Y1E/O7Z A303 and 1LPA/BNG B450 incomplete
+references as exploratory site anchors, with frozen boxes and complete CCD
+screening chemistry unchanged. This exposes a current acceptance provenance
+gap: a site-interpretation warning must remain distinct from receptor edits and
+survive protocol export/import, screening, PDFs and reopening. The bounded
+increment is a hash-bound local review receipt through the existing host and
+box-review path, with mandatory portable warnings. It grants no atom filling,
+chemistry change, receptor repair or control authority. A general reference
+editor/file-picker is outside this increment; native acceptance covers the exact
+receipt import and existing GUI selection path.
+
+This increment now has three new native CPU workflows: reviewed 1A4G and 4EY7
+Vina paths and an ordinary mmCIF/P2Rank/QuickVina-W path. Exact choices, source
+identity, box hashes and warnings survived through outputs/reopening. Original
+visual failures remain recorded; copied report corrections do not rerun science
+or turn this development evidence into a 90% coverage/installation claim. See
+[the review checkpoint](preparation-review-20261025.md).
+
+The user now requests the four remaining areas: safe resolution/retesting of
+preparation failures, historical report review and explicit multi-site coverage,
+an explicit retained-output reclustering action, and fresh-install/cross-platform
+regression acceptance. This supersedes deferral of reclustering, not scientific
+review boundaries. Preserve the original cohort, installed dependencies and
+reviewed inputs; use new versioned validation outputs. Rebuilding zero-occupancy
+atoms, choosing replacement chemistry or adding unvalidated glycan templates
+is not automatic approval. Do independent work while specific molecular or
+external-machine/CI authority decisions are pending. Do not claim an unrun OS
+or a boundary rejection is a completed docking workflow.
+
+The user further authorizes site-first review: suggest pockets/boxes from
+coordinates before parameterization, flag preparation problems in each box's
+context, offer explicit reviewed repairs, and preserve original-deposition
+override warnings permanently. A source-only two-stage implementation now keeps
+failed preparation from hiding sites and adds strict finalization guards;
+reviewed model-change controls and native acceptance remain open. The isolated
+three-atom 1UY6 rebuild was specifically approved and passes strict preparation,
+but is not adopted. See [current evidence and limits](four-area-completion-20261023.md).
+
+### Cohort software-defect repairs (authorized 2026-10-23)
+
+The user requests fixing software defects before receptor/chemistry review.
+This is correctness/safety work, not permission for new GUI features, relaxed
+preparation, replacement structures or rerunning completed docking. A new
+isolated candidate corrects the exact small-ligand handoff, multi-component PLIP
+contact selection, unavailable legacy-backend checks, error categorization,
+gross generated-repair overlaps, diagram-label clearance, reference pagination
+and validation checks/counters. Tested locally and **subsequently installed**
+after explicit authorization. Preserve original studies and frozen earlier runs.
+Underlying receptor/template/dependency
+boundaries remain explicit, not successful preparations. See
+[the repair checkpoint](software-defect-repairs-20261023.md).
+
+Requested retest: two new corrected-build PDB/mmCIF trypsin workflows passed
+functionally; nine retained native representatives, 113 Python cases and four
+shell groups passed. Report review found and separately corrected a portable
+preparation-summary handoff in isolated v3; original incorrect PDFs remain
+failed records, corrected copies were checked without redocking. At that checkpoint,
+the candidate was not yet installed;
+the original cohort and unresolved preparation boundaries remain unchanged.
+
+Subsequently authorized and installed on the Mac with the presets below:
+20 backed-up application-file changes, 231 installed-runtime Python contracts,
+four shell groups and six native representatives checked. Dependencies,
+scientific defaults, old reports and original studies are unchanged. See the
+repair checkpoint's deployment section for exact scope and remaining work.
+
+### Qualitative clustering presets (design agreed 2026-10-23)
+
+The user agrees that qualitative categories should accompany the numerical
+pose-clustering cutoff for people unfamiliar with RMSD. Agreed choices are
+**Tight (1.0 A)**, **Default (1.5 A)**, **Loose (2.0 A)** and **Custom (editable
+value in A)**. Keep the selected number visible in the GUI and retained reports.
+Explain the effect briefly: tighter separates more pose groups; looser merges
+more. These describe grouping, not pose accuracy or experimental recovery.
+
+Status: **implemented and installed on the Mac** after explicit follow-up
+authorization. Preset-to-number mapping, custom values, saved-setting reopening,
+exact numeric launch payload, unchanged study state and fresh approvals are
+tested. The 1.5 A default, explicit saved/custom cutoffs and frozen historical
+validation runtime/settings remain unchanged. This is presentation of the
+existing setting, not a change to clustering or docking algorithms.
+Applying a changed cutoff to already completed results is a separate
+post-processing path; it is not available merely by adding these presets and
+must not be described as implemented without its own tests.
+
+### Systematic validation framework (authorized 2026-10-22)
+
+The user further authorizes confidence-oriented GUI and pipeline evaluation,
+suggesting 100. Keep the distinction between molecular examples and mixed
+software scenarios explicit. A separate 100-scenario foundation is now prepared:
+50 Qt contracts, 36 pipeline contracts and 14 installed native control reviews
+using verified real pipeline evidence. No rerun of completed docking is needed
+for controls, image exports or reopening. Preserve the failed combined-runtime
+test attempt; corrected runtime routing passes 126 Qt and 23 pipeline contracts.
+The corrected 100-scenario foundation now passes all 100 cases, including the
+separate visual gate for all 14 native reviews (42 retained representatives).
+The first stopped foundation/shared-helper import failure remains preserved;
+69 focused report/supervisor/receipt guard checks also pass after its repair.
+Raw-input chronological gates and scientific review remain separate requirements;
+don't claim 100 proteins, broad accuracy or full release readiness from these
+counts. See [the confidence gates](gui-pipeline-acceptance.md).
+
+The user requests systematic evaluation across many examples, replacing ad hoc
+one-off acceptance with repeatable suites. Build local-only, sequential,
+data-driven execution with pinned reviewed inputs, resumable evidence, explicit
+failure/unsupported/not-run states, separate functional/scientific/visual gates,
+runtime provenance and human review. Reuse existing scientific/GUI services;
+do not introduce new docking engines, parallel searches or automatic scientific
+approval. Large runs must be planned and explicitly executed; missing approved
+protocols or hardware are blocked coverage, not passes. A diverse public-example
+catalogue is a coverage plan, not a claim those examples were all validated.
+Implemented with a 37-case starter catalogue, local CLI/planner, pinned-runtime
+supervisor, generic installed GUI protocol-reuse worker, matched-seed scientific
+metrics, visual review and anonymous status export. All 37 supervisor guard tests
+pass; the final eight regression groups execute 232 cases without skips. One
+fresh two-compound native GUI case passed and was visually reviewed; resume
+reused completed evidence without docking again. The broad matrix is still
+incomplete (unbound targets are not passes). See [usage and scope](validation-system.md).
+
+### Report residue-label clipping (authorized 2026-10-22)
+
+The user requests correcting the clipped 3D residue labels found in the fresh
+three-engine report inspection. Original PyMOL snapshots retain complete labels;
+the shared report compositor crops those snapshots to fill wider panel cells.
+Preserve the full snapshot with bounded aspect-preserving sizing, cover edge
+content and one/two/three-panel layouts in regression tests, and rebuild only
+report assets in isolated validation copies. No docking, PLIP recomputation,
+label-font change, scientific selection or user-study rewrite is needed.
+Completed and installed: all six affected compound panels and three corrected
+PDFs checked, unchanged text/values and original artifacts, 38 focused cases and
+byte-identical installed compositor output. See
+[the framing verification](report-snapshot-framing.md). Existing PDFs remain
+unchanged; no scientific work was repeated.
+
+### Installed Mac three-engine functional acceptance (authorized 2026-10-22)
+
+After the presentation/report synchronization, the user requests a fresh
+installed GUI-to-report check for Vina, QuickVina-W and optional Apple AD4 GPU.
+Reuse the explicitly reviewed preparation in isolated studies; create fresh
+protocols and two-compound docking/PLIP/2D/PDF outputs sequentially, inspect the
+native embedded viewer and reopen completed studies. Use one starting shape
+per state and one seed for a bounded functional test, not accuracy calibration
+or an engine comparison. Preserve the experimental/exploratory AD4 boundary,
+all original studies/settings and installed dependencies. No engine defaults,
+control thresholds or installation files are changed by this acceptance work.
+Completed functional checks for all three engines, including exact-pose native
+review and reopening; a real canonical-energy-column reader defect was fixed
+and installed without repeating completed Vina searches. PDF visual inspection
+retains a separate nonblocking report callout-clipping issue, not a clean visual
+pass. Failed test-launch/review attempts remain preserved. See the
+[scope and evidence](mac-all-engine-gui-validation.md); scientific outputs remain local.
+
+### Mac GUI/documentation synchronization (authorized 2026-10-22)
+
+The user requests fixing the review findings: install the already tested
+no-prediction/detector-version report corrections on the working Mac; identify
+the retained scoring function beside GUI energies, with kcal/mol units; correct
+stale detector/engine defaults and removed static-figure export instructions;
+link the documented top-20/control-global-RMSD interpretation from the user guide.
+Repair the layout validator's hidden-AD4-field assumption as part of acceptance.
+This is a bounded correctness/documentation task, not a GUI redesign or new
+scientific option. Back up overwritten application code, preserve runtime
+registrations/dependencies and all studies/settings, and verify the installed
+code without repeating docking or rewriting completed reports.
+
+Completed locally: four backed-up Mac application files updated; source and
+installed scoring/provenance checks pass. PDF visual checking also exposed and
+corrected control-only reports taking a preparation-only early return. No
+scientific search or approval rule changed. See
+[the acceptance record](mac-gui-documentation-sync.md); original studies and
+historical PDFs remain unchanged. Consumer Windows testing remains deferred.
+
 ### No-prerequisite Windows installation (authorized 2026-10-18)
 
 - Completed normal-default acceptance at `73054b9`: native 39512043939 passes

@@ -67,6 +67,7 @@ def main() -> int:
     crop = json.loads(Path(str(output) + ".crop-audit.json").read_text())
     failures = [item for item in packing.get("labels", []) if
                 item.get("remainingGeometryHits", 0) or item.get("ambiguous") or item.get("contourGap", 0) > 12]
+    failures += [item for item in packing.get("structures", []) if item.get("remainingGeometryHits", 0)]
     if collision.get("overlapCount") or failures:
         output.unlink(missing_ok=True)
         raise RuntimeError("Approved renderer could not produce a collision-free unambiguous layout")

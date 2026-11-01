@@ -9,6 +9,34 @@ class WorkflowPanelTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls): cls.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 
+    def test_site_review_and_parameterization_are_separate_explicit_actions(self):
+        panel = StudySetupPanel()
+        panel._coordinate_review_supported = True
+        panel._update_mode()
+        self.assertEqual(panel.prepare_button.text(), 'Find and review docking regions')
+        final = ProtocolFinalizationPanel()
+        self.assertTrue(final.prepare_reviewed_button.isHidden())
+        observed = []
+        final.prepareReviewedRequested.connect(lambda: observed.append(True))
+        final.prepare_reviewed_button.click()
+        self.assertEqual(observed, [True])
+        self.assertIn('never authorizes omission', final.prepare_reviewed_button.toolTip())
+
+    def test_import_warning_is_plain_readable_text_not_a_dictionary_dump(self):
+        from docking_universal.gui.workflow_panels import ProtocolImportDialog
+        dialog = ProtocolImportDialog({'target': 'Example', 'protocol_type': 'site-guided-exploratory',
+            'region_count': 1, 'exploratory_authorization_required': True, 'engine': 'vina',
+            'parameters': {}, 'verified_files': 4,
+            'receptor_modification_warning': {'severity': 'high', 'summary': 'User <edited> receptor; review the retained changes.',
+                                              'prepared_hash': 'not reader-facing data'}})
+        warning = dialog.findChild(QtWidgets.QPlainTextEdit, 'protocol_model_change_warning')
+        self.assertTrue(warning.isReadOnly())
+        self.assertIn('High-severity', warning.toPlainText())
+        self.assertIn('User <edited> receptor', warning.toPlainText())
+        self.assertNotIn('prepared_hash', warning.toPlainText())
+        self.assertNotIn("{'", warning.toPlainText())
+        dialog.close()
+
     def test_setup_emits_intention_and_returns_typed_values(self):
         panel = StudySetupPanel(); observed=[]; fetched=[]
         panel.prepareRequested.connect(lambda: observed.append(True))
@@ -195,6 +223,37 @@ class WorkflowPanelTests(unittest.TestCase):
         self.assertEqual(panel.cluster_rmsd.value(), 1.5)
         panel.cluster_rmsd.setValue(2.0)
         self.assertEqual(panel.cluster_rmsd.value(), 2.0)
+        self.assertEqual(panel.cluster_preset.currentText(), 'Loose (2.0 Å)')
+        panel.close()
+
+    def test_clustering_presets_map_to_numbers_without_launch_or_approval(self):
+        panel = ScreeningSetupPanel()
+        changed, launched, approved = [], [], []
+        panel.inputsChanged.connect(lambda: changed.append(True))
+        panel.runRequested.connect(lambda: launched.append(True))
+        panel.approvalChanged.connect(lambda: approved.append(True))
+        self.assertEqual(panel.cluster_preset.currentText(), 'Default (1.5 Å)')
+        for index, value in ((0, 1.0), (2, 2.0), (1, 1.5)):
+            panel.cluster_preset.setCurrentIndex(index)
+            self.assertEqual(panel.cluster_rmsd.value(), value)
+        self.assertTrue(changed)
+        self.assertFalse(launched or approved)
+        self.assertFalse(panel.approval.isChecked())
+        self.assertIn('does not regroup completed results', panel.cluster_preset.toolTip())
+        panel.close()
+
+    def test_custom_clustering_preserves_number_and_numeric_restore_updates_category(self):
+        panel = ScreeningSetupPanel()
+        panel.cluster_preset.setCurrentIndex(3)
+        self.assertEqual(panel.cluster_rmsd.value(), 1.5)
+        for value in (0.1, 1.25, 2.75, 20.0):
+            panel.cluster_rmsd.setValue(value)
+            self.assertEqual(panel.cluster_preset.currentIndex(), 3)
+            self.assertEqual(panel.cluster_rmsd.value(), value)
+        for value, index in ((1.0, 0), (1.5, 1), (2.0, 2)):
+            panel.cluster_rmsd.setValue(value)
+            self.assertEqual(panel.cluster_preset.currentIndex(), index)
+        panel.close()
 
     def test_screening_cpu_default_automatic_custom_and_return_do_not_launch(self):
         panel = ScreeningSetupPanel()

@@ -1,5 +1,22 @@
 # GUI toolkit decision
 
+## Current status (2026-10-22)
+
+The desktop uses Qt6/Python 3.12, separate from the scientific host. Supported
+Apple-Silicon installations now include a pinned Qt6-compatible embedded PyMOL
+runtime; the companion remains an explicit alternative. Full PyMOL detachment
+borrows the same scene/engine and returns it to the workspace. Normal launch is
+maximized, not locked full-screen. Static report-figure browsing was removed;
+interactive review and image export remain. See
+[Mac runtime packaging](mac-runtime-packaging.md),
+[the user guide](guided-workflow.md) and
+[current cross-platform boundaries](cross-platform-compatibility.md).
+
+## Historical decision record (2026-09-12/13)
+
+The following describes the original companion-only implementation, not current
+installation instructions or the present embedded-viewer limitation.
+
 Decision date: 2026-09-12; revised 2026-09-13. The initial desktop client used
 Qt 5/PyQt5. The active migration target is Python 3.12 with PyQt6 in a dedicated
 GUI environment.

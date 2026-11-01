@@ -48,10 +48,18 @@ if QtWidgets is not None:
             warning.setWordWrap(True)
             warning.setStyleSheet("background:#fff1b8;color:#332600;padding:6px")
 
-            self.screening_results = QtWidgets.QTableWidget(0, 6)
+            self.screening_results = QtWidgets.QTableWidget(0, 7)
             self.screening_results.setHorizontalHeaderLabels((
-                "Compound", "Status", "Sites", "Planned jobs", "Best score", "Clusters",
+                "Compound", "Status", "Sites", "Planned jobs", "Best energy (kcal/mol)",
+                "Scoring function", "Clusters",
             ))
+            self.screening_results.horizontalHeaderItem(4).setToolTip(
+                "Lowest retained estimated binding energy for this compound, not a measured affinity."
+            )
+            self.screening_results.horizontalHeaderItem(5).setToolTip(
+                "Recorded energy model: Vina for AutoDock Vina/QuickVina-W, AD4 for AutoDock-GPU. "
+                "The two scales are not interchangeable. Missing historical identities are not guessed."
+            )
             self.screening_results.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
             self.screening_results.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
             self.screening_results.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -127,7 +135,7 @@ if QtWidgets is not None:
             self.pose_results = QtWidgets.QTableWidget(0, 7)
             self.pose_results.setObjectName("expanded_pose_results")
             self.pose_results.setHorizontalHeaderLabels((
-                "Pose", "Cluster", "Score", "Representative", "Seed", "Conformer", "Model",
+                "Pose", "Cluster", "Energy", "Representative", "Seed", "Conformer", "Model",
             ))
             self.pose_results.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
             self.pose_results.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)

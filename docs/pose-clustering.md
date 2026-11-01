@@ -17,12 +17,19 @@ The user does not request a particular number of clusters. RDKit Butina clusteri
 
 | RMSD cutoff | Practical interpretation |
 | ---: | --- |
-| 1.0 Å | Strict; may separate modest variations of one mode |
+| 1.0 Å | Tight; may separate modest variations of one mode |
 | 1.5 Å | Default; moderately strict |
-| 2.0 Å | Broader grouping; may combine modest variations of one mode |
+| 2.0 Å | Loose; may combine modest variations of one mode |
 | 2.5–3.0 Å | Broad; may combine scientifically distinct poses |
 
 Butina clustering is center-based. Membership does not require every pair of peripheral poses in a cluster to be within the cutoff of each other. Docking Universal records the cutoff and method in `clustering_manifest.json` so the result can be interpreted and reproduced.
+
+The GUI offers Tight (1.0 Å), Default (1.5 Å), Loose (2.0 Å), and Custom with
+the number always visible. Categories describe granularity, not accuracy.
+Custom and existing saved numbers are preserved. This changes the next
+screening analysis; it does not automatically recluster completed studies or
+rewrite their reports. The numeric cutoff in each retained manifest remains
+authoritative.
 
 ## Selecting representatives
 

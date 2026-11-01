@@ -10,7 +10,7 @@ The receptor remains rigid during docking. The example supplies one compound for
 
 ## What the workflow helps you find
 
-The initial PDB inventory shows every exact hetero group and explains why water and glycerol are excluded from automatic control-ligand candidates. Finding a small molecule in a crystal structure does not automatically make it an appropriate pocket-defining ligand. With no relevant inhibitor available, fpocket searches the protein geometry and reports candidate cavities, scores, centers, dimensions, and warnings for review.
+The initial PDB inventory shows every exact hetero group and explains why water and glycerol are excluded from automatic control-ligand candidates. Finding a small molecule in a crystal structure does not automatically make it an appropriate pocket-defining ligand. With no relevant inhibitor available, P2Rank predicts pocket locations; fpocket remains a fallback geometric detector. Retained scores, boxes and warnings identify the actual detector used. AutoDock Vina is the default docking engine, separate from pocket prediction.
 
 The compound-library inventory then identifies every readable SDF record before docking. It displays the compound name, stable folder identifier, formula, formal charge, heavy-atom count, and coordinate-free isomeric SMILES. For a multi-record SDF or SDF directory, all compounds are listed before the first job starts.
 
@@ -52,7 +52,7 @@ The command remains interactive because cavity review and box selection should n
 
 1. Do not select glycerol (`GOL`) as a bound control ligand.
 2. Choose ligand-free cavity detection.
-3. Review the ranked fpocket candidates, dimensions, warnings, and PyMOL pocket scenes.
+3. Review the ranked P2Rank candidates (or explicitly recorded fpocket fallback), box dimensions, warnings, and PyMOL scenes.
 4. Select a cavity and box only after structural review.
 5. Confirm the planned exploratory docking effort.
 

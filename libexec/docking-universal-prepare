@@ -196,6 +196,13 @@ handle_receptor_failure_and_removal_approval
 
 finalize_receptor_preparation_audit || exit $?
 
+# Site-first GUI studies retain detector outputs separately. Do not repeat
+# prediction or make a new site decision while preparing the reviewed receptor.
+if [ "${DOCKING_UNIVERSAL_PARAMETERIZATION_ONLY:-0}" = 1 ]; then
+  log "Receptor parameterization complete; retained site review is unchanged."
+  exit 0
+fi
+
 ###############################################################################
 # LIGAND DETECTION (RESTORED WORKING LOGIC)
 ###############################################################################
@@ -203,6 +210,13 @@ echo
 log "=== STEP 1b: Detecting ligand ==="
 
 resolve_site_ligand_strategy || exit 1
+if [ "$REFERENCE_SITE_ONLY" = 1 ]; then
+  [ "$LIG_PRESENT" -eq 1 ] || { echo "ERROR: Exact reference ligand was not retained" >&2; exit 1; }
+  log "Exact input-bound-ligand site requested; no P2Rank or fpocket prediction executed."
+  log "The application will retain the ligand-defined box and require explicit site review."
+  printf '%s\n' '{"engine":"none","mode":"input_bound_ligand","prediction_executed":false,"site_definition":"Exact input ligand; not independent supporting evidence"}' > "$CAVITY_DIR/pocket_detection_provenance.json"
+  exit 0
+fi
 ###############################################################################
 # STEP 2: POCKET DETECTION
 ###############################################################################
