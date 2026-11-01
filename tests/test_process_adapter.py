@@ -19,6 +19,29 @@ from docking_universal.processes import (
 
 
 class ProcessAdapterTests(unittest.TestCase):
+    def test_darwin_cleanup_accepts_permission_error_only_for_confirmed_dead_groups(self):
+        from docking_universal import darwin_processes
+        process = Mock(pid=12345)
+        process.poll.return_value = 0
+        for live in (False, True, OSError('inspection unavailable')):
+            with self.subTest(live=live), patch.object(process_module.os, 'name', 'posix'), \
+                    patch.object(process_module.sys, 'platform', 'darwin'), \
+                    patch.object(process_module.signal, 'SIGKILL', 9, create=True), \
+                    patch.object(process_module.os, 'killpg', create=True,
+                                 side_effect=[None, PermissionError('group denied')]) as kill_group, \
+                    patch.object(darwin_processes, 'group_has_live_processes') as inspect:
+                if isinstance(live, Exception):
+                    inspect.side_effect = live
+                else:
+                    inspect.return_value = live
+                if live is False:
+                    ProcessRunner._terminate(process, 0)
+                else:
+                    with self.assertRaisesRegex(PermissionError, 'group denied'):
+                        ProcessRunner._terminate(process, 0)
+                self.assertEqual(kill_group.call_count, 2)
+                inspect.assert_called_once_with(process.pid)
+
     def test_cancelled_process_is_not_terminated_again_during_reader_cleanup(self):
         for fail_final_tick in (False, True):
             with self.subTest(fail_final_tick=fail_final_tick), tempfile.TemporaryDirectory() as directory:

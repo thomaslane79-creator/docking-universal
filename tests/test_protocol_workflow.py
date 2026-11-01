@@ -106,7 +106,8 @@ class ProtocolWorkflowTests(unittest.TestCase):
             if predicate(state):
                 return state
             time.sleep(0.02)
-        self.fail("Timed out waiting for asynchronous workflow state")
+        jobs = ', '.join(f'{job.stage}={job.status.value}' for job in state.jobs)
+        self.fail(f'Timed out waiting for asynchronous workflow state ({state.completion_status.value}; {jobs})')
 
     def test_preparation_discovers_artifacts_and_pauses_for_pocket_review(self):
         dispatcher = CommandDispatcher(self.controller, "session", self.executable())
@@ -406,17 +407,23 @@ class ProtocolWorkflowTests(unittest.TestCase):
 
     def test_host_can_cancel_running_preparation(self):
         dispatcher = CommandDispatcher(self.controller, "session", self.executable(slow=True))
-        started = dispatcher.dispatch(self.start_command(dispatcher, "slow"))
-        self.assertEqual(started.status, "applied")
-        snapshot = dispatcher.dispatch(Command("workflow", "session", "snapshot", "snapshot"))
-        active_job_id = self.store.load("workflow").active_job.id
-        cancelled = dispatcher.dispatch(Command(
-            "workflow", "session", "cancel", "cancel_active_job",
-            {"job_id": active_job_id}, snapshot.revision,
-        ))
-        self.assertEqual(cancelled.status, "applied")
-        state = self.wait_for(lambda item: bool(item.jobs) and item.jobs[0].status is JobStatus.CANCELLED)
-        self.assertEqual(state.pending_decisions, [])
+        try:
+            started = dispatcher.dispatch(self.start_command(dispatcher, "slow"))
+            self.assertEqual(started.status, "applied")
+            snapshot = dispatcher.dispatch(Command("workflow", "session", "snapshot", "snapshot"))
+            active_job_id = self.store.load("workflow").active_job.id
+            cancelled = dispatcher.dispatch(Command(
+                "workflow", "session", "cancel", "cancel_active_job",
+                {"job_id": active_job_id}, snapshot.revision,
+            ))
+            self.assertEqual(cancelled.status, "applied")
+            state = self.wait_for(lambda item: bool(item.jobs) and item.jobs[0].status in {
+                JobStatus.CANCELLED, JobStatus.FAILED, JobStatus.COMPLETED, JobStatus.INTERRUPTED})
+            self.assertEqual(state.jobs[0].status, JobStatus.CANCELLED, state.jobs[0].error)
+            self.assertEqual(state.pending_decisions, [])
+            self.assertIsNone(state.active_job)
+        finally:
+            dispatcher.shutdown()
 
     def test_host_shutdown_cancels_and_reaps_running_preparation(self):
         dispatcher = CommandDispatcher(self.controller, "session", self.executable(slow=True))

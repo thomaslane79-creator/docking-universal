@@ -5,6 +5,7 @@ LIBEXECDIR ?= $(PREFIX)/libexec/docking-universal
 .PHONY: test test-integration test-release setup install install-conda install-launcher uninstall
 
 test:
+	PYTHONPATH="$(CURDIR)/libexec" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_darwin_processes.py
 	PYTHONPATH="$(CURDIR)/libexec" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_reproducibility.py
 	PYTHONPATH="$(CURDIR)/libexec" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_site_first_workflow.py tests/test_receptor_model_review.py tests/test_sidechain_candidate.py tests/test_reviewed_connectivity.py tests/test_site_reference_review.py tests/test_reclustering.py tests/test_reviewed_exclusions.py tests/test_receptor_model_history.py
 	PYTHONPATH="$(CURDIR)/libexec" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_report_synchronization.py tests/test_report_snapshot_framing.py tests/test_report_pagination.py tests/test_system_validation.py tests/test_contract_worker.py tests/test_protein_coverage.py

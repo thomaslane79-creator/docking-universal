@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -221,12 +222,30 @@ class ProcessRunner:
         return result
 
     @staticmethod
+    def _signal_posix_group(group_id: int, signum: int) -> bool:
+        try:
+            os.killpg(group_id, signum)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            if sys.platform == 'darwin':
+                from .darwin_processes import group_has_live_processes
+                try:
+                    if not group_has_live_processes(group_id):
+                        return False
+                except (OSError, ValueError):
+                    pass  # An inconclusive probe must not hide the permission error.
+            raise
+        return True
+
+    @staticmethod
     def _terminate(process: subprocess.Popen, grace_seconds: float) -> None:
         if os.name == 'nt' and process.poll() is not None:
             return
         try:
             if os.name != "nt":
-                os.killpg(process.pid, signal.SIGTERM)
+                if not ProcessRunner._signal_posix_group(process.pid, signal.SIGTERM):
+                    return
             else:
                 process.terminate()
         except ProcessLookupError:
@@ -239,7 +258,7 @@ class ProcessRunner:
         if os.name != 'nt' or process.poll() is None:
             try:
                 if os.name != "nt":
-                    os.killpg(process.pid, signal.SIGKILL)
+                    ProcessRunner._signal_posix_group(process.pid, signal.SIGKILL)
                 else:
                     process.kill()
             except ProcessLookupError:

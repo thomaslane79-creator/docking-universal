@@ -150,6 +150,41 @@ crash verifies exit-code transport, partial-output removal and absence of
 scientific values in the status summary. No retry, scientific setting or
 acceptance criterion changed.
 
+## macOS cancellation follow-up (2026-11-01)
+
+At `e5466c2`, macOS job `125015676990` failed in
+`test_host_can_cancel_running_preparation` during the integration suite's second
+`make test`: the five-second wait never observed a cancelled job. The first
+CLI test pass and the other general jobs passed. The timeout alone does not
+identify the terminal job error.
+
+Inspection found an additional cleanup defect consistent with the earlier
+Darwin permission errors: Apple's `killpg1` filters out zombies and can return
+EPERM when an existing group has no live signal targets. A final SIGKILL after
+successful SIGTERM could therefore turn completed cleanup into a job failure.
+The earlier correction prevented redundant termination calls but did not
+handle this first-call zombie-only case.
+
+On Darwin permission errors only, cleanup now uses native libproc to inspect
+the specific owned process group. It accepts the error only if every observed
+member is a zombie or has disappeared. Live members, denied inspection,
+truncated snapshots and unreadable records preserve the original permission
+error. It invokes no subprocess, adds no dependency, and leaves Windows/Linux
+signalling and scientific parameters unchanged.
+
+A controlled reproduction on Windows raises PermissionError with the old code
+and completes cleanup with the correction. Forty local checks pass; two native
+POSIX/macOS cases are skipped here. CI now includes a real macOS child kept
+unreaped to deterministically exercise a zombie-only group. Native macOS
+verification remains required. The workflow cancellation test retains its
+five-second deadline, reports a terminal failure directly and always shuts
+down its test dispatcher.
+
+Primary references: Apple's
+[signal implementation](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/kern_sig.c),
+[process record definitions](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/proc_info.h),
+and [libproc wrappers](https://github.com/apple-oss-distributions/xnu/blob/main/libsyscall/wrappers/libproc/libproc.c).
+
 ## On the new Mac
 
 Clone this branch, or clone its self-contained recovery Git bundle with
