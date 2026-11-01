@@ -28,6 +28,28 @@ The source's box-duplicate rule still compares each geometry value within
 0.5 Å. It does not implement a new overlap-based duplicate policy. Scientific
 defaults, approval thresholds and historical results were preserved.
 
+### Follow-up to the first GitHub CI run
+
+The first general CI run (`41321535367`) passed the six native/build foundation
+jobs but failed the Mac and Ubuntu CLI jobs. Mac reached an outdated assertion
+that expected clusters without evaluable RMSD to disappear from the CSV, despite
+the recovered N/A-strip behavior. That assertion now requires the retained
+global rank, unchanged energy, `NA` distance and `unavailable` status.
+
+Ubuntu timed out waiting for preparation cancellation and retained an orphaned
+`sleep`. Inspection identified a POSIX cleanup gap: an exited wrapper could leave
+descendants holding the reader pipes, and the helper skipped group cleanup once
+the leader exited. The follow-up cleans the owned POSIX process group before
+joining readers, including signal-ignoring descendants. A deterministic test
+fails on the old helper, and real POSIX tests cover completed and cancelled
+wrappers. Windows continues to use its existing owned Job Object path.
+
+This is a deliberate process-lifecycle fix after the byte-identical recovery;
+it does not change docking parameters, scoring, clustering or scientific
+approval rules. Local follow-up checks pass the 48 landscape/report tests and
+the 133-test native-foundation group (two platform skips). The real POSIX
+regression and complete CLI suites require the corrected GitHub CI run.
+
 ## Windows validation
 
 A separate candidate was staged beside the existing Windows application and

@@ -6,6 +6,9 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, call, patch
+
+import docking_universal.processes as process_module
 
 from docking_universal.processes import (
     ProcessExecutionError,
@@ -16,6 +19,58 @@ from docking_universal.processes import (
 
 
 class ProcessAdapterTests(unittest.TestCase):
+    def test_exited_posix_wrapper_does_not_hide_its_live_process_group(self):
+        process = Mock(pid=12345)
+        process.poll.return_value = 0
+        with patch.object(process_module.os, 'name', 'posix'), \
+             patch.object(process_module.os, 'killpg', create=True) as kill_group, \
+             patch.object(process_module.signal, 'SIGKILL', 9, create=True):
+            ProcessRunner._terminate(process, 0)
+            self.assertEqual(kill_group.call_args_list, [
+                call(process.pid, process_module.signal.SIGTERM), call(process.pid, 9),
+            ])
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX process groups; Windows uses an owned Job Object')
+    def test_completed_or_cancelled_wrapper_reaps_signal_ignoring_pipe_holder(self):
+        import signal
+        for cancel_running in (False, True):
+            with self.subTest(cancel_running=cancel_running), tempfile.TemporaryDirectory() as directory:
+                marker = str(Path(directory) / 'ready')
+                child = (
+                    "import pathlib,signal,sys,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); "
+                    "print('child-ready',flush=True); pathlib.Path(sys.argv[1]).write_text('ready'); time.sleep(30)"
+                )
+                parent = (
+                    "import pathlib,subprocess,sys,time\n"
+                    f"subprocess.Popen([sys.executable,'-u','-c',{child!r},{marker!r}])\n"
+                    + ("time.sleep(30)\n" if cancel_running else
+                       f"while not pathlib.Path({marker!r}).is_file(): time.sleep(.01)\n")
+                )
+                owned_group = []
+                cancel = threading.Event()
+                def cleanup():
+                    if owned_group:
+                        try:
+                            os.killpg(owned_group[0], signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                watchdog = threading.Timer(4, cleanup)
+                watchdog.start()
+                try:
+                    result = ProcessRunner().run(
+                        ProcessRequest((sys.executable, '-u', '-c', parent), directory, 'descendant',
+                                       termination_grace_seconds=.1, check=False),
+                        cancel_event=cancel,
+                        on_started=owned_group.append,
+                        on_output=lambda event: cancel.set() if cancel_running and 'child-ready' in event.text else None,
+                    )
+                finally:
+                    watchdog.cancel()
+                    cleanup()
+                self.assertEqual(result.status, ProcessStatus.CANCELLED if cancel_running else ProcessStatus.COMPLETED)
+                self.assertIn('child-ready', Path(result.stdout_log).read_text())
+                self.assertLess(result.duration_seconds, 3)
+
     def test_scientific_child_cannot_inherit_an_open_host_command_pipe(self):
         with tempfile.TemporaryDirectory() as directory:
             code = (

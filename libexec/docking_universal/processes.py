@@ -186,6 +186,10 @@ class ProcessRunner:
                 # Kill any grandchild that outlived a completed wrapper before
                 # joining readers; inherited pipes must not hang shutdown.
                 tree.close()
+            else:
+                # A POSIX wrapper can exit while descendants still hold its
+                # pipes. Its session remains ours even after the leader exits.
+                self._terminate(process, 0.0)
             for thread in threads:
                 thread.join()
         if status is ProcessStatus.COMPLETED and returncode != 0:
@@ -213,7 +217,7 @@ class ProcessRunner:
 
     @staticmethod
     def _terminate(process: subprocess.Popen, grace_seconds: float) -> None:
-        if process.poll() is not None:
+        if os.name == 'nt' and process.poll() is not None:
             return
         try:
             if os.name != "nt":
@@ -225,7 +229,9 @@ class ProcessRunner:
         deadline = time.monotonic() + max(0.0, grace_seconds)
         while process.poll() is None and time.monotonic() < deadline:
             time.sleep(0.02)
-        if process.poll() is None:
+        # Reaping the POSIX leader does not mean its descendants have exited.
+        # A signal-ignoring pipe holder must not stall the reader joins.
+        if os.name != 'nt' or process.poll() is None:
             try:
                 if os.name != "nt":
                     os.killpg(process.pid, signal.SIGKILL)

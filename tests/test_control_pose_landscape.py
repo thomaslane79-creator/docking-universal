@@ -377,8 +377,13 @@ class ControlLandscapeTests(unittest.TestCase):
                 self.assertTrue(figures.plot_clusters(root, output))
             with output.with_suffix(".csv").open() as handle:
                 plotted = list(csv.DictReader(handle))
-            self.assertEqual(len(plotted), 1)
-            self.assertEqual(plotted[0]["cluster_id"], "1")
+            self.assertEqual([row['cluster_id'] for row in plotted], ['1', '99'])
+            self.assertEqual(plotted[0]['rmsd_angstrom'], '0.000000')
+            self.assertEqual(plotted[0]['rmsd_status'], 'evaluated')
+            self.assertEqual(plotted[1]['energy_rank'], '2')
+            self.assertEqual(plotted[1]['best_energy_kcal_per_mol'], '-5')
+            self.assertEqual(plotted[1]['rmsd_angstrom'], 'NA')
+            self.assertEqual(plotted[1]['rmsd_status'], 'unavailable')
 
 
 if __name__ == "__main__":
