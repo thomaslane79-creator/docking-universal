@@ -523,6 +523,16 @@ def resolve_cpu(options: DockOptions, environment: Mapping[str, str]) -> None:
             match = re.fullmatch(r"\s*cpu\s*=\s*([^#]+?)(?:\s*#.*)?", line)
             if match:
                 value, source = match.group(1).strip(), "config"
+    native_qvinaw = (options.engine == 'qvinaw' and os.name == 'nt'
+                     and bool(environment.get('DOCKING_UNIVERSAL_QVINAW_RUNTIME')))
+    if native_qvinaw:
+        if value is None:
+            value, source = '1', 'windows_qvinaw_serial_containment'
+        elif str(value).strip() != '1':
+            raise DockUsageError(
+                'ERROR: the installed Windows QuickVina-W build has reproduced heap-corruption crashes '
+                'with parallel workers. This execution profile requires CPU 1; the explicit CPU setting '
+                'was not changed and no search was started. Review a single-worker protocol before running it.')
     if value is None and options.engine == "vina" and platform.system() == "Darwin" and platform.machine() == "arm64":
         value, source = str(min(8, os.cpu_count() or 1)), "apple_silicon_bounded_default"
     if value is None:

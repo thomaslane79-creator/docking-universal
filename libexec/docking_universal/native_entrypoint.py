@@ -23,6 +23,23 @@ PREVIEW_NOTICE = (
 )
 
 
+def suppress_native_crash_dialogs(*, windows=None, kernel=None):
+    """Keep child failures in the application's diagnostics, not native popups.
+
+    The mode is process-local and inherited by children. Exceptions and exit
+    codes are unchanged; no system-wide error-reporting setting is modified.
+    """
+    if not (os.name == 'nt' if windows is None else windows):
+        return
+    if kernel is None:
+        import ctypes
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.GetErrorMode.restype = ctypes.c_uint
+        kernel.SetErrorMode.argtypes = [ctypes.c_uint]
+        kernel.SetErrorMode.restype = ctypes.c_uint
+    kernel.SetErrorMode(kernel.GetErrorMode() | 0x8003)
+
+
 def isolated_environment(prefix: Path, inherited=None) -> dict[str, str]:
     environment = dict(os.environ if inherited is None else inherited)
     for key in ("PYTHONHOME", "PYTHONPATH", "QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH", "QML2_IMPORT_PATH",
@@ -81,6 +98,7 @@ def launch_command(app: Path, configuration: dict, arguments: list[str]):
 
 
 def main(arguments=None, *, app: Path | None = None) -> int:
+    suppress_native_crash_dialogs()
     arguments = list(sys.argv[1:] if arguments is None else arguments)
     app = app or Path(__file__).resolve().parents[1]
     command = arguments[0] if arguments else "help"

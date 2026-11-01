@@ -1,5 +1,57 @@
 # Native Windows reviewed-control port — enabled-default acceptance passed
 
+## 2026-11-01: parallel QuickVina-W acceptance reopened
+
+The pinned `qvina=2.1.0=he453025_8` Windows executable returned
+`3221226356` (`0xC0000374`, heap corruption) in installed CI run `41345892677`.
+The preceding full run `41344853045` passed all four controls. A passing attempt
+therefore does not establish reliability of the parallel profile.
+
+A local matched-input experiment reproduced two heap-corruption crashes among
+15 searches with four workers, at seeds 20260811 and 20260812. All 15 searches
+passed with one worker, including those same input/seed pairs. Both profiles
+used the exact pinned executable, prepared 1STP receptor/box and three biotin
+conformers, five unchanged seeds, exhaustiveness 16, 15 modes and energy range
+8. Input hashes remained unchanged. Successful three-conformer batches averaged
+47.318 seconds with four workers and 138.931 seconds with one worker on this
+machine. This is a bounded public-fixture experiment, not the 100-target panel.
+
+The candidate contains the issue by restricting the owned native Windows
+QuickVina-W profile to one worker. It records an otherwise unspecified CPU
+setting as `1` with source `windows_qvinaw_serial_containment`; conflicting
+explicit command-line, environment or saved-box CPU settings fail before search
+without being rewritten. Mac/Linux, Vina, GPU settings, engine identity,
+scientific inputs, seeds, search parameters and acceptance thresholds are
+unchanged. Existing engine choices and CPU help disclose the native worker
+limit. This is not a corrected multi-worker C++ binary.
+
+Native children inherit process-local error-mode flags that suppress crash
+popups while leaving real exit codes and failed-run status intact. No global
+Windows error-reporting settings change. The first full local GUI-control
+attempt stopped before docking because sandbox DNS blocked the strict RCSB CCD
+identity lookup. That failure is retained; no chemistry override was used.
+The network-enabled ordinary five-seed GUI control passed in 845.016 seconds.
+Sampling and ranking both pass the existing 2 Å threshold; the five-seed
+minimum, reviewed-input hashes, PDF, approved protocol bundle, portable-input
+checks and cleanup pass without configuration or chemistry overrides. All
+five docking manifests record CPU `1` and the containment policy. The receptor,
+box and all three prepared ligand hashes match the worker comparison exactly.
+The four-page report retains the cross-platform notice and CPU setting.
+
+Thirty-nine policy/engine/provenance tests and 34 native-entrypoint/Qt tests
+pass locally. These include actual Windows child error-mode inheritance,
+rejection of conflicting CPU settings without rewriting them, and unchanged
+Mac/Linux/Vina policy. The 410 protected original application files and all
+440 staged files remain unchanged through the control. The separately staged
+runtime's Python files match the candidate source. Fresh-install CI remains
+required after publication; longer operational deadlines accommodate serial
+execution without changing the seed count or RMSD criteria.
+
+Process-local popup handling follows Microsoft's
+[SetErrorMode documentation](https://learn.microsoft.com/en-us/windows/win32/api/errhandlingapi/nf-errhandlingapi-seterrormode).
+
+The historical acceptance records below describe their original builds.
+
 Final enabled-default build: `73054b9`, pushed only to the existing `github`
 feature branch. Native run
 [39512043939](https://github.com/thomaslane79-creator/docking-universal/actions/runs/39512043939)

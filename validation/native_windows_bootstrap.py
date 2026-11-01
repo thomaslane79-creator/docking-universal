@@ -218,7 +218,7 @@ def main():
             with (out / 'control-candidate.local.log').open('w', encoding='utf-8') as log:
                 subprocess.run([str(gui), str(ROOT / 'validation/native_windows_control_workflow.py'),
                     '--app', str(app), '--out', str(out / 'control-candidate')],
-                    env=environment, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=2700)
+                    env=environment, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=4200)
             status['checks'].append('installed_strict_reviewed_controls_enabled_defaults_both_cpu_engines')
             status['installed_control_workflow'] = 'passed_enabled_defaults'
         status["status"] = "passed"

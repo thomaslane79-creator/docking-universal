@@ -2,6 +2,21 @@
 
 Status: active scope-control record, established 2026-09-24.
 
+### Native Windows QuickVina-W crash containment (2026-11-01)
+
+The current pinned native binary returned `0xC0000374` heap corruption in CI.
+A local matched-input test reproduced two crashes with four workers. This is
+a demonstrated engine crash (gate 1). The bounded candidate restricts the
+owned native Windows QuickVina-W execution profile to one worker, records that
+default and rejects conflicting explicit settings without changing them.
+Existing engine choices and CPU help disclose the profile. Native child crash
+dialogs are suppressed per process while failed exit codes remain unchanged.
+This is containment, not a corrected C++ binary. Local five-seed engine and
+ordinary GUI control acceptance passed, including reports and portable inputs.
+Scientific seeds,
+input bytes, RMSD criteria, five-seed minimum and Mac/Linux execution policies
+remain unchanged. Extra validation time accommodates serial execution.
+
 ### Cross-system reproducibility disclosure (authorized 2026-11-01)
 
 The user requests explicit software disclosure after matched-input Mac/API and

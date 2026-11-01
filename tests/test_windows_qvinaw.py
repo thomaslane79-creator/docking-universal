@@ -3,11 +3,54 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from docking_universal.windows_qvinaw import PROFILE, record, supported_engines, engine_environment
 
 
 class OwnedQuickVinaTests(unittest.TestCase):
+    def test_native_cpu_containment_defaults_to_one_and_preserves_explicit_one(self):
+        from docking_universal_dock import DockOptions, resolve_cpu
+        native = {'DOCKING_UNIVERSAL_QVINAW_RUNTIME': 'owned-runtime'}
+        with patch('docking_universal_dock.os.name', 'nt'):
+            options = DockOptions(engine='qvinaw')
+            resolve_cpu(options, native)
+            self.assertEqual((options.cpu, options.cpu_source), ('1', 'windows_qvinaw_serial_containment'))
+            options = DockOptions(engine='qvinaw', cpu='1')
+            resolve_cpu(options, native)
+            self.assertEqual((options.cpu, options.cpu_source), ('1', 'command_line'))
+            options = DockOptions(engine='qvinaw')
+            resolve_cpu(options, dict(native, DOCKING_UNIVERSAL_CPU='1'))
+            self.assertEqual((options.cpu, options.cpu_source), ('1', 'environment'))
+
+    def test_native_cpu_containment_rejects_unsafe_explicit_choices_without_rewriting_them(self):
+        from docking_universal_dock import DockOptions, DockUsageError, resolve_cpu
+        native = {'DOCKING_UNIVERSAL_QVINAW_RUNTIME': 'owned-runtime'}
+        with tempfile.TemporaryDirectory() as temp:
+            config = Path(temp) / 'box.conf'
+            config.write_text('cpu = 4 # retained explicit setting\n')
+            with patch('docking_universal_dock.os.name', 'nt'):
+                for options, environment in (
+                    (DockOptions(engine='qvinaw', cpu='0'), native),
+                    (DockOptions(engine='qvinaw', cpu='4'), native),
+                    (DockOptions(engine='qvinaw'), dict(native, DOCKING_UNIVERSAL_CPU='4')),
+                    (DockOptions(engine='qvinaw', config=config), native)):
+                    original = vars(options).copy()
+                    with self.assertRaisesRegex(DockUsageError, 'explicit CPU setting was not changed'):
+                        resolve_cpu(options, environment)
+                    self.assertEqual(vars(options), original)
+            self.assertEqual(config.read_text(), 'cpu = 4 # retained explicit setting\n')
+
+    def test_cpu_containment_is_limited_to_the_owned_native_windows_quickvina_profile(self):
+        from docking_universal_dock import DockOptions, resolve_cpu
+        native = {'DOCKING_UNIVERSAL_QVINAW_RUNTIME': 'owned-runtime'}
+        for operating_system, engine, environment in (
+            ('posix', 'qvinaw', native), ('nt', 'qvinaw', {}), ('nt', 'vina', native)):
+            with patch('docking_universal_dock.os.name', operating_system):
+                options = DockOptions(engine=engine, cpu='4')
+                resolve_cpu(options, environment)
+                self.assertEqual(options.cpu, '4')
+
     def test_only_accepted_installation_enables_engine_not_an_inherited_test_flag(self):
         config = {'qvinaw_candidate_installed': True, 'qvinaw_supported': False}
         self.assertEqual(supported_engines(config, {}), ('vina',))

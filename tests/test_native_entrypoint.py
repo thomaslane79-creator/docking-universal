@@ -5,12 +5,39 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 from docking_universal.native_entrypoint import isolated_environment, launch_command, main
 
 
 class NativeEntrypointTests(unittest.TestCase):
+    def test_native_dialog_suppression_preserves_prior_flags_and_does_not_mask_alignment_faults(self):
+        from docking_universal.native_entrypoint import suppress_native_crash_dialogs
+        kernel = Mock()
+        kernel.GetErrorMode.return_value = 0x1000
+        suppress_native_crash_dialogs(windows=True, kernel=kernel)
+        kernel.SetErrorMode.assert_called_once_with(0x9003)
+        kernel.reset_mock()
+        suppress_native_crash_dialogs(windows=False, kernel=kernel)
+        kernel.assert_not_called()
+        kernel.GetErrorMode.assert_not_called()
+
+    @unittest.skipUnless(os.name == 'nt', 'Native Windows child error-mode inheritance')
+    def test_native_dialog_mode_is_inherited_by_the_child_process(self):
+        import ctypes
+        import subprocess
+        import sys
+        from docking_universal.native_entrypoint import suppress_native_crash_dialogs
+        kernel = ctypes.WinDLL('kernel32')
+        previous = kernel.GetErrorMode()
+        try:
+            suppress_native_crash_dialogs()
+            mode = int(subprocess.check_output([sys.executable, '-c',
+                'import ctypes; print(ctypes.WinDLL("kernel32").GetErrorMode())'], text=True))
+            self.assertEqual(mode & 0x8003, 0x8003)
+        finally:
+            kernel.SetErrorMode(previous)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name).resolve() / "Native Ω test with spaces"

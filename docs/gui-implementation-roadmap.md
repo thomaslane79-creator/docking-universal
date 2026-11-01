@@ -1,5 +1,18 @@
 # GUI implementation roadmap
 
+### Native Windows QuickVina-W crash containment (2026-11-01)
+
+Reproduce the pinned engine's heap corruption locally before another full CI
+cycle. Validate a bounded one-worker execution profile on the same public
+biotin inputs and the ordinary five-seed control, expose the worker policy at
+existing engine/CPU controls and retain all prior failures. Explicit conflicting
+CPU settings require review, never automatic conversion or retry. This does
+not establish a corrected multi-worker binary or a 100-target success rate.
+Local acceptance passed: 15/15 one-worker searches and the ordinary five-seed
+GUI control, including reports and a verified portable protocol; 73 focused
+tests pass. Fresh-install CI follows publication.
+See the [scope record](gui-idea-backlog.md#native-windows-quickvina-w-crash-containment-2026-11-01).
+
 ### Cross-system reproducibility disclosure (2026-11-01)
 
 Expose the demonstrated pose/score variability in existing control/screening

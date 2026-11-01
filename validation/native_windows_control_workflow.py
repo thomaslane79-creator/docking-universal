@@ -204,7 +204,8 @@ def main():
                 raise GateError('Reviewed control action is not available after the explicit site decision')
             window.finalize_button.click()
             case['phase'] = 'redocking'; save()
-            state = wait(study, lambda s: not s.active_job and bool(s.workflow_data.get('latest_control_status')), seconds=1200)
+            state = wait(study, lambda s: not s.active_job and bool(s.workflow_data.get('latest_control_status')),
+                         seconds=2400 if engine == 'qvinaw' else 1200)
             control_output = Path(state.workflow_data['latest_control_output'])
             protocols = list((control_output / 'control/04_redocking' / engine / tier).glob('protocol.json'))
             if len(protocols) != 1:

@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import sys
 
 from .qt import QtCore, QtWidgets
 from .protocol_help import SETTINGS_HELP, INLINE_HELP, settings_guide_html
 from ..reproducibility import DOCKING_REPRODUCIBILITY_NOTICE
+
+
+def _quickvina_label():
+    return 'QuickVina-W (native Windows: 1 CPU worker)' if sys.platform == 'win32' else 'QuickVina-W'
 
 
 def _path_row(field, button_text):
@@ -113,7 +118,7 @@ class StudySetupPanel(QtWidgets.QWidget):
         self.predict_with_ligand.toggled.connect(self._update_mode)
         self.control_engine = QtWidgets.QComboBox()
         self.control_engine.addItem("AutoDock Vina", "vina")
-        self.control_engine.addItem("QuickVina-W", "qvinaw")
+        self.control_engine.addItem(_quickvina_label(), "qvinaw")
         self.control_tier = QtWidgets.QComboBox()
         for label, value in (
             ("Quick diagnostic", "quick"), ("Repeatability", "repeatability"),
@@ -568,7 +573,7 @@ class ProtocolFinalizationPanel(QtWidgets.QWidget):
         form.addRow(self.review_model_button)
         self.output_directory = QtWidgets.QLineEdit()
         output_row, output_button = _path_row(self.output_directory, "Browse…")
-        self.engine = QtWidgets.QComboBox(); self.engine.addItem("AutoDock Vina", "vina"); self.engine.addItem("QuickVina-W", "qvinaw")
+        self.engine = QtWidgets.QComboBox(); self.engine.addItem("AutoDock Vina", "vina"); self.engine.addItem(_quickvina_label(), "qvinaw")
         from ..ad4_gpu import available, ENGINE_LABEL
         if available():self.engine.addItem(ENGINE_LABEL,'adgpu')
         self.ph = QtWidgets.QDoubleSpinBox(); self.ph.setRange(.1, 14); self.ph.setValue(7.4); self.ph.setDecimals(2)
@@ -872,7 +877,11 @@ class ScreeningSetupPanel(QtWidgets.QWidget):
         self.cpu_count.setVisible(not ad4 and self.cpu.currentData() == 'custom')
         self.inline_explanations['cpu'].setText(
             'Not used by AutoDock-GPU. The experimental AD4 profile uses the Apple GPU; CPU thread selections are not applied. Compounds still run sequentially.'
-            if ad4 else self.cpu.toolTip())
+            if ad4 else
+            'Native Windows QuickVina-W uses one CPU worker to contain reproduced parallel-worker heap-corruption crashes. '
+            'Default selects one worker; explicit automatic or multi-worker settings are rejected before search. '
+            'The selected CPU setting is recorded with the results.'
+            if engine == 'qvinaw' and sys.platform == 'win32' else self.cpu.toolTip())
 
     def cpu_override(self):
         """None inherits policy; zero is explicitly engine automatic."""

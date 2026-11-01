@@ -9,6 +9,30 @@ class WorkflowPanelTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls): cls.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 
+    def test_native_quickvina_worker_limit_is_visible_without_changing_engine_identity(self):
+        from docking_universal.gui.workflow_panels import _quickvina_label
+        from unittest.mock import patch
+        with patch('docking_universal.gui.workflow_panels.sys.platform', 'win32'):
+            self.assertIn('1 CPU worker', _quickvina_label())
+        with patch('docking_universal.gui.workflow_panels.sys.platform', 'darwin'):
+            self.assertEqual(_quickvina_label(), 'QuickVina-W')
+        setup, finalization = StudySetupPanel(), ProtocolFinalizationPanel()
+        for combo in (setup.control_engine, finalization.engine):
+            self.assertEqual(combo.itemText(combo.findData('qvinaw')), _quickvina_label())
+        setup.close(); finalization.close()
+
+    def test_quickvina_cpu_explanation_does_not_rewrite_an_explicit_selection(self):
+        from unittest.mock import patch
+        panel = ScreeningSetupPanel()
+        panel.cpu.setCurrentIndex(panel.cpu.findData('automatic'))
+        with patch('docking_universal.gui.workflow_panels.sys.platform', 'win32'):
+            panel.set_engine('qvinaw')
+            self.assertIn('heap-corruption', panel.inline_explanations['cpu'].text())
+            self.assertEqual(panel.cpu_override(), 0)
+            panel.set_engine('vina')
+            self.assertEqual(panel.inline_explanations['cpu'].text(), panel.cpu.toolTip())
+        panel.close()
+
     def test_control_reproducibility_notice_is_shown_at_the_control_engine_choice(self):
         panel = StudySetupPanel()
         initial = panel.pathway.currentIndex()

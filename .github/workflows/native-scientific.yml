@@ -71,7 +71,7 @@ jobs:
   installed-scientific-gate:
     name: Native Windows installed exploratory GUI, viewer and CPU engines
     runs-on: windows-2022
-    timeout-minutes: 65
+    timeout-minutes: 95
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
