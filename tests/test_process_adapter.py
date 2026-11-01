@@ -19,6 +19,29 @@ from docking_universal.processes import (
 
 
 class ProcessAdapterTests(unittest.TestCase):
+    def test_cancelled_process_is_not_terminated_again_during_reader_cleanup(self):
+        for fail_final_tick in (False, True):
+            with self.subTest(fail_final_tick=fail_final_tick), tempfile.TemporaryDirectory() as directory:
+                cancel = threading.Event()
+                with patch.object(ProcessRunner, '_terminate', wraps=ProcessRunner._terminate) as terminate:
+                    def tick():
+                        if fail_final_tick and terminate.called:
+                            raise RuntimeError('final feedback failed')
+                    def run():
+                        return ProcessRunner()._run(
+                            ProcessRequest((sys.executable, '-u', '-c',
+                                            "import time; print('ready',flush=True); time.sleep(10)"),
+                                           directory, 'single-stop', termination_grace_seconds=.1, check=False),
+                            tree=None, cancel_event=cancel, on_started=None, on_tick=tick,
+                            on_output=lambda event: cancel.set() if 'ready' in event.text else None,
+                        )
+                    if fail_final_tick:
+                        with self.assertRaisesRegex(RuntimeError, 'final feedback failed'):
+                            run()
+                    else:
+                        self.assertEqual(run().status, ProcessStatus.CANCELLED)
+                self.assertEqual(terminate.call_count, 1)
+
     def test_exited_posix_wrapper_does_not_hide_its_live_process_group(self):
         process = Mock(pid=12345)
         process.poll.return_value = 0
@@ -52,10 +75,11 @@ class ProcessAdapterTests(unittest.TestCase):
                     if owned_group:
                         try:
                             os.killpg(owned_group[0], signal.SIGKILL)
-                        except ProcessLookupError:
+                        except (ProcessLookupError, PermissionError):
                             pass
                 watchdog = threading.Timer(4, cleanup)
                 watchdog.start()
+                finished = False
                 try:
                     result = ProcessRunner().run(
                         ProcessRequest((sys.executable, '-u', '-c', parent), directory, 'descendant',
@@ -64,9 +88,11 @@ class ProcessAdapterTests(unittest.TestCase):
                         on_started=owned_group.append,
                         on_output=lambda event: cancel.set() if cancel_running and 'child-ready' in event.text else None,
                     )
+                    finished = True
                 finally:
                     watchdog.cancel()
-                    cleanup()
+                    if not finished:
+                        cleanup()
                 self.assertEqual(result.status, ProcessStatus.CANCELLED if cancel_running else ProcessStatus.COMPLETED)
                 self.assertIn('child-ready', Path(result.stdout_log).read_text())
                 self.assertLess(result.duration_seconds, 3)

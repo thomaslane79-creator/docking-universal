@@ -50,6 +50,14 @@ approval rules. Local follow-up checks pass the 48 landscape/report tests and
 the 133-test native-foundation group (two platform skips). The real POSIX
 regression and complete CLI suites require the corrected GitHub CI run.
 
+The real descendant regression passed on Ubuntu in the next run. macOS exposed
+a second cleanup attempt after successful cancellation, returning `EPERM` once
+the process group was already stopped. The follow-up tracks completed
+termination, including the error path after final feedback, and avoids redundant
+signals. Its test watchdog performs emergency cleanup only after an exception.
+The 23-test local process/job group passes with the real POSIX case skipped on
+Windows; the Mac/Ubuntu regression remains required in CI.
+
 ## Windows validation
 
 A separate candidate was staged beside the existing Windows application and

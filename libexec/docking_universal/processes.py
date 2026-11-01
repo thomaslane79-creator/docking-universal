@@ -152,6 +152,7 @@ class ProcessRunner:
             thread.start()
 
         status = ProcessStatus.COMPLETED
+        process_group_stopped = False
         next_tick = 0.0
         try:
             while process.poll() is None:
@@ -164,12 +165,14 @@ class ProcessRunner:
                     if tree:
                         tree.close()
                     self._terminate(process, request.termination_grace_seconds)
+                    process_group_stopped = True
                     break
                 if request.timeout_seconds is not None and time.monotonic() - started >= request.timeout_seconds:
                     status = ProcessStatus.TIMED_OUT
                     if tree:
                         tree.close()
                     self._terminate(process, request.termination_grace_seconds)
+                    process_group_stopped = True
                     break
                 time.sleep(0.02)
             if on_tick is not None:
@@ -178,7 +181,9 @@ class ProcessRunner:
         except BaseException:
             if tree:
                 tree.close()
-            self._terminate(process, request.termination_grace_seconds)
+            if not process_group_stopped:
+                self._terminate(process, request.termination_grace_seconds)
+                process_group_stopped = True
             process.wait()
             raise
         finally:
@@ -186,7 +191,7 @@ class ProcessRunner:
                 # Kill any grandchild that outlived a completed wrapper before
                 # joining readers; inherited pipes must not hang shutdown.
                 tree.close()
-            else:
+            elif not process_group_stopped:
                 # A POSIX wrapper can exit while descendants still hold its
                 # pipes. Its session remains ours even after the leader exits.
                 self._terminate(process, 0.0)
