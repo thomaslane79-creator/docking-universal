@@ -2,6 +2,147 @@
 
 Status: active scope-control record, established 2026-09-24.
 
+### Integrated 2D and paired 2D/3D reference selection (authorized 2026-11-03)
+
+The user requests the molecule's 2D drawing in the regular interface, an optional
+window showing 2D and 3D side by side, and an explicit action to use the selected
+deposited molecule as the bound reference ligand. They clarified that screening
+compound selection is outside this action. This replaces the tabbed inspector
+with one embedded panel and a detachable paired view (gate 4), completing input
+identification and reference selection in the existing setup step (gate 2).
+
+Reuse the same molecule list, source identities and embedded viewer. The explicit
+reference action must verify the current input and exact chain/residue identity,
+respect locked/active studies, and update the existing ligand-guided/control
+fields while preserving the redocking checkbox. Browsing alone changes no
+scientific selection. No job, chemistry generation or approval is launched by
+the action. Acceptance covers inline rendering, simultaneous views, return to
+the interface, exact reference launch values, stale/foreign/locked rejection,
+unchanged screening selections, and real native visual checks. This bounded
+interaction correction extends current work without displacing a scientific run.
+
+Native acceptance (2026-11-03) renders inline 2D and simultaneous 2D/3D for local
+5IKR and a loaded screening fixture. The exact ID8 B:602 action returns the panel
+to setup, preserves the redocking checkbox and all screening checkboxes, and
+changes only the reversible draft reference. Original input/study bytes and the
+prior viewer objects/camera are preserved. Targeted tests also verify exact
+reference restoration on reopen, chain/residue values in the existing control
+request, and rejection after source changes. No scientific docking was run by
+this display/selection acceptance.
+
+User refinements: default 3D includes the original receptor and selected bound
+ligand, with a Show receptor toggle for isolated deposited-conformation viewing.
+Unaligned screening compounds remain separate. Keep inline 2D at a compact
+280×190 preview beside the controls in a left-aligned card; source additions are
+collapsed and longer explanations are tooltips. Native checks verify these
+dimensions even on a wide display and verify the receptor toggle in both states.
+
+The user additionally requests ligand selection directly in the 3D pane
+(2026-11-03). This closes the same input-identification interaction gap (gate 2)
+using the existing native atom-pick mechanism. A pick must resolve the exact
+source object, chain, residue and segment into the shared list and 2D drawing;
+only the existing explicit reference action changes the draft docking choice.
+Keep other deposited components visible in the full-structure overview, distinguish the
+selected component, preserve the camera on picks, and restore the previous
+wizard/input behavior on close or failure. Reject stale, foreign, polymer and
+water picks. No added panel, job or molecular-edit operation is authorized.
+
+The user clarified that picking matters in the full structure with all bound
+ligands. Keep that overview on a 3D pick for continued browsing. Explicitly
+choosing an individual component in the list returns to only that ligand plus
+optional receptor context, preserving the focused view.
+
+The user clarified the underlying clutter problem: common crystallographic
+components should not crowd ligand selection. Default the inspection list and
+3D overview to other bound molecules, with one compact All components toggle
+to reveal supporting components. Use a conservative local display classification
+for known additives, saccharides and selected cofactor codes; explicit deposited
+SUBJECT OF INVESTIGATION annotations override that filter. Unknown molecules
+stay visible. Show the filter reason in tooltips, never infer inhibitor/agonist
+activity, never auto-select a docking reference or change molecular inputs.
+Acceptance covers an additive-only input, annotation override, exact instance
+mapping, consistent list/3D filtering, toggling/reopening and unchanged studies.
+
+Filter acceptance: 153 targeted tests pass, including exact depositor-interest
+override and reveal of an explicitly chosen supporting reference. Native 5IKR
+inspection defaults to only ID8 A:601/B:602, with 19 supporting components
+available under All components. The toggle updates the shared list/3D overview
+without moving the camera. A native mouse click selects B:602, updates its 2D
+drawing and applies only through the explicit reference action. Inputs, study
+bytes, screening choices and original viewer state remain unchanged. This is
+display/selection validation, not a new scientific docking run.
+
+Branch publication checks also pass 199 related tests through package-qualified
+imports with the repository's normal PYTHONPATH. The standard test target now
+includes the local molecule-inspection contracts. Native display evidence and
+installed-module hash checks remain as recorded above; no full cross-platform
+scientific validation is implied by these focused GUI changes.
+
+The user then identified the separate Bound ligand dropdown as redundant with
+the visual molecule selector. Hide that duplicate row and its detection button;
+retain the existing exact-identity field internally for draft/control storage.
+Show the applied reference briefly in the existing molecule heading. This
+simplifies the same interaction (gate 4), with no new vertical space or implicit
+reference commitment when browsing.
+
+Acceptance: 150 focused tests pass. A real native mouse click on local 5IKR
+selects ID8 B:602 from the 3D viewport, updates the shared selector/2D drawing,
+highlights its carbon atoms and preserves the camera. Applying the explicit
+reference keeps redocking and screening choices unchanged. The duplicate row
+stays hidden; closing restores the original viewer objects, wizard/input mode
+and camera. Original source and private scientific-study bytes are unchanged.
+
+### Shared molecule list for 2D/3D inspection (clarified 2026-11-02)
+
+The user requires selecting molecules already present in both the loaded
+receptor and the loaded screening library. Replace the separate preview windows
+with one list and 2D/3D tabs (gate 4: a simpler interaction for the same input
+inspection step). Add a toolbar entry so inspection is reachable during screening
+as well as setup. Preserve exact source, chain, residue and mmCIF subchain
+identities and all independent scientific selections. Local SDF/MOL/SMILES
+sources add inspection entries, not screening inputs.
+
+The loaded mmCIF may contain its own chemical-component atom/bond tables; use
+those without a network lookup. Only declared bond orders/charges and verified
+tetrahedral stereochemistry are drawn. Missing/incomplete valence or unsupported
+stereochemistry leaves 2D explicitly unavailable; source 3D remains inspectable.
+The 2D component definition is distinguished from the observed 3D atoms. Library
+3D uses only existing conformers, never an automatically generated substitute.
+Acceptance checks both lists, stable selection across tabs, exact ID8 A/B
+instances in local 5IKR, BOG chemistry, supplied screening coordinates, unchanged
+source/study/checked-record bytes and restoration of the original viewer scene.
+
+### Local 2D and 3D input inspection during setup (authorized 2026-11-02)
+
+The user could not visually identify the supplied receptor or its deposited
+molecules during Study setup and mistook ligand-bound 5IKR for ligand-free input.
+This is a concrete input-review gap in the supported chronological workflow
+(gate 2). Add one local read-only preview action beside the receptor input,
+borrowing the existing embedded PyMOL widget in a temporary window. Display the
+original polymer as cartoon and non-water components as sticks with a clear
+legend; do not infer binding relevance, prepare the receptor, select a site or
+grant approval. Closing must restore the original objects, camera and widget.
+No new viewer dependency, scientific workflow branch or other deferred feature
+is included. This bounded correction extends the current setup fixes; no active
+scientific run is displaced. Acceptance covers apo and ligand-containing input,
+input replacement, missing/unsupported files, restore-on-error, unchanged input
+and study bytes, and real native rendering before installing the changed files.
+
+The user clarified that a 2D chemical drawing is also required, independent of
+PDB retrieval, and retained 3D as an option. Add a separate 2D action using the
+existing local RDKit/compound-preview code for SDF/MOL files (including record
+selection) or explicitly entered SMILES. These are inspection sources only,
+never a screening selection or a change to the receptor. Do not infer precise
+chemical bond orders from receptor coordinates or make network lookups. Test
+multiple local records, invalid/stale sources and SMILES, plus native display.
+
+Native macOS acceptance displays 5IKR with its deposited components, a separate
+polymer-only display fixture, a SMILES drawing and a local MOL drawing. The
+original receptor and isolated study bytes are unchanged; the existing viewer's
+objects, enabled/disabled state and camera are restored. This is display
+acceptance, not preparation, docking or biological validation. The focused
+workflow-panel, workspace, embedded-adapter and 2D-preview tests pass.
+
 ### Native Windows QuickVina-W crash containment (2026-11-01)
 
 The current pinned native binary returned `0xC0000374` heap corruption in CI.

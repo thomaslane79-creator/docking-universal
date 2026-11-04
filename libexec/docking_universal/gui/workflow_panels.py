@@ -43,6 +43,8 @@ class StudySetupPanel(QtWidgets.QWidget):
     chooseInputRequested = QtCore.pyqtSignal()
     fetchInputRequested = QtCore.pyqtSignal()
     detectLigandsRequested = QtCore.pyqtSignal()
+    previewInputRequested = QtCore.pyqtSignal()
+    previewMoleculeRequested = QtCore.pyqtSignal()
     chooseOutputRequested = QtCore.pyqtSignal()
     prepareRequested = QtCore.pyqtSignal()
     cancelRequested = QtCore.pyqtSignal()
@@ -160,6 +162,20 @@ class StudySetupPanel(QtWidgets.QWidget):
         self.fetch_button = QtWidgets.QPushButton("Fetch RCSB ID")
         self.fetch_button.setObjectName("fetch_rcsb_pdb_button")
         input_row.layout().addWidget(self.fetch_button)
+        self.preview_input_button = QtWidgets.QPushButton("Inspect molecules in 3D…")
+        self.preview_input_button.setObjectName("preview_input_structure_button")
+        self.preview_input_button.setEnabled(False)
+        self.preview_input_button.setToolTip("Choose or download a receptor structure to preview its original coordinates.")
+        self.preview_input_button.clicked.connect(self.previewInputRequested)
+        self.preview_molecule_button = QtWidgets.QPushButton("Inspect molecules in 2D…")
+        self.preview_molecule_button.setObjectName("preview_molecule_2d_button")
+        self.preview_molecule_button.setToolTip("Draw a local SDF/MOL file or SMILES without a PDB lookup or changing study inputs.")
+        self.preview_molecule_button.clicked.connect(self.previewMoleculeRequested)
+        self.preview_options = QtWidgets.QWidget()
+        preview_layout = QtWidgets.QHBoxLayout(self.preview_options)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        preview_layout.addWidget(self.preview_input_button)
+        preview_layout.addWidget(self.preview_molecule_button)
         output_row, output_button = _path_row(self.output_directory, "Browse…")
         ligand_row = QtWidgets.QWidget()
         ligand_layout = QtWidgets.QHBoxLayout(ligand_row)
@@ -187,6 +203,11 @@ class StudySetupPanel(QtWidgets.QWidget):
         form.addRow(self.lock_notice)
         form.addRow("Study output directory", output_row)
         form.addRow("Receptor structure", input_row)
+        form.addRow(self.preview_options)
+        self.molecule_preview_slot = QtWidgets.QWidget()
+        slot_layout = QtWidgets.QVBoxLayout(self.molecule_preview_slot)
+        slot_layout.setContentsMargins(0, 0, 0, 0)
+        form.addRow(self.molecule_preview_slot)
         form.addRow("Deposited structure", self.deposited_evidence)
         form.addRow("", self.deposited_evidence_details)
         form.addRow("Study source", self.study_source)
@@ -257,7 +278,13 @@ class StudySetupPanel(QtWidgets.QWidget):
 
         self._coordinate_evidence_record = record
         self.deposited_evidence_details.setEnabled(bool(record))
-        self.deposited_evidence_details.setVisible(bool(record))
+        # QFormLayout hides rows by taking their items out of active layout.
+        # Showing only the button leaves it unmanaged at its default geometry
+        # (a large overlapping rectangle on macOS). Restore the whole row.
+        self._form.setRowVisible(
+            self.deposited_evidence_details,
+            bool(record) and self.pathway.currentData() != "reuse",
+        )
         if record:
             self.deposited_evidence.setText("\n".join(evidence_lines(record)))
         else:
@@ -304,7 +331,9 @@ class StudySetupPanel(QtWidgets.QWidget):
         # Browse buttons live in row containers; disabling the complete panel
         # would also hide retained values from keyboard selection/copying.
         for button in self.findChildren(QtWidgets.QPushButton):
-            if button is not self.cancel_button:
+            if self.molecule_preview_slot.isAncestorOf(button):
+                continue  # Read-only inspection has its own reference-action gate.
+            if button not in (self.cancel_button, self.preview_input_button, self.preview_molecule_button):
                 button.setEnabled(not locked)
         self.deposited_evidence_details.setEnabled(bool(self._coordinate_evidence_record))
         self.review_protocol_button.setEnabled(locked)
@@ -352,6 +381,8 @@ class StudySetupPanel(QtWidgets.QWidget):
                        self.deposited_evidence):
             self._form.setRowVisible(widget, not reuse)
         self._form.setRowVisible(self.deposited_evidence_details, not reuse and bool(self._coordinate_evidence_record))
+        self._form.setRowVisible(self.preview_options, False)
+        self._form.setRowVisible(self.molecule_preview_slot, not reuse)
         self._form.setRowVisible(self.site_mode, not control and not reuse)
         self._form.setRowVisible(self.site_guidance_note, not reuse)
         self._form.setRowVisible(self.predict_with_ligand, ligand_site)
@@ -362,7 +393,9 @@ class StudySetupPanel(QtWidgets.QWidget):
         for widget in (self.control_engine, self.control_tier):
             self._form.setRowVisible(widget, control)
         self._form.setRowVisible(self.reproducibility_notice, control)
-        self._form.setRowVisible(self.ligand_resname.parentWidget(), ligand_site)
+        # The visual molecule inspector owns selection. Keep this exact-identity
+        # field for existing draft/control serialization, without a second menu.
+        self._form.setRowVisible(self.ligand_resname.parentWidget(), False)
         self.site_mode.setEnabled(not control and not self._locked)
         self.pocket_engine.setEnabled(not reuse and prediction and not self._locked)
         self.predict_with_ligand.setEnabled(ligand_site and not self._locked and self._native_ligand_prediction_supported)

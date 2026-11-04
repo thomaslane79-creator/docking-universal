@@ -16,6 +16,258 @@ from docking_universal.state import JsonStudyStore
 
 @unittest.skipIf(QT_IMPORT_ERROR is not None, "selected Qt 6 binding is unavailable")
 class DesktopWorkspaceTests(unittest.TestCase):
+    def test_inspector_has_both_input_components_and_screening_records_in_one_list(self):
+        from tests.test_molecule_inspection import component_fixture
+        from rdkit import Chem
+        from docking_universal.services.ligand_library import inspect_ligand_library
+        source, _ = component_fixture(self.root)
+        compounds = self.root / 'inspection-compounds.sdf'
+        compounds.write_text(Chem.MolToMolBlock(Chem.MolFromSmiles('CCN')) + '\n$$$$\n')
+        library_panel = self.window.screening_setup_panel.library_panel
+        library_panel.library = inspect_ligand_library(compounds)
+        library_panel._selected_ids = {'prior-scientific-selection'}
+        self.window.input_pdb.setText(str(source))
+        original = self.store.path_for('desktop').read_bytes()
+        panel = self.window.molecule_inspector
+        self.assertEqual(panel.choices.count(), 4)
+        panel.choices.setCurrentIndex(1)
+        selected = panel.choices.currentData()
+        self.assertEqual(selected['chain'], 'A')
+        self.assertIsNotNone(panel.picture.picture)
+        self.window.preview_molecule_2d()
+        dialog = self.window._input_preview_dialog
+        self.assertIs(dialog.inspector, panel)
+        self.assertEqual(panel.choices.currentData(), selected)
+        self.assertIn('requires the embedded', panel.three_d_message.text())
+        self.assertTrue(panel.picture.isVisibleTo(dialog))
+        self.assertTrue(panel.three_d_page.isVisibleTo(dialog))
+        panel.choices.setCurrentIndex(3)
+        self.assertEqual(panel.choices.currentData()['origin'], 'library')
+        self.assertIsNotNone(panel.picture.picture)
+        self.assertEqual(library_panel._selected_ids, {'prior-scientific-selection'})
+        self.assertEqual(self.store.path_for('desktop').read_bytes(), original)
+        dialog.close()
+
+    def test_2d_inspection_needs_no_receptor_or_viewer_and_does_not_change_study(self):
+        self.assertIsNone(self.window.viewer_widget)
+        original = self.store.path_for('desktop').read_bytes()
+        panel = self.window.molecule_inspector
+        panel.smiles.setText('CCO')
+        panel.draw_smiles()
+        self.assertIsNotNone(panel.picture.picture)
+        self.assertEqual(self.store.path_for('desktop').read_bytes(), original)
+        self.assertIsNone(self.window._input_preview_dialog)
+
+    def test_input_preview_borrows_one_viewer_and_restores_without_mutating_study(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from docking_universal.gui.qt import QtWidgets
+
+        StudyController(self.store).create_study('input-preview', 'Input preview')
+        adapter = SimpleNamespace(begin_input_preview=Mock(), end_input_preview=Mock(), focus_input_preview=Mock())
+        viewer = SimpleNamespace(adapter=adapter, backend_name='Embedded PyMOL',
+                                 backend_kind='embedded', connected=False,
+                                 report_view_available=False, status='disconnected',
+                                 last_error=None, refresh_health=lambda: False)
+        widget = QtWidgets.QFrame()
+        window = StudyWindow(self.store, 'input-preview', settings=self.settings,
+                             viewer_coordinator=viewer, viewer_widget=widget)
+        self.addCleanup(window.close)
+        source = self.root / 'input-preview.pdb'
+        source.write_text('ATOM      1  CA  GLY A   1       0.000   0.000   0.000  1.00 10.00           C\n')
+        original = self.store.path_for('input-preview').read_bytes()
+        window.show()
+        self.assertFalse(window.study_setup_panel.preview_input_button.isEnabled())
+        window.input_pdb.setText(str(source))
+        self.assertTrue(window.study_setup_panel.preview_input_button.isEnabled())
+        for fail in (False, True):
+            adapter.begin_input_preview.side_effect = ValueError('bad structure') if fail else None
+            with patch.object(QtWidgets.QMessageBox, 'warning'):
+                window.preview_input_structure()
+            self.application.processEvents()
+            dialog = window._input_preview_dialog
+            self.assertTrue(dialog.isVisible())
+            if not fail:
+                self.assertIs(widget.parentWidget(), dialog.inspector.three_d_page)
+            else:
+                self.assertIn('bad structure', dialog.inspector.three_d_message.text())
+            dialog.close()
+            self.application.processEvents()
+            self.assertIsNone(window._input_preview_dialog)
+            self.assertIs(widget.parentWidget(), window.pose_split)
+            self.assertIs(window.molecule_inspector.parentWidget(), window.study_setup_panel.molecule_preview_slot)
+            self.assertEqual(self.store.path_for('input-preview').read_bytes(), original)
+        self.assertEqual(adapter.begin_input_preview.call_count, 2)
+        self.assertEqual(adapter.end_input_preview.call_count, 2)
+        window.input_pdb.setText(str(self.root / 'missing.cif'))
+        self.assertFalse(window.study_setup_panel.preview_input_button.isEnabled())
+
+    def test_inline_reference_action_selects_exact_instance_and_retains_redocking_choice(self):
+        from tests.test_molecule_inspection import component_fixture
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        source, _ = component_fixture(self.root)
+        StudyController(self.store).create_study('reference-selection', 'Reference selection')
+        client = SimpleNamespace(runtime={}, connected=True, request=Mock())
+        window = StudyWindow(self.store, 'reference-selection', settings=self.settings, host_client=client)
+        self.addCleanup(window.close)
+        window.input_pdb.setText(str(source))
+        window.output_directory.setText(str(self.root / 'reference-output'))
+        original = self.store.path_for('reference-selection').read_bytes()
+        source_bytes = source.read_bytes()
+        inspector = window.molecule_inspector
+        for redock in (False, True):
+            window.study_setup_panel.redock_ligand.setChecked(redock)
+            index = next(i for i in range(inspector.choices.count()) if inspector.choices.itemData(i).get('chain') == 'B')
+            inspector.choices.setCurrentIndex(index)
+            self.assertTrue(inspector.reference_button.isEnabled())
+            inspector.reference_button.click()
+            self.assertEqual(window.study_setup_panel.redock_ligand.isChecked(), redock)
+            self.assertEqual(window.site_mode.currentData(), 'ligand')
+            values = window.study_setup_panel.values()
+            self.assertEqual(values.ligand_identity, {'resname': 'LIG', 'chain_id': 'B', 'residue_number': '102', 'insertion_code': '', 'altloc': ''})
+            self.assertIn('reference: LIG B:102', inspector.title.text())
+            self.assertFalse(window.study_setup_panel._form.isRowVisible(window.ligand_resname.parentWidget()))
+            self.assertEqual(values.pathway, 'control' if redock else 'exploratory')
+            self.assertEqual(self.store.path_for('reference-selection').read_bytes(), original)
+            self.assertEqual(source.read_bytes(), source_bytes)
+        client.request.assert_not_called()
+        window.close()
+        reopened = StudyWindow(self.store, 'reference-selection', settings=self.settings, host_client=client)
+        self.addCleanup(reopened.close)
+        self.assertEqual(reopened.study_setup_panel.ligand_identity()['chain_id'], 'B')
+        self.assertEqual(reopened.study_setup_panel.ligand_identity()['residue_number'], '102')
+        with patch.object(reopened, 'prepare_geostd_library', return_value=str(self.root)), \
+             patch.object(reopened.host_controller, 'start_control_validation') as start:
+            reopened._submit_preparation()
+            self.assertEqual(start.call_count, 1)
+            payload = start.call_args.args[0]
+            self.assertEqual((payload['ligand_resname'], payload['ligand_chain_id'], payload['ligand_residue_number']), ('LIG', 'B', '102'))
+        source.write_text('changed after selecting reference')
+        from docking_universal.gui.qt import QtWidgets
+        with patch.object(QtWidgets.QMessageBox, 'warning') as warning, \
+             patch.object(reopened.host_controller, 'start_control_validation') as start:
+            reopened._submit_preparation()
+            warning.assert_called_once()
+            start.assert_not_called()
+
+    def test_3d_pick_syncs_exact_instance_without_committing_and_rejects_invalid_picks(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from docking_universal.gui.qt import QtCore, QtWidgets
+        from tests.test_molecule_inspection import component_fixture
+
+        class ViewerWidget(QtWidgets.QFrame):
+            inputMoleculePicked = QtCore.pyqtSignal(dict)
+
+        source, _ = component_fixture(self.root)
+        StudyController(self.store).create_study('3d-pick', 'Native molecule picks')
+        adapter = SimpleNamespace(begin_input_preview=Mock(return_value={'object_name': 'preview_1'}),
+                                  end_input_preview=Mock(), focus_input_preview=Mock(),
+                                  enable_input_preview_picking=Mock())
+        coordinator = SimpleNamespace(adapter=adapter, backend_name='Embedded PyMOL', backend_kind='embedded',
+                                      connected=False, report_view_available=False, status='disconnected',
+                                      last_error=None, refresh_health=lambda: False)
+        widget = ViewerWidget()
+        window = StudyWindow(self.store, '3d-pick', settings=self.settings,
+                             viewer_coordinator=coordinator, viewer_widget=widget)
+        self.addCleanup(window.close)
+        window.input_pdb.setText(str(source))
+        window.preview_input_structure()
+        inspector = window.molecule_inspector
+        inspector.choices.setCurrentIndex(0)  # Full structure with all bound components.
+        entry = next(inspector.choices.itemData(i) for i in range(inspector.choices.count())
+                     if inspector.choices.itemData(i).get('chain') == 'B')
+        initial_reference = window.study_setup_panel.ligand_identity()
+        initial_state = self.store.path_for('3d-pick').read_bytes()
+        picked = dict(object='preview_1', name=entry['resname'], chain=entry['chain'],
+                      number=entry['resi'], segment=entry['segment'])
+        for invalid in (dict(picked, object='other_scene'), dict(picked, chain='X'),
+                        dict(picked, number='102A'), dict(picked, segment='other_subchain'),
+                        dict(picked, name='HOH'), dict(picked, name='ALA')):
+            previous = inspector.choices.currentData()
+            widget.inputMoleculePicked.emit(invalid)
+            self.assertEqual(inspector.choices.currentData(), previous)
+        widget.inputMoleculePicked.emit(picked)
+        self.assertEqual(inspector.choices.currentData(), entry)
+        self.assertIsNotNone(inspector.picture.picture)
+        self.assertTrue(inspector.reference_button.isEnabled())
+        self.assertEqual(window.study_setup_panel.ligand_identity(), initial_reference)
+        self.assertEqual(self.store.path_for('3d-pick').read_bytes(), initial_state)
+        visible = [inspector.choices.itemData(i) for i in range(inspector.choices.count())
+                   if inspector.choices.itemData(i).get('kind') == 'component']
+        adapter.focus_input_preview.assert_called_with(entry, show_receptor=True, preserve_view=True,
+                                                      show_all_components=True, visible_components=visible)
+        inspector.choices.setCurrentIndex(1)
+        adapter.focus_input_preview.assert_called_with(inspector.choices.currentData(), show_receptor=True,
+                                                      preserve_view=False, show_all_components=False,
+                                                      visible_components=visible)
+        adapter.enable_input_preview_picking.assert_called_once()
+        inspector.choices.setCurrentIndex(0)
+        source.write_text('input changed since preview opened')
+        widget.inputMoleculePicked.emit(picked)
+        self.assertEqual(inspector.choices.currentIndex(), 0)
+        self.assertIn('structure changed', inspector.three_d_message.text())
+        self.assertFalse(inspector._borrowed)
+        adapter.end_input_preview.assert_called_once()
+        window._input_preview_dialog.close()
+        widget.inputMoleculePicked.emit(picked)
+        self.assertEqual(inspector.choices.currentIndex(), 0)
+
+    def test_supporting_only_input_has_one_reveal_toggle_and_retains_explicit_reference(self):
+        import gemmi
+        from tests.test_molecule_inspection import component_fixture
+        source, _ = component_fixture(self.root)
+        structure = gemmi.read_structure(str(source))
+        for chain in structure[0]:
+            chain[0].name = 'BOG'
+        source.write_text(structure.make_mmcif_document().as_string())
+        StudyController(self.store).create_study('display-filter', 'Supporting components')
+        window = StudyWindow(self.store, 'display-filter', settings=self.settings)
+        self.addCleanup(window.close)
+        before = self.store.path_for('display-filter').read_bytes()
+        window.input_pdb.setText(str(source))
+        inspector = window.molecule_inspector
+        self.assertEqual(inspector.choices.count(), 1)
+        self.assertEqual(inspector.choices.currentData()['kind'], 'whole')
+        self.assertIn('2 hidden', inspector.all_components.text())
+        self.assertFalse(inspector.reference_button.isEnabled())
+        inspector.all_components.setChecked(True)
+        self.assertEqual(inspector.choices.count(), 3)
+        inspector.choices.setCurrentIndex(2)
+        self.assertEqual(inspector.choices.currentData()['chain'], 'B')
+        inspector.reference_button.click()
+        identity = window.study_setup_panel.ligand_identity()
+        self.assertEqual((identity['resname'], identity['chain_id']), ('BOG', 'B'))
+        inspector.all_components.setChecked(False)
+        self.assertEqual(inspector.choices.count(), 1)
+        self.assertEqual(window.study_setup_panel.ligand_identity(), identity)
+        window._sync_inspected_reference()
+        self.assertTrue(inspector.all_components.isChecked())
+        self.assertEqual(inspector.choices.currentData()['chain'], 'B')
+        self.assertEqual(self.store.path_for('display-filter').read_bytes(), before)
+
+    def test_reference_action_rejects_nonbound_locked_and_stale_entries(self):
+        from tests.test_molecule_inspection import component_fixture
+        from docking_universal.gui.qt import QtWidgets
+        source, _ = component_fixture(self.root)
+        StudyController(self.store).create_study('reference-guards', 'Reference guards')
+        window = StudyWindow(self.store, 'reference-guards', settings=self.settings)
+        self.addCleanup(window.close)
+        window.input_pdb.setText(str(source))
+        inspector = window.molecule_inspector
+        entry = next(inspector.choices.itemData(i) for i in range(inspector.choices.count()) if inspector.choices.itemData(i).get('chain') == 'B')
+        initial = window.study_setup_panel.values()
+        with patch.object(QtWidgets.QMessageBox, 'warning') as warning:
+            window.use_inspected_reference({'origin': 'smiles', 'kind': 'compound', 'smiles': 'CCO'})
+            window.study_setup_panel.set_locked(True)
+            window.use_inspected_reference(entry)
+            window.study_setup_panel.set_locked(False)
+            source.write_text('changed source')
+            window.use_inspected_reference(entry)
+            self.assertEqual(warning.call_count, 3)
+        self.assertEqual(window.study_setup_panel.values(), initial)
+
     def test_site_only_approval_cannot_enable_finalization_and_failure_keeps_review(self):
         from unittest.mock import Mock
         controller = StudyController(self.store)

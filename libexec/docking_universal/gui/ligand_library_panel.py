@@ -65,6 +65,7 @@ class LibraryReadTask(QtCore.QObject):
 
 
 class LigandLibraryPanel(QtWidgets.QWidget):
+    bothRequested = QtCore.pyqtSignal(str)
     loadRequested = QtCore.pyqtSignal()
     previewRequested = QtCore.pyqtSignal(str)
     selectionChanged = QtCore.pyqtSignal()
@@ -179,6 +180,9 @@ class LigandLibraryPanel(QtWidgets.QWidget):
             'Protonation/tautomer states are prepared later for docking.')
         self.preview_basis.setWordWrap(True)
         review_layout.addWidget(self.preview_basis)
+        self.both_button = QtWidgets.QPushButton('View selected compound in 2D + 3D…')
+        self.both_button.clicked.connect(lambda: self.bothRequested.emit(self.current_record_id()) if self.current_record_id() else None)
+        review_layout.addWidget(self.both_button)
         layout.addWidget(self.review)
         self.review.hide()
 

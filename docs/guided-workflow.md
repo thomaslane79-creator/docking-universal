@@ -1,5 +1,51 @@
 # Guided studies
 
+## Inspect inputs before preparation
+
+The regular **Study setup** interface shows a molecule list and its 2D chemical
+drawing. The list includes the loaded receptor, its individual non-water
+components (identified by chain and residue), and compounds already read into
+the screening library. Common supporting components are filtered out by default;
+**All components** reveals them in the same list and 3D overview. This includes
+known salts/additives, detergents, sugars, porphyrin cofactors and metal ions.
+Unclassified molecules stay visible, and an explicit deposited **SUBJECT OF
+INVESTIGATION** annotation takes priority over the filter. A tooltip explains
+each component's display classification; none establishes inhibitor/agonist
+activity or changes the molecular input. Revealed supporting components remain
+selectable for inspection and explicit bound-reference use.
+
+Choose an entry, then use **2D + 3D window…** to see both
+views side by side. Closing the window returns the same selected entry and its
+2D drawing to the form. **Molecules…** on the toolbar opens this paired window
+from any stage; screening also has **View selected compound in 2D + 3D…**.
+
+Choose **Loaded receptor / whole structure** to see the visible deposited ligands
+with the receptor. Click a ligand in that 3D overview to select its exact chain/residue
+in the shared list and 2D drawing; the overview stays available for further picks.
+Choosing an individual component from the list shows that ligand with its receptor.
+The selected ligand's carbon atoms are cyan; other components remain orange.
+Picking preserves your camera and leaves the reference choice unchanged until
+you use **Use as bound reference ligand**.
+Uncheck **Show receptor** to inspect that same bound conformation alone. Local
+screening coordinates are shown separately because they are not a docked pose in
+the receptor's frame. Closing restores the previous scene and camera. The 2D view uses the
+loaded mmCIF's component atom/bond definitions when sufficient, or the selected
+compound's local chemical connectivity. Missing or unsupported chemistry is
+reported rather than guessed. A compound's 3D view requires supplied 3D
+coordinates; the inspector does not generate a new conformer automatically.
+
+You may also add a local SDF/MOL file or pasted SMILES to this inspection list.
+No PDB lookup is required. Browsing does not change the study's input choices.
+
+For a component of the current receptor, **Use as bound reference ligand**
+selects its exact chain and residue in the existing ligand-guided/control
+workflow. The redocking checkbox keeps your current choice; selecting a
+reference does not start preparation or docking. The exact draft reference is
+shown in the molecule heading; there is no separate bound-ligand dropdown. It is
+restored after reopening only while its source file still matches. Existing
+retained/active setups cannot be changed through this action. Screening compound
+checkboxes are independent and remain unchanged.
+
 ## Development preview: review receptor preparation changes
 
 This two-stage flow is currently validated in a private Mac development build,

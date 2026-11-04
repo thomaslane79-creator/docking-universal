@@ -98,6 +98,177 @@ class FakeWidget:
 
 
 class EmbeddedEvidenceCameraTests(unittest.TestCase):
+    def test_component_inspection_uses_exact_chain_residue_and_segment(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        widget = FakeWidget()
+        command = widget.cmd
+        command.count_atoms = Mock(return_value=2)
+        command.orient, command.zoom, command.show = Mock(), Mock(), Mock()
+        command.get_model = Mock(return_value=SimpleNamespace(atom=[
+            SimpleNamespace(index=1, chain='A', resi='601', resn='ID8', segi='E'),
+            SimpleNamespace(index=2, chain='A', resi='601', resn='ID8', segi='E'),
+            SimpleNamespace(index=3, chain='B', resi='601', resn='ID8', segi='O'),
+        ]))
+        adapter = EmbeddedPymolAdapter(widget)
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'input.pdb'
+            path.write_text('END\n')
+            name = adapter.begin_input_preview(path)['object_name']
+            adapter.focus_input_preview({'kind': 'component', 'chain': 'A', 'resi': '601',
+                                         'resname': 'ID8', 'segment': 'E'})
+            command.show.assert_any_call('sticks', name + ' and index 1+2')
+            command.show.assert_any_call('cartoon', name + ' and polymer')
+            command.show.assert_any_call('sticks', name + ' and not polymer and not solvent')
+            self.assertIn(('cyan', f'({name} and index 1+2) and elem C'), command.colors)
+            command.show.reset_mock()
+            adapter.focus_input_preview({'kind': 'component', 'chain': 'A', 'resi': '601',
+                                         'resname': 'ID8', 'segment': 'E'}, show_all_components=True)
+            command.show.assert_any_call('sticks', name + ' and not polymer and not solvent')
+            command.show.reset_mock()
+            command.orient.reset_mock()
+            command.zoom.reset_mock()
+            adapter.focus_input_preview({'kind': 'component', 'chain': 'A', 'resi': '601',
+                                         'resname': 'ID8', 'segment': 'E'}, preserve_view=True)
+            command.orient.assert_not_called()
+            command.zoom.assert_not_called()
+            self.assertNotIn(('sticks', name + ' and not polymer and not solvent'),
+                             [call.args for call in command.show.call_args_list])
+            adapter.focus_input_preview({'kind': 'component', 'chain': 'A', 'resi': '601',
+                                         'resname': 'ID8', 'segment': 'E'}, show_receptor=False)
+            self.assertEqual(command.orient.call_args.args[0], name + ' and index 1+2')
+            with self.assertRaisesRegex(ValueError, 'exact selected component'):
+                adapter.focus_input_preview({'kind': 'component', 'chain': 'X', 'resi': '601',
+                                             'resname': 'ID8', 'segment': 'E'})
+            command.show.reset_mock()
+            adapter.focus_input_preview({'kind': 'whole'}, visible_components=[
+                dict(resname='ID8', chain='A', resi='601', segment='E')])
+            command.show.assert_any_call('sticks', name + ' and index 1+2')
+            self.assertNotIn(('sticks', name + ' and not polymer and not solvent'),
+                             [call.args for call in command.show.call_args_list])
+            command.show.reset_mock()
+            adapter.focus_input_preview({'kind': 'whole'}, visible_components=[])
+            command.show.assert_any_call('sticks', 'none')
+            command.show.assert_any_call('cartoon', name + ' and polymer')
+            adapter.end_input_preview()
+
+    def test_input_picks_route_only_the_live_preview_and_restore_wizard_and_input(self):
+        import sys
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+
+        class Wizard:
+            event_mask_pick = 1
+            def __init__(self, _self):
+                self.cmd = _self
+
+        widget = FakeWidget()
+        widget.inputMoleculePicked = Mock()
+        widget._du_interaction_review = False
+        command = widget.cmd
+        command.count_atoms = Mock(return_value=20)
+        command.orient, command.zoom = Mock(), Mock()
+        previous_wizard = object()
+        command.get_wizard_stack = Mock(return_value=[previous_wizard])
+        command.set_wizard, command.set_wizard_stack, command.unpick = Mock(), Mock(), Mock()
+        adapter = EmbeddedPymolAdapter(widget)
+        with TemporaryDirectory() as temporary, patch.dict(sys.modules, {'pymol.wizard': SimpleNamespace(Wizard=Wizard)}):
+            source = Path(temporary) / 'input.cif'
+            source.write_text('data_test\n')
+            name = adapter.begin_input_preview(source)['object_name']
+            adapter.enable_input_preview_picking()
+            adapter.enable_input_preview_picking()
+            self.assertEqual(command.set_wizard.call_count, 1)
+            wizard = command.set_wizard.call_args.args[0]
+            self.assertTrue(widget._du_interaction_review)
+            self.assertEqual(wizard.get_event_mask(), Wizard.event_mask_pick)
+            command.index = Mock(return_value=[(name, 7)])
+            command.get_model = Mock(return_value=SimpleNamespace(atom=[
+                SimpleNamespace(resn='ID8', chain='B', resi='602A', segi='O')]))
+            wizard.do_pick(0)
+            widget.inputMoleculePicked.emit.assert_called_once_with(dict(
+                object=name, name='ID8', chain='B', number='602A', segment='O'))
+            widget.inputMoleculePicked.emit.reset_mock()
+            wizard.do_pick(1)
+            command.index.return_value = [('original_receptor', 7)]
+            wizard.do_pick(0)
+            command.index.return_value = [(name, 7), (name, 8)]
+            wizard.do_pick(0)
+            widget.inputMoleculePicked.emit.assert_not_called()
+            adapter.end_input_preview()
+            command.set_wizard_stack.assert_called_once_with([previous_wizard])
+            self.assertFalse(widget._du_interaction_review)
+            command.index.return_value = [(name, 7)]
+            wizard.do_pick(0)
+            widget.inputMoleculePicked.emit.assert_not_called()
+            self.assertEqual(command.unpick.call_count, 5)
+
+    def test_input_preview_is_temporary_and_preserves_registered_scene_and_source(self):
+        from unittest.mock import Mock
+        with TemporaryDirectory() as temporary:
+            source = Path(temporary) / 'original.cif'
+            source.write_text('data_original\n')
+            widget = FakeWidget()
+            command = widget.cmd
+            command.count_atoms = Mock(return_value=20)
+            command.orient = Mock(side_effect=lambda *_args, **_kw: command.set_view((9.0,) * 18))
+            command.zoom = Mock()
+            command.show = Mock()
+            adapter = EmbeddedPymolAdapter(widget)
+            adapter.report_session = Path('retained-report.pse')
+            original_names = command.get_names('objects')
+            original_view = command.get_view()
+            original_bytes = source.read_bytes()
+            preview = adapter.begin_input_preview(source)
+            self.assertIn(preview['object_name'], command.objects)
+            self.assertEqual(command.disabled, original_names)
+            self.assertEqual(command.auto_zoom, 1)
+            self.assertEqual(adapter.structures, {})
+            self.assertEqual(adapter.report_session, Path('retained-report.pse'))
+            command.show.assert_any_call('cartoon', preview['object_name'] + ' and polymer')
+            command.show.assert_any_call('sticks', preview['object_name'] + ' and not polymer and not solvent')
+            adapter.end_input_preview()
+            adapter.end_input_preview()
+            self.assertEqual(command.objects, original_names)
+            self.assertEqual(command.enabled, original_names)
+            self.assertEqual(command.get_view(), original_view)
+            self.assertEqual(source.read_bytes(), original_bytes)
+
+    def test_input_preview_restores_scene_after_a_failed_partial_load(self):
+        from unittest.mock import Mock
+        with TemporaryDirectory() as temporary:
+            source = Path(temporary) / 'broken.pdb'
+            source.write_text('invalid input')
+            widget = FakeWidget()
+            command = widget.cmd
+            original_names = list(command.objects)
+            original_view = command.get_view()
+            load = command.load
+            def fail(path, name, **kwargs):
+                load(path, name, **kwargs)
+                raise ValueError('Invalid structure')
+            command.load = Mock(side_effect=fail)
+            adapter = EmbeddedPymolAdapter(widget)
+            with self.assertRaisesRegex(ValueError, 'Invalid structure'):
+                adapter.begin_input_preview(source)
+            self.assertEqual(command.objects, original_names)
+            self.assertEqual(command.get_view(), original_view)
+            self.assertEqual(command.auto_zoom, 1)
+            self.assertIsNone(adapter._input_preview)
+
+    def test_input_preview_rejects_missing_or_nonstructural_files_before_viewer_changes(self):
+        with TemporaryDirectory() as temporary:
+            wrong = Path(temporary) / 'not-a-structure.txt'
+            wrong.write_text('text')
+            widget = FakeWidget()
+            adapter = EmbeddedPymolAdapter(widget)
+            for path in (wrong, wrong.with_suffix('.pdb')):
+                with self.assertRaises(ValueError):
+                    adapter.begin_input_preview(path)
+            self.assertFalse(widget.cmd.loads)
+            self.assertFalse(widget.cmd.disabled)
+            self.assertIsNone(adapter._input_preview)
+
     def test_linked_pose_rank_colors_survive_without_camera_or_atom_selection_changes(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)

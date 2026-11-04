@@ -9,6 +9,64 @@ class WorkflowPanelTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls): cls.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 
+    def test_duplicate_bound_selector_stays_hidden_for_all_setup_modes(self):
+        panel = StudySetupPanel()
+        self.addCleanup(panel.close)
+        row = panel.ligand_resname.parentWidget()
+        identity = dict(resname='ID8', chain_id='B', residue_number='602', insertion_code='', altloc='')
+        panel.ligand_resname.addItem('ID8 B:602', identity)
+        panel.ligand_resname.setCurrentIndex(0)
+        for mode in ('pockets', 'ligand'):
+            panel.site_mode.setCurrentIndex(panel.site_mode.findData(mode))
+            for redock in (False, True):
+                panel.redock_ligand.setChecked(redock)
+                self.assertFalse(panel._form.isRowVisible(row))
+                self.assertTrue(panel.detect_ligands_button.isHidden() or row.isHidden())
+                self.assertEqual(panel.values().ligand_identity, identity)
+        panel.set_locked(True)
+        self.assertFalse(panel._form.isRowVisible(row))
+        self.assertEqual(panel.values().ligand_identity, identity)
+
+    def test_loaded_evidence_button_stays_in_its_row_after_show_and_resize(self):
+        panel = StudySetupPanel()
+        self.addCleanup(panel.close)
+        panel.resize(1000, 1200)
+        panel.show()
+        self.app.processEvents()
+        record = {"source_format": "mmcif", "assemblies": [{"id": "1", "oligomeric_details": "dimeric"}]}
+        for width in (1000, 700, 1200):
+            with self.subTest(width=width):
+                panel.set_coordinate_evidence(record)
+                panel.resize(width, 1200)
+                self.app.processEvents()
+                button = panel.deposited_evidence_details
+                self.assertTrue(button.isVisible())
+                self.assertTrue(button.isEnabled())
+                self.assertGreater(button.height(), 0)
+                self.assertLessEqual(button.height(), button.sizeHint().height() + 4)
+                self.assertGreater(button.y(), panel.deposited_evidence.geometry().bottom())
+                self.assertLess(button.geometry().bottom(), panel.study_source.y())
+                self.assertTrue(panel.rect().contains(button.geometry()))
+                panel.set_coordinate_evidence(None)
+                self.app.processEvents()
+                self.assertFalse(button.isVisible())
+
+    def test_evidence_loaded_during_protocol_reuse_stays_hidden_until_structure_setup(self):
+        panel = StudySetupPanel()
+        self.addCleanup(panel.close)
+        panel.resize(1000, 1200)
+        panel.show()
+        panel.study_source.setCurrentIndex(panel.study_source.findData("reuse"))
+        panel.set_coordinate_evidence({"source_format": "mmcif"})
+        self.app.processEvents()
+        self.assertFalse(panel.deposited_evidence_details.isVisible())
+        panel.study_source.setCurrentIndex(panel.study_source.findData("structure"))
+        self.app.processEvents()
+        button = panel.deposited_evidence_details
+        self.assertTrue(button.isVisible())
+        self.assertGreater(button.y(), panel.deposited_evidence.geometry().bottom())
+        self.assertLess(button.geometry().bottom(), panel.study_source.y())
+
     def test_native_quickvina_worker_limit_is_visible_without_changing_engine_identity(self):
         from docking_universal.gui.workflow_panels import _quickvina_label
         from unittest.mock import patch

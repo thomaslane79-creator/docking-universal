@@ -97,6 +97,8 @@ if QtWidgets is not None:
             )
             self.viewer_coordinator = viewer_coordinator
             self.viewer_widget = viewer_widget
+            self._input_preview_dialog = None
+            self._draft_reference_sha256 = None
             self._retained_setup_signature = None
             self._prepared_meeko_template_file = None
             if self.viewer_widget is not None and self.viewer_coordinator is None:
@@ -144,6 +146,7 @@ if QtWidgets is not None:
             runtime = getattr(self.host_client, "runtime", {}) or {}
             self.study_setup_panel._coordinate_review_supported = bool(runtime.get('coordinate_site_review_supported'))
             self.study_setup_panel._update_mode()
+            self._refresh_input_preview_button()
             if not runtime.get("native_scientific_preview"):
                 return
             allowed = ((self.protocol_engine, runtime["supported_engines"]),
@@ -452,6 +455,9 @@ if QtWidgets is not None:
             self.setCentralWidget(central)
 
             self.view_toolbar = self.addToolBar("View")
+            self.inspect_molecules_action = self.view_toolbar.addAction('Molecules…')
+            self.inspect_molecules_action.setToolTip('Choose a loaded receptor component or screening compound and inspect it in 2D or 3D.')
+            self.inspect_molecules_action.triggered.connect(self.preview_molecule_2d)
             self.view_toolbar.setObjectName("view_toolbar")
             self.scientific_detail_action = self.view_toolbar.addAction("Scientific Detail")
             self.scientific_detail_action.setCheckable(True)
@@ -612,12 +618,22 @@ if QtWidgets is not None:
             self.control_tier = panel.control_tier
             self.ligand_resname = panel.ligand_resname
             self.pocket_engine = panel.pocket_engine
+            from .input_preview import MoleculeInspectorPanel
+            self.molecule_inspector = MoleculeInspectorPanel(self)
+            panel.molecule_preview_slot.layout().addWidget(self.molecule_inspector, 0, QtCore.Qt.AlignmentFlag.AlignLeft)
+            self.molecule_inspector.bothRequested.connect(self.preview_input_structure)
+            self.molecule_inspector.referenceRequested.connect(self.use_inspected_reference)
+            self.ligand_resname.currentIndexChanged.connect(self._sync_inspected_reference)
             self.start_preparation_button = panel.prepare_button
             self.cancel_job_button = panel.cancel_button
             panel.chooseInputRequested.connect(self.choose_input_pdb)
             panel.chooseProtocolRequested.connect(self.choose_saved_protocol)
             panel.reviewProtocolRequested.connect(self.review_imported_protocol)
             panel.fetchInputRequested.connect(self.fetch_input_pdb)
+            panel.previewInputRequested.connect(self.preview_input_structure)
+            panel.previewMoleculeRequested.connect(self.preview_molecule_2d)
+            self.input_pdb.textChanged.connect(self._refresh_input_preview_button)
+            self.input_pdb.textChanged.connect(lambda *_args: setattr(self, '_draft_reference_sha256', None))
             self.input_pdb.editingFinished.connect(self.refresh_input_coordinate_evidence)
             self.input_pdb.editingFinished.connect(
                 lambda: self.detect_bound_ligands(quiet=True)
@@ -674,6 +690,7 @@ if QtWidgets is not None:
             panel.library_panel.columnsApprovalRequested.connect(self.read_screening_library)
             panel.library_panel.sheetRequested.connect(lambda sheet: self.read_screening_library(sheet=sheet))
             panel.library_panel.previewRequested.connect(self.preview_library_record)
+            panel.library_panel.bothRequested.connect(self.preview_library_both)
             panel.library_panel.selectionChanged.connect(self._invalidate_screening_plan)
             panel.ligands.textChanged.connect(self._clear_screening_library)
             panel.chooseFileRequested.connect(self.choose_screen_ligand_file)
@@ -782,6 +799,8 @@ if QtWidgets is not None:
                 "setup/control_engine": self.control_engine.currentData(),
                 "setup/control_tier": self.control_tier.currentData(),
                 "setup/ligand_resname": self.study_setup_panel.ligand_value(),
+                "setup/ligand_identity": json.dumps(self.study_setup_panel.ligand_identity()),
+                "setup/reference_source_sha256": self._draft_reference_sha256 or '',
                 "setup/pocket_engine": self.pocket_engine.currentData(),
                 "setup/predict_with_ligand": self.study_setup_panel.predict_with_ligand.isChecked(),
                 "final/output_directory": self.final_output_directory.text(),
@@ -839,6 +858,20 @@ if QtWidgets is not None:
                     self.ligand_resname.setCurrentText(
                         self.settings.value("setup/ligand_resname", "", type=str)
                     )
+                    reference_hash = self.settings.value('setup/reference_source_sha256', '', type=str)
+                    if reference_hash:
+                        from ..services.molecule_inspection import verify_input
+                        try:
+                            identity = json.loads(self.settings.value('setup/ligand_identity', '{}', type=str))
+                            verify_input({'path': self.input_pdb.text().strip(), 'sha256': reference_hash})
+                            self.detect_bound_ligands(quiet=True)
+                            index = next(i for i in range(self.ligand_resname.count()) if self.ligand_resname.itemData(i) == identity)
+                            self.ligand_resname.setCurrentIndex(index)
+                            self._draft_reference_sha256 = reference_hash
+                        except (OSError, ValueError, StopIteration, TypeError):
+                            self.ligand_resname.setCurrentIndex(-1)
+                            self.ligand_resname.setEditText('')
+                            self.statusBar().showMessage('The saved reference no longer matches the source. Choose a bound reference again.')
                     self._restore_combo(
                         self.pocket_engine,
                         self.settings.value("setup/pocket_engine", "p2rank", type=str),
@@ -1902,6 +1935,7 @@ if QtWidgets is not None:
                     self.right_review_stack.setCurrentWidget(self.right_review_blank)
 
         def _update_stage_review_visibility(self) -> None:
+            self._refresh_input_preview_button()
             target = getattr(self, "_workflow_target", "study_setup_dock")
             review = target in {"central", "screening_results_dock"}
             pocket_review = target == "central"
@@ -2395,6 +2429,115 @@ if QtWidgets is not None:
                 return
             self.study_setup_panel.set_coordinate_evidence(evidence)
 
+        def _refresh_input_preview_button(self) -> None:
+            button = self.study_setup_panel.preview_input_button
+            adapter = getattr(self.viewer_coordinator, 'adapter', None)
+            supported = self.viewer_widget is not None and callable(getattr(adapter, 'begin_input_preview', None))
+            source = Path(self.input_pdb.text().strip())
+            valid = source.is_file() and source.suffix.lower() in {'.pdb', '.cif', '.mmcif'}
+            library_panel = getattr(getattr(self, 'screening_setup_panel', None), 'library_panel', None)
+            library = getattr(library_panel, 'library', None)
+            inspector = getattr(self, 'molecule_inspector', None)
+            if inspector is not None:
+                inspector.refresh_sources(self.input_pdb.text().strip(), library)
+            valid = valid or bool(library and any(row.get('valid') for row in library.get('records', [])))
+            state = getattr(self, 'state', None)
+            running = bool(state and state.active_job)
+            button.setEnabled(supported and valid and not running)
+            button.setToolTip(
+                'Input preview requires the embedded PyMOL viewer in this installation.' if not supported else
+                'Choose or download a local PDB or mmCIF receptor structure first.' if not valid else
+                'Wait for the active scientific stage to finish before previewing the original input.' if running else
+                'Inspect the original structure and non-water components locally, before preparation. Viewing does not approve a site.'
+            )
+
+        def preview_input_structure(self) -> None:
+            self._open_molecule_inspector('both')
+
+        def _open_molecule_inspector(self, view) -> None:
+            self._refresh_input_preview_button()
+            if self._input_preview_dialog is not None:
+                self._input_preview_dialog.raise_()
+                return
+            from .input_preview import InputStructurePreview
+            path = Path(self.input_pdb.text().strip())
+            dialog = InputStructurePreview(self, path, initial_view=view)
+            self._input_preview_dialog = dialog
+            try:
+                dialog.show_structure(path)
+            except Exception as exc:
+                QtWidgets.QMessageBox.warning(self, 'Input preview unavailable', str(exc))
+
+        def preview_molecule_2d(self) -> None:
+            self._open_molecule_inspector('both')
+
+        def preview_library_both(self, identifier) -> None:
+            self._refresh_input_preview_button()
+            inspector = self.molecule_inspector
+            for index in range(inspector.choices.count()):
+                if inspector.choices.itemData(index).get('record_id') == identifier:
+                    inspector.choices.setCurrentIndex(index)
+                    self._open_molecule_inspector('both')
+                    return
+
+        def reference_eligibility(self, entry):
+            panel = self.study_setup_panel
+            if panel._locked or panel.pathway.currentData() == 'reuse':
+                return False, 'This study setup is locked. Create a new study to choose a different reference.'
+            state = getattr(self, 'state', None)
+            if state and state.active_job:
+                return False, 'Finish the active scientific stage before changing the bound reference.'
+            if not entry or entry.get('origin') != 'input' or entry.get('kind') != 'component':
+                return False, 'Choose a deposited component from the loaded receptor to use as the bound reference.'
+            if Path(entry['path']).resolve() != Path(self.input_pdb.text().strip()).expanduser().resolve():
+                return False, 'The reference must belong to the currently loaded receptor.'
+            index = self.site_mode.findData('ligand')
+            if index < 0 or not self.site_mode.model().item(index).isEnabled():
+                return False, 'Ligand-guided site selection is unavailable in this runtime.'
+            return True, 'Set this exact deposited molecule as the reference. Your redocking checkbox choice is retained.'
+
+        def use_inspected_reference(self, entry) -> None:
+            from ..services.molecule_inspection import verify_input
+            from ..services.bound_ligands import detect_bound_ligands
+            allowed, reason = self.reference_eligibility(entry)
+            try:
+                if not allowed:
+                    raise ValueError(reason)
+                latest = self.store.load(self.study_id)
+                if latest.active_job:
+                    raise ValueError('The study has an active scientific stage; the reference was not changed.')
+                if latest.workflow_data.get('study_setup'):
+                    raise ValueError('This receptor setup has already been retained. Create a new study to choose another reference.')
+                path = verify_input(entry)
+                identities = [instance.identity for candidate in detect_bound_ligands(path)
+                              for instance in candidate.instances
+                              if instance.resname == entry['resname']
+                              and instance.chain_id == (entry['chain'] or '_')
+                              and instance.residue_number == entry['residue_number']
+                              and instance.insertion_code == entry['insertion_code']]
+                if len(identities) != 1:
+                    raise ValueError('The selected component does not identify one unambiguous bound reference. Review the deposited instances first.')
+                identity = identities[0]
+                if self._input_preview_dialog is not None:
+                    self._input_preview_dialog.close()
+                self.detect_bound_ligands(quiet=True)
+                self.site_mode.setCurrentIndex(self.site_mode.findData('ligand'))
+                index = next(i for i in range(self.ligand_resname.count()) if self.ligand_resname.itemData(i) == identity)
+                self.ligand_resname.setCurrentIndex(index)
+                self._draft_reference_sha256 = entry['sha256']
+                self._save_form_values()
+                self.statusBar().showMessage(f"Bound reference selected: {entry['resname']} {entry['chain']}:{entry['resi']}. Ready for the existing preparation/control workflow.")
+            except Exception as exc:
+                QtWidgets.QMessageBox.warning(self, 'Bound reference not changed', str(exc))
+
+        def _sync_inspected_reference(self, *_args):
+            """Mirror a chosen draft/retained reference into the shared inspector."""
+            inspector = getattr(self, 'molecule_inspector', None)
+            identity = self.ligand_resname.currentData()
+            if inspector is None or not isinstance(identity, dict):
+                return
+            inspector.select_reference(identity)
+
         def detect_bound_ligands(self, quiet: bool = False) -> list[str]:
             from ..services.bound_ligands import detect_bound_ligands
 
@@ -2436,7 +2579,7 @@ if QtWidgets is not None:
             elif not quiet:
                 QtWidgets.QMessageBox.information(
                     self, "No deposited ligands found",
-                    "This structure contains no deposited non-water ligand residues. Use predicted-pocket mode or enter an explicit residue name.",
+                    "This structure contains no deposited non-water ligand residues. Use predicted-pocket mode.",
                 )
             return [instance.label for candidate in candidates for instance in candidate.instances]
 
@@ -2806,6 +2949,13 @@ if QtWidgets is not None:
                     self, "Output directory required", "Choose a study output directory before starting.",
                 )
                 return
+            if self._draft_reference_sha256 and (self.site_mode.currentData() == 'ligand' or self.study_pathway.currentData() == 'control'):
+                from ..services.molecule_inspection import verify_input
+                try:
+                    verify_input({'path': input_text, 'sha256': self._draft_reference_sha256})
+                except ValueError as exc:
+                    QtWidgets.QMessageBox.warning(self, 'Choose the reference again', str(exc))
+                    return
             ligand_resname = self.study_setup_panel.ligand_value()
             ligand_identity = self.study_setup_panel.ligand_identity()
             site_first = bool((getattr(self.host_client, 'runtime', {}) or {}).get('coordinate_site_review_supported')
@@ -2819,7 +2969,7 @@ if QtWidgets is not None:
                             ligand_identity.get("residue_number"))):
                     QtWidgets.QMessageBox.warning(
                         self, "Exact control ligand required",
-                        "Detect deposited ligands and choose one exact ligand instance before redocking.",
+                        "Choose a ligand in the molecule list or 3D view, then click Use as bound reference ligand before redocking.",
                     )
                     return
                 control_payload = {
@@ -4607,6 +4757,8 @@ if QtWidgets is not None:
             self._schedule_initial_candidate_review()
 
         def closeEvent(self, event) -> None:
+            if self._input_preview_dialog is not None:
+                self._input_preview_dialog.close()
             self._close_interaction_review()
             panel = getattr(self, "linked_pose_panel", None)
             if panel is not None and panel._detached_window is not None:

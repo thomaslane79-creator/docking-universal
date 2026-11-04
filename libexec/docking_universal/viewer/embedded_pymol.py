@@ -82,6 +82,7 @@ def create_embedded_pymol_widget(parent=None):
 
     class EmbeddedPymolWidget(PyMOLGLWidget):
         residuePicked = QtCore.pyqtSignal(dict)
+        inputMoleculePicked = QtCore.pyqtSignal(dict)
 
         def __init__(self, widget_parent=None):
             super().__init__(widget_parent)
@@ -258,6 +259,161 @@ class EmbeddedPymolAdapter:
         self._hidden_source_box: str | None = None
         self._hidden_redundant_boxes: list[str] = []
         self._visible_associated_object_names: set[str] = set()
+        self._input_preview = None
+
+    def begin_input_preview(self, path: Path | str) -> dict[str, Any]:
+        """Temporarily display supplied coordinates without registering a receptor."""
+        source = Path(path).resolve()
+        if not source.is_file() or source.suffix.lower() not in {'.pdb', '.cif', '.mmcif'}:
+            raise ValueError('Preview requires a local PDB or mmCIF structure.')
+        result = self._begin_local_preview(lambda name: self.cmd.load(str(source), name, zoom=0))
+        return {**result, 'path': str(source)}
+
+    def begin_compound_preview(self, mol_block: str) -> dict[str, Any]:
+        """Display supplied compound coordinates; never generate a conformer."""
+        return self._begin_local_preview(lambda name: self.cmd.read_molstr(mol_block, name, zoom=0))
+
+    def _begin_local_preview(self, load) -> dict[str, Any]:
+        if self._input_preview is not None:
+            raise RuntimeError('An input-structure preview is already open.')
+        name = 'du_input_preview_' + uuid4().hex
+        self._input_preview = {
+            'name': name, 'view': self.cmd.get_view(),
+            'enabled': list(self.cmd.get_names('objects', enabled_only=1)),
+        }
+        auto_zoom = self.cmd.get_setting_int('auto_zoom')
+        try:
+            self.cmd.set('auto_zoom', 0)
+            load(name)
+            for existing in self._input_preview['enabled']:
+                self.cmd.disable(existing)
+            self.cmd.hide('everything', name)
+            self.cmd.color('atomic', name)
+            self.cmd.set('cartoon_color', 'gray70', name)
+            self.cmd.show('cartoon', f'{name} and polymer')
+            components = f'{name} and not polymer and not solvent'
+            self.cmd.color('orange', f'({components}) and elem C')
+            self.cmd.show('sticks', components)
+            self.cmd.show('nonbonded', components)
+            visible = f'{name} and not solvent'
+            if not self.cmd.count_atoms(visible):
+                raise ValueError('No non-water atoms are available to preview.')
+            self.cmd.orient(visible, animate=0)
+            self.cmd.zoom(visible, buffer=6, complete=1, animate=0)
+            self.widget.update()
+            return {'object_name': name}
+        except Exception:
+            self.end_input_preview()
+            raise
+        finally:
+            self.cmd.set('auto_zoom', auto_zoom)
+
+    def focus_input_preview(self, entry, *, show_receptor=True, preserve_view=False,
+                            show_all_components=False, visible_components=None) -> None:
+        """Render the inspector's visible instances using exact source atom indices.
+
+        An overview pick keeps the camera/other visible ligands; explicit list
+        navigation can focus one component. Hidden supporting atoms remain in
+        the temporary object and original input for reversible display filtering.
+        """
+        if self._input_preview is None:
+            raise ValueError('Open the local preview first.')
+        name = self._input_preview['name']
+        components = f'{name} and not polymer and not solvent'
+        shown_components = components
+        atoms = self.cmd.get_model(name, state=1).atom if visible_components is not None or entry['kind'] != 'whole' else []
+        if visible_components is not None:
+            identities = {(item['resname'], item['chain'], item['resi'], item.get('segment') or None)
+                          for item in visible_components}
+            indices = [atom.index for atom in atoms
+                       if (atom.resn, atom.chain, atom.resi, atom.segi) in identities
+                       or (atom.resn, atom.chain, atom.resi, None) in identities]
+            shown_components = f'{name} and index ' + '+'.join(str(int(index)) for index in indices) if indices else 'none'
+        self.cmd.color('orange', f'({components}) and elem C')
+        if entry['kind'] == 'whole':
+            self.cmd.hide('everything', name)
+            self.cmd.show('cartoon', f'{name} and polymer')
+            selection = shown_components
+            self.cmd.show('sticks', selection)
+            self.cmd.show('nonbonded', selection)
+            selection = f'({name} and polymer) or ({shown_components})'
+        else:
+            indices = [atom.index for atom in atoms
+                       if atom.chain == entry['chain'] and atom.resi == entry['resi']
+                       and atom.resn == entry['resname']
+                       and (not entry.get('segment') or atom.segi == entry['segment'])]
+            if not indices:
+                raise ValueError('The exact selected component is not present in the preview coordinates.')
+            selection = f'{name} and index ' + '+'.join(str(int(index)) for index in indices)
+            self.cmd.hide('everything', name)
+            self.cmd.show('sticks', selection)
+            self.cmd.show('nonbonded', selection)
+            if show_receptor:
+                self.cmd.show('cartoon', f'{name} and polymer')
+                if show_all_components:
+                    self.cmd.show('sticks', shown_components)
+                    self.cmd.show('nonbonded', shown_components)
+            self.cmd.color('cyan', f'({selection}) and elem C')
+            if show_receptor:
+                selection = f'({name} and polymer) or ({shown_components if show_all_components else selection})'
+        if not preserve_view:
+            self.cmd.orient(selection, animate=0)
+            self.cmd.zoom(selection, buffer=4, complete=1, animate=0)
+        self.widget.update()
+
+    def enable_input_preview_picking(self) -> None:
+        """Route temporary native atom picks to the molecule inspector only."""
+        if self._input_preview is None:
+            raise ValueError('Open the local preview first.')
+        preview = self._input_preview
+        if 'wizard_stack' in preview:
+            return
+        from pymol.wizard import Wizard
+        preview['wizard_stack'] = self.cmd.get_wizard_stack()
+        preview['interaction_input'] = getattr(self.widget, '_du_interaction_review', False)
+        adapter = self
+
+        class InputMoleculeWizard(Wizard):
+            def get_event_mask(self):
+                return Wizard.event_mask_pick
+
+            def do_pick(self, bondFlag):
+                try:
+                    if bondFlag or adapter._input_preview is not preview:
+                        return
+                    indices = self.cmd.index('pk1')
+                    if len(indices) != 1 or indices[0][0] != preview['name']:
+                        return
+                    atoms = self.cmd.get_model('pk1', state=1).atom
+                    if len(atoms) == 1:
+                        atom = atoms[0]
+                        adapter.widget.inputMoleculePicked.emit(dict(
+                            object=preview['name'], name=atom.resn, chain=atom.chain,
+                            number=atom.resi, segment=atom.segi))
+                finally:
+                    self.cmd.unpick()
+
+        self.cmd.set_wizard(InputMoleculeWizard(_self=self.cmd))
+        self.widget._du_interaction_review = True
+
+    def end_input_preview(self) -> None:
+        preview = self._input_preview
+        if preview is None:
+            return
+        self._input_preview = None
+        try:
+            if 'wizard_stack' in preview:
+                self.cmd.set_wizard_stack(preview['wizard_stack'])
+                self.widget._du_interaction_review = preview['interaction_input']
+                self.widget._du_blocked_gesture = False
+            self.cmd.delete(preview['name'])
+        finally:
+            names = set(self.cmd.get_names('objects'))
+            for name in preview['enabled']:
+                if name in names:
+                    self.cmd.enable(name)
+            self.cmd.set_view(preview['view'])
+            self.widget.update()
 
     def set_structure_context(self, identity: str | None) -> None:
         self.structure_context = str(identity) if identity else None

@@ -1,5 +1,17 @@
 # Complete interactive GUI workflow plan
 
+Current user-requested interface follow-up (2026-11-03): embed the selected
+molecule's 2D drawing in setup, offer the existing viewer beside it in a paired
+window, and connect an explicit bound-reference action to the existing exact
+ligand identity fields. Preserve control choices and launch/approval boundaries.
+Direct 3D ligand picks must synchronize the shared list/2D view, retain the
+camera and leave reference commitment to the existing explicit action.
+Use this one visual selector and a concise applied-reference label in place of
+the duplicate Bound ligand dropdown.
+Filter common supporting components from the list and 3D overview by default,
+with an All components reveal toggle and no inferred biological-activity label.
+See the acceptance scope in [the GUI backlog](gui-idea-backlog.md).
+
 Active follow-up authorized 2026-10-23: resolve/retest remaining preparation
 issues, finish report and multi-site coverage, implement explicit retained-output
 reclustering, then run fresh-install/cross-platform checks. Preserve historical
