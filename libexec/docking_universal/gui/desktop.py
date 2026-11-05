@@ -2046,7 +2046,12 @@ if QtWidgets is not None:
                 self._restore_combo(self.study_pathway, "reuse")
                 imported = state.workflow_data.get('protocol_import') or {}
                 from ..reporting import engine_display_name
-                self.study_setup_panel.protocol_note.setText(
+                self.study_setup_panel.protocol_note.set_content(
+                    f"Target: {imported.get('target', 'Not recorded')} · "
+                    f"{engine_display_name(imported.get('engine', 'Not recorded'))} · "
+                    f"{imported.get('region_count', '?')} locked region(s). "
+                    + ('Exploratory: no pose-recovery control.' if imported.get('exploratory_authorization_required')
+                       else 'Pose-recovery control recorded.'),
                     f"Imported target: {imported.get('target', 'Not recorded')} · "
                     f"{engine_display_name(imported.get('engine', 'Not recorded'))} · "
                     f"{imported.get('region_count', '?')} locked docking region(s). "

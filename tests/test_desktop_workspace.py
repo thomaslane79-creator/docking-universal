@@ -1350,7 +1350,7 @@ class DesktopWorkspaceTests(unittest.TestCase):
                 "Show selected pose in interactive structure",
             )
             self.assertTrue(window.pocket_evidence_panel.compare_button.isHidden())
-            self.assertIn("Selecting observations updates the 3D view", window.pocket_evidence_panel.note.text())
+            self.assertIn("show/hide their ligands in 3D", window.pocket_evidence_panel.note.text())
             visible_pymol_buttons = [
                 button.text()
                 for button in window.findChildren(QtWidgets.QPushButton)

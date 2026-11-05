@@ -28,6 +28,11 @@ def main():
     scroll.setWidget(panel)
     layout.addWidget(scroll)
     result = {'checks': []}
+    # Exercise presentation even when this isolated process has no GPU runtime
+    # configured. No host/worker exists, so this cannot enable scientific use.
+    result['experimental_engine_display_fixture'] = panel.engine.findData('adgpu') < 0
+    if result['experimental_engine_display_fixture']:
+        panel.engine.addItem('AutoDock-GPU (layout fixture)', 'adgpu')
     def check(name, condition):
         result['checks'].append({'name': name, 'passed': bool(condition)})
         if not condition:

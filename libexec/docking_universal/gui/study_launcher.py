@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from .qt import QtCore, QtWidgets
+from .explanations import ExplanationLabel
 
 
 def study_id_from_name(name: str) -> str:
@@ -71,7 +72,9 @@ class StudyLauncherDialog(QtWidgets.QDialog):
         self.study_name = QtWidgets.QLineEdit()
         self.study_name.setPlaceholderText("For example: COX-2 compound screening")
         self.study_name.setMinimumWidth(360)
-        self.workflow_scope = QtWidgets.QLabel(
+        self.workflow_scope = ExplanationLabel(
+            'Next: load a structure and choose the study options.',
+            'Starting a study',
             "Next, choose a structure file or download one by PDB ID. "
             "You’ll choose exploratory docking or known-ligand redocking in Study setup."
         )

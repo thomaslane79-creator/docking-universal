@@ -4,6 +4,7 @@ from __future__ import annotations
 
 try:
     from .qt import QtCore, QtWidgets
+    from .explanations import ExplanationLabel
 except ImportError as exc:  # pragma: no cover - diagnosed by desktop runtime inventory
     QtCore = QtWidgets = None
     QT_IMPORT_ERROR = exc
@@ -72,10 +73,13 @@ if QtWidgets is not None:
             )
             screening_header.setStretchLastSection(True)
 
-            interaction_note = QtWidgets.QLabel(
+            interaction_note = ExplanationLabel(
+                'PLIP shows contacts for each cluster’s lowest-energy pose.',
+                'Reading docking results and interactions',
                 "PLIP view: one lowest-energy representative per distinct pose cluster. "
                 "Clusters are ordered by representative energy; the diagram summarizes contacts, "
-                "not binding affinity."
+                "not binding affinity.\n\nVina and AD4 use different energy scales; do not combine them into "
+                "one ranking. Expanded all-pose review exposes retained alternatives to each representative."
             )
             interaction_note.setObjectName("results_interaction_note")
             interaction_note.setWordWrap(True)
@@ -86,6 +90,9 @@ if QtWidgets is not None:
             if renderer_status["status"] == "available":
                 self.renderer_status.setText("Local interaction renderer ready")
                 self.renderer_status.setStyleSheet("color:#176b35")
+                self.renderer_status.hide()
+                interaction_note.set_content(interaction_note.summary_text,
+                                             interaction_note.details_text + '\n\nLocal interaction renderer ready.')
             else:
                 self.renderer_status.setText(
                     "Local interaction renderer unavailable — "

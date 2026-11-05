@@ -1,5 +1,11 @@
 # Complete interactive GUI workflow plan
 
+Current user-requested presentation follow-up (2026-11-04): reduce explanatory
+text across the GUI using brief visible summaries and separate, modeless
+explanation windows. Preserve explicit choices, consent, warnings and complete
+local guidance. Reuse existing guides where present; no scientific behavior or
+default changes. See `gui-text-review.md` and the implementation gate record.
+
 Current user-requested interface follow-up (2026-11-03): embed the selected
 molecule's 2D drawing in setup, offer the existing viewer beside it in a paired
 window, and connect an explicit bound-reference action to the existing exact

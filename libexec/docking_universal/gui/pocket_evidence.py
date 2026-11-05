@@ -6,6 +6,7 @@ import json
 import html
 
 from .qt import QtCore, QtGui, QtWidgets
+from .explanations import ExplanationLabel
 
 LIGAND_EVIDENCE_COLOR = "#009b50"
 OBSTRUCTION_COLOR = "#a85b00"
@@ -59,9 +60,11 @@ class EvidenceText(QtWidgets.QPlainTextEdit):
         warning = has_obstruction_warning(conformation)
         heading = f"!  {summary}" if warning else summary
         brief = (
-            "Flags protein side-chain overlap—not all rotamer changes. "
-            "This is not proof of flexibility."
-            if conformation.get("status") == "conformationally_incompatible" else explanation
+            "Side-chain overlap only; not proof of flexibility."
+            if conformation.get("status") == "conformationally_incompatible" else
+            "This does not validate the docking site."
+            if conformation.get("status") == "reviewed_no_geometric_incompatibility" else
+            "Missing comparisons do not establish absence of differences."
         )
         self.setPlainText(heading if compact else f"{heading}\n{brief}")
         if warning:
@@ -159,7 +162,7 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
         self.heading = QtWidgets.QLabel("Select a docking-box candidate to inspect its evidence.")
         self.heading.setWordWrap(True)
         self.heading.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Fixed)
-        self.heading.setFixedHeight(self.heading.fontMetrics().lineSpacing() * 3)
+        self.heading.setFixedHeight(self.heading.fontMetrics().lineSpacing() * 2)
         self.evidence_summary = QtWidgets.QFrame()
         self.evidence_summary.setObjectName("ligand_evidence_summary")
         self.evidence_summary.setStyleSheet(
@@ -168,11 +171,10 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
         )
         summary_layout = QtWidgets.QVBoxLayout(self.evidence_summary)
         summary_layout.setContentsMargins(6, 6, 6, 6)
-        self.lookup_status = QtWidgets.QLabel()
+        self.lookup_status = ExplanationLabel('', 'Public PDB lookup coverage', '')
         self.lookup_status.setWordWrap(True)
         self.lookup_status.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Minimum)
         self.lookup_status.setMinimumHeight(self.lookup_status.fontMetrics().lineSpacing() * 2 + 12)
-        self.lookup_status.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
         self.lookup_status.hide()
         layout.addWidget(self.lookup_status)
         self.preparation_issues = QtWidgets.QPlainTextEdit()
@@ -201,7 +203,7 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
         # A text viewport does not export QLabel's text-dependent height-for-
         # width to the outer dock. Only its contents scroll, never the panels.
         self.warning_scroll = self.warning
-        self.warning_scroll.setFixedHeight(self.warning.fontMetrics().lineSpacing() * 4 + 16)
+        self.warning_scroll.setFixedHeight(self.warning.fontMetrics().lineSpacing() * 3 + 16)
         self._embedded_presentation = False
         self._obstructing_residues = []
         self._residue_highlighted = False
@@ -253,7 +255,9 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
             "close structural homolog", "2R8N", "Ligand", "Cα RMSD (Å)", "Identity", "Coverage",
         )):
             self.table.setColumnWidth(column, metrics.horizontalAdvance(sample) + 24)
-        self.note = QtWidgets.QLabel(
+        self.note = ExplanationLabel(
+            'Double-click an observation to view its ligand. Viewing does not approve a region.',
+            'Viewing experimental ligand evidence',
             "Double-click an observation to show its aligned deposited ligand in PyMOL. "
             "Experimental correspondence supports a decision; it does not approve a box."
         )
@@ -285,13 +289,11 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
         self._update_residue_action()
         if embedded:
             self.note.setText(
-                "Selecting observations updates the 3D view; deselecting hides them. "
-                "Experimental evidence does not approve a docking region."
+                "Select observations to show/hide their ligands in 3D. Viewing does not approve a region."
             )
         else:
             self.note.setText(
-                "Double-click an observation to show its aligned deposited ligand in PyMOL. "
-                "Experimental correspondence supports a decision; it does not approve a box."
+                "Double-click an observation to view its ligand. Viewing does not approve a region."
             )
             self.compare_button.setText("Show selected observations in PyMOL")
 
@@ -315,9 +317,17 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
         self._lookup_status_fingerprint = fingerprint
         from ..services.pdb_lookup_status import lookup_notice
         text, warning = lookup_notice(record)
-        self.lookup_status.setText(text)
-        self.lookup_status.setVisible(bool(text))
+        summary = (
+            'Local-only evidence: public PDB search is off.' if record.get('mode') == 'off' else
+            'PDB lookup unavailable. Local work can continue; supporting evidence may be missing.'
+            if record.get('status') in {'unavailable', 'failed'} else
+            'PDB lookup incomplete: some structures could not be retrieved; evidence may be missing.'
+            if (record.get('coverage') or {}).get('failed_entry_count') else
+            'PDB search completed: no qualifying observations found; this is not proof of absence.'
+            if text else '')
         detail = record.get('detail') or record.get('error') or ''
+        self.lookup_status.set_content(summary, text + ('\n\nDetails: ' + str(detail) if detail else ''))
+        self.lookup_status.setVisible(bool(text))
         self.lookup_status.setToolTip(text + ('\n\nDetails: ' + str(detail) if detail else ''))
         self.lookup_status.setStyleSheet(
             'QLabel {background:#fff1b8;color:#392600;border:1px solid #a85b00;padding:5px;border-radius:4px;}'
@@ -354,11 +364,14 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
         label = (candidate or {}).get("label") or (candidate or {}).get("id") or "No candidate"
         classes = experimental.get("evidence_class_counts") or {}
         self.heading.setText(
-            f"{label}: {experimental.get('observation_count', 0)} deposited-ligand observations · "
-            f"{experimental.get('pdb_entry_count', 0)} PDB entries · "
-            f"exact {classes.get('exact_sequence_match', 0)} · homolog {classes.get('close_structural_homolog', 0)}"
-        )
-        self.heading.setToolTip(self.heading.text())
+            f"{label}: {experimental.get('observation_count', 0)} observations · "
+            f"{experimental.get('pdb_entry_count', 0)} PDB entries")
+        self.heading.setToolTip(self.heading.text() +
+            f" · exact {classes.get('exact_sequence_match', 0)} · homolog {classes.get('close_structural_homolog', 0)}")
+        self.note.set_content(self.note.summary_text,
+            self.evidence_header.toolTip() + '\n\n' + self.heading.toolTip() +
+            '\n\nSelecting observations updates the 3D view; deselecting hides them. '
+            'Experimental correspondence supports a decision; it does not approve a docking region.')
         conformation = evidence.get("conformational_site_evidence") or {}
         self._conformation = conformation
         self.obstruction_details_button.setEnabled(bool(conformation))

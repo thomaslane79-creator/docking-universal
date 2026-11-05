@@ -2,6 +2,7 @@
 
 from .qt import QtCore, QtGui, QtWidgets
 from .ligand_library_panel import CompoundPreview, LibraryReadTask
+from .explanations import ExplanationLabel
 from ..services.molecule_inspection import (
     input_molecules, library_molecules, drawing_for_entry, verify_input,
     compound_3d_block, molecule_for_entry,
@@ -99,8 +100,14 @@ class MoleculeInspectorPanel(QtWidgets.QWidget):
         frame_layout = QtWidgets.QVBoxLayout(self.view_frame)
         frame_layout.setContentsMargins(0, 0, 0, 0)
         frame_layout.setSizeConstraint(QtWidgets.QLayout.SizeConstraint.SetNoConstraint)
-        self.origin = QtWidgets.QLabel()
-        self.origin.setTextFormat(QtCore.Qt.TextFormat.PlainText)
+        self._inspection_help = (
+            '2D drawings use local chemical definitions or the selected compound file/SMILES; no PDB lookup is needed. '
+            '3D uses supplied coordinates, with the receptor when available. No new conformation is generated.\n\n'
+            'Click a ligand in the 3D overview or choose it in the list to inspect its exact chain and residue. '
+            'Use as bound reference ligand explicitly applies the choice; browsing changes no docking selection. '
+            'Loaded screening compounds and added local molecules are inspection sources, not bound references.\n\n'
+            + self.all_components.toolTip())
+        self.origin = ExplanationLabel('', 'Molecule source and selection', self._inspection_help)
         self.origin.setWordWrap(True)
         self.origin.setMinimumWidth(0)
         self.origin.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Preferred)
@@ -270,17 +277,21 @@ class MoleculeInspectorPanel(QtWidgets.QWidget):
         self.update_reference_action()
         self.receptor_context.setEnabled(bool(entry and entry.get('origin') == 'input' and entry.get('kind') == 'component'))
         if not entry:
+            self.origin.set_content('No molecule selected.', self._inspection_help)
             self.picture.setText('No molecules are loaded. Add a local molecule file or SMILES to the list.')
             self.three_d_message.setText('No molecule is selected.')
             return
-        self.origin.setText(entry['label'])
+        self.origin.set_content(entry['label'], entry['label'] + '\n\n' + self._inspection_help)
         try:
             png, basis = drawing_for_entry(entry)
             image = QtGui.QPixmap()
             if not image.loadFromData(png):
                 raise ValueError('The chemical drawing could not be displayed.')
             self.picture.setPixmap(image)
-            self.origin.setText(basis)
+            self.origin.set_content(
+                'Local mmCIF chemical definition; observed atoms may be incomplete.'
+                if entry.get('origin') == 'input' else '2D from the selected local compound.',
+                entry['label'] + '\n\n' + basis + '\n\n' + self._inspection_help)
             self.origin.setToolTip(entry['label'] + '\n' + basis)
         except Exception as exc:
             self.picture.setText(str(exc))

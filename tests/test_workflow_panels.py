@@ -9,6 +9,69 @@ class WorkflowPanelTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls): cls.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 
+    def test_explanation_link_is_keyboard_accessible_read_only_and_literal(self):
+        from PyQt6.QtTest import QTest
+        from docking_universal.gui.qt import QtCore
+        from docking_universal.gui.explanations import ExplanationLabel
+        summary = 'Source <ligand> & receptor'
+        detail = 'Deposited <img src="file:///missing"> is literal data.\n\n' + '\n'.join(
+            f'Observation {i}' for i in range(100))
+        note = ExplanationLabel(summary, 'Source evidence', detail)
+        self.addCleanup(note.close)
+        note.resize(500, 70)
+        note.show()
+        note.setFocus()
+        self.app.processEvents()
+        QTest.keyClick(note, QtCore.Qt.Key.Key_Return)
+        guide = note.explanation_window
+        self.assertIsNotNone(guide)
+        self.addCleanup(guide.close)
+        self.assertTrue(guide.isVisible())
+        self.assertFalse(guide.isModal())
+        self.assertTrue(guide.content.isReadOnly())
+        self.assertFalse(guide.content.openExternalLinks())
+        self.assertIn('<img src="file:///missing">', guide.content.toPlainText())
+        self.app.processEvents()
+        scroll = guide.content.verticalScrollBar()
+        scroll.setValue(scroll.maximum() // 2)
+        position = scroll.value()
+        note.set_content(summary, detail)
+        self.assertEqual(scroll.value(), position)
+        guide.close()
+        note.set_content('Updated source', 'Current source details')
+        QTest.mouseClick(note, QtCore.Qt.MouseButton.LeftButton,
+            pos=QtCore.QPoint(note.fontMetrics().horizontalAdvance('Updated source ') + 12, note.height() // 2))
+        self.assertIs(note.explanation_window, guide)
+        self.assertTrue(guide.isVisible())
+        self.assertIn('Current source details', guide.content.toPlainText())
+        self.assertNotIn('Observation', guide.content.toPlainText())
+
+    def test_deposited_details_remain_readable_for_locked_and_changed_inputs(self):
+        panel = StudySetupPanel()
+        self.addCleanup(panel.close)
+        panel.output_directory.setText('/study')
+        panel.set_coordinate_evidence({'source_format': 'mmcif',
+            'assemblies': [{'id': '1', 'oligomeric_details': 'dimeric'}]})
+        before = panel.values()
+        panel.deposited_evidence_details.click()
+        guide = panel._deposited_evidence_window
+        self.addCleanup(guide.close)
+        self.assertIn('dimeric', guide.content.toPlainText())
+        self.assertFalse(guide.isModal())
+        panel.set_locked(True)
+        buttons = guide.findChild(QtWidgets.QDialogButtonBox)
+        self.assertTrue(buttons.button(QtWidgets.QDialogButtonBox.StandardButton.Close).isEnabled())
+        self.assertEqual(panel.values(), before)
+        panel.site_guidance_note.show_explanation()
+        self.assertTrue(panel.site_guidance_note.explanation_window.isVisible())
+        panel.site_guidance_note.explanation_window.close()
+        panel.set_coordinate_evidence({'source_format': 'mmcif',
+            'assemblies': [{'id': '2', 'oligomeric_details': 'tetrameric'}]})
+        self.assertIn('tetrameric', guide.content.toPlainText())
+        self.assertNotIn('dimeric', guide.content.toPlainText())
+        panel.set_coordinate_evidence(None)
+        self.assertFalse(guide.isVisible())
+
     def test_duplicate_bound_selector_stays_hidden_for_all_setup_modes(self):
         panel = StudySetupPanel()
         self.addCleanup(panel.close)
@@ -85,10 +148,16 @@ class WorkflowPanelTests(unittest.TestCase):
         panel.cpu.setCurrentIndex(panel.cpu.findData('automatic'))
         with patch('docking_universal.gui.workflow_panels.sys.platform', 'win32'):
             panel.set_engine('qvinaw')
-            self.assertIn('heap-corruption', panel.inline_explanations['cpu'].text())
+            self.assertIn('1 worker', panel.inline_explanations['cpu'].text())
+            panel.inline_explanations['cpu'].show_explanation()
+            guide = panel.inline_explanations['cpu'].explanation_window
+            self.assertIn('heap-corruption', guide.content.toPlainText())
             self.assertEqual(panel.cpu_override(), 0)
             panel.set_engine('vina')
-            self.assertEqual(panel.inline_explanations['cpu'].text(), panel.cpu.toolTip())
+            self.assertEqual(panel.inline_explanations['cpu'].details_text, panel.cpu.toolTip())
+            self.assertIn('8 threads', guide.content.toPlainText())
+            self.assertNotIn('heap-corruption', guide.content.toPlainText())
+            guide.close()
         panel.close()
 
     def test_control_reproducibility_notice_is_shown_at_the_control_engine_choice(self):
@@ -96,7 +165,10 @@ class WorkflowPanelTests(unittest.TestCase):
         initial = panel.pathway.currentIndex()
         panel.pathway.setCurrentIndex(panel.pathway.findData('control'))
         self.assertTrue(panel._form.isRowVisible(panel.reproducibility_notice))
-        self.assertIn('API/CLI backends', panel.reproducibility_notice.text())
+        self.assertIn('same seed', panel.reproducibility_notice.text())
+        panel.reproducibility_notice.show_explanation()
+        self.assertIn('API/CLI backends', panel.reproducibility_notice.explanation_window.content.toPlainText())
+        panel.reproducibility_notice.explanation_window.close()
         self.assertTrue(panel.reproducibility_notice.wordWrap())
         panel.pathway.setCurrentIndex(initial)
         self.assertFalse(panel._form.isRowVisible(panel.reproducibility_notice))
@@ -159,7 +231,7 @@ class WorkflowPanelTests(unittest.TestCase):
         self.assertEqual(panel.values().site_mode, "ligand")
         self.assertTrue(panel.values().predict_pockets_with_ligand)
         self.assertEqual(panel.values().pdb_pocket_evidence, "off")
-        self.assertIn("exploratory", panel.redock_note.text())
+        self.assertIn("exploratory", panel.redock_note.text().lower())
         panel.study_source.setCurrentIndex(panel.study_source.findData("reuse"))
         self.assertEqual(panel.values().pathway, "reuse")
         self.assertTrue(panel.redock_ligand.isHidden())
@@ -176,8 +248,11 @@ class WorkflowPanelTests(unittest.TestCase):
         panel = StudySetupPanel()
         self.assertEqual(panel._form.labelForField(panel.site_mode).text(), "Starting point for site review")
         self.assertIn("one or more", panel.site_guidance_note.text())
-        self.assertIn("elsewhere", panel.site_guidance_note.text())
-        self.assertIn("other structures", panel.site_guidance_note.text())
+        panel.site_guidance_note.show_explanation()
+        guidance = panel.site_guidance_note.explanation_window.content.toPlainText()
+        self.assertIn("elsewhere", guidance)
+        self.assertIn("other structures", guidance)
+        panel.site_guidance_note.explanation_window.close()
         self.assertFalse(panel.site_guidance_note.isHidden())
         panel.redock_ligand.setChecked(True)
         self.assertFalse(panel.site_guidance_note.isHidden())
@@ -256,7 +331,7 @@ class WorkflowPanelTests(unittest.TestCase):
         self.assertEqual(panel.cpu_override(), 12)
         panel.close()
 
-    def test_finalization_explains_every_setting_inline_without_changing_defaults(self):
+    def test_finalization_summarizes_settings_with_full_guidance_without_changing_defaults(self):
         from docking_universal.gui.protocol_help import SETTINGS_HELP
         from docking_universal.protocol_finalization import FinalizationSettings
         panel = ProtocolFinalizationPanel()
@@ -264,10 +339,13 @@ class WorkflowPanelTests(unittest.TestCase):
         self.assertEqual(set(panel.inline_explanations), set(SETTINGS_HELP))
         self.assertEqual(set(panel.help_buttons), set(SETTINGS_HELP))
         self.assertIn('does not dock ligands now', panel.introduction.text())
-        self.assertIn('vacuum', panel.inline_explanations['conformers'].text())
+        self.assertIn('starting shapes', panel.inline_explanations['conformers'].text())
         self.assertIn('chemical state', panel.inline_explanations['ph'].text())
         self.assertIn('not clusters', panel.inline_explanations['modes'].text())
-        self.assertIn('−7 kcal/mol', panel.inline_explanations['energy_range'].text())
+        panel.show_settings_guide()
+        self.assertIn('vacuum', panel._guide_text.toPlainText())
+        self.assertIn('−7 kcal/mol', panel._guide_text.toPlainText())
+        panel._settings_guide.close()
         self.assertEqual(panel.engine.currentData(), defaults.engine)
         for name, setting in (('ph', 'ph'), ('conformers', 'conformers'), ('seeds', 'seed_count'),
                               ('base_seed', 'base_seed'), ('exhaustiveness', 'exhaustiveness'),
@@ -387,9 +465,13 @@ class WorkflowPanelTests(unittest.TestCase):
         for key, note in panel.inline_explanations.items():
             self.assertTrue(note.wordWrap())
             self.assertFalse(note.isHidden())
-            self.assertEqual(getattr(panel, key).accessibleDescription(), note.text())
+            self.assertEqual(getattr(panel, key).accessibleDescription(), note.details_text)
+            note.show_explanation()
+            self.assertFalse(note.explanation_window.isModal())
+            self.assertIn(note.details_text, note.explanation_window.content.toPlainText())
+            note.explanation_window.close()
         self.assertIn('per compound', panel.inline_explanations['representatives'].text())
-        self.assertIn('lowest-energy pose', panel.inline_explanations['representatives'].text())
+        self.assertIn('Lowest-energy pose', panel.inline_explanations['representatives'].text())
         self.assertIn('not a compound or total-pose limit', panel.representatives.toolTip())
         for term in ('heavy-atom', 'without realignment', 'not RMSD to an experimental pose'):
             self.assertIn(term, panel.cluster_rmsd.toolTip())
@@ -422,7 +504,10 @@ class WorkflowPanelTests(unittest.TestCase):
     def test_preparation_progress_is_distinct_from_setup_and_exposes_retained_work(self):
         panel = PreparationProgressPanel()
         self.assertEqual(panel.progress.format(), "Not started")
-        self.assertIn("selected pocket detector", panel.operations.text())
+        self.assertIn('pause for review', panel.operations.text())
+        panel.operations.show_explanation()
+        self.assertIn("selected pocket detector", panel.operations.explanation_window.content.toPlainText())
+        panel.operations.explanation_window.close()
         self.assertTrue(panel.summary.isReadOnly())
 
     def test_navigation_controller_owns_visibility_only(self):

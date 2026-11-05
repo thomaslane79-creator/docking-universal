@@ -462,8 +462,13 @@ Docking energy is a model score used for ranking under one protocol; it is not a
 
 ## Understanding Finalize protocol
 
-The Finalize protocol screen also serves as a teaching step: every setting has a
-visible explanation beside its control, including runtime/workload tradeoffs.
+Across the GUI, short summaries keep the controls readable. **Explain…** opens
+the full local explanation in a separate window that can stay open while you
+review the interface. Use Tab and Enter or Space to open these explanations
+from the keyboard. Approval wording, privacy disclosures, current warnings and
+exact selections stay visible in the main interface.
+
+The Finalize protocol screen gives each setting a brief description.
 **Settings guide…** and each **?** button open a reusable, modeless guide showing
 current values and fuller definitions. Reading help does not change settings or
 authorize anything. Defaults are starting values, not target-specific validation.
@@ -471,6 +476,12 @@ The live shapes × repeats hint is per chemical state and approved site; it is n
 the full library job count or a runtime prediction. Review the actual workload in
 the later screening step. Finalization packages the approved recipe; it does not
 dock new ligands.
+
+**Full deposited evidence…** opens the complete structure annotations and
+component inventory. In Scientific Detail, **Full details…** opens the technical
+event record in another window without changing your chosen detail level.
+The inline ligand drawing, shared molecule list, 2D/3D window and explicit
+**Use as bound reference ligand** action are unchanged by this presentation.
 
 ## Saving custom GUI images
 

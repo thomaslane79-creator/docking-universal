@@ -1,5 +1,6 @@
 """Explicit model-change review; the host owns preview verification and execution."""
 from .qt import QtCore, QtWidgets
+from .explanations import ExplanationLabel
 
 
 class ReceptorModelReviewDialog(QtWidgets.QDialog):
@@ -17,7 +18,9 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(body)
         scroll.setWidget(body)
         outer.addWidget(scroll, 1)
-        introduction = QtWidgets.QLabel(
+        introduction = ExplanationLabel(
+            'Exclusions change the scored receptor and are not recommended. Successful preparation does not validate the model.',
+            'Reviewing receptor-model changes',
             'The original structure and reviewed docking boxes are retained. Choose only the exact changes '
             'you intend. Exclusion is not recommended: it changes the scored receptor. Successful preparation '
             'does not validate the model or binding pose. No missing residues, backbone atoms or loops are built here.')
@@ -48,7 +51,9 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
             layout.addWidget(QtWidgets.QLabel('No nonblank alternate-location labels were found in these input coordinates.'))
         else:
             layout.addWidget(self.alternates)
-            explanation = QtWidgets.QLabel('Occupancy is the deposited fraction for that conformation. A higher occupancy is not a docking score or proof of correctness. A and B are labels, not quality grades.')
+            explanation = ExplanationLabel('Occupancy is a deposited fraction, not a quality score.',
+                'Alternate conformations and occupancy',
+                'Occupancy is the deposited fraction for that conformation. A higher occupancy is not a docking score or proof of correctness. A and B are labels, not quality grades.')
             explanation.setWordWrap(True)
             layout.addWidget(explanation)
         partial = [r['label'] + ' missing ' + ', '.join(r['missing_backbone_atom_names'])
@@ -69,7 +74,9 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
         layout.addWidget(self.exclusions)
         candidate_group = QtWidgets.QGroupBox('Local side-chain candidate — optional, explicit review required')
         candidate_layout = QtWidgets.QVBoxLayout(candidate_group)
-        candidate_note = QtWidgets.QLabel(
+        candidate_note = ExplanationLabel(
+            'Import a locally generated candidate only after reviewing its exact added atoms.',
+            'Local side-chain candidates',
             'Select a candidate receipt only after reviewing its exact missing side-chain atoms. '
             'The host verifies the parent/model hashes and every unchanged observed record. '
             'This imports a locally generated candidate; it does not generate atoms or prove chemical correctness.')

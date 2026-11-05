@@ -41,8 +41,8 @@ def main():
             QTest.qWait(150)
             check(f'{width}: no horizontal scrolling', scroll.horizontalScrollBar().maximum() == 0)
             for key, note in panel.inline_explanations.items():
-                needed = note.fontMetrics().boundingRect(note.contentsRect(),
-                    QtCore.Qt.TextFlag.TextWordWrap, note.text()).height()
+                # Ask Qt to lay out the rich-text Explain link, not its markup.
+                needed = note.heightForWidth(note.width())
                 check(f'{width}: {key} text not clipped', needed <= note.height() + 4)
                 if key not in ('approval', 'stop_on_error'):
                     field = getattr(panel, key)
@@ -75,6 +75,18 @@ def main():
         check('representative count remains three', panel.representatives.value() == 3)
         check('no automatic authorization', not panel.approval.isChecked())
         check('molecule preview hints unchanged', panel.library_panel.preview.sizeHint() == QtCore.QSize(300, 240))
+        before = (panel.cpu_override(), panel.representatives.value(), panel.cluster_rmsd.value())
+        note = panel.inline_explanations['cluster_rmsd']
+        note.show_explanation()
+        QTest.qWait(100)
+        check('explanation opens as a separate modeless window',
+              note.explanation_window.isWindow() and not note.explanation_window.isModal())
+        check('full clustering explanation remains available',
+              'without realignment' in note.explanation_window.content.toPlainText())
+        note.explanation_window.grab().save(str(args.output / 'clustering-explanation.png'))
+        note.explanation_window.close()
+        check('reading explanation preserves settings',
+              before == (panel.cpu_override(), panel.representatives.value(), panel.cluster_rmsd.value()))
     except Exception as exc:
         results['error'] = str(exc)
     finally:

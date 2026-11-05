@@ -32,7 +32,11 @@ class ReceptorModelReviewGuiTests(unittest.TestCase):
         self.assertEqual(self.dialog.choices(), {'exclusions': [], 'alternate_locations': []})
         self.assertFalse(self.dialog.prepare_button.isEnabled())
         self.assertEqual(self.calls, [])
-        self.assertIn('No missing residues', self.dialog.findChildren(QtWidgets.QLabel)[0].text())
+        note = self.dialog.findChildren(QtWidgets.QLabel)[0]
+        self.assertIn('not recommended', note.text())
+        note.show_explanation()
+        self.assertIn('No missing residues', note.explanation_window.content.toPlainText())
+        note.explanation_window.close()
 
     def test_exact_choices_preview_and_rationale_are_required_before_accept(self):
         self.dialog.exclusions.setPlainText('NAG A 1\nNAG B 1')

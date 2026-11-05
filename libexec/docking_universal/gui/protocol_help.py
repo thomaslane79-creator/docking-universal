@@ -92,7 +92,7 @@ SETTINGS_HELP = {
         'earlier decision. Screening will require its own explicit authorization.'),
 }
 
-# Always-visible teaching copy, beside each control rather than hover-only help.
+# Complete offline teaching material lives in the separate settings guide.
 AD4_ENGINE_GUIDE_HTML = '''
 <h3>Learning guide: AD4, Vina and the GPU</h3>
 <p><b>Two separate choices:</b> the scoring function estimates how favorable a
@@ -146,18 +146,18 @@ This explanation is available offline; opening links is optional.</p>
 
 
 INLINE_HELP = {
-    'output_directory': 'The report documents the recipe; the .duprotocol file lets you reuse it for later screening.',
+    'output_directory': 'Save the report and reusable .duprotocol file here.',
     'engine': 'Changing programs may change results. No program proves that a ligand binds.',
-    'ph': 'A chemical state can differ in charge or hydrogen placement. This does not re-prepare the receptor or simulate solvent.',
-    'conformers': 'More shapes mean more runs. Shapes are not docking poses. Current minimization uses MMFF94 vacuum energies, not solvent-aware energies.',
-    'seeds': 'Different random starts test search repeatability, not experimental correctness. More repeats take longer.',
-    'base_seed': 'Keep it when comparing settings. A bigger number is not better; the same inputs and software also matter.',
-    'exhaustiveness': 'Higher effort usually takes longer. It is separate from repeat count and cannot correct a wrong receptor or site.',
-    'modes': 'The engine may return fewer. Poses are individual placements, not clusters or compounds; similar poses are grouped later.',
-    'energy_range': 'A wider window retains more alternatives. For a best energy of −9 and a window of 2, the cutoff is −7 kcal/mol.',
-    'ad4_runs': 'One winner per genetic run is kept. All winners are clustered later; no Vina output window is applied.',
-    'ad4_heuristic_cap': 'Autostop may finish sooner. Search effort and AD4 energies cannot be directly equated with Vina.',
-    'approval': 'This recipe has not passed a test of recovering a known experimental ligand pose. Saving it does not validate hits or affinity.',
+    'ph': 'Sets ligand chemical states; the prepared receptor is unchanged.',
+    'conformers': 'More starting shapes mean more docking runs.',
+    'seeds': 'Repeats test search repeatability, not experimental correctness.',
+    'base_seed': 'Keep it when comparing settings. A larger number is not better.',
+    'exhaustiveness': 'Higher effort usually takes longer; it does not guarantee accuracy.',
+    'modes': 'Maximum individual poses per run, not clusters. Fewer may be returned.',
+    'energy_range': 'Retain poses this far above each run’s best energy.',
+    'ad4_runs': 'Keep one winner per genetic run; group similar winners later.',
+    'ad4_heuristic_cap': 'Maximum search budget; autostop may finish sooner.',
+    'approval': 'Approval does not validate hits or affinity.',
 }
 
 

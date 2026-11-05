@@ -87,12 +87,14 @@ class LinkedIdentityTests(unittest.TestCase):
                 window = InteractionReviewWindow(view, panel, QtWidgets.QWidget(), adapter)
                 self.assertEqual(view.experimental, experimental)
                 if experimental:
-                    self.assertIn('Experimental structure only — not a docked pose', window.basis.text())
-                    self.assertIn('PLIP contacts are calculated', window.basis.text())
+                    self.assertIn('Experimental structure, not a docked pose', window.basis.text())
+                    window.basis.show_explanation()
+                    self.assertIn('PLIP contacts are calculated', window.basis.explanation_window.content.toPlainText())
+                    window.basis.explanation_window.close()
                 elif kind == 'docked':
                     self.assertTrue(window.basis.text().startswith('Docked pose'))
                 else:
-                    self.assertIn('source kind is not recorded', window.basis.text())
+                    self.assertIn('source kind unrecorded', window.basis.text())
                 self.assertIn('no verified residue links', panel.status.text())
                 window.dispose()
                 window.close()

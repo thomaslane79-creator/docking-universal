@@ -17,8 +17,10 @@ class LigandLibraryPanelTests(unittest.TestCase):
              'valid': i != 3, 'error': 'Invalid chemistry' if i == 3 else ''}
             for i in range(1, 4)]})
         self.assertEqual(panel.selection()['record_ids'], [])
-        self.assertIn('Input structure and charge as supplied', panel.preview_basis.text())
-        self.assertIn('not adjusted to the protocol pH', panel.preview_basis.text())
+        self.assertIn('chemistry as supplied', panel.preview_basis.text())
+        panel.preview_basis.show_explanation()
+        self.assertIn('not adjusted to the protocol pH', panel.preview_basis.explanation_window.content.toPlainText())
+        panel.preview_basis.explanation_window.close()
         inspected = []
         panel.previewRequested.connect(inspected.append)
         panel.table.setCurrentCell(1, 1)

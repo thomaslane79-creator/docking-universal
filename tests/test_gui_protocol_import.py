@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -6,7 +7,7 @@ from unittest.mock import patch
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from docking_universal.gui.desktop import QT_IMPORT_ERROR, StudyWindow
 from docking_universal.gui.host_client import ApplicationHostClient
-import test_protocol_import
+from tests import test_protocol_import
 
 
 @unittest.skipIf(QT_IMPORT_ERROR is not None, 'Qt unavailable')
@@ -18,7 +19,7 @@ class GuiProtocolImportTests(unittest.TestCase):
         self.fixture.setUp()
         self.client = ApplicationHostClient(self.fixture.store.root,
             Path(__file__).parents[1] / 'libexec/docking-universal-application-host.py',
-            python_executable='/opt/anaconda3/envs/docking-universal/bin/python')
+            python_executable=sys.executable)
         self.client.start()
         self.settings = QtCore.QSettings(str(self.fixture.root / 'window.ini'), QtCore.QSettings.Format.IniFormat)
         self.window = StudyWindow(self.fixture.store, 'fresh', host_client=self.client, settings=self.settings)
@@ -69,8 +70,13 @@ class GuiProtocolImportTests(unittest.TestCase):
         from docking_universal.gui.workflow_panels import ProtocolImportDialog
         dialog = ProtocolImportDialog(self.fixture.preview)
         labels = ' '.join(label.text() for label in dialog.findChildren(QtWidgets.QLabel))
-        self.assertIn('has not passed', labels)
-        self.assertIn('does not prepare', labels)
+        self.assertIn('no passed pose-recovery control', labels)
+        from docking_universal.gui.explanations import ExplanationLabel
+        note = dialog.findChildren(ExplanationLabel)[0]
+        note.show_explanation()
+        self.assertIn('has not passed', note.explanation_window.content.toPlainText())
+        self.assertIn('does not prepare', note.explanation_window.content.toPlainText())
+        note.explanation_window.close()
         table = dialog.findChild(QtWidgets.QTableWidget)
         self.assertEqual(table.editTriggers(), QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
         self.assertFalse(self.fixture.store.load('fresh').artifacts)

@@ -4,6 +4,7 @@ import threading
 
 from .qt import QtCore, QtGui, QtWidgets
 from .navigation_table import NavigationTable
+from .explanations import ExplanationLabel
 
 
 class CompoundPreview(QtWidgets.QWidget):
@@ -175,7 +176,9 @@ class LigandLibraryPanel(QtWidgets.QWidget):
         self.splitter.setMinimumHeight(240)
         self.splitter.setMaximumHeight(370)
         review_layout.addWidget(self.splitter)
-        self.preview_basis = QtWidgets.QLabel(
+        self.preview_basis = ExplanationLabel(
+            'Input chemistry as supplied; docking protonation states are prepared later.',
+            'Compound preview and docking chemistry',
             'Input structure and charge as supplied — not adjusted to the protocol pH. '
             'Protonation/tautomer states are prepared later for docking.')
         self.preview_basis.setWordWrap(True)

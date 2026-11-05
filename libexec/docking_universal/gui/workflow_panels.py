@@ -7,7 +7,11 @@ import sys
 
 from .qt import QtCore, QtWidgets
 from .protocol_help import SETTINGS_HELP, INLINE_HELP, settings_guide_html
+from .explanations import ExplanationLabel, ExplanationWindow
 from ..reproducibility import DOCKING_REPRODUCIBILITY_NOTICE
+
+
+REPRODUCIBILITY_SUMMARY = 'Scores and poses can differ across operating systems and software, even with the same seed.'
 
 
 def _quickvina_label():
@@ -62,7 +66,7 @@ class StudySetupPanel(QtWidgets.QWidget):
         self.output_directory = QtWidgets.QLineEdit()
         self.output_directory.setPlaceholderText("Choose where this study will be saved")
         form.setFieldGrowthPolicy(QtWidgets.QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-        form.setRowWrapPolicy(QtWidgets.QFormLayout.RowWrapPolicy.WrapAllRows)
+        form.setRowWrapPolicy(QtWidgets.QFormLayout.RowWrapPolicy.WrapLongRows)
         self.pathway = QtWidgets.QComboBox(self)
         self.pathway.addItem("Exploratory — no redocking control", "exploratory")
         self.pathway.addItem("Redock experimental ligand — recommended when available", "control")
@@ -81,12 +85,15 @@ class StudySetupPanel(QtWidgets.QWidget):
         self.redock_ligand = QtWidgets.QCheckBox("Redock experimental ligand (recommended when available)")
         self.redock_ligand.setObjectName("redock_experimental_ligand")
         self.redock_ligand.setToolTip(self.pathway.toolTip())
-        self.redock_note = QtWidgets.QLabel()
-        self.redock_note.setWordWrap(True)
+        self.redock_note = ExplanationLabel('', 'Experimental pose recovery', self.pathway.toolTip() +
+            '\n\nTests recovery of the selected experimental ligand after site review. '
+            'Evidence lookup and additional-pocket prediction are separate choices.')
         self.protocol_bundle = QtWidgets.QLineEdit()
         self.protocol_bundle.setPlaceholderText("Choose a saved .duprotocol bundle")
         protocol_row, protocol_button = _path_row(self.protocol_bundle, "Browse…")
-        self.protocol_note = QtWidgets.QLabel(
+        self.protocol_note = ExplanationLabel(
+            'Reuse the saved receptor, regions and settings. Review before importing.',
+            'Using a saved protocol',
             "Reuse the saved receptor, docking regions, program and settings without preparing them again. "
             "Review the verified bundle before importing. Exploratory protocols remain exploratory; "
             "importing is not a new pose-recovery control. Select compounds in Screen ligands next."
@@ -98,13 +105,15 @@ class StudySetupPanel(QtWidgets.QWidget):
         self.site_mode = QtWidgets.QComboBox()
         self.site_mode.addItem("Predicted pockets", "pockets")
         self.site_mode.addItem("Selected bound ligand", "ligand")
-        self.site_guidance_note = QtWidgets.QLabel(
+        self.site_guidance_note = ExplanationLabel(
+            'Starting point only. Review and approve one or more docking regions.',
+            'Choosing docking regions',
             "This is a starting point, not the final docking location. "
             "After review, choose one or more docking regions here or elsewhere, "
             "including sites supported by other structures."
         )
         self.site_guidance_note.setWordWrap(True)
-        self.site_mode.setToolTip(self.site_guidance_note.text())
+        self.site_mode.setToolTip(self.site_guidance_note.details_text)
         self.pocket_engine = QtWidgets.QComboBox()
         self.pocket_engine.addItem("P2Rank — primary", "p2rank")
         self.pocket_engine.addItem("fpocket — fallback", "fpocket")
@@ -137,9 +146,7 @@ class StudySetupPanel(QtWidgets.QWidget):
             "Recommended for finding other experimentally observed ligand sites. "
             "Uncheck for local-only evidence review. This controls evidence lookup only; structure and chemistry downloads are separate."
         )
-        self.pdb_evidence_note = QtWidgets.QLabel()
-        self.pdb_evidence_note.setWordWrap(True)
-        self.pdb_evidence_note.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.pdb_evidence_note = ExplanationLabel('', 'Public PDB evidence and privacy', self.pdb_evidence.toolTip())
         self.pdb_evidence_note.setToolTip(self.pdb_evidence.toolTip())
         self.pdb_evidence.toggled.connect(self._update_evidence_note)
         self._update_evidence_note()
@@ -158,6 +165,7 @@ class StudySetupPanel(QtWidgets.QWidget):
         self.deposited_evidence_details.setEnabled(False)
         self.deposited_evidence_details.hide()
         self._coordinate_evidence_record = None
+        self._deposited_evidence_window = None
         input_row, input_button = _path_row(self.input_pdb, "Browse…")
         self.fetch_button = QtWidgets.QPushButton("Fetch RCSB ID")
         self.fetch_button.setObjectName("fetch_rcsb_pdb_button")
@@ -225,7 +233,8 @@ class StudySetupPanel(QtWidgets.QWidget):
         form.addRow("Bound ligand", ligand_row)
         form.addRow("Control docking engine", self.control_engine)
         form.addRow("Initial control sampling", self.control_tier)
-        self.reproducibility_notice = QtWidgets.QLabel(DOCKING_REPRODUCIBILITY_NOTICE)
+        self.reproducibility_notice = ExplanationLabel(REPRODUCIBILITY_SUMMARY,
+            'Comparing docking runs across systems', DOCKING_REPRODUCIBILITY_NOTICE)
         self.reproducibility_notice.setObjectName('control_reproducibility_notice')
         self.reproducibility_notice.setWordWrap(True)
         form.addRow(self.reproducibility_notice)
@@ -268,13 +277,13 @@ class StudySetupPanel(QtWidgets.QWidget):
 
     def _update_evidence_note(self):
         self.pdb_evidence_note.setText(
-            "Online evidence lookup sends the receptor’s protein sequence to RCSB PDB. Uncheck for local-only evidence."
+            "Sends the receptor protein sequence to RCSB PDB. Uncheck for local-only evidence."
             if self.pdb_evidence.isChecked() else
-            "Local-only evidence: PDB databank search is off. Local structure information remains available; public evidence may be missing."
+            "Local-only evidence: public PDB search is off; additional evidence may be missing."
         )
 
     def set_coordinate_evidence(self, record) -> None:
-        from ..services.coordinate_evidence import evidence_lines
+        from ..services.coordinate_evidence import evidence_summary, evidence_lines
 
         self._coordinate_evidence_record = record
         self.deposited_evidence_details.setEnabled(bool(record))
@@ -286,35 +295,34 @@ class StudySetupPanel(QtWidgets.QWidget):
             bool(record) and self.pathway.currentData() != "reuse",
         )
         if record:
-            self.deposited_evidence.setText("\n".join(evidence_lines(record)))
+            summary = evidence_summary(record)
+            polymers = sum(item.get('type') == 'polymer' for item in summary['chain_entities'])
+            chains = f'{polymers} polymer chains' if summary['chain_entities'] else 'Chain count unrecorded'
+            assemblies = len(summary['assemblies'])
+            self.deposited_evidence.setText(
+                f"{chains} · {len(summary['ligands'])} annotated ligand/additive instances · "
+                f"{assemblies} assembly annotation{'s' if assemblies != 1 else ''}. Supplied coordinates only.")
+            if self._deposited_evidence_window is not None:
+                self._deposited_evidence_window.set_content('\n\n'.join(evidence_lines(record, detailed=True)))
         else:
             self.deposited_evidence.setText(
                 "Load or download a structure above to review its assembly and deposited components."
             )
+            if self._deposited_evidence_window is not None:
+                self._deposited_evidence_window.close()
 
     def show_deposited_evidence_details(self) -> None:
         if not self._coordinate_evidence_record:
             return
         from ..services.coordinate_evidence import evidence_lines
 
-        dialog = QtWidgets.QDialog(self)
-        dialog.setWindowTitle("Deposited structure evidence")
-        dialog.resize(720, 520)
-        layout = QtWidgets.QVBoxLayout(dialog)
-        explanation = QtWidgets.QLabel(
-            "These observations come from the deposited coordinate file. Review them "
-            "alongside the structure before choosing a docking region."
-        )
-        explanation.setWordWrap(True)
-        details = QtWidgets.QPlainTextEdit()
-        details.setReadOnly(True)
-        details.setPlainText("\n\n".join(evidence_lines(self._coordinate_evidence_record, detailed=True)))
-        close = QtWidgets.QPushButton("Close")
-        close.clicked.connect(dialog.accept)
-        layout.addWidget(explanation)
-        layout.addWidget(details, 1)
-        layout.addWidget(close)
-        dialog.exec()
+        if self._deposited_evidence_window is None:
+            self._deposited_evidence_window = ExplanationWindow('Deposited structure evidence', self)
+        dialog = self._deposited_evidence_window
+        dialog.set_content("\n\n".join(evidence_lines(self._coordinate_evidence_record, detailed=True)))
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     def set_locked(self, locked: bool) -> None:
         self._locked = locked
@@ -333,7 +341,8 @@ class StudySetupPanel(QtWidgets.QWidget):
         for button in self.findChildren(QtWidgets.QPushButton):
             if self.molecule_preview_slot.isAncestorOf(button):
                 continue  # Read-only inspection has its own reference-action gate.
-            if button not in (self.cancel_button, self.preview_input_button, self.preview_molecule_button):
+            if (button not in (self.cancel_button, self.preview_input_button, self.preview_molecule_button)
+                    and button.window() == self.window()):
                 button.setEnabled(not locked)
         self.deposited_evidence_details.setEnabled(bool(self._coordinate_evidence_record))
         self.review_protocol_button.setEnabled(locked)
@@ -364,10 +373,9 @@ class StudySetupPanel(QtWidgets.QWidget):
         self._form.setRowVisible(self.redock_note, not reuse)
         self.redock_ligand.setEnabled(not reuse and not self._locked and self._native_control_supported)
         self.redock_note.setText(
-            "Tests recovery of the selected experimental ligand after site review. "
-            "Evidence lookup and additional-pocket prediction are separate choices."
+            "Tests recovery of the selected experimental pose after site review."
             if control else
-            "Without redocking, the saved protocol is exploratory — not validated by experimental-pose recovery."
+            "Exploratory protocol: no experimental pose-recovery control."
         )
         ligand_site = not reuse and (control or self.site_mode.currentData() == "ligand")
         detector = {"p2rank": "P2Rank", "fpocket": "fpocket",
@@ -458,7 +466,11 @@ class ProtocolImportDialog(QtWidgets.QDialog):
         authority = QtWidgets.QLabel(protocol_type_label(preview['protocol_type']) +
             f" · {preview['region_count']} locked docking region(s)")
         layout.addWidget(authority)
-        note = QtWidgets.QLabel(
+        note = ExplanationLabel(
+            'Exploratory protocol: no passed pose-recovery control. Screening requires explicit approval.'
+            if preview['exploratory_authorization_required'] else
+            'Passed pose-recovery control retained. Import does not repeat or extend that test.',
+            'What protocol import preserves',
             "Import keeps the saved receptor, regions, docking program and settings unchanged. "
             "It does not prepare the receptor or start docking. " +
             ("This is exploratory: it has not passed a bound-ligand pose-recovery control. "
@@ -478,7 +490,9 @@ class ProtocolImportDialog(QtWidgets.QDialog):
             for column, value in enumerate(values):
                 table.setItem(row, column, QtWidgets.QTableWidgetItem(str(value)))
         layout.addWidget(table, 1)
-        verification = QtWidgets.QLabel(
+        verification = ExplanationLabel(
+            f"{preview['verified_files']} files verified. Import saves a study-owned copy.",
+            'Protocol file verification',
             f"Verified {preview['verified_files']} retained files. A study-owned copy is saved on import. "
             "Integrity checks detect changed files; they do not establish scientific correctness."
         )
@@ -535,7 +549,9 @@ class PreparationProgressPanel(QtWidgets.QWidget):
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
         self.progress.setFormat("Not started")
-        self.operations = QtWidgets.QLabel(
+        self.operations = ExplanationLabel(
+            'Prepare the receptor, find sites and gather evidence; then pause for review.',
+            'What preparation does',
             "This stage validates the selected structure, prepares the receptor, runs the "
             "selected pocket detector, constructs docking boxes, and gathers related-structure "
             "evidence before pausing for scientific review."
@@ -579,7 +595,7 @@ class ProtocolFinalizationPanel(QtWidgets.QWidget):
         form = QtWidgets.QFormLayout(self)
         self._settings_guide = None
         self._control_mode = False
-        self.introduction = QtWidgets.QLabel('Save a reusable recipe for later screening. This step packages your approved receptor, regions and settings; it does not dock ligands now.')
+        self.introduction = QtWidgets.QLabel('Save a reusable protocol; this does not dock ligands now.')
         self.introduction.setWordWrap(True)
         self.guide_button = QtWidgets.QPushButton('Settings guide…')
         self.guide_button.setObjectName('protocol_settings_guide')
@@ -648,7 +664,7 @@ class ProtocolFinalizationPanel(QtWidgets.QWidget):
             label_layout.addWidget(help_button)
             label_row.setMaximumWidth(250)
             widget.setMaximumWidth(300 if key == 'output_directory' else 190 if key == 'engine' else 140)
-            explanation = QtWidgets.QLabel(short + ' ' + INLINE_HELP[key])
+            explanation = QtWidgets.QLabel(INLINE_HELP[key])
             explanation.setObjectName('protocol_explain_' + key)
             explanation.setWordWrap(True)
             explanation.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextSelectableByMouse |
@@ -687,7 +703,7 @@ class ProtocolFinalizationPanel(QtWidgets.QWidget):
     def _update_engine_fields(self):
         is_ad4=self.engine.currentData()=='adgpu'
         self.inline_explanations['engine'].setText(
-            'Experimental AD4 on the GPU—not GPU Vina. Different search and estimated binding-energy formula; do not compare its energy values directly with Vina. Use ? for the offline learning guide. This release accepts only the tested Apple-Silicon build.'
+            'Experimental AD4, not GPU Vina. Energies are not comparable with Vina; tested Apple-Silicon build only.'
             if is_ad4 else INLINE_HELP['engine'])
         for key,widgets in self._field_rows.items():
             if key.startswith('ad4_') or key in ('exhaustiveness','modes','energy_range'):
@@ -707,7 +723,7 @@ class ProtocolFinalizationPanel(QtWidgets.QWidget):
                        self.inline_explanations['approval'], self.guide_button, self.workload_hint):
             widget.setVisible(not active)
         self.introduction.setText(description if active else
-            'Save a reusable recipe for later screening. This step packages your approved receptor, regions and settings; it does not dock ligands now.')
+            'Save a reusable protocol; this does not dock ligands now.')
         self.finalize_button.setText("Run reviewed known-ligand control" if active else "Generate final report and .duprotocol")
         if not active:
             self._update_engine_fields()
@@ -726,13 +742,12 @@ class ProtocolFinalizationPanel(QtWidgets.QWidget):
         if self.engine.currentData()=='adgpu':
             self.workload_hint.setText(
                 f'Per chemical state and approved site: up to {self.conformers.value()*self.seeds.value()} GPU repeats '
-                f'({self.conformers.value()} starting shapes × {self.seeds.value()} seeds), each retaining {self.ad4_runs.value()} genetic-search winners. '
-                'Experimental AD4 uses a dry rigid receptor. Macrocycles/metals are rejected; actual grid extents may expand by a fraction of one 0.375 Å cell and are locked and reported separately.')
+                f'({self.conformers.value()} shapes × {self.seeds.value()} seeds); {self.ad4_runs.value()} winners per repeat. '
+                'Macrocycles/metals are unsupported.')
             return
         self.workload_hint.setText(
             f'Per chemical state and approved site: up to {self.conformers.value() * self.seeds.value()} docking runs '
-            f'({self.conformers.value()} starting shapes × {self.seeds.value()} repeats), each saving at most '
-            f'{self.modes.value()} poses. Actual totals depend on generated states/shapes and the ligand library.')
+            f'({self.conformers.value()} shapes × {self.seeds.value()} repeats); at most {self.modes.value()} poses per run.')
 
     def show_settings_guide(self, key=''):
         if self._settings_guide is None:
@@ -805,7 +820,8 @@ class ScreeningSetupPanel(QtWidgets.QWidget):
         cpu_layout.addWidget(self.cpu_count)
         self.stop_on_error = QtWidgets.QCheckBox("Stop the library after the first failed compound")
         self.approval = QtWidgets.QCheckBox("I authorize screening with this exploratory protocol without pose-recovery control"); self.approval.setObjectName("exploratory_screening_approval")
-        self.preview_button = QtWidgets.QPushButton("Preview workload (chemistry validated at launch)")
+        self.preview_button = QtWidgets.QPushButton("Preview workload")
+        self.preview_button.setToolTip('Estimate jobs before launch. Full chemistry validation occurs when screening starts.')
         self.run_button = QtWidgets.QPushButton("Run locked-protocol screening"); self.run_button.setObjectName("start_locked_screening_button")
         self.status = QtWidgets.QLabel("Finalize a reusable protocol, then select ligands and preview the workload."); self.status.setWordWrap(True)
         self.elapsed = QtWidgets.QLabel()
@@ -825,6 +841,15 @@ class ScreeningSetupPanel(QtWidgets.QWidget):
         settings_grid.setColumnStretch(2, 1)
         settings_grid.setHorizontalSpacing(20)
         self.inline_explanations = {}
+        brief = {
+            'output': 'Save this run’s results here; the protocol stays locked.',
+            'analysis': 'Choose output detail; docking search is unchanged.',
+            'cpu': 'Threads per search. More threads can be slower; compounds run sequentially.',
+            'representatives': 'Lowest-energy pose groups per compound to review in detail.',
+            'cluster_rmsd': 'Smaller cutoff separates more groups; larger merges more. This is not an accuracy score.',
+            'stop_on_error': 'Unchecked: continue other compounds and report failures.',
+            'approval': 'Authorization does not validate hits or binding affinity.',
+        }
         for row, (key, title, widget, explanation) in enumerate((
                 ('output', 'Screening output', output_row,
                  'Folder for this screening run and its results; the locked protocol is not overwritten.'),
@@ -841,11 +866,9 @@ class ScreeningSetupPanel(QtWidgets.QWidget):
             label.setBuddy(getattr(self, key))
             label.setWordWrap(True)
             widget.setMaximumWidth(330 if key in ('output', 'analysis', 'cpu', 'cluster_rmsd') else 140)
-            note = QtWidgets.QLabel(explanation)
+            note = ExplanationLabel(brief[key], title, explanation)
             note.setObjectName('screening_explain_' + key)
             note.setWordWrap(True)
-            note.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextSelectableByMouse |
-                                         QtCore.Qt.TextInteractionFlag.TextSelectableByKeyboard)
             settings_grid.addWidget(label, row, 0, QtCore.Qt.AlignmentFlag.AlignTop)
             settings_grid.addWidget(widget, row, 1, QtCore.Qt.AlignmentFlag.AlignTop)
             settings_grid.addWidget(note, row, 2)
@@ -863,14 +886,17 @@ class ScreeningSetupPanel(QtWidgets.QWidget):
                 ('approval', self.approval,
                  'Exploratory means this protocol has no experimental pose-recovery control. Authorization is not validation of hits or binding affinity.')):
             form.addRow(widget)
-            note = QtWidgets.QLabel(explanation)
+            note = ExplanationLabel(brief[key], widget.text(), explanation)
             note.setObjectName('screening_explain_' + key)
             note.setWordWrap(True)
             form.addRow(note)
             self.inline_explanations[key] = note
             widget.setToolTip(explanation)
             widget.setAccessibleDescription(explanation)
-        self.reproducibility_notice = QtWidgets.QLabel(DOCKING_REPRODUCIBILITY_NOTICE)
+        self._cpu_default_help = self.cpu.toolTip()
+        self._cpu_default_summary = brief['cpu']
+        self.reproducibility_notice = ExplanationLabel(REPRODUCIBILITY_SUMMARY,
+            'Comparing docking runs across systems', DOCKING_REPRODUCIBILITY_NOTICE)
         self.reproducibility_notice.setObjectName('screening_reproducibility_notice')
         self.reproducibility_notice.setWordWrap(True)
         form.addRow(self.reproducibility_notice)
@@ -908,13 +934,19 @@ class ScreeningSetupPanel(QtWidgets.QWidget):
         ad4 = engine == 'adgpu'
         self.cpu.setEnabled(not ad4)
         self.cpu_count.setVisible(not ad4 and self.cpu.currentData() == 'custom')
-        self.inline_explanations['cpu'].setText(
+        details = (
             'Not used by AutoDock-GPU. The experimental AD4 profile uses the Apple GPU; CPU thread selections are not applied. Compounds still run sequentially.'
             if ad4 else
             'Native Windows QuickVina-W uses one CPU worker to contain reproduced parallel-worker heap-corruption crashes. '
             'Default selects one worker; explicit automatic or multi-worker settings are rejected before search. '
             'The selected CPU setting is recorded with the results.'
-            if engine == 'qvinaw' and sys.platform == 'win32' else self.cpu.toolTip())
+            if engine == 'qvinaw' and sys.platform == 'win32' else self._cpu_default_help)
+        summary = ('CPU thread settings are not applied to AutoDock-GPU.' if ad4 else
+                   'Windows QuickVina-W requires 1 worker. Automatic and multi-worker settings are rejected.'
+                   if engine == 'qvinaw' and sys.platform == 'win32' else self._cpu_default_summary)
+        self.inline_explanations['cpu'].set_content(summary, details)
+        self.cpu.setToolTip(details)
+        self.cpu.setAccessibleDescription(details)
 
     def cpu_override(self):
         """None inherits policy; zero is explicitly engine automatic."""

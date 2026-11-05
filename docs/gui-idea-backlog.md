@@ -2,6 +2,25 @@
 
 Status: active scope-control record, established 2026-09-24.
 
+### Compact GUI explanations (authorized 2026-11-04)
+
+The user reports excessive text throughout the interface and explicitly requests
+short summaries with fuller explanations in a separate window. Audit all GUI
+surfaces; replace repeated teaching paragraphs, not scientific evidence or
+approval consequences. This is gate 4: a simpler presentation of existing work.
+Reuse existing guides and one shared, modeless explanation component. No new
+scientific options, settings, dependencies or workflow branch are included.
+
+Keep network disclosures, exploratory status, exact selections, errors and
+model-change warnings visible. Preserve the full local teaching material in
+scrollable, selectable windows, available by mouse and keyboard. Opening help
+must not launch work, grant approval or change scientific values. Acceptance
+covers current/reopened content, engine-specific guidance, locked studies,
+unchanged defaults/selection, and rendered views at ordinary window sizes.
+This user-directed presentation pass follows completed branch CI and displaces
+no active scientific run. The detailed surface audit is recorded in
+`gui-text-review.md`.
+
 ### Integrated 2D and paired 2D/3D reference selection (authorized 2026-11-03)
 
 The user requests the molecule's 2D drawing in the regular interface, an optional

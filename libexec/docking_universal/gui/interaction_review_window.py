@@ -4,6 +4,7 @@ from .linked_pose_review import contact_residues
 import html
 import xml.etree.ElementTree as ET
 from .image_export import save_image_button, diagram_export, pymol_export, paired_export
+from .explanations import ExplanationLabel
 
 
 class InteractionReviewWindow(QtWidgets.QDialog):
@@ -44,7 +45,13 @@ class InteractionReviewWindow(QtWidgets.QDialog):
         close.clicked.connect(self.close)
         bar.addWidget(close)
         layout.addLayout(bar)
-        self.basis = QtWidgets.QLabel(
+        self.basis = ExplanationLabel(
+            'Experimental structure, not a docked pose. Both views use the same coordinates.'
+            if view.experimental else
+            'Docked pose: both views use the same retained coordinates. Contacts do not establish affinity.'
+            if view.coordinate_kind == 'docked' else
+            'Coordinate source kind unrecorded. Both views use the same coordinates; contacts do not establish affinity.',
+            '2D / 3D coordinate source',
             "Experimental structure only — not a docked pose. Both views use the same retained "
             "experimental receptor and ligand coordinates. PLIP contacts are calculated from those "
             "coordinates, not predictions for the study receptor."
