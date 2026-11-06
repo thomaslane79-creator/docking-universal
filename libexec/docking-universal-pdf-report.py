@@ -850,15 +850,20 @@ def receptor_preparation_record(study, control=None, protocol=None):
     reduce2_audit_path = retained(["preparation/**/receptor/reduce2_audit.json", "**/receptor/reduce2_audit.json", "**/assets/reduce2_audit.json"])
     reduce2_log = retained(["preparation/**/receptor/reduce2.log", "**/receptor/reduce2.log", "**/assets/reduce2.log"])
     reduce2_audit = read_json(reduce2_audit_path)
-    from docking_universal.services.receptor_model_history import normalize_preparation
+    from docking_universal.services.receptor_model_history import normalize_preparation, recorded_backend_summary
     summary_preparation = read_json(Path(study) / 'report/study_summary.json').get('protocol_receptor_preparation') or {}
     recorded_preparation = normalize_preparation(
         (protocol or {}).get('receptor_preparation') or summary_preparation,
         ((protocol or {}).get('locked_inputs') or {}).get('receptor_sha256'))
     recorded_removal = bool(recorded_preparation.get("user_approved_component_removal"))
     recorded_rows = recorded_preparation.get("user_approved_removed_components") or []
+    backend_audit_path = ccd_audit_path or (receptor_dir / "ccd_modification_audit.json" if receptor_dir else None)
+    recorded_backend = recorded_backend_summary(backend_audit_path) if backend_audit_path else None
     if (removal_log and removal_log.stat().st_size) or recorded_removal:
         path = "user-approved removal of unmatched receptor components after safe preparation fallbacks failed"
+        used = bool(audit_path)
+    elif recorded_backend:
+        path = recorded_backend
         used = bool(audit_path)
     elif adfr_log and adfr_log.stat().st_size:
         path = "legacy ADFRsuite fallback after Meeko rejected a linked deposited component"
@@ -890,6 +895,7 @@ def receptor_preparation_record(study, control=None, protocol=None):
     )
     return {
         "path": path,
+        "preparation_route": ccd_audit.get("preparation_route"),
         "pdbfixer_used": used,
         "pdbfixer_audit": str(audit_path) if audit_path else None,
         "user_approved_component_removal_log": str(removal_log) if removal_log else None,
@@ -1303,9 +1309,12 @@ def reproducibility_record(protocol, study, control):
 def retain_used_report_methods(provenance, cavity, has_docking):
     """Keep only software and references supported by retained run evidence."""
     preparation = provenance.get("receptor_preparation", {})
+    primary_adfr = preparation.get("preparation_route") == "adfr_primary"
     used_software = {
         "Docking Universal", "Meeko", "PyMOL", "Matplotlib", "ReportLab", "Python",
     }
+    if primary_adfr and not has_docking:
+        used_software.discard("Meeko")
     used_software.update(row["software"] for row in provenance.get("software", [])
                          if row.get("role") == "Docking-region definition")
     poseedit_used = provenance.get("methods", {}).get("interaction_diagram") == "approved-poseedit-local-v1"
@@ -1321,7 +1330,7 @@ def retain_used_report_methods(provenance, cavity, has_docking):
         used_software.update({"PDB2PQR", "PROPKA"})
     if preparation.get("reduce2_audit") and (preparation.get("reduce2") or {}).get("status") == "compatible":
         used_software.add("CCTBX")
-    if preparation.get("adfr_fallback_log"):
+    if primary_adfr or preparation.get("adfr_fallback_log"):
         used_software.add("ADFRsuite")
     pocket_evidence_used = bool(first(Path(provenance["study"]), ["report/pocket_evidence_site_*_AB.png"]))
     if pocket_evidence_used:
@@ -1350,8 +1359,12 @@ def retain_used_report_methods(provenance, cavity, has_docking):
                 "Receptor and ligand parameterization"
                 if has_docking else "Receptor preparation"
             )
-            if preparation.get("adfr_fallback_log"):
+            if primary_adfr:
+                item["role"] = "Ligand parameterization"
+            elif preparation.get("adfr_fallback_log"):
                 item["role"] = "Primary receptor preparation attempt (rejected)"
+        elif item.get("software") == "ADFRsuite" and primary_adfr:
+            item["role"] = "Primary receptor parameterization"
         elif item.get("software") == "RDKit" and pocket_evidence_used and not has_docking:
             item["role"] = "Deposited-ligand 2D identity depictions"
 
@@ -1364,9 +1377,9 @@ def retain_used_report_methods(provenance, cavity, has_docking):
         if "P2Rank:" in citation:
             return bool(cavity) and cavity.get("pocket_engine") == "p2rank"
         if "Meeko:" in citation:
-            return True
+            return not primary_adfr or has_docking
         if "AutoDockFR:" in citation:
-            return bool(preparation.get("adfr_fallback_log"))
+            return primary_adfr or bool(preparation.get("adfr_fallback_log"))
         if "PDBFixer:" in citation or "OpenMM 7:" in citation:
             return bool(preparation.get("pdbfixer_used"))
         if "PDB2PQR:" in citation or "PROPKA:" in citation:

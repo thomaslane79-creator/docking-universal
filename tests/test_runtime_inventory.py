@@ -9,6 +9,33 @@ from docking_universal import runtime_inventory
 
 
 class RuntimeInventoryTests(unittest.TestCase):
+    def test_external_adfr_is_discovered_without_running_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            executable = home / "ADFRsuite-1.0/bin/prepare_receptor"
+            executable.parent.mkdir(parents=True)
+            executable.write_text("#!/bin/sh\nexit 0\n")
+            executable.chmod(0o755)
+            spec = next(spec for spec in runtime_inventory.COMMAND_SPECS if spec.id == "adfr_receptor")
+            with patch.object(runtime_inventory.Path, "home", return_value=home), patch.dict(
+                os.environ, {"DOCKING_UNIVERSAL_ADFR_FALLBACK_BIN": ""},
+            ), patch.object(runtime_inventory.subprocess, "run", side_effect=AssertionError("Inventory must not start ADFR")):
+                observed = runtime_inventory._observe_command(spec, [])
+            self.assertEqual(observed.status, "available")
+            self.assertEqual(observed.path, str(executable.resolve()))
+            self.assertIn("checks startup", observed.detail)
+
+    def test_missing_adfr_override_does_not_fall_back_to_another_installation(self):
+        spec = next(spec for spec in runtime_inventory.COMMAND_SPECS if spec.id == "adfr_receptor")
+        configured = "/missing-explicit-adfr/prepare_receptor"
+        with patch.dict(os.environ, {"DOCKING_UNIVERSAL_ADFR_FALLBACK_BIN": configured}), patch.object(
+            runtime_inventory, "_which", side_effect=AssertionError("Override is authoritative"),
+        ):
+            observed = runtime_inventory._observe_command(spec, [])
+        self.assertEqual(observed.status, "absent")
+        self.assertEqual(observed.path, configured)
+        self.assertIn("Configured", observed.detail)
+
     def test_prefix_inventory_is_read_only_and_reports_pip_override_without_conda_list(self):
         with tempfile.TemporaryDirectory() as directory:
             prefix = Path(directory)

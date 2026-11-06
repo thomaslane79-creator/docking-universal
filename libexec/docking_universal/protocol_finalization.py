@@ -419,6 +419,15 @@ def approved_regions_from_study(state: StudyState):
         artifact_id = candidates[candidate_id]["box_artifact_id"]
         if approved_hashes.get(artifact_id) != region["box_sha256"]:
             raise ValueError(f"Approved evidence hash is missing or changed for {candidate_id}")
+        from .services.preparation_site_issues import candidate_with_model_change_review
+        reviewed = candidate_with_model_change_review(state, candidates[candidate_id])
+        impact = reviewed.get('evidence', {}).get('receptor_model_review')
+        if impact:
+            if impact.get('status') == 'model_change_evidence_unverified':
+                raise ValueError('Receptor-change box-impact evidence could not be verified: ' + impact['warning'])
+            # Keep the exact per-box warning in the portable region record,
+            # alongside the source/model history and verified box digest.
+            region['receptor_model_review'] = impact
     return regions, approval
 
 

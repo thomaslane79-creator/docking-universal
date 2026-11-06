@@ -209,6 +209,8 @@ class CommandDispatcher:
                 preview = self.workflow_runner.preview_receptor_changes(command.study_id, command.payload['choices'],
                     expected_revision=command.expected_revision)
                 return Response(command.request_id, 'applied', command.expected_revision, {'preview': preview})
+            if set(command.payload) != {'choices', 'preview_sha256', 'actor', 'rationale'}:
+                raise ValueError('Exact changes, preview hash, actor and rationale are required')
             result = self.workflow_runner.prepare_reviewed_receptor(command.study_id,
                 model_changes=command.payload, request_id=command.request_id, expected_revision=command.expected_revision)
             state = self.controller.get_study(command.study_id)

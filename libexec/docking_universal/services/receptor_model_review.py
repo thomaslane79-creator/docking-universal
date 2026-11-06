@@ -75,14 +75,20 @@ def inspect_source_data(data):
 
 def preview_changes(source, choices, *, context):
     """Return a deterministic preview and in-memory derivative; write nothing."""
-    if not isinstance(choices, dict) or set(choices) - {'exclusions', 'alternate_locations', 'sidechain_candidate'}:
+    if not isinstance(choices, dict) or set(choices) - {'exclusions', 'alternate_locations', 'sidechain_candidate', 'preparation_backend'}:
         raise ValueError('Only explicit exclusions, alternate locations and a reviewed side-chain candidate are supported')
+    if 'preparation_backend' in choices and (not isinstance(choices['preparation_backend'], str)
+                                           or choices['preparation_backend'] not in {'meeko', 'adfr'}):
+        raise ValueError('Select an explicit Meeko or ADFRsuite preparation backend')
     data, lines, atoms, inventory = inspect_source(source)
     excluded_rows = choices.get('exclusions', [])
     alt_rows = choices.get('alternate_locations', [])
     if not isinstance(excluded_rows, list) or not isinstance(alt_rows, list):
         raise ValueError('Receptor changes must be lists of exact residue identities')
     excluded = [identity(row) for row in excluded_rows]
+    reference = context.get('bound_reference')
+    if reference and identity(reference) in excluded:
+        raise ValueError('The selected bound reference ligand cannot be excluded from its control/site input')
     selected = [(identity(row), row.get('altloc')) for row in alt_rows]
     if len(excluded) != len(set(excluded)) or len(selected) != len({key for key, _ in selected}):
         raise ValueError('Each residue may appear only once in a change list')
@@ -205,3 +211,45 @@ def write_model(root, source_name, preview, derivative, *, actor, rationale):
               'model_path': str(model.resolve()), 'status': 'approved_changes_not_parameterized'}
     (root / 'reviewed_model.json').write_text(json.dumps(record, indent=2) + '\n')
     return model, record
+
+
+def retain_reviewed_receptor_input(root, preview, derivative):
+    """Keep the original receptor filter's inventory through explicit changes.
+
+    Pruning a LINK during an approved exclusion must not make a second,
+    unselected component disappear when the legacy filter runs again. Retain
+    only atoms admitted by the original filter, plus explicitly modeled atoms,
+    using the already reviewed full derivative's labels and coordinates.
+    """
+    from ..receptor_filter import filter_receptor_pdb
+    root = Path(root)
+    source = Path(preview['source_path'])
+    if digest(source.read_bytes()) != preview['source_sha256'] or digest(derivative) != preview['model_input_sha256']:
+        raise ValueError('Original source or reviewed model changed before retaining its receptor inventory')
+    baseline = root / 'model/original_filtered_receptor.pdb'
+    filter_receptor_pdb(source, baseline)
+    allowed = {}
+    context = []
+    for line in baseline.read_text().splitlines(keepends=True):
+        if line.startswith(('ATOM  ', 'HETATM')):
+            allowed[(residue_id(line), line[12:16].strip())] = line[:6]
+        else:
+            context.append(line)
+    modeled = {(tuple(row.get(key, '') for key in ('resname', 'chain', 'number', 'insertion_code')), row['atom_name'])
+               for change in preview['changes'] for row in change.get('generated_atoms', [])}
+    selected = list(context)
+    for line in derivative.decode('utf-8').splitlines(keepends=True):
+        if not line.startswith(('ATOM  ', 'HETATM')):
+            continue
+        key = (residue_id(line), line[12:16].strip())
+        if key in allowed or key in modeled:
+            selected.append(allowed.get(key, line[:6]) + line[6:])
+    if not any(line.startswith('ATOM  ') for line in selected):
+        raise ValueError('Reviewed receptor inventory contains no protein coordinates')
+    output = root / 'model/reviewed_filtered_receptor.pdb'
+    output.write_text(''.join(selected))
+    if digest(source.read_bytes()) != preview['source_sha256']:
+        raise ValueError('Original receptor source changed during inventory review')
+    return {'path': str(output.resolve()), 'sha256': digest(output.read_bytes()),
+            'baseline_path': str(baseline.resolve()), 'baseline_sha256': digest(baseline.read_bytes()),
+            'policy': 'original receptor inventory with only the explicitly reviewed model changes'}

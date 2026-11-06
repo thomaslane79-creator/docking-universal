@@ -90,11 +90,13 @@ resolve_prepare_runtime_tools() {
         PREP_RECEPTOR_BIN=$(command -v mk_prepare_receptor.py)
       else
         PREP_BACKEND=adfr
-        PREP_RECEPTOR_BIN=$(command -v prepare_receptor 2>/dev/null || true)
+        PREP_RECEPTOR_BIN="$ADFR_FALLBACK_BIN"
       fi
       ;;
     meeko) [ -n "$PREP_RECEPTOR_BIN" ] || PREP_RECEPTOR_BIN=$(command -v mk_prepare_receptor.py 2>/dev/null || true) ;;
-    adfr) [ -n "$PREP_RECEPTOR_BIN" ] || PREP_RECEPTOR_BIN=$(command -v prepare_receptor 2>/dev/null || true) ;;
+    # The separately installed suite need not be on PATH. Reuse the same
+    # explicit/PATH/conventional-home discovery for primary and fallback use.
+    adfr) [ -n "$PREP_RECEPTOR_BIN" ] || PREP_RECEPTOR_BIN="$ADFR_FALLBACK_BIN" ;;
     *) echo "ERROR: DOCKING_UNIVERSAL_PREP_BACKEND must be auto, meeko, or adfr" >&2; return 2 ;;
   esac
   if [ "$POCKET_ENGINE" = p2rank ]; then

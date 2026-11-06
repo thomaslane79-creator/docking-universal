@@ -8,6 +8,24 @@ The user requires retaining COH A:602 and B:603. See
 `coh-support-20261105.md` and `results-design-handoff-20261105.md`; no new charge
 model, cofactor template or surface capability is accepted by this plan entry.
 
+Preparation follow-up authorized 2026-11-05: restore the independently installed
+ADFR backend with user-approved Rosetta on Apple Silicon; fix primary/fallback
+discovery and route provenance; report fallback skips and failures explicitly.
+An actual legacy candidate exposed deletion of retained sugar chains and a
+reported missing charge parameter despite exit code zero. Correct cleanup and
+require strict output validation before accepting ADFR artifacts. This urgent
+workflow correction continues ahead of visualization work; neither a written
+PDBQT nor an installed tool establishes target-specific scientific validation.
+
+2026-11-06 clarification: restore access to the existing explicit-exclusion
+review after failed control preparation, before any box exists. Keep the locked
+control/reference choices and require a fresh exact preview and approval. A
+reviewed derivative runs in a new isolated directory; automatic secondary
+repairs/removals remain disabled. Generated boxes receive exact inside/distance
+warnings from the pinned original coordinates, retained in portable region
+records. Tests cover control/settings preservation, source/approval hashes,
+orphaned linked-component retention, failure isolation and bundle reopening.
+
 Current user-requested presentation follow-up (2026-11-04): reduce explanatory
 text across the GUI using brief visible summaries and separate, modeless
 explanation windows. Preserve explicit choices, consent, warnings and complete

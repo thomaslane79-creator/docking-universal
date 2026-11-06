@@ -24,7 +24,14 @@ def main() -> int:
     guard = None
     capabilities = {"scientific_stages_supported": os.name != "nt",
                     "coordinate_site_review_supported": sys.platform == 'darwin',
-                    "reviewed_receptor_changes_supported": sys.platform == 'darwin'}
+                    "reviewed_receptor_changes_supported": sys.platform == 'darwin',
+                    "failed_preparation_model_review_supported": sys.platform == 'darwin',
+                    "reviewed_receptor_preparation_backends": ["meeko"]}
+    if sys.platform == 'darwin':
+        from docking_universal.runtime_inventory import COMMAND_SPECS, _command_search_paths, _observe_command
+        adfr = next(spec for spec in COMMAND_SPECS if spec.id == 'adfr_receptor')
+        if _observe_command(adfr, _command_search_paths(sys.prefix)).status == 'available':
+            capabilities['reviewed_receptor_preparation_backends'].append('adfr')
     if os.name == "nt":
         from docking_universal.windows_desktop import installed_host, workflow_guard, installed_capabilities
         try:

@@ -2,6 +2,44 @@
 
 Status: active scope-control record, established 2026-09-24.
 
+### Restore usable, auditable preparation fallbacks (2026-11-05)
+
+The user requests correction of missing non-Meeko recovery paths. The branch
+history retains ADFRsuite as an independent backend after the Meeko default
+change; it was separately installed, outside the Conda declaration. September's
+inventory recorded its presence, while October's validation already recorded
+an Intel startup failure. Restore availability on this Mac with the user's
+explicitly approved Rosetta and nonacademic ADFRsuite installation.
+
+This is a demonstrated preparation correctness/acceptance failure (gate 1).
+Unify primary/fallback discovery, report skipped and failed routes, and label
+primary ADFR success accurately in all preparation summaries. Check the actual
+output, not only command success: a real legacy attempt removed retained sugar
+chains through its default `nonstdres` cleanup and assigned a zero charge after
+reporting a missing parameter. Preserve these chains with explicit cleanup and
+reject missing heavy atoms, changed coordinates, invalid types/charges or
+reported charge-assignment failures. Retain validation evidence on failure.
+
+Open Babel remains a conversion/depiction dependency. Isolated tests show that
+its successful PDBQT writer can conceal failed Gasteiger assignment for COH;
+do not connect that unchecked conversion as an automatic receptor fallback.
+No change to the selected source, cofactors, charge model or study approval is
+made by installing tools or testing isolated candidates.
+
+User clarification (2026-11-06): preserve the optional removal workflow and
+warn when an omitted residue lies in a docking box. The exact GUI review
+already exists for sites-first studies, but a failed control preparation could
+not reach it before boxes existed. This is the same gate-1 completion problem,
+not permission for automatic removal or a switch to coordinate-first controls.
+Expose the existing review dialog from failed setup; require exact choices,
+preview, rationale and acknowledgement. Keep the bound reference and locked
+control settings, prepare an isolated derivative with the explicitly chosen
+backend, and disable additional repair/fallback engines. Preserve the original
+baseline receptor inventory so pruning a LINK cannot silently remove another
+component. Project reviewed residue coordinates onto later-generated boxes and
+retain the per-box warning in exported/reopened protocols. COH remains retained
+unless the user explicitly changes that scientific choice.
+
 ### P2Rank installation path correction (2026-11-05)
 
 The user's ligand-guided control with additional P2Rank prediction failed before

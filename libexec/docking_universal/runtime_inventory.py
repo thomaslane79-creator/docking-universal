@@ -303,10 +303,32 @@ def _which(names: Sequence[str], paths: Sequence[str]) -> str | None:
 
 
 def _observe_command(spec: DependencySpec, paths: Sequence[str], version: str | None = None) -> DependencyObservation:
-    path = _which(spec.command_names, paths)
+    detail = None
+    if spec.id == "adfr_receptor":
+        # Match the preparer's separately installed backend discovery. Merely
+        # finding its wrapper does not prove its bundled interpreter can start.
+        configured = os.environ.get("DOCKING_UNIVERSAL_ADFR_FALLBACK_BIN", "")
+        if configured:
+            path = shutil.which(configured, path=os.pathsep.join(paths))
+            if not path:
+                return DependencyObservation(
+                    spec.id, spec.label, spec.role, "absent", path=configured,
+                    required_for=spec.required_for,
+                    detail="Configured ADFRsuite fallback is missing or not executable.",
+                )
+        else:
+            path = _which(spec.command_names, paths) or shutil.which(
+                str(Path.home() / "ADFRsuite-1.0/bin/prepare_receptor"),
+                path=os.pathsep.join(paths),
+            )
+        if path:
+            path = str(Path(path).resolve())
+            detail = "Executable found; preparation checks startup before using the fallback."
+    else:
+        path = _which(spec.command_names, paths)
     return DependencyObservation(
         spec.id, spec.label, spec.role, "available" if path else "absent",
-        version=version, path=path, required_for=spec.required_for,
+        version=version, path=path, required_for=spec.required_for, detail=detail,
     )
 
 

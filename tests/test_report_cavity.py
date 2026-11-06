@@ -311,6 +311,53 @@ class CavityReportTests(unittest.TestCase):
             self.assertIn("ADFRsuite", record["path"])
             self.assertTrue(record["adfr_fallback_log"].endswith("receptor_adfr_fallback.log"))
 
+    def test_primary_adfr_is_not_reported_as_strict_meeko(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            study = Path(temporary)
+            receptor = study / "preparation/target_receptor_prep/receptor"
+            receptor.mkdir(parents=True)
+            (receptor / "ccd_modification_audit.json").write_text(json.dumps({
+                "preparation_route": "adfr_primary",
+            }))
+            record = REPORT.receptor_preparation_record(study)
+            self.assertIn("ADFRsuite", record["path"])
+            self.assertIn("primary", record["path"])
+            self.assertNotIn("Meeko", record["path"])
+            self.assertFalse(record["pdbfixer_used"])
+            self.assertIsNone(record["adfr_fallback_log"])
+
+    def test_failed_adfr_log_does_not_claim_successful_preparation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            study = Path(temporary)
+            receptor = study / "preparation/target_receptor_prep/receptor"
+            receptor.mkdir(parents=True)
+            (receptor / "receptor_adfr_fallback.log").write_text("legacy command exited zero\n")
+            (receptor / "preparation_intervention.json").write_text(json.dumps({
+                "adfr_fallback": {"status": "validation_failed", "reason": "ADFR reported missing Gasteiger parameters"},
+            }))
+            record = REPORT.receptor_preparation_record(study)
+            self.assertIn("preparation stopped", record["path"])
+            self.assertIn("missing Gasteiger parameters", record["path"])
+            self.assertNotIn("fallback after Meeko", record["path"])
+
+    def test_primary_adfr_methods_do_not_assign_receptor_work_to_meeko(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            for has_docking in (False, True):
+                with self.subTest(has_docking=has_docking):
+                    provenance = {
+                        "study": temporary, "receptor_preparation": {"preparation_route": "adfr_primary"},
+                        "methods": {"docking_scores_and_poses": "AutoDock Vina"},
+                        "software": [{"software": name} for name in ("Meeko", "ADFRsuite")],
+                        "references": [{"citation": name} for name in ("Meeko:", "AutoDockFR:")],
+                    }
+                    record = REPORT.retain_used_report_methods(provenance, None, has_docking)
+                    roles = {item["software"]: item["role"] for item in record["software"]}
+                    self.assertEqual(roles["ADFRsuite"], "Primary receptor parameterization")
+                    if has_docking:
+                        self.assertEqual(roles["Meeko"], "Ligand parameterization")
+                    else:
+                        self.assertNotIn("Meeko", roles)
+
     def test_receptor_preparation_record_recovers_external_preparation_route(self):
         with tempfile.TemporaryDirectory() as temporary:
             temporary = Path(temporary)

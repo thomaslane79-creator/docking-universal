@@ -1,7 +1,8 @@
 # 5IKR COH support investigation — 2026-11-05
 
-Status: P2Rank installation repaired; cofactor-preserving receptor preparation
-remains blocked. The user explicitly requires keeping both COH cofactors.
+Status, updated 2026-11-06: P2Rank and the independent ADFR runtime are repaired;
+whole-receptor preparation with all deposited glycans remains stopped on
+reported charge failures. The user explicitly requires keeping both COH cofactors.
 Protein electrostatic visualization remains the first requested results addition;
 this investigation addresses the current run and its charge-model prerequisite.
 
@@ -18,8 +19,54 @@ complete partial-charge parameter set.
 The current selection remains ID8 B:602, P2Rank with additional-pocket prediction
 enabled, and the original control/evidence settings. The source mmCIF hash remains
 `a4a20672b28f87d32a4cdff8ae7dbdbe4c94af40bc86d4b7caf0122d860cf472`.
-No cofactor, glycan or metal was removed or substituted during this investigation.
+The current study and original source have no cofactor, glycan or metal removal
+or substitution. Rejected private diagnostic candidates are described below.
 No new docking control or hit screen ran.
+
+## Independent fallback restoration and current result
+
+The branch history retains ADFRsuite when Meeko becomes the default. ADFR was
+installed separately from Conda; September's inventory records its presence,
+and October's validation already records `Bad CPU type in executable`. This is
+an unavailable legacy installation, not evidence that a newer Meeko replaced
+every preparation route.
+
+With explicit user approval, Rosetta and official Intel Mac ADFRsuite 1.0 are
+installed. The nonacademic installer option is selected; its unused academic
+surface module is outside the installed prefix. `prepare_receptor -h` succeeds.
+The archive SHA-256 is
+`9556680809c76859b159b7709fa1a6e84716e2cb41a0ab8bd72aecbb7960b413`.
+
+An isolated real fallback revealed that ADFR's default `nonstdres` cleanup
+deletes 78 retained heavy atoms from six sugar residues on chains C/D. Explicit
+`-U nphs_lps_waters` prevents that loss. The corrected full pipeline retains all
+9,132 heavy atoms at unchanged coordinates, including both COH cofactors. ADFR
+has explicit elemental cobalt Gasteiger parameters and assigns each cobalt
+approximately +0.873 e in this candidate; that establishes parameter coverage,
+not target-specific charge/scoring accuracy or APBS acceptance.
+
+The output is rejected despite exit code zero because ADFR reports five missing
+Gasteiger assignments: NAG B:607 O6, C:1 O4, C:2 O4, D:1 O4 and D:2 O4. The
+original source is byte-identical to the current public RCSB mmCIF. It contains
+an O6–GLU B:416 OE1 distance of about 1.262 Å without alternate conformers;
+legacy distance-based bond perception adds an unsupported O–O edge. Four
+glycosidic NAG O4 sites also retain HO4 atoms identified as leaving atoms in
+the branch-link table. Linked ASN sites and cross-chain connectivity need
+complete review as well; removing only the five warnings is not a complete
+topology correction. No source-connectivity adapter or hydrogen edit has been
+adopted, and no real study was retried by this validation.
+
+Open Babel's isolated Gasteiger charge calculation fails on COH even though its
+PDBQT writer can still return success. Its QEq component probe produces finite
+but unreviewed charges with an assumed total state; EQEq fails. These outputs
+are not accepted as automatic substitutes.
+
+The optional exact-exclusion review remains available. The 2026-11-06 user
+clarification extends its GUI entry point to failed control preparation before
+boxes exist. No exclusions are preselected. A reviewed derivative is prepared
+separately, and later boxes receive persistent inside/distance warnings from
+the original residue coordinates. The unchanged source and both COH cofactors
+remain the current study model until the user explicitly approves a change.
 
 ## Findings and actual checks
 

@@ -142,6 +142,10 @@ write_receptor_failure_diagnosis() {
     category="Unsupported element in receptor preparation"
     why="The preparation backend lacks an element parameter needed for bond perception. This is a software-support gap, not evidence that the deposited metal or cofactor should be removed."
     next="Review metal/cofactor templates, atom typing and charge-model support. Retain site-relevant cofactors; do not replace the metal or assign placeholder parameters to bypass this failure."
+  elif grep -qs 'ADFRsuite receptor-output validation: rejected' "${failure_logs[@]}"; then
+    category="Rejected ADFRsuite receptor output"
+    why="The legacy backend exited successfully but its output did not preserve the supplied heavy-atom model or provide supported atom types and charges."
+    next="Inspect the retained ADFRsuite output audit and original coordinates; do not accept dropped components or missing charge parameters as successful preparation."
   elif grep -qs 'repair_geometry.py' "${failure_logs[@]}" && grep -qs 'could not convert string to float' "${failure_logs[@]}"; then
     category="Preparation coordinate-format handling error"
     why="An application geometry check could not read its coordinate input. This is a software format-handling failure, not evidence of incorrect deposited chemistry."
@@ -256,7 +260,9 @@ build_adfr_receptor_command() {
 # Protected by: tests/test_receptor_command_builders.sh.
 build_adfr_linked_fallback_command() {
   local executable="$1" receptor_pdb="$2" receptor_pdbqt="$3"
-  PREPARATION_COMMAND=("$executable" -r "$receptor_pdb" -o "$receptor_pdbqt" -A checkhydrogens)
+  # ADFR's default cleanup includes nonstdres, which can silently delete the
+  # very deposited linked components that made this route eligible.
+  PREPARATION_COMMAND=("$executable" -r "$receptor_pdb" -o "$receptor_pdbqt" -A checkhydrogens -U nphs_lps_waters)
 }
 
 # Translate depositor-annotated SSBOND records into Meeko CYX assignments.
@@ -369,6 +375,68 @@ run_logged_preparation_artifact() {
   run_logged_preparation_command "$log_file" "$@" && [ -s "$required_artifact" ]
 }
 
+# Record availability separately from backend diagnostics. A skipped fallback
+# must not create a backend log: downstream provenance uses that log as evidence
+# that the legacy compatibility route was considered or attempted.
+record_adfr_fallback_status() {
+  ADFR_FALLBACK_STATUS="$1"
+  ADFR_FALLBACK_REASON="$2"
+  log "ADFRsuite fallback status: $ADFR_FALLBACK_STATUS; $ADFR_FALLBACK_REASON"
+}
+
+# Extend an existing success/failure audit instead of creating another manifest.
+# This metadata explains routing only; it neither changes the primary diagnosis
+# nor asserts that a legacy preparer supports the retained chemistry.
+retain_adfr_fallback_status() {
+  local audit_path="$1" audited_executable="${ADFR_FALLBACK_BIN:-}"
+  [ "${PREP_BACKEND:-}" != adfr ] || audited_executable="${PREP_RECEPTOR_BIN:-}"
+  [ -s "$audit_path" ] || return 0
+  "$PYTHON_COMMAND" - "$audit_path" "${ADFR_FALLBACK_STATUS:-not_evaluated}" \
+    "${ADFR_FALLBACK_REASON:-Receptor preparation stopped before fallback evaluation.}" \
+    "$audited_executable" "${ADFR_OUTPUT_AUDIT:-}" "${ADFR_VALIDATION_LOG:-}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+record = json.loads(path.read_text())
+record["adfr_fallback"] = {
+    "status": sys.argv[2],
+    "reason": sys.argv[3],
+    "executable": sys.argv[4] or None,
+}
+for key, value in zip(("validation_audit", "validation_log"), sys.argv[5:]):
+    if value and Path(value).is_file():
+        record["adfr_fallback"][key] = str(Path(value).resolve())
+path.write_text(json.dumps(record, indent=2) + "\n")
+PY
+}
+
+# A successful legacy command is insufficient: retain the exact input/output
+# comparison and reject missing atoms or unsupported charge assignment before
+# publishing a PDBQT as prepared. This never changes a parameter or coordinate.
+validate_adfr_preparation_output() {
+  local source_pdb="$1" backend_log="$2"
+  if "$PYTHON_COMMAND" - "$LIBEXEC_DIR" "$source_pdb" "$RECEPTOR_PDBQT" \
+    "$backend_log" "$ADFR_OUTPUT_AUDIT" > "$ADFR_VALIDATION_LOG" 2>&1 <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+from docking_universal.services.preparation_atom_inventory import audit_adfr_receptor_output
+
+report = audit_adfr_receptor_output(*sys.argv[2:])
+print("ADFRsuite receptor-output validation: " + report["status"])
+for reason in report["reasons"]:
+    print(reason)
+raise SystemExit(0 if report["status"] == "accepted" else 1)
+PY
+  then
+    ADFR_VALIDATION_DETAIL=""
+    return 0
+  fi
+  ADFR_VALIDATION_DETAIL=$(sed -n '2,4p' "$ADFR_VALIDATION_LOG" | tr '\n' ' ')
+  return 1
+}
+
 # Initialize receptor-preparation paths, immutable filtered input, and optional
 # repair capability before any backend attempt is made.
 #
@@ -400,14 +468,45 @@ initialize_receptor_preparation() {
   DISULFIDE_RETRY_LOG="$RECEPTOR_DIR/receptor_disulfide_retry.log"
   DISULFIDE_SELECTION_LOG="$RECEPTOR_DIR/disulfide_template_selection.tsv"
   ADFR_FALLBACK_LOG="$RECEPTOR_DIR/receptor_adfr_fallback.log"
+  ADFR_OUTPUT_AUDIT="$RECEPTOR_DIR/adfr_output_audit.json"
+  ADFR_VALIDATION_LOG="$RECEPTOR_DIR/adfr_output_validation.log"
   CCD_AUDIT_JSON="$RECEPTOR_DIR/ccd_modification_audit.json"
   CCD_AUDIT_TSV="$RECEPTOR_DIR/ccd_modification_audit.tsv"
   PDBFIXER_USED=0
   PROTONATION_USED=0
   REDUCE2_USED=0
+  ADFR_FALLBACK_STATUS=not_evaluated
+  ADFR_FALLBACK_REASON="Receptor preparation stopped before fallback evaluation."
 
   DISULFIDE_TEMPLATE_ASSIGNMENTS=$(disulfide_template_assignments "$INPUT_PDB")
-  filter_receptor_input "$INPUT_PDB" "$RECEPTOR_FILTERED_PDB"
+  if [ -n "${DOCKING_UNIVERSAL_REVIEWED_RECEPTOR_INPUT:-}" ]; then
+    # Removing a reviewed residue also prunes its LINK records. Re-filtering
+    # that full complex could then silently discard an orphaned component that
+    # the user chose to retain. The host instead pins the original receptor
+    # inventory with only the explicitly reviewed changes applied.
+    [ "${DOCKING_UNIVERSAL_REVIEWED_MODEL_ONLY:-0}" = 1 ] || {
+      echo "ERROR: A reviewed receptor inventory requires an explicit reviewed-model attempt" >&2
+      return 1
+    }
+    "$PYTHON_COMMAND" - "$DOCKING_UNIVERSAL_REVIEWED_RECEPTOR_INPUT" \
+      "${DOCKING_UNIVERSAL_REVIEWED_RECEPTOR_INPUT_SHA256:-}" "$RECEPTOR_FILTERED_PDB" <<'PY' || return 1
+import hashlib
+from pathlib import Path
+import re
+import sys
+
+try:
+    source, expected, destination = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3])
+    data = source.read_bytes()
+    if not re.fullmatch(r"[0-9a-f]{64}", expected) or hashlib.sha256(data).hexdigest() != expected:
+        raise ValueError("the approved filtered receptor is missing its hash or has changed")
+    destination.write_bytes(data)
+except (OSError, ValueError) as exc:
+    raise SystemExit("ERROR: Reviewed receptor inventory could not be verified: " + str(exc))
+PY
+  else
+    filter_receptor_input "$INPUT_PDB" "$RECEPTOR_FILTERED_PDB"
+  fi
   RETAINED_LINKED_COMPONENTS=$(list_retained_linked_components "$INPUT_PDB" "$RECEPTOR_FILTERED_PDB")
 
   PDBFIXER_MODE="${DOCKING_UNIVERSAL_PDBFIXER:-auto}"
@@ -523,6 +622,7 @@ finalize_receptor_preparation_audit() {
     )
     [ -z "$RETAINED_MEEKO_TEMPLATE" ] || CCD_AUDIT_ARGS+=(--additional-templates "$RETAINED_MEEKO_TEMPLATE")
     "$PYTHON_COMMAND" "$ccd_helper" "${CCD_AUDIT_ARGS[@]}" >/dev/null
+    retain_adfr_fallback_status "$CCD_AUDIT_JSON"
     ccd_count=$("$PYTHON_COMMAND" -c 'import json,sys; print(json.load(open(sys.argv[1]))["modified_polymer_residue_count"])' "$CCD_AUDIT_JSON")
     if [ "$ccd_count" -gt 0 ]; then
       log "CCD/MODRES audit recorded $ccd_count modified polymer residue(s): $CCD_AUDIT_TSV"
@@ -620,10 +720,21 @@ run_safe_receptor_preparation_attempts() {
   PREP_SUCCESS=0
   PREP_ROUTE=not_completed
   if run_logged_preparation_command "$RECEPTOR_BACKEND_LOG" "${PREP_COMMAND[@]}"; then
+    if [ "$PREP_BACKEND" = adfr ] && ! validate_adfr_preparation_output "$RECEPTOR_PDB" "$RECEPTOR_BACKEND_LOG"; then
+      record_adfr_fallback_status validation_failed "The primary ADFRsuite output failed validation: $ADFR_VALIDATION_DETAIL Inspect $ADFR_OUTPUT_AUDIT and $ADFR_VALIDATION_LOG."
+      return 0
+    fi
     PREP_SUCCESS=1
-    PREP_ROUTE=strict_meeko
+    if [ "$PREP_BACKEND" = meeko ]; then
+      PREP_ROUTE=strict_meeko
+      record_adfr_fallback_status not_needed "Initial strict Meeko preparation succeeded."
+    else
+      PREP_ROUTE=adfr_primary
+      record_adfr_fallback_status primary_backend "ADFRsuite was selected as the primary backend; no Meeko fallback was requested."
+    fi
     log "Initial receptor preparation succeeded; PDBFixer was not needed"
   elif [ "${DOCKING_UNIVERSAL_REVIEWED_MODEL_ONLY:-0}" = 1 ]; then
+    record_adfr_fallback_status reviewed_model_stop "The explicitly reviewed model permits one strict preparation attempt only."
     log "The explicitly reviewed receptor failed strict preparation; no additional repair, alternate-location choice, residue exclusion or legacy fallback was attempted."
     return 0
   elif [ "$PREP_BACKEND" = "meeko" ]; then
@@ -732,8 +843,17 @@ EOF
     # diagnosed an unsupported *linked* component, and the legacy preparer can
     # retain many such deposited adducts in a Vina-readable PDBQT. It is not a
     # generic rescue for glycans, nucleic acids, or metal/cofactor chemistry.
-    if [ "$PREP_SUCCESS" = "0" ] && [ "$ADFR_FALLBACK" = "1" ] && [ -n "$ADFR_FALLBACK_BIN" ] && [ -x "$ADFR_FALLBACK_BIN" ] && \
-       { [ -n "$RETAINED_LINKED_COMPONENTS" ] || grep -qs "linking fragments" "$RECEPTOR_BACKEND_LOG" "$PDBFIXER_MEEKO_LOG" "$RECEPTOR_RETRY_LOG" "$DISULFIDE_RETRY_LOG" 2>/dev/null; }; then
+    if [ "$PREP_SUCCESS" = "1" ]; then
+      record_adfr_fallback_status not_needed "A Meeko preparation or repair retry succeeded."
+    elif [ "$ADFR_FALLBACK" != "1" ]; then
+      record_adfr_fallback_status disabled "The configured ADFRsuite fallback is disabled."
+    elif [ -z "$ADFR_FALLBACK_BIN" ]; then
+      record_adfr_fallback_status unavailable "No ADFRsuite prepare_receptor executable was found; configure a compatible executable with DOCKING_UNIVERSAL_ADFR_FALLBACK_BIN for the eligible compatibility route."
+    elif [ ! -x "$ADFR_FALLBACK_BIN" ]; then
+      record_adfr_fallback_status unavailable "The configured ADFRsuite prepare_receptor is missing or not executable; check DOCKING_UNIVERSAL_ADFR_FALLBACK_BIN."
+    elif [ -z "$RETAINED_LINKED_COMPONENTS" ] && ! grep -qs "linking fragments" "$RECEPTOR_BACKEND_LOG" "$PDBFIXER_MEEKO_LOG" "$RECEPTOR_RETRY_LOG" "$DISULFIDE_RETRY_LOG" 2>/dev/null; then
+      record_adfr_fallback_status ineligible "No retained linked-component evidence or linked-fragment diagnosis permits the narrow compatibility route."
+    else
       # Executable permission alone does not mean an old architecture-specific
       # wrapper can start. Probe help without passing coordinates or changing
       # preparation models. Failure must not replace the original diagnosis.
@@ -743,17 +863,26 @@ EOF
       build_adfr_linked_fallback_command "$ADFR_FALLBACK_BIN" "$RECEPTOR_FILTERED_PDB" "$RECEPTOR_PDBQT"
       ADFR_FALLBACK_COMMAND=("${PREPARATION_COMMAND[@]}")
       if run_logged_preparation_artifact "$ADFR_FALLBACK_LOG" "$RECEPTOR_PDBQT" "${ADFR_FALLBACK_COMMAND[@]}"; then
+        if ! validate_adfr_preparation_output "$RECEPTOR_FILTERED_PDB" "$ADFR_FALLBACK_LOG"; then
+          record_adfr_fallback_status validation_failed "The eligible ADFRsuite output failed validation: $ADFR_VALIDATION_DETAIL Inspect $ADFR_OUTPUT_AUDIT and $ADFR_VALIDATION_LOG."
+          return 0
+        fi
         PREP_SUCCESS=1
         PREP_ROUTE=adfr_legacy_linked_component_fallback
         cp "$RECEPTOR_FILTERED_PDB" "$RECEPTOR_PDB"
+        record_adfr_fallback_status succeeded "The eligible legacy ADFRsuite command produced a receptor PDBQT."
         log "Legacy ADFRsuite preparation succeeded after Meeko's linked-component rejection; a target-matched control is required for the control-validated designation, while explicit user-reviewed exploratory approval remains available"
       else
+        record_adfr_fallback_status failed "The eligible legacy ADFRsuite command did not produce a receptor PDBQT."
         log "Legacy ADFRsuite fallback did not produce a receptor PDBQT; retaining Meeko diagnostics for structural review"
       fi
       else
+        record_adfr_fallback_status startup_failed "ADFRsuite failed its startup/compatibility probe; no receptor was passed to it. Inspect $RECEPTOR_DIR/adfr_startup_audit.json."
         log "Legacy ADFRsuite fallback unavailable: startup/compatibility check failed; no receptor was passed to it. See $RECEPTOR_DIR/adfr_startup_audit.json"
       fi
     fi
+  else
+    record_adfr_fallback_status primary_backend "ADFRsuite was selected as the primary backend and failed; there is no additional ADFRsuite fallback."
   fi
 }
 
@@ -766,12 +895,13 @@ handle_receptor_failure_and_removal_approval() {
 if [ "$PREP_SUCCESS" = "0" ]; then
   FAILURE_DIAGNOSIS="$RECEPTOR_DIR/receptor_failure_diagnosis.txt"
   PREPARATION_INTERVENTION="$RECEPTOR_DIR/preparation_intervention.json"
-  FAILURE_LOGS=("$ADFR_FALLBACK_LOG" "$DISULFIDE_RETRY_LOG" "$RECEPTOR_RETRY_LOG" "$PDBFIXER_MEEKO_LOG" "$PDBFIXER_LOG" "$RECEPTOR_BACKEND_LOG")
+  FAILURE_LOGS=("$ADFR_VALIDATION_LOG" "$ADFR_FALLBACK_LOG" "$DISULFIDE_RETRY_LOG" "$RECEPTOR_RETRY_LOG" "$PDBFIXER_MEEKO_LOG" "$PDBFIXER_LOG" "$RECEPTOR_BACKEND_LOG")
   write_receptor_failure_diagnosis "$INPUT_PDB" "$RECEPTOR_FILTERED_PDB" "$FAILURE_DIAGNOSIS" "${FAILURE_LOGS[@]}"
   # Noninteractive GUI workers need a useful terminal error too. The complete
   # explanation stays in the retained diagnosis, without authorizing a repair.
   printf 'ERROR: %s\n' "$(head -n1 "$FAILURE_DIAGNOSIS")" >&2
   grep '^Detected detail:' "$FAILURE_DIAGNOSIS" >&2 || :
+  printf 'ADFRsuite fallback: %s; %s\n' "$ADFR_FALLBACK_STATUS" "$ADFR_FALLBACK_REASON" >&2
   INTERVENTION_HELPER="$LIBEXEC_DIR/docking-universal-preparation-intervention.py"
   if [ -f "$INTERVENTION_HELPER" ]; then
     HISTIDINE_RESIDUE=$(ambiguous_histidine_residue "${FAILURE_LOGS[@]}")
@@ -790,6 +920,7 @@ if [ "$PREP_SUCCESS" = "0" ]; then
     "$PYTHON_COMMAND" "$INTERVENTION_HELPER" "${INTERVENTION_ARGS[@]}" || {
       echo "WARNING: structured preparation intervention could not be written" >&2
     }
+    retain_adfr_fallback_status "$PREPARATION_INTERVENTION"
   fi
 
   # Omitting unmatched components changes the receptor model. It is a final,

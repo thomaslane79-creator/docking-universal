@@ -13,6 +13,41 @@ KINDS = {'sidechain_reconstruction', 'component_exclusion', 'manual_receptor_edi
          'standard_residue_connectivity_override'}
 
 
+def recorded_backend_summary(audit_path):
+    """Prefer accepted routing or retained failure evidence over log existence."""
+    path = Path(audit_path)
+    try:
+        audit = json.loads(path.read_text())
+    except (OSError, ValueError, TypeError):
+        audit = {}
+    routes = {
+        'adfr_primary': 'ADFRsuite selected as the primary receptor-preparation backend; the retained backend log records the applied path',
+        'adfr_legacy_linked_component_fallback': 'legacy ADFRsuite fallback after Meeko rejected a linked deposited component',
+        'strict_meeko': 'strict Meeko succeeded; PDBFixer was not needed',
+        'pdbfixer_then_strict_meeko': 'conservative PDBFixer repair followed by strict Meeko',
+        'meeko_disulfide_templates': 'strict Meeko succeeded after a CYX disulfide-template retry',
+        'guided_histidine_template': 'strict Meeko succeeded after an explicit histidine-template review',
+        'meeko_user_approved_component_removal': 'user-approved removal of unmatched receptor components after safe preparation fallbacks failed',
+    }
+    if isinstance(audit, dict) and audit.get('preparation_route') in routes:
+        route = audit['preparation_route']
+        # Preserve existing richer Reduce2/PDB2PQR summaries unless an ADFR
+        # route or leftover ADFR log actually requires disambiguation.
+        if route.startswith('adfr_') or path.with_name('receptor_adfr_fallback.log').is_file():
+            return routes[route]
+        return None
+    # Failed startup or rejected output can leave an ADFR log. That file alone
+    # must never become a claim that the legacy backend prepared a receptor.
+    try:
+        intervention = json.loads(path.with_name('preparation_intervention.json').read_text())
+    except (OSError, ValueError, TypeError):
+        return None
+    fallback = intervention.get('adfr_fallback') if isinstance(intervention, dict) else None
+    if isinstance(fallback, dict) and fallback.get('status') not in {None, 'not_needed', 'succeeded'}:
+        return 'Receptor preparation stopped; ADFRsuite status ' + str(fallback['status']) + ': ' + str(fallback.get('reason') or 'Inspect the retained preparation intervention.')
+    return None
+
+
 def validate_history(history, expected_receptor_sha256=None):
     if not isinstance(history, dict) or history.get('schema_name') != SCHEMA or history.get('schema_version') != 1:
         raise ValueError('Unsupported receptor-model change history')

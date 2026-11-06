@@ -95,6 +95,16 @@ doctor() {
   optional="prank java fpocket prepare_receptor prepare_ligand mk_prepare_receptor.py mk_prepare_ligand.py obabel plip pymol $PYTHON_COMMAND"
   missing=0
   missing_full=0
+  # ADFRsuite is external to Conda and usually is not on the launcher's PATH.
+  # Keep a configured fallback authoritative, including an invalid override.
+  adfr_receptor="${DOCKING_UNIVERSAL_ADFR_FALLBACK_BIN:-$(command -v prepare_receptor 2>/dev/null || true)}"
+  if [ -z "$adfr_receptor" ] && [ -x "$HOME/ADFRsuite-1.0/bin/prepare_receptor" ]; then
+    adfr_receptor="$HOME/ADFRsuite-1.0/bin/prepare_receptor"
+  fi
+  adfr_ligand="$(command -v prepare_ligand 2>/dev/null || true)"
+  if [ -z "$adfr_ligand" ] && [ -x "$HOME/ADFRsuite-1.0/bin/prepare_ligand" ]; then
+    adfr_ligand="$HOME/ADFRsuite-1.0/bin/prepare_ligand"
+  fi
 
   printf 'Core tools\n'
   for tool in $required; do
@@ -126,7 +136,15 @@ doctor() {
 
   printf '\nStage-specific tools\n'
   for tool in $optional; do
-    if command -v "$tool" >/dev/null 2>&1; then
+    if [ "$tool" = prepare_receptor ] || [ "$tool" = prepare_ligand ]; then
+      external_path="$adfr_receptor"
+      [ "$tool" != prepare_ligand ] || external_path="$adfr_ligand"
+      if [ -n "$external_path" ] && [ -x "$external_path" ]; then
+        printf '  available  %s (%s; executable found)\n' "$tool" "$external_path"
+      else
+        printf '  absent     %s\n' "$tool"
+      fi
+    elif command -v "$tool" >/dev/null 2>&1; then
       printf '  available  %s\n' "$tool"
     else
       printf '  absent     %s\n' "$tool"
@@ -149,10 +167,10 @@ doctor() {
      ! command -v "$PYTHON_COMMAND" >/dev/null 2>&1; then
     missing_full=1
   fi
-  if ! command -v prepare_receptor >/dev/null 2>&1 && ! command -v mk_prepare_receptor.py >/dev/null 2>&1; then
+  if { [ -z "$adfr_receptor" ] || [ ! -x "$adfr_receptor" ]; } && ! command -v mk_prepare_receptor.py >/dev/null 2>&1; then
     missing_full=1
   fi
-  if ! command -v prepare_ligand >/dev/null 2>&1 && ! command -v mk_prepare_ligand.py >/dev/null 2>&1; then
+  if { [ -z "$adfr_ligand" ] || [ ! -x "$adfr_ligand" ]; } && ! command -v mk_prepare_ligand.py >/dev/null 2>&1; then
     missing_full=1
   fi
 

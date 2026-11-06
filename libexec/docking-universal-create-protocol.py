@@ -175,10 +175,14 @@ def scientific_software_record(engine):
 
 
 def preparation_summary(prep_root):
+    from docking_universal.services.receptor_model_history import recorded_backend_summary
     text = (prep_root / "run.log").read_text(errors="replace") if (prep_root / "run.log").is_file() else ""
     removal_record = next(iter(sorted(prep_root.glob("receptor/user_approved_component_removal.txt"))), None)
     if removal_record and removal_record.is_file():
         return "User explicitly approved removal of unmatched receptor components after safe preparation fallbacks failed; the retained record identifies the altered model"
+    recorded_backend = recorded_backend_summary(prep_root / "receptor/ccd_modification_audit.json")
+    if recorded_backend:
+        return recorded_backend
     if next(iter(sorted(prep_root.glob("receptor/meeko_ptm_template_approval.json"))), None):
         return "Strict Meeko used an explicitly reviewed local PTM template; retained CCD/GeoStd validation and approval records identify the parameterization"
     if "Initial receptor preparation succeeded; PDBFixer was not needed" in text:

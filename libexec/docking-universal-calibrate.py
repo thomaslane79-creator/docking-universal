@@ -329,8 +329,12 @@ def run_tier(args, tier_name, cli, libexec, tier_root):
     user_removal_record = receptor_dir / "user_approved_component_removal.txt"
     user_removal_manifest = receptor_dir / "user_approved_component_removal.tsv"
     adfr_fallback_log = receptor_dir / "receptor_adfr_fallback.log"
+    from docking_universal.services.receptor_model_history import recorded_backend_summary
+    recorded_backend = recorded_backend_summary(ccd_audit)
     if user_removal_log.is_file() and user_removal_log.stat().st_size:
         preparation_path = "user-approved removal of unmatched receptor components after safe preparation fallbacks failed"
+    elif recorded_backend:
+        preparation_path = recorded_backend
     elif adfr_fallback_log.is_file() and adfr_fallback_log.stat().st_size:
         preparation_path = "legacy ADFRsuite fallback after Meeko rejected a linked deposited component"
     elif post_pdbfixer_log.is_file() and post_pdbfixer_log.stat().st_size:

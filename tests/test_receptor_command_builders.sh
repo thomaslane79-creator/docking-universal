@@ -23,6 +23,6 @@ build_adfr_receptor_command adfr receptor.pdb receptor.pdbqt
 assert_array $'adfr\n-r\nreceptor.pdb\n-o\nreceptor.pdbqt\n-A\nnone\n-U\nwaters' "ADFR primary command changed"
 
 build_adfr_linked_fallback_command adfr receptor.pdb receptor.pdbqt
-assert_array $'adfr\n-r\nreceptor.pdb\n-o\nreceptor.pdbqt\n-A\ncheckhydrogens' "ADFR linked-component fallback changed"
+assert_array $'adfr\n-r\nreceptor.pdb\n-o\nreceptor.pdbqt\n-A\ncheckhydrogens\n-U\nnphs_lps_waters' "ADFR linked-component fallback changed"
 
 printf 'PASS: receptor command-builder checks\n'

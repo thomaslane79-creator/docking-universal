@@ -6,11 +6,16 @@ from .explanations import ExplanationLabel
 class ReceptorModelReviewDialog(QtWidgets.QDialog):
     def __init__(self, initial_preview, preview_callback, parent=None):
         super().__init__(parent)
-        self.setWindowTitle('Review receptor changes — exploratory preparation')
+        self.setWindowTitle('Review receptor changes')
         self.resize(850, 730)
         self._preview_callback = preview_callback
         self._reviewed = None
         self._alternatives = []
+        self._box_review_pending = bool(initial_preview.get('box_review_pending'))
+        self._initial_backend = (initial_preview.get('preparation_backend')
+            or (initial_preview.get('context') or {}).get('preparation_backend')
+            or (initial_preview.get('choices') or {}).get('preparation_backend') or 'meeko')
+        self._available_backends = set(initial_preview.get('available_preparation_backends', ['meeko']))
         outer = QtWidgets.QVBoxLayout(self)
         scroll = QtWidgets.QScrollArea()
         scroll.setWidgetResizable(True)
@@ -26,6 +31,26 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
             'does not validate the model or binding pose. No missing residues, backbone atoms or loops are built here.')
         introduction.setWordWrap(True)
         layout.addWidget(introduction)
+        self.box_review_notice = QtWidgets.QLabel(
+            'Docking box not available yet; exclusions will be flagged when the box is generated.')
+        self.box_review_notice.setWordWrap(True)
+        self.box_review_notice.setVisible(self._box_review_pending)
+        layout.addWidget(self.box_review_notice)
+        backend_row = QtWidgets.QHBoxLayout()
+        backend_row.addWidget(QtWidgets.QLabel('Preparation backend'))
+        self.preparation_backend = QtWidgets.QComboBox()
+        self.preparation_backend.setObjectName('reviewed_receptor_preparation_backend')
+        for label, value in (('Meeko', 'meeko'), ('ADFRsuite', 'adfr')):
+            available = value in self._available_backends
+            self.preparation_backend.addItem(label if available else label + ' — unavailable', value)
+            self.preparation_backend.model().item(self.preparation_backend.count() - 1).setEnabled(available)
+        self.preparation_backend.setCurrentIndex(self.preparation_backend.findData(self._initial_backend))
+        self.preparation_backend.setToolTip(
+            'Choose explicitly. Backend changes can alter atom typing and charges. '
+            'Preparation success does not validate the changed receptor or binding pose.')
+        self.preparation_backend.currentIndexChanged.connect(self.invalidate_preview)
+        backend_row.addWidget(self.preparation_backend)
+        layout.addLayout(backend_row)
         layout.addWidget(QtWidgets.QLabel('Deposited alternate conformations (no choice is selected automatically)'))
         rows = [r for r in initial_preview['residue_inventory'] if r['alternate_locations']]
         self.alternates = QtWidgets.QTableWidget(len(rows), 3)
@@ -92,8 +117,16 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
         browse_candidate.clicked.connect(self.browse_candidate)
         candidate_row.addWidget(browse_candidate)
         candidate_layout.addLayout(candidate_row)
+        self.candidate_toggle = QtWidgets.QToolButton()
+        self.candidate_toggle.setText('Local side-chain candidate…')
+        self.candidate_toggle.setCheckable(True)
+        self.candidate_toggle.setVisible(self._box_review_pending)
+        self.candidate_toggle.toggled.connect(candidate_group.setVisible)
+        layout.addWidget(self.candidate_toggle)
         layout.addWidget(candidate_group)
-        self.preview_button = QtWidgets.QPushButton('Preview exact changes and distances to selected boxes')
+        candidate_group.setVisible(not self._box_review_pending)
+        self.preview_button = QtWidgets.QPushButton('Preview exact changes' if self._box_review_pending else
+            'Preview exact changes and distances to selected boxes')
         self.preview_button.clicked.connect(self.preview)
         layout.addWidget(self.preview_button)
         self.details = QtWidgets.QPlainTextEdit()
@@ -103,10 +136,13 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
         self.details.setPlainText('Preview the choices before approving. No receptor has been changed.')
         layout.addWidget(self.details, 1)
         self.rationale = QtWidgets.QLineEdit()
-        self.rationale.setPlaceholderText('Why are these specific changes acceptable for this exploratory study?')
+        self.rationale.setPlaceholderText('Why are these specific changes acceptable for this study?')
         self.rationale.textChanged.connect(self.update_accept)
         layout.addWidget(self.rationale)
-        self.acknowledge = QtWidgets.QCheckBox('I reviewed these exact changes and box distances; retain the model-change warning.')
+        self.acknowledge = QtWidgets.QCheckBox(
+            'I reviewed these exact changes; retain warnings when the docking box is generated.'
+            if self._box_review_pending else
+            'I reviewed these exact changes and box distances; retain the model-change warning.')
         self.acknowledge.toggled.connect(self.update_accept)
         layout.addWidget(self.acknowledge)
         self.protein_acknowledge = QtWidgets.QCheckBox('I understand that these exclusions remove standard amino acids from the scored receptor.')
@@ -133,6 +169,11 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
         alternate = [{**{k: row[k] for k in ('resname', 'chain', 'number', 'insertion_code')},
                       'altloc': choice.currentData()} for row, choice in self._alternatives if choice.currentData()]
         choices = {'exclusions': excluded, 'alternate_locations': alternate}
+        backend = self.preparation_backend.currentData()
+        if backend not in self._available_backends:
+            raise ValueError('The selected preparation backend is unavailable on this host.')
+        if backend != self._initial_backend:
+            choices['preparation_backend'] = backend
         if self.sidechain_candidate.text().strip():
             choices['sidechain_candidate'] = self.sidechain_candidate.text().strip()
         return choices
@@ -160,6 +201,9 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
                     *descriptions,
                     f"Excluded atom records: {record['removed_atom_count']}. New modeled atoms in the candidate: "
                     f"{record.get('new_atoms_generated', 0)}. Retained coordinates are unchanged."]
+            text.append('Preparation backend: ' + self.preparation_backend.currentText() + '.')
+            if record.get('box_review_pending'):
+                text.append('Docking box not available yet; exclusions will be flagged when the box is generated.')
             for change in record['changes']:
                 if change.get('kind') == 'sidechain_reconstruction':
                     generator = change['generator']

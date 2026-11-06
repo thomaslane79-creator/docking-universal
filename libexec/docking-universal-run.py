@@ -1132,6 +1132,11 @@ def relative_to_study(path, study):
 
 def receptor_preparation_summary(study):
     """Summarize the observed or protocol-carried receptor preparation path."""
+    from docking_universal.services.receptor_model_history import recorded_backend_summary
+    for receptor in sorted(study.glob("preparation/**/receptor")):
+        recorded_backend = recorded_backend_summary(receptor / "ccd_modification_audit.json")
+        if recorded_backend:
+            return recorded_backend
     post_fix_logs = sorted(study.glob("preparation/**/receptor/receptor_after_pdbfixer.log"))
     removal_logs = [path for path in sorted(study.glob("preparation/**/receptor/receptor_user_approved_removal.log")) if path.stat().st_size]
     adfr_logs = [path for path in sorted(study.glob("preparation/**/receptor/receptor_adfr_fallback.log")) if path.stat().st_size]

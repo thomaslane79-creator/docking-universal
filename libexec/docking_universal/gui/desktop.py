@@ -644,6 +644,7 @@ if QtWidgets is not None:
                 if self.study_pathway.currentData() == "control" else None
             )
             panel.detectLigandsRequested.connect(self.detect_bound_ligands)
+            panel.reviewModelChangesRequested.connect(self.review_receptor_changes)
             panel.chooseOutputRequested.connect(self.choose_output_directory)
             panel.prepareRequested.connect(self.start_preparation)
             panel.cancelRequested.connect(self.cancel_active_job)
@@ -2236,6 +2237,27 @@ if QtWidgets is not None:
             if self.viewer_coordinator is None:
                 self.viewer_status.setText("Required structural viewer is not configured")
             active = state.active_job
+            # Failed legacy/control preparation has no boxes yet. Its bounded
+            # recovery reuses exact model review without changing the retained
+            # setup or pretending the coordinate-first control route exists.
+            setup = state.workflow_data.get('study_setup') or {}
+            runtime = getattr(self.host_client, 'runtime', {}) or {}
+            failed_preparation = next((job for job in reversed(state.jobs)
+                if job.stage == 'preparation_and_pocket_detection'), None)
+            failed_review = bool(
+                runtime.get('failed_preparation_model_review_supported')
+                and setup and not setup.get('explore_sites_first')
+                and setup.get('pathway') != 'reuse'
+                and setup.get('input_structure_sha256')
+                and failed_preparation and failed_preparation.status.value == 'failed'
+                and not any(job.stage == 'preparation_and_pocket_detection' and job.status.value == 'completed'
+                            for job in state.jobs)
+                and not any(a.kind in {'prepared_receptor', 'protocol_bundle'} for a in state.artifacts)
+                and not state.workflow_data.get('latest_control_output'))
+            self.study_setup_panel.review_failed_button.setVisible(failed_review)
+            self.start_preparation_button.setVisible(not failed_review)
+            self.study_setup_panel.review_failed_button.setEnabled(bool(
+                failed_review and self.host_controller.available and not active and not pending))
             preparation_complete = any(
                 job.stage == "preparation_and_pocket_detection" and job.status.value == "completed"
                 for job in state.jobs
@@ -3060,6 +3082,10 @@ if QtWidgets is not None:
             try:
                 initial = self.host_controller.preview_receptor_changes(
                     {'exclusions': [], 'alternate_locations': []}, revision)
+                initial = dict(initial)
+                initial.setdefault('available_preparation_backends',
+                    (getattr(self.host_client, 'runtime', {}) or {}).get(
+                        'reviewed_receptor_preparation_backends', ['meeko']))
                 dialog = ReceptorModelReviewDialog(initial,
                     lambda choices: self.host_controller.preview_receptor_changes(choices, revision), self)
                 if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:

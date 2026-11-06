@@ -3,6 +3,7 @@
 
 import importlib.util
 import argparse
+import json
 import tempfile
 import unittest
 import sys
@@ -18,6 +19,31 @@ SPEC.loader.exec_module(RUNNER)
 
 
 class RunCommandSyntaxTests(unittest.TestCase):
+    def test_primary_adfr_summary_uses_recorded_backend(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            study = Path(temporary)
+            receptor = study / "preparation/target_receptor_prep/receptor"
+            receptor.mkdir(parents=True)
+            (receptor / "ccd_modification_audit.json").write_text(json.dumps({
+                "preparation_route": "adfr_primary",
+            }))
+            summary = RUNNER.receptor_preparation_summary(study)
+            self.assertIn("ADFRsuite", summary)
+            self.assertNotIn("Meeko", summary)
+
+    def test_failed_adfr_summary_uses_intervention_instead_of_log_presence(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            study = Path(temporary)
+            receptor = study / "preparation/target_receptor_prep/receptor"
+            receptor.mkdir(parents=True)
+            (receptor / "receptor_adfr_fallback.log").write_text("failed startup\n")
+            (receptor / "preparation_intervention.json").write_text(json.dumps({
+                "adfr_fallback": {"status": "startup_failed", "reason": "incompatible architecture"},
+            }))
+            summary = RUNNER.receptor_preparation_summary(study)
+            self.assertIn("preparation stopped", summary)
+            self.assertIn("startup_failed", summary)
+
     def test_materialized_protocol_is_retained_without_copying_arbitrary_parents(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

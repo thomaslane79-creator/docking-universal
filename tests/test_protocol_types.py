@@ -3,6 +3,7 @@
 import hashlib
 import importlib.util
 import json
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -443,6 +444,57 @@ class ProtocolTypeTests(unittest.TestCase):
             receptor.mkdir()
             (receptor / "user_approved_component_removal.txt").write_text("User approved component removal.\n")
             self.assertIn("explicitly approved removal", CREATE.preparation_summary(prep))
+
+    def test_preparation_summary_honors_primary_adfr_audit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            prep = Path(directory)
+            receptor = prep / "receptor"
+            receptor.mkdir()
+            (receptor / "ccd_modification_audit.json").write_text(json.dumps({
+                "preparation_route": "adfr_primary",
+            }))
+            (prep / "run.log").write_text("Initial receptor preparation succeeded; PDBFixer was not needed\n")
+            self.assertIn("ADFRsuite", CREATE.preparation_summary(prep))
+            self.assertNotIn("Meeko", CREATE.preparation_summary(prep))
+
+    def test_calibration_retains_primary_adfr_preparation_path(self):
+        spec = importlib.util.spec_from_file_location(
+            "primary_adfr_calibration", ROOT / "libexec/docking-universal-calibrate.py",
+        )
+        calibration = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(calibration)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            receptor = root / "receptor"
+            receptor.mkdir()
+            (receptor / "ccd_modification_audit.json").write_text(json.dumps({
+                "preparation_route": "adfr_primary",
+            }))
+            arguments = ["calibrate"]
+            for flag, value in (
+                ("reference-sdf", root / "reference.sdf"),
+                ("crystal-ligand", root / "ligand.pdb"),
+                ("receptor-pdb", receptor / "target.pdb"),
+                ("receptor-pdbqt", receptor / "target.pdbqt"),
+                ("box", root / "box.conf"), ("out", root / "control"),
+            ):
+                arguments.extend(["--" + flag, str(value)])
+            with patch.object(sys, "argv", arguments):
+                args = calibration.parse_args()
+
+            def mock_scientific_command(command):
+                if str(command[1]).endswith("docking-universal-calibration-evaluate.py"):
+                    Path(command[command.index("--out") + 1]).write_text("{}")
+                elif command[1] == "dock":
+                    output = Path(command[command.index("--out") + 1])
+                    output.mkdir(parents=True)
+                    (output / "run_manifest.tsv").write_text("engine\tvina\n")
+
+            with patch.object(calibration, "run", side_effect=mock_scientific_command):
+                _, record = calibration.run_tier(args, "quick", ROOT / "bin/docking-universal",
+                                                 ROOT / "libexec", root / "control")
+            self.assertIn("ADFRsuite", record["receptor_preparation"]["path"])
+            self.assertNotIn("Meeko", record["receptor_preparation"]["path"])
 
     def test_approved_removal_summary_names_removed_residues(self):
         with tempfile.TemporaryDirectory() as directory:

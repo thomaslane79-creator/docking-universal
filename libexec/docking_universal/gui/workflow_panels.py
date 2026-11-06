@@ -52,6 +52,7 @@ class StudySetupPanel(QtWidgets.QWidget):
     chooseOutputRequested = QtCore.pyqtSignal()
     prepareRequested = QtCore.pyqtSignal()
     cancelRequested = QtCore.pyqtSignal()
+    reviewModelChangesRequested = QtCore.pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -197,9 +198,17 @@ class StudySetupPanel(QtWidgets.QWidget):
         self.cancel_button = QtWidgets.QPushButton("Cancel active stage")
         self.cancel_button.setObjectName("cancel_job_button")
         self.cancel_button.hide()
+        self.review_failed_button = QtWidgets.QPushButton('Review unsupported components…')
+        self.review_failed_button.setObjectName('review_failed_preparation_components_button')
+        self.review_failed_button.setToolTip(
+            'Preview exact exclusions, alternate locations and the preparation backend before retrying. '
+            'No component is selected for removal automatically. The original input and retained control settings stay recorded; '
+            'changes and their location relative to generated docking boxes remain flagged.')
+        self.review_failed_button.hide()
         buttons = QtWidgets.QVBoxLayout()
         buttons.addWidget(self.prepare_button)
         buttons.addWidget(self.cancel_button)
+        buttons.addWidget(self.review_failed_button)
         self.lock_notice = QtWidgets.QLabel(
             "This setup is part of the retained study record. Create a new study to change it."
         )
@@ -246,6 +255,7 @@ class StudySetupPanel(QtWidgets.QWidget):
         output_button.clicked.connect(self.chooseOutputRequested)
         self.prepare_button.clicked.connect(self.prepareRequested)
         self.cancel_button.clicked.connect(self.cancelRequested)
+        self.review_failed_button.clicked.connect(self.reviewModelChangesRequested)
         self.site_mode.currentIndexChanged.connect(self._update_mode)
         self.pocket_engine.currentIndexChanged.connect(self._update_mode)
         self.pathway.currentIndexChanged.connect(self._update_mode)

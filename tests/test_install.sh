@@ -80,6 +80,13 @@ expected_version="Docking Universal $(cat "$project_dir/VERSION")"
   docking-universal validate --help >/dev/null || fail "installed validate help"
   docking-universal runtime-inventory --json > "$installed_dir/runtime-inventory.json" || fail "installed runtime inventory"
   docking-universal desktop --help >/dev/null || fail "installed desktop help"
+  # The public checker must see an explicitly configured ADFR outside PATH.
+  # Finding a wrapper is reported separately from successful startup/preparation.
+  external_adfr="$installed_dir/external-adfr"
+  printf '#!/bin/sh\nexit 0\n' > "$external_adfr"
+  chmod +x "$external_adfr"
+  DOCKING_UNIVERSAL_ADFR_FALLBACK_BIN="$external_adfr" docking-universal doctor > "$installed_dir/doctor.txt"
+  grep -F "prepare_receptor ($external_adfr; executable found)" "$installed_dir/doctor.txt" >/dev/null || fail "doctor lost the configured external ADFR"
   grep -q 'docking-universal-runtime-inventory' "$installed_dir/runtime-inventory.json" || fail "runtime inventory schema"
   docking-universal validate smoke --out "$installed_dir/smoke" >/dev/null || fail "installed smoke validation"
   if docking-universal validate quick --out "$installed_dir/quick" >"$installed_dir/quick.stdout" 2>"$installed_dir/quick.stderr"; then

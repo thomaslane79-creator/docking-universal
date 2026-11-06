@@ -141,6 +141,8 @@ class ReviewedModelWorkflowTests(unittest.TestCase):
         request = request_from_study(done, FinalizationSettings(), self.root / 'final', exploratory_use_approved=True)
         self.assertEqual(request.source_structure, self.source.resolve())
         self.assertNotEqual(request.preparation_root, self.root / 'work/Target_receptor_prep')
+        self.assertIn('receptor_model_review', request.regions[0])
+        self.assertIn('NAG A:200', request.regions[0]['receptor_model_review']['warning'])
         from docking_universal.services.preparation_site_issues import candidate_with_model_change_review
         candidate = done.workflow_data['pocket_candidates'][0]
         decorated = candidate_with_model_change_review(done, candidate)

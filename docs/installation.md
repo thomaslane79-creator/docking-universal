@@ -271,6 +271,13 @@ The separately licensed customized `plip_to_2D` runner remains an optional fallb
 
 ## Preparation backends
 
+Meeko and the separately installed ADFRsuite are the independent receptor
+PDBQT exporters. Reduce2 and PDB2PQR assess/place hydrogens; PDBFixer repairs
+structure before another Meeko attempt. They do not provide independent
+receptor export. Open Babel is used for conversion and depiction, and is not
+an automatic receptor fallback: writing a PDBQT can succeed after charge
+assignment has failed.
+
 Docking Universal tries the filtered original receptor with strict Meeko first. PDBFixer runs only if that attempt fails. It selects one alternate location, repairs missing side-chain heavy atoms, and applies recognized nonstandard-residue mappings. It deliberately reports rather than builds missing loops or terminal atoms. Its full audit is retained as `receptor/pdbfixer_audit.json`. Set `DOCKING_UNIVERSAL_PDBFIXER=off` to disable this repair attempt, or `required` to fail when PDBFixer is unavailable.
 
 When a depositor-annotated `SSBOND` pair triggers Meeko's disulfide-padding error, Docking Universal retries with both cysteines assigned the standard disulfide `CYX` template. The bridge is retained and listed in `receptor/disulfide_template_selection.tsv`; it is never silently removed. If all safe fallbacks then fail in an interactive terminal, Docking Universal displays the current diagnosis and offers one final, explicit option to omit unmatched components with Meeko. The prompt warns that complete protein/peptide residues may be removed, not merely missing atoms or optional hetero components. Declining leaves the receptor unchanged and stops. Accepting writes the exact TSV inventory, approval record, and raw log; removal of any standard amino-acid residue is labeled a high-severity structural modification in the original and all protocol-reuse reports. Target-matched control redocking remains required before screening.
@@ -278,6 +285,53 @@ When a depositor-annotated `SSBOND` pair triggers Meeko's disulfide-padding erro
 When a retained multi-atom `LINK`ed component is present and strict Meeko rejects it, or Meeko explicitly reports unsupported linked deposited chemistry, Docking Universal can make one final ADFRsuite compatibility attempt (`DOCKING_UNIVERSAL_ADFR_FALLBACK=1`, the default). Coordination waters and unsupported single-atom ions are not treated as covalent components solely because they appear in a `LINK` record. This narrow fallback is intended for linked small-molecule adducts, not glycans, DNA/RNA, heme, metals, or arbitrary cofactors. It retains `receptor/receptor_adfr_fallback.log` and records the backend switch. A successful target-matched control is required for the **control-validated** designation, but a protocol without a suitable control may still be explicitly approved by the user for exploratory screening after review of the receptor, selected site, docking box, and preparation history. The preparer discovers `~/ADFRsuite-1.0/bin/prepare_receptor` when installed in that conventional location; otherwise set `DOCKING_UNIVERSAL_ADFR_FALLBACK_BIN` to its executable path. Set `DOCKING_UNIVERSAL_ADFR_FALLBACK=0` to disable it.
 
 If the remaining error is specifically an ambiguous histidine tautomer, guided preparation explains HIE, HID, and HIP and asks which template to use before retrying. The choice is recorded. For unattended execution, set an exact Meeko assignment such as `MEEKO_SET_TEMPLATE=A:36=HIE`; no histidine state is chosen silently.
+
+ADFRsuite is not installed by the Conda environment. Its official Mac 1.0
+release is Intel-only; Apple Silicon needs working Rosetta translation. Install
+Rosetta using Apple's interactive command and review its license:
+
+```sh
+softwareupdate --install-rosetta
+```
+
+Obtain the Mac archive from the [official ADFR download page](https://sannerlab.github.io/software/adfr/download.html).
+The tested `ADFRsuite_x86_64Darwin_1.0.tar.gz` release has SHA-256
+`9556680809c76859b159b7709fa1a6e84716e2cb41a0ab8bd72aecbb7960b413`.
+Extract it, enter its directory and run:
+
+```sh
+./install.sh -d "$HOME/ADFRsuite-1.0" -c 0
+"$HOME/ADFRsuite-1.0/bin/prepare_receptor" -h
+```
+
+Choose **N** at the academic-installation prompt to use the nonacademic
+installation, which does not activate MSMS/MSLIB. Receptor preparation does
+not use that optional surface module. No shell PATH change is needed for
+the conventional installation: both primary and fallback discovery recognize
+it. An explicit `DOCKING_UNIVERSAL_ADFR_FALLBACK_BIN` takes precedence, including
+when that path is invalid. Runtime inventory reports executable discovery;
+the preparation startup probe establishes whether the wrapper actually runs.
+
+Preparation records why the ADFR fallback was skipped or failed in the run log
+and the existing preparation audit/intervention JSON. An actual attempt retains
+its own backend log. The linked-component command explicitly omits `nonstdres`
+cleanup so retained nonstandard chains survive. Before accepting primary or
+fallback ADFR output, an atom/charge audit rejects heavy-atom loss, changed
+coordinates, invalid output types/charges and reported missing Gasteiger
+parameters. A zero exit code alone is insufficient. Successful primary ADFR
+preparation is recorded as `adfr_primary`, not `strict_meeko`.
+
+After a failed preparation on the accepted Mac host, Study setup offers
+**Review unsupported components…**. This opens the existing exact-exclusion
+review without switching a control study to a different workflow. No component
+is selected for removal automatically. Choose exact identities and an available
+backend, preview the changes, and supply a rationale and acknowledgement before
+the isolated retry. The bound reference cannot be excluded through this action.
+If no box exists yet, the dialog says so; the generated box later displays which
+reviewed residues lie inside it and the distance to those outside. Warnings stay
+with exported/reopened protocol regions. Original files and control settings
+remain locked. An approved derivative does not trigger further automatic
+Reduce2, PDB2PQR, PDBFixer, residue removal or backend-switch attempts.
 
 If preparation still stops, both the interactive terminal and `receptor_failure_diagnosis.txt` report a likely failure category, why it cannot be resolved safely, and the next review step. Recognized categories include unsupported non-standard amino acids, DNA/RNA or mixed protein–nucleic-acid template conflicts, heme/cofactor templates, linked glycans or other covalent fragments, alternate-location conflicts, incomplete residues, and histidine ambiguity. Detected residue identifiers are included where the PDB and backend logs expose them. This explanation supplements—not replaces—the retained Meeko and PDBFixer logs.
 

@@ -9,6 +9,27 @@ SCRIPT = Path(__file__).resolve().parents[1] / "libexec" / "docking-universal-cc
 
 
 class CcdAuditTests(unittest.TestCase):
+    def test_adfr_routes_do_not_claim_meeko_template_resolution(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pdb = root / "input.pdb"
+            pdbqt = root / "receptor.pdbqt"
+            log = root / "backend.log"
+            output_json = root / "audit.json"
+            output_tsv = root / "audit.tsv"
+            pdb.write_text("MODRES 1ABC CSO A   67  CYS  S-HYDROXYCYSTEINE\n")
+            pdbqt.write_text("ATOM      1  CA  CSO A  67       0.000   0.000   0.000  1.00  0.00     0.000 C \n")
+            log.write_text("ADFRsuite receptor preparation succeeded.\n")
+            for route in ("adfr_primary", "adfr_legacy_linked_component_fallback"):
+                with self.subTest(route=route):
+                    subprocess.run([
+                        str(SCRIPT), str(pdb), str(pdbqt), str(log), route,
+                        str(output_json), str(output_tsv),
+                    ], check=True, capture_output=True, text=True)
+                    resolution = json.loads(output_json.read_text())["residues"][0]["resolution"]
+                    self.assertIn("ADFRsuite", resolution)
+                    self.assertNotIn("Meeko", resolution)
+
     def test_modres_ccd_generation_and_retention_are_recorded(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
