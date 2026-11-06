@@ -51,11 +51,17 @@ resolve_prepare_runtime_tools() {
   fi
   FPOCKET_BIN="${DOCKING_UNIVERSAL_FPOCKET:-$(command -v fpocket 2>/dev/null || true)}"
   local installed_p2rank=""
-  if [ -n "${CONDA_PREFIX:-}" ]; then
-    if [ -x "$CONDA_PREFIX/share/docking-universal/p2rank-2.5.1/prank" ]; then
-      installed_p2rank="$CONDA_PREFIX/share/docking-universal/p2rank-2.5.1/prank"
-    elif [ -f "$CONDA_PREFIX/share/docking-universal/p2rank-2.5.1/prank.bat" ]; then
-      installed_p2rank="$CONDA_PREFIX/share/docking-universal/p2rank-2.5.1/prank.bat"
+  local p2rank_prefix="${CONDA_PREFIX:-}"
+  # The desktop may inherit its GUI/terminal Conda label. Its explicit
+  # scientific interpreter owns the pinned predictor, not that label.
+  if [ -n "${DOCKING_UNIVERSAL_PYTHON:-}" ] && [ -f "$DOCKING_UNIVERSAL_PYTHON" ]; then
+    p2rank_prefix=$(dirname "$(dirname "$DOCKING_UNIVERSAL_PYTHON")")
+  fi
+  if [ -n "$p2rank_prefix" ]; then
+    if [ -x "$p2rank_prefix/share/docking-universal/p2rank-2.5.1/prank" ]; then
+      installed_p2rank="$p2rank_prefix/share/docking-universal/p2rank-2.5.1/prank"
+    elif [ -f "$p2rank_prefix/share/docking-universal/p2rank-2.5.1/prank.bat" ]; then
+      installed_p2rank="$p2rank_prefix/share/docking-universal/p2rank-2.5.1/prank.bat"
     fi
   fi
   P2RANK_BIN="${DOCKING_UNIVERSAL_P2RANK:-$(command -v prank 2>/dev/null || command -v prank.bat 2>/dev/null || printf '%s' "$installed_p2rank")}"

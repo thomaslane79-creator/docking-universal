@@ -2,6 +2,53 @@
 
 Status: active scope-control record, established 2026-09-24.
 
+### P2Rank installation path correction (2026-11-05)
+
+The user's ligand-guided control with additional P2Rank prediction failed before
+preparation: `P2Rank launcher not found`. The installed upstream archive created
+`p2rank_2.5.1`, while the installer, GUI and workers expect `p2rank-2.5.1`.
+This is a demonstrated supported-workflow failure (gate 1). Normalize archive
+extraction into the expected destination, and let a Bash worker locate that
+asset beside its explicitly selected scientific Python when a GUI/terminal
+Conda label differs. Keep explicit predictor overrides authoritative.
+
+The installed asset is moved intact, without a version, model or predictor
+change. Regression checks execute the actual installer section against an
+upstream-shaped archive and check discovery with separate GUI/scientific
+prefixes. Native verification starts the existing P2Rank 2.5.1 on Java 17.
+The failed attempt's study snapshot/logs are retained privately before a retry
+through the normal runner with the exact accepted setup. This urgent run
+repair precedes the newly requested electrostatic visualization work.
+
+Native P2Rank prediction now completes on the retained 5IKR receptor coordinates.
+The unchanged-setup retry reaches receptor preparation and stops on cobalt
+support, rather than launcher discovery. The user explicitly requires retaining
+COH A:602 and B:603 and investigating parameter support. Installed Meeko 0.7.1
+lacks the cobalt radius/type/template path; an isolated 0.8.0 test gets beyond
+the radius error but rejects COH and linked glycan template generation. No
+cofactor deletion, metal substitution, charge substitution or live Meeko upgrade
+is authorized by these tests. See `coh-support-20261105.md`.
+
+Failure reporting now recognizes missing element/radius support and retains the
+actual element error. A noninteractive failure emits that diagnosis instead of
+leaving the GUI with only `failed`. This is a bounded reporting correction, not
+parameter support or a successful receptor-preparation claim.
+
+### Protein electrostatic visualization first (authorized 2026-11-05)
+
+The user supplied a Docking Results design handoff and explicitly prioritized
+partial-charge work, then clarified protein first. The first intended addition
+is a protein electrostatic surface using documented charge/radius assignment
+and an APBS potential map in the existing viewer. Preserve the docking receptor,
+record all preprocessing and physical assumptions, reject missing parameters
+and cache maps for display. Keep the interface compact with expanded detail in
+a separate window. Ligand partial-charge maps remain requested as a subsequent
+increment; the other explorer/template/interpretation proposals are separate.
+
+This changes the presentation priority after the compact-GUI pass; no surface
+or scientific method has been implemented or accepted by this record. The
+current user's failed scientific run takes precedence over implementing it.
+
 ### Compact GUI explanations (authorized 2026-11-04)
 
 The user reports excessive text throughout the interface and explicitly requests

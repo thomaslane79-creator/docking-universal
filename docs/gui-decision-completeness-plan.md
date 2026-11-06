@@ -1,5 +1,13 @@
 # Complete interactive GUI workflow plan
 
+2026-11-05 priority update: protein electrostatic visualization comes first in
+the user's new Results design. Preserve the existing ligand viewer and compact
+explanations. The current 5IKR run first needs cofactor-preserving preparation:
+P2Rank discovery is repaired, while COH parameter support remains unresolved.
+The user requires retaining COH A:602 and B:603. See
+`coh-support-20261105.md` and `results-design-handoff-20261105.md`; no new charge
+model, cofactor template or surface capability is accepted by this plan entry.
+
 Current user-requested presentation follow-up (2026-11-04): reduce explanatory
 text across the GUI using brief visible summaries and separate, modeless
 explanation windows. Preserve explicit choices, consent, warnings and complete

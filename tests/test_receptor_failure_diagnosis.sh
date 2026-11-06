@@ -23,6 +23,10 @@ check_case() {
 }
 
 check_case heme 'Unsupported heme or cofactor template' "$base" "$base" "resname='HEM' not in residue_templates"
+check_case cobalt 'Unsupported element in receptor preparation' "$base" "$base" $'    raise RuntimeError(f"Element {symbol} doesn\'t have an implemented covalent radius")\nRuntimeError: Element Co doesn\'t have an implemented covalent radius, which was required for the perception of intermolecular bonds.'
+grep -q 'Detected detail: RuntimeError: Element Co' "$tmp/cobalt.txt" || fail 'unsupported cobalt detail lost'
+grep -q 'Retain site-relevant cofactors' "$tmp/cobalt.txt" || fail 'unsupported metal suggested automatic cofactor removal'
+check_case selenium 'Unsupported element in receptor preparation' "$base" "$base" "RuntimeError: Element Se doesn't have an implemented covalent radius"
 
 cp "$base" "$tmp/nucleic.pdb"
 printf 'HETATM    2  P    DA B   7       1.000   0.000   0.000  1.00 20.00           P\n' >> "$tmp/nucleic.pdb"

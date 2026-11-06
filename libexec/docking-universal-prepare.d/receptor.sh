@@ -138,6 +138,10 @@ write_receptor_failure_diagnosis() {
     category="Ambiguous histidine protonation"
     why="More than one histidine tautomer fits the coordinates; the biologically appropriate state depends on the local environment."
     next="Review nearby hydrogen bonds or catalytic chemistry, then rerun interactively or provide an explicit MEEKO_SET_TEMPLATE assignment."
+  elif grep -qs "doesn't have an implemented covalent radius\|Missing covalent radii for elements" "${failure_logs[@]}"; then
+    category="Unsupported element in receptor preparation"
+    why="The preparation backend lacks an element parameter needed for bond perception. This is a software-support gap, not evidence that the deposited metal or cofactor should be removed."
+    next="Review metal/cofactor templates, atom typing and charge-model support. Retain site-relevant cofactors; do not replace the metal or assign placeholder parameters to bypass this failure."
   elif grep -qs 'repair_geometry.py' "${failure_logs[@]}" && grep -qs 'could not convert string to float' "${failure_logs[@]}"; then
     category="Preparation coordinate-format handling error"
     why="An application geometry check could not read its coordinate input. This is a software format-handling failure, not evidence of incorrect deposited chemistry."
@@ -205,7 +209,7 @@ write_receptor_failure_diagnosis() {
     if grep -qs 'Bad CPU type\|Exec format error\|cannot execute' "${failure_logs[@]}"; then
       printf 'Backend compatibility warning: A configured preparation executable could not run on this machine; this is separate from the retained receptor-template failure.\n'
     fi
-    grep -h -m1 "Input residues .*not in residue_templates\|Template generation failed for unknown residues\|Template matching failed for:\|Residues with alternate location:" "${failure_logs[@]}" 2>/dev/null | head -1 | sed 's/^/Detected detail: /' || :
+    grep -h -m1 "Input residues .*not in residue_templates\|Template generation failed for unknown residues\|Template matching failed for:\|Residues with alternate location:\|RuntimeError: Element .*doesn't have an implemented covalent radius\|RuntimeError: Missing covalent radii for elements" "${failure_logs[@]}" 2>/dev/null | head -1 | sed 's/^/Detected detail: /' || :
   } > "$output_file"
 }
 
@@ -764,6 +768,10 @@ if [ "$PREP_SUCCESS" = "0" ]; then
   PREPARATION_INTERVENTION="$RECEPTOR_DIR/preparation_intervention.json"
   FAILURE_LOGS=("$ADFR_FALLBACK_LOG" "$DISULFIDE_RETRY_LOG" "$RECEPTOR_RETRY_LOG" "$PDBFIXER_MEEKO_LOG" "$PDBFIXER_LOG" "$RECEPTOR_BACKEND_LOG")
   write_receptor_failure_diagnosis "$INPUT_PDB" "$RECEPTOR_FILTERED_PDB" "$FAILURE_DIAGNOSIS" "${FAILURE_LOGS[@]}"
+  # Noninteractive GUI workers need a useful terminal error too. The complete
+  # explanation stays in the retained diagnosis, without authorizing a repair.
+  printf 'ERROR: %s\n' "$(head -n1 "$FAILURE_DIAGNOSIS")" >&2
+  grep '^Detected detail:' "$FAILURE_DIAGNOSIS" >&2 || :
   INTERVENTION_HELPER="$LIBEXEC_DIR/docking-universal-preparation-intervention.py"
   if [ -f "$INTERVENTION_HELPER" ]; then
     HISTIDINE_RESIDUE=$(ambiguous_histidine_residue "${FAILURE_LOGS[@]}")

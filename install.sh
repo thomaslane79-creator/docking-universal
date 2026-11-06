@@ -150,8 +150,10 @@ if [ ! -x "$p2rank_target/prank" ] && [ ! -f "$p2rank_target/prank.bat" ]; then
     printf 'Error: P2Rank archive checksum mismatch.\n' >&2
     exit 1
   }
-  mkdir -p "$p2rank_parent"
-  tar -xzf "$p2rank_archive" -C "$p2rank_parent"
+  # The upstream archive uses p2rank_2.5.1/, while our runtime uses
+  # p2rank-2.5.1/. Extract into the exact pinned destination on every host.
+  mkdir -p "$p2rank_target"
+  tar -xzf "$p2rank_archive" --strip-components=1 -C "$p2rank_target"
   chmod +x "$p2rank_target/prank" 2>/dev/null || true
   rm -f "$p2rank_archive"
   trap - EXIT HUP INT TERM
