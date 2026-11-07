@@ -18,6 +18,14 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+# These names encode hydrogen/protonation states and disulfide CYX naming of
+# the same heavy-atom residue. Keep actual names/hydrogens in retained output;
+# normalize only the comparison keys. Modified residues such as CSO are not
+# equivalent to a protonation alias and must still fail an identity change.
+PROTONATION_PARENTS = {"HID": "HIS", "HIE": "HIS", "HIP": "HIS",
+                       "ASH": "ASP", "GLH": "GLU", "LYN": "LYS",
+                       "CYM": "CYS", "CYX": "CYS", "TYM": "TYR"}
+
 
 def _atom_key(line: str) -> tuple[str, str, str, str, str, str]:
     record = line[0:6].strip()
@@ -35,9 +43,10 @@ def _atoms(path: Path) -> list[tuple[str, str, str, str, str, str]]:
         if not line.startswith(("ATOM  ", "HETATM")):
             continue
         element = line[76:78].strip().upper()
-        if element == "H" or line[12:16].strip().upper().startswith("H"):
+        if element in {"H", "D"} or (not element and line[12:16].strip().upper().startswith("H")):
             continue
-        rows.append(_atom_key(line))
+        key = _atom_key(line)
+        rows.append(key[:3] + (PROTONATION_PARENTS.get(key[3], key[3]),) + key[4:])
     return rows
 
 
@@ -47,7 +56,7 @@ def _states(path: Path) -> list[dict[str, str]]:
         if not line.startswith(("ATOM  ", "HETATM")):
             continue
         res = line[17:20].strip().upper()
-        if res not in {"ASH", "GLH", "HID", "HIE", "HIP", "LYN", "CYM", "TYM"}:
+        if res not in PROTONATION_PARENTS:
             continue
         states.append({"chain": line[21:22].strip(), "residue": line[22:26].strip(), "icode": line[26:27].strip(), "state": res})
     unique = sorted({tuple(sorted(item.items())) for item in states})
@@ -62,7 +71,7 @@ def audit(input_pdb: Path, output_pdb: Path, *, ph: float, command: str, log: Pa
     warnings = [line for line in log.read_text(errors="replace").splitlines()
                 if ("unable to find" in line.lower() or "ignored" in line.lower())
                 and "header lines in output" not in line.lower()]
-    status = "incompatible" if missing else ("review_required" if warnings else "compatible")
+    status = "incompatible" if missing or added or not before else ("review_required" if warnings else "compatible")
     return {
         "tool": "PDB2PQR",
         "command": command,
@@ -70,11 +79,13 @@ def audit(input_pdb: Path, output_pdb: Path, *, ph: float, command: str, log: Pa
         "input": str(input_pdb.resolve()),
         "output": str(output_pdb.resolve()),
         "status": status,
+        "input_has_heavy_atoms": bool(before),
         "input_heavy_atom_count": sum(before.values()),
         "output_heavy_atom_count": sum(after.values()),
         "missing_input_heavy_atoms": [list(row) for row in missing],
         "added_heavy_atoms": [list(row) for row in added],
         "assigned_states": _states(output_pdb) if output_pdb.is_file() else [],
+        "protonation_alias_comparison": PROTONATION_PARENTS,
         "warnings": warnings,
     }
 

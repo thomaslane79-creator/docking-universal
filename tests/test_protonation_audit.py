@@ -53,6 +53,76 @@ def test_real_audit_marks_component_identity_change_incompatible():
         assert record["missing_input_heavy_atoms"]
 
 
+def test_audit_rejects_unreadable_atom_inventory_instead_of_accepting_zero_atoms():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        source, output = root / 'filtered.cif', root / 'out.pdb'
+        source.write_text('data_filtered\n_entry.id filtered\n')
+        _pdb(output)
+        code, record = _run(source, output)
+        assert code == 2
+        assert record['status'] == 'incompatible'
+        assert record['input_has_heavy_atoms'] is False
+
+
+def test_audit_does_not_mistake_mercury_for_hydrogen():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        source, output = root / 'source.pdb', root / 'out.pdb'
+        _pdb(source)
+        output.write_bytes(source.read_bytes())
+        with source.open('a') as handle:
+            handle.write('HETATM    3 HG    HG A 100       3.000   0.000   0.000  1.00 20.00          HG\n')
+        code, record = _run(source, output)
+        assert code == 2
+        assert record['input_heavy_atom_count'] == 3
+        assert record['missing_input_heavy_atoms'][0][4] == 'HG'
+
+
+def test_audit_accepts_audited_protonation_alias_and_keeps_missing_atom_guard():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        source, output = root / 'source.pdb', root / 'out.pdb'
+        _pdb(source, residue='HIS')
+        _pdb(output, residue='HID')
+        code, record = _run(source, output)
+        assert code == 0
+        assert record['status'] == 'compatible'
+        assert record['missing_input_heavy_atoms'] == []
+        assert record['assigned_states'][0]['state'] == 'HID'
+        output.write_text(output.read_text().splitlines()[0] + '\nEND\n')
+        code, record = _run(source, output)
+        assert code == 2
+        assert record['missing_input_heavy_atoms']
+
+
+def test_audit_rejects_unreviewed_heavy_atom_additions():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        source, output = root / 'source.pdb', root / 'out.pdb'
+        _pdb(source)
+        output.write_text(source.read_text() +
+            'ATOM      3  CB  ALA A   1       3.000   0.000   0.000  1.00 20.00           C\n')
+        code, record = _run(source, output)
+        assert code == 2
+        assert record['added_heavy_atoms']
+
+
+def test_audit_accepts_disulfide_alias_without_replacing_modified_cysteine():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        source, output = root / 'source.pdb', root / 'out.pdb'
+        _pdb(source, residue='CYS')
+        _pdb(output, residue='CYX')
+        code, record = _run(source, output)
+        assert code == 0
+        assert record['assigned_states'][0]['state'] == 'CYX'
+        _pdb(source, residue='CSO')
+        code, record = _run(source, output)
+        assert code == 2
+        assert record['missing_input_heavy_atoms']
+
+
 def test_reduce2_wrapper_accepts_hydrogen_optimized_model():
     helper = ROOT / "libexec" / "docking-universal-reduce2-receptor.py"
     with tempfile.TemporaryDirectory() as directory:
@@ -122,6 +192,11 @@ def test_reduce2_wrapper_rejects_overprotonated_internal_peptide_nitrogen():
 class ProtonationAuditTests(unittest.TestCase):
     test_dropped_heavy_atoms = staticmethod(test_audit_rejects_dropped_heavy_atoms)
     test_component_identity_change = staticmethod(test_real_audit_marks_component_identity_change_incompatible)
+    test_unreadable_input_inventory = staticmethod(test_audit_rejects_unreadable_atom_inventory_instead_of_accepting_zero_atoms)
+    test_mercury_retention = staticmethod(test_audit_does_not_mistake_mercury_for_hydrogen)
+    test_protonation_alias = staticmethod(test_audit_accepts_audited_protonation_alias_and_keeps_missing_atom_guard)
+    test_unreviewed_heavy_atom_additions = staticmethod(test_audit_rejects_unreviewed_heavy_atom_additions)
+    test_disulfide_alias = staticmethod(test_audit_accepts_disulfide_alias_without_replacing_modified_cysteine)
     test_reduce2_hydrogen_optimized_model = staticmethod(test_reduce2_wrapper_accepts_hydrogen_optimized_model)
     test_reduce2_overprotonated_internal_peptide = staticmethod(
         test_reduce2_wrapper_rejects_overprotonated_internal_peptide_nitrogen

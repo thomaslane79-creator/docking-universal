@@ -64,7 +64,7 @@ done
 
 succeed=0
 case "${PREP_ROUTE_CASE:?}" in
-  strict|ligand|parameterize) succeed=1 ;;
+  strict|ligand|parameterize|protonation_mmcif) succeed=1 ;;
   pdbfixer) [ "$count" -ge 2 ] && succeed=1 ;;
   disulfide)
     case "$args" in
@@ -152,8 +152,38 @@ run_route() {
   mkdir -p "$case_dir/tools"
   input="$case_dir/${route_case}.pdb"
   write_base_pdb "$input"
+  protonation_mode=off
+  pdb2pqr_command=pdb2pqr30
 
   case "$route_case" in
+    protonation_mmcif)
+      "$python_command" - "$input" "$case_dir/protonation_mmcif.cif" <<'PY'
+import sys
+import gemmi
+gemmi.read_structure(sys.argv[1]).make_mmcif_document().write_file(sys.argv[2])
+PY
+      input="$case_dir/protonation_mmcif.cif"
+      protonation_mode=required
+      pdb2pqr_command="$case_dir/tools/pdb2pqr"
+      cat > "$pdb2pqr_command" <<'PQR'
+#!/usr/bin/env bash
+set -eu
+output=""
+source_input=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --pdb-output) output="$2"; shift 2 ;;
+    --with-ph) shift 2 ;;
+    --*) shift ;;
+    *) source_input="$1"; shift; break ;;
+  esac
+done
+case "$source_input" in *.pdb) ;; *) echo 'Filtered mmCIF sent to PDB2PQR' >&2; exit 3 ;; esac
+grep -q '^ATOM  ' "$source_input"
+cp "$source_input" "$output"
+PQR
+      chmod +x "$pdb2pqr_command"
+      ;;
     ligand)
       awk '/^END/ {
         for (i=0; i<10; i++)
@@ -229,7 +259,8 @@ run_route() {
     DOCKING_UNIVERSAL_ADFR_FALLBACK="$adfr_enabled"
     DOCKING_UNIVERSAL_PYTHON="$python_command"
     DOCKING_UNIVERSAL_PDBFIXER=off
-    DOCKING_UNIVERSAL_PROTONATION=off
+    DOCKING_UNIVERSAL_PROTONATION="$protonation_mode"
+    PDB2PQR_COMMAND="$pdb2pqr_command"
     DOCKING_UNIVERSAL_REDUCE2=off
     "$root/libexec/docking-universal-prepare" "$input")
 
@@ -297,6 +328,14 @@ PY
 
 assert_route strict strict_meeko
 assert_route parameterize strict_meeko
+assert_route protonation_mmcif strict_meeko
+"$python_command" - "$tmp/protonation_mmcif/protonation_mmcif_receptor_prep/receptor/pdb2pqr_audit.json" <<'PY'
+import json, sys
+record = json.load(open(sys.argv[1]))
+assert record['status'] == 'compatible', record
+assert record['input_heavy_atom_count'] == 4, record
+assert record['input'].endswith('_filtered.pdb'), record
+PY
 assert_route ligand strict_meeko
 assert_route pdbfixer pdbfixer_then_strict_meeko
 assert_route disulfide meeko_disulfide_templates

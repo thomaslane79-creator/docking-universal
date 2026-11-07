@@ -679,8 +679,12 @@ run_safe_receptor_preparation_attempts() {
     fi
     if [ "$REDUCE2_USED" = "0" ] && { [ "$REDUCE2_AVAILABLE" = "0" ] || [ "$PROTONATION_MODE" = required ]; } && [ "$PROTONATION_MODE" != off ] && [ "$PROTONATION_AVAILABLE" = "1" ]; then
       log "Running pH-aware PDB2PQR/PROPKA receptor assessment at pH $PROTONATION_PH; audit -> $PROTONATION_AUDIT"
+      # PDB2PQR 3.6 requires descriptive categories absent from our filtered
+      # native mmCIF. Its audit also reads PDB records. Use the already retained
+      # compatibility projection of this exact receptor, without re-filtering
+      # or inventing a new atom/model selection.
       if run_logged_preparation_command "$PROTONATION_LOG" "$PYTHON_COMMAND" "$PROTONATION_HELPER" \
-        "$initial_input" "$PROTONATION_PDB" "$PROTONATION_PQR" "$PROTONATION_AUDIT" "$PROTONATION_LOG" --ph "$PROTONATION_PH"; then
+        "$RECEPTOR_FILTERED_PDB" "$PROTONATION_PDB" "$PROTONATION_PQR" "$PROTONATION_AUDIT" "$PROTONATION_LOG" --ph "$PROTONATION_PH"; then
         protonation_status=$("$PYTHON_COMMAND" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status", "unknown"))' "$PROTONATION_AUDIT" 2>/dev/null || echo unknown)
         if [ "$protonation_status" = compatible ]; then
           PROTONATION_USED=1

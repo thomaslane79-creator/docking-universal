@@ -4,6 +4,20 @@ Status: active scope-control record, established 2026-09-24.
 
 ### Restore usable, auditable preparation fallbacks (2026-11-05)
 
+2026-11-07 real-structure acceptance: a 14-structure preparation campaign found
+that the PDB2PQR handoff used a filtered mmCIF missing categories required by
+that tool, while the retention audit only understood PDB records. Pass the
+already retained compatibility PDB to this existing engine. Compare known
+protonation/disulfide aliases as the same heavy-atom residue while retaining
+actual states and hydrogen coordinates. Continue rejecting modified-residue
+replacement, atom loss, unreviewed heavy-atom additions and empty inventories;
+do not misclassify mercury as hydrogen. This is a demonstrated format/audit
+correctness repair within gate 1, with no new GUI option or fallback policy.
+The [real-structure record](receptor-preparation-validation-2026-11-07.md)
+separates completed preparations, safe stops, network dependence and remaining
+scientific limitations. The former CLI supplies historical context; the
+current acceptance boundary is the GUI preparation engine and job service.
+
 2026-11-07 usability clarification: users should not need to know preparation
 tools to choose a recovery. Reuse retained failure evidence to explain the
 problem, attempted stages and the next action. Put named tool selection under

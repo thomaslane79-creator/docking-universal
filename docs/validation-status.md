@@ -41,6 +41,14 @@ The release suite is intentionally slow. It first repeats the integration probes
 
 ## Real-tool smoke checks
 
+The [2026-11-07 receptor preparation campaign](receptor-preparation-validation-2026-11-07.md)
+exercised 14 public structures across 23 scenarios and 39 real preparation
+attempts on Apple Silicon, including the GUI job-service handoff. It documents
+the repaired PDB2PQR adapter, automatic ADFR success, rejected incomplete
+exports, and the still-blocked 5IKR glycan charge assignments. These results
+supersede historical success claims for the specific preparation paths tested;
+they do not establish docking or electrostatic accuracy.
+
 The maintained scientific environment has been checked with fpocket, Meeko, PDBFixer 1.11, MolScrub, RDKit, Open Babel, PLIP, PyMOL Open-Source, AutoDock Vina 1.2.7, and QuickVina-W 1.1 from the qvina 2.1.0 Conda package. Real fixture-based checks cover:
 
 - ligand-centered 1HVR/XK2 receptor preparation and box generation;
