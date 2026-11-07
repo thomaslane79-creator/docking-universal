@@ -238,7 +238,8 @@ def retain_reviewed_receptor_input(root, preview, derivative):
     if digest(source.read_bytes()) != preview['source_sha256'] or digest(derivative) != preview['model_input_sha256']:
         raise ValueError('Original source or reviewed model changed before retaining its receptor inventory')
     baseline = root / 'model/original_filtered_receptor.pdb'
-    filter_receptor_pdb(source, baseline)
+    filtering = filter_receptor_pdb(source, baseline,
+        bound_reference=(preview.get('context') or {}).get('bound_reference'))
     allowed = {}
     context = []
     for line in baseline.read_text().splitlines(keepends=True):
@@ -262,6 +263,7 @@ def retain_reviewed_receptor_input(root, preview, derivative):
     if digest(source.read_bytes()) != preview['source_sha256']:
         raise ValueError('Original receptor source changed during inventory review')
     return {'path': str(output.resolve()), 'sha256': digest(output.read_bytes()),
+            'bound_reference_separation': filtering.get('bound_reference_separation'),
             'baseline_path': str(baseline.resolve()), 'baseline_sha256': digest(baseline.read_bytes()),
             'policy': 'original receptor inventory with only the explicitly reviewed model changes'}
 

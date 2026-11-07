@@ -546,6 +546,7 @@ class PreparationProgressPanel(QtWidgets.QWidget):
     cancelRequested = QtCore.pyqtSignal()
     logsRequested = QtCore.pyqtSignal()
     artifactsRequested = QtCore.pyqtSignal()
+    reviewModelChangesRequested = QtCore.pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -572,10 +573,15 @@ class PreparationProgressPanel(QtWidgets.QWidget):
         self.summary.setPlaceholderText("Retained preparation outputs will appear here.")
         buttons = QtWidgets.QHBoxLayout()
         self.cancel_button = QtWidgets.QPushButton("Cancel preparation")
+        self.review_failed_button = QtWidgets.QPushButton('Review unsupported components…')
+        self.review_failed_button.setObjectName('review_failed_preparation_from_progress')
+        self.review_failed_button.setToolTip('Preview exact receptor changes before approving a new preparation attempt.')
+        self.review_failed_button.hide()
         self.logs_button = QtWidgets.QPushButton("Show complete logs")
         self.artifacts_button = QtWidgets.QPushButton("Show study files")
         self.artifacts_button.setToolTip("Show saved reports, structures, logs and protocol files for this study")
         buttons.addWidget(self.cancel_button)
+        buttons.addWidget(self.review_failed_button)
         buttons.addStretch(1)
         buttons.addWidget(self.logs_button)
         buttons.addWidget(self.artifacts_button)
@@ -586,6 +592,7 @@ class PreparationProgressPanel(QtWidgets.QWidget):
         layout.addWidget(self.summary, 1)
         layout.addLayout(buttons)
         self.cancel_button.clicked.connect(self.cancelRequested)
+        self.review_failed_button.clicked.connect(self.reviewModelChangesRequested)
         self.logs_button.clicked.connect(self.logsRequested)
         self.artifacts_button.clicked.connect(self.artifactsRequested)
 

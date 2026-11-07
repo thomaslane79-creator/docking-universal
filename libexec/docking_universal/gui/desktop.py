@@ -1490,6 +1490,7 @@ if QtWidgets is not None:
             blank_layout.addWidget(blank_message, 1)
             self.preparation_progress_panel = PreparationProgressPanel()
             self.preparation_progress_panel.cancelRequested.connect(self.cancel_active_job)
+            self.preparation_progress_panel.reviewModelChangesRequested.connect(self.review_receptor_changes)
             self.preparation_progress_panel.logsRequested.connect(
                 lambda: self._set_auxiliary_dock_visible(
                     self.logs_dock, QtCore.Qt.DockWidgetArea.BottomDockWidgetArea, True,
@@ -2254,10 +2255,14 @@ if QtWidgets is not None:
                             for job in state.jobs)
                 and not any(a.kind in {'prepared_receptor', 'protocol_bundle'} for a in state.artifacts)
                 and not state.workflow_data.get('latest_control_output'))
-            self.study_setup_panel.review_failed_button.setVisible(failed_review)
+            # A failed attempt leaves the user on progress. Keep the existing
+            # exact-review action reachable there, with the same host gates as
+            # setup; returning to an earlier step must not be required.
+            for panel in (self.study_setup_panel, self.preparation_progress_panel):
+                panel.review_failed_button.setVisible(failed_review)
+                panel.review_failed_button.setEnabled(bool(
+                    failed_review and self.host_controller.available and not active and not pending))
             self.start_preparation_button.setVisible(not failed_review)
-            self.study_setup_panel.review_failed_button.setEnabled(bool(
-                failed_review and self.host_controller.available and not active and not pending))
             preparation_complete = any(
                 job.stage == "preparation_and_pocket_detection" and job.status.value == "completed"
                 for job in state.jobs

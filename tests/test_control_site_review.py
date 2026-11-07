@@ -1,5 +1,6 @@
 """Site-first controls must not skip lookup, review, or site-specific authority."""
 import json
+from dataclasses import replace
 import os
 from pathlib import Path
 import tempfile
@@ -208,6 +209,36 @@ class ControlSiteReviewTests(unittest.TestCase):
         Path(contract["assets"]["box"]["path"]).write_text("changed")
         with self.assertRaises(ValueError):
             reviewed_control_inputs(state)
+
+    def test_reference_retained_as_cofactor_cannot_be_redocked_against_itself(self):
+        self.prepare(online=False)
+        state = self.approve(['B1'])
+        artifact = next(a for a in state.artifacts if a.kind == 'prepared_receptor')
+        Path(artifact.path).write_text(
+            'HETATM    2  C1  LIG A 101       1.000   2.000   3.000  1.00 10.00     0.125 C\n')
+        state.artifacts = [replace(a, sha256=sha256(Path(artifact.path)))
+                           if a.id == artifact.id else a for a in state.artifacts]
+        self.store.save(state)
+        with self.assertRaisesRegex(ValueError, 'reference LIG:A:101 is still present'):
+            self.runner.start_control_validation('workflow', {}, request_id='bad-control',
+                expected_revision=state.revision)
+        self.assertFalse(any(j.stage == 'control_validation' for j in self.store.load('workflow').jobs))
+        self.assertFalse((self.root / 'study/control').exists())
+
+    def test_native_boundary_rejects_reference_even_with_matching_receptor_hash(self):
+        self.prepare(online=False)
+        contract = reviewed_control_inputs(self.approve(['B1']))
+        receptor = Path(contract['assets']['receptor_pdbqt']['path'])
+        receptor.write_text('HETATM    2  C1  LIG A 101       1.000   2.000   3.000  1.00 10.00     0.125 C\n')
+        contract['assets']['receptor_pdbqt']['sha256'] = sha256(receptor)
+        path = self.root / 'retained-reference-contract.json'
+        path.write_text(json.dumps(contract))
+        with self.assertRaisesRegex(ValueError, 'reference LIG:A:101 is still present'):
+            read_reviewed_control_inputs(path)
+        receptor.write_text(receptor.read_text().replace('LIG A 101', 'LIG B 101'))
+        contract['assets']['receptor_pdbqt']['sha256'] = sha256(receptor)
+        path.write_text(json.dumps(contract))
+        read_reviewed_control_inputs(path)  # Another exact instance is not this reference.
 
     def test_native_boundary_rechecks_contract_and_retained_files(self):
         self.prepare()

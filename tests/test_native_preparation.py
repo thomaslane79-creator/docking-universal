@@ -16,7 +16,10 @@ class NativePreparationTests(unittest.TestCase):
         fixture = Path(__file__).resolve().parents[1] / 'examples/tutorials/02_ligand_free_cavity/inputs/2R8N.pdb'
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            source = root / 'bound.pdb'; source.write_bytes(fixture.read_bytes())
+            source = root / 'bound.pdb'
+            source.write_text('\n'.join(line for line in fixture.read_text().splitlines()
+                if not line.startswith('END')) + '\n'
+                'HETATM 9999  C1  MK1 B 902     100.000 100.000 100.000  1.00 20.00           C\nEND\n')
             options = ReceptorPreparationOptions(source, root / 'outputs', 'ligand',
                 ligand_resname='MK1', ligand_chain_id='B', ligand_residue_number='902', reduce2='off')
             calls = []

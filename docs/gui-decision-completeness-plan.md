@@ -1,5 +1,27 @@
 # Complete interactive GUI workflow plan
 
+2026-11-07 user priority update: after the preparation/recovery issues are
+resolved, correct input-ligand evidence indicators and consolidate near-identical
+box suggestions into one site option with retained provenance. Then implement
+the optional experimental-ligand similarity/template-guided pathway from the
+November 5 handoff, before returning to protein/ligand charge surfaces. Keep
+template-guided calculations distinct from independent control validation.
+The real P1/B1 case has 94.41% box intersection-over-union and contains the same
+32-atom GNP in both; it is a functional duplication/evidence-display defect.
+The [backlog acceptance scope](gui-idea-backlog.md) records the user override,
+provenance requirements and scientific boundaries. Existing approved geometry
+and protocols remain unchanged.
+
+Current native GUI acceptance: the reviewed omission/retry worked, and the saved
+box warnings survive a reopened offscreen rendering. A selected-table Qt Cocoa
+accessibility crash blocks completion of the interactive pocket-review/reopen
+test. The metal-linked reference-role separation now passes a fresh API retry:
+the exact reference is withheld from scoring but retained in the full source,
+all 1,343 receptor heavy atoms pass the strict ADFR audit, and approved omission
+warnings persist. Control also rejects an exact reference still present in the
+scored receptor. Covalently associated references still require explicit review.
+See [actual steps and limits](gui-receptor-recovery-walkthrough-2026-11-07.md).
+
 2026-11-07 recovery presentation: explain the diagnosed problem, retained
 attempts and recommended next action before exposing named tools under
 Advanced. Suggestions are checked candidates, never guarantees. Permit an

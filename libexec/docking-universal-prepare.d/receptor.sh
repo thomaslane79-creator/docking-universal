@@ -16,6 +16,22 @@
 filter_receptor_input() {
   local input_pdb="$1"
   local output_pdb="$2"
+  if [ -n "${REQUESTED_LIGAND:-}" ] && [ -n "${REQUESTED_LIGAND_CHAIN:-}" ] && [ -n "${REQUESTED_LIGAND_RESSEQ:-}" ]; then
+    # GUI exact-reference selection owns this role. Preserve the full complex,
+    # but keep even a metal-associated reference out of the scored receptor.
+    "$PYTHON_COMMAND" - "$LIBEXEC_DIR" "$input_pdb" "$output_pdb" "$REQUESTED_LIGAND" \
+      "$REQUESTED_LIGAND_CHAIN" "$REQUESTED_LIGAND_RESSEQ" "${REQUESTED_LIGAND_ICODE:-}" <<'PY'
+import json
+from pathlib import Path
+import sys
+sys.path.insert(0, sys.argv[1])
+from docking_universal.receptor_filter import filter_receptor_pdb
+reference = dict(zip(('resname', 'chain', 'number', 'insertion_code'), sys.argv[4:]))
+record = filter_receptor_pdb(Path(sys.argv[2]), Path(sys.argv[3]), bound_reference=reference)
+Path(sys.argv[3]).with_name('bound_reference_separation.json').write_text(json.dumps(record, indent=2) + '\n')
+PY
+    return $?
+  fi
   awk '
     FNR == NR {
       if (/^MODRES/) {
@@ -505,7 +521,7 @@ except (OSError, ValueError) as exc:
     raise SystemExit("ERROR: Reviewed receptor inventory could not be verified: " + str(exc))
 PY
   else
-    filter_receptor_input "$INPUT_PDB" "$RECEPTOR_FILTERED_PDB"
+    filter_receptor_input "$INPUT_PDB" "$RECEPTOR_FILTERED_PDB" || return $?
   fi
   RETAINED_LINKED_COMPONENTS=$(list_retained_linked_components "$INPUT_PDB" "$RECEPTOR_FILTERED_PDB")
 

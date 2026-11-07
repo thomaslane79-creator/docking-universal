@@ -50,6 +50,8 @@ CASES = {
     '1AKI_ph74': 'Disulfide-containing lysozyme; explicit pH-aware assessment',
     '1CA2_ph74': 'Zinc receptor; explicit protonation must not discard the metal',
     '1HVR_ph74': 'Oxidized cysteine; protonation must not silently replace or omit CSO',
+    '1HVR_reference': 'Exact XK2 bound reference; preserve CSO and withhold the reference from scoring',
+    '1N6O_reference': 'Exact metal-associated GNP reference; retain Mg pending explicit review',
 }
 VARIANTS = {
     '1UBQ_missing_sidechain': {'delete_atom': 'NZ'},
@@ -68,6 +70,10 @@ VARIANTS = {
                          'DOCKING_UNIVERSAL_PROTONATION': 'required'}},
     '1HVR_ph74': {'env': {'DOCKING_UNIVERSAL_REDUCE2': 'off',
                          'DOCKING_UNIVERSAL_PROTONATION': 'required'}},
+    '1HVR_reference': {'env': {'DOCKING_UNIVERSAL_LIGAND_RESNAME': 'XK2',
+        'DOCKING_UNIVERSAL_LIGAND_CHAIN': 'A', 'DOCKING_UNIVERSAL_LIGAND_RESSEQ': '263'}},
+    '1N6O_reference': {'env': {'DOCKING_UNIVERSAL_LIGAND_RESNAME': 'GNP',
+        'DOCKING_UNIVERSAL_LIGAND_CHAIN': 'A', 'DOCKING_UNIVERSAL_LIGAND_RESSEQ': '200'}},
 }
 
 
@@ -289,7 +295,14 @@ def run(out, ids, prefix, timeout, protect, overrides, service=False):
             controller.create_study(pdb_id, 'Isolated receptor validation ' + pdb_id)
             options = ReceptorPreparationOptions(source, case, 'pockets', feedback_level='concise',
                 reduce2=case_settings.get('DOCKING_UNIVERSAL_REDUCE2', 'auto'),
-                protonation=case_settings.get('DOCKING_UNIVERSAL_PROTONATION', 'auto'))
+                protonation=case_settings.get('DOCKING_UNIVERSAL_PROTONATION', 'auto'),
+                pdbfixer=case_settings.get('DOCKING_UNIVERSAL_PDBFIXER', 'auto'),
+                preparation_backend=case_settings.get('DOCKING_UNIVERSAL_PREP_BACKEND', 'auto'),
+                meeko_templates=case_settings.get('MEEKO_SET_TEMPLATE', ''),
+                ligand_resname=case_settings.get('DOCKING_UNIVERSAL_LIGAND_RESNAME'),
+                ligand_chain_id=case_settings.get('DOCKING_UNIVERSAL_LIGAND_CHAIN'),
+                ligand_residue_number=case_settings.get('DOCKING_UNIVERSAL_LIGAND_RESSEQ'),
+                ligand_insertion_code=case_settings.get('DOCKING_UNIVERSAL_LIGAND_ICODE', ''))
             plan = build_receptor_preparation_plan(command[0], options,
                                                    base_environment=dict(env, **case_settings))
             plan = replace(plan, request=replace(plan.request, timeout_seconds=timeout))

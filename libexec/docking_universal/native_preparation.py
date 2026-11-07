@@ -192,7 +192,10 @@ def prepare_native_candidate(options: ReceptorPreparationOptions, *,
         normalized = normalize_structure_input(source, root / "source-input")
         from docking_universal_region import validate_protein_pdb
         validate_protein_pdb(normalized.engine_pdb_path)
-        linked = filter_receptor_pdb(normalized.engine_pdb_path, filtered)
+        reference = (dict(resname=options.ligand_resname, chain=options.ligand_chain_id,
+                          number=options.ligand_residue_number, insertion_code=options.ligand_insertion_code)
+                     if options.ligand_resname and options.ligand_chain_id and options.ligand_residue_number else None)
+        linked = filter_receptor_pdb(normalized.engine_pdb_path, filtered, bound_reference=reference)
         shutil.copyfile(filtered, pdb)
         native_input = filtered
         if normalized.derived_for_legacy_engine:

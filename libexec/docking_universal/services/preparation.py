@@ -265,6 +265,7 @@ class ReceptorPreparationService:
             ]
             receptor_dir = plan.output_root / "receptor"
             for name, kind in (("pdb2pqr_audit.json", "protonation_audit"),
+                               ("bound_reference_separation.json", "reference_separation_audit"),
                                ("pdb2pqr.log", "protonation_log"),
                                ("reduce2_audit.json", "reduce2_audit"),
                                ("reduce2.log", "reduce2_log"),

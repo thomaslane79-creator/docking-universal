@@ -246,9 +246,9 @@ class FailedPreparationReviewExposureTests(unittest.TestCase):
 
     def test_failed_control_exposes_review_while_retained_setup_stays_locked(self):
         original = self.store.path_for('failed-control').read_bytes()
-        button = self.window.study_setup_panel.review_failed_button
-        self.assertFalse(button.isHidden())
-        self.assertTrue(button.isEnabled())
+        for panel in (self.window.study_setup_panel, self.window.preparation_progress_panel):
+            self.assertFalse(panel.review_failed_button.isHidden())
+            self.assertTrue(panel.review_failed_button.isEnabled())
         self.assertFalse(self.window.input_pdb.isEnabled())
         self.assertEqual(self.window.study_pathway.currentData(), 'control')
         self.assertTrue(self.window.protocol_finalization_panel.review_model_button.isHidden())
@@ -268,22 +268,26 @@ class FailedPreparationReviewExposureTests(unittest.TestCase):
         state.jobs.append(Job('active', 'control_validation', JobStatus.RUNNING))
         self.store.save(state); self.window.refresh()
         self.assertFalse(self.window.study_setup_panel.review_failed_button.isEnabled())
+        self.assertFalse(self.window.preparation_progress_panel.review_failed_button.isEnabled())
         reset()
         state = self.store.load('failed-control')
         state.decisions.append(DecisionRequired('d', 'review', 'Review?', 'Detected', 'Stopped', (),
             (DecisionOption('stop', 'Stop', 'Keep stopped'),)))
         self.store.save(state); self.window.refresh()
         self.assertFalse(self.window.study_setup_panel.review_failed_button.isEnabled())
+        self.assertFalse(self.window.preparation_progress_panel.review_failed_button.isEnabled())
         reset()
         state = self.store.load('failed-control')
         state.jobs[0].status = JobStatus.COMPLETED
         self.store.save(state); self.window.refresh()
         self.assertTrue(self.window.study_setup_panel.review_failed_button.isHidden())
+        self.assertTrue(self.window.preparation_progress_panel.review_failed_button.isHidden())
         reset()
         state = self.store.load('failed-control')
         state.artifacts.append(ArtifactRecord('locked', 'protocol_bundle', '/retained/protocol.duprotocol'))
         self.store.save(state); self.window.refresh()
         self.assertTrue(self.window.study_setup_panel.review_failed_button.isHidden())
+        self.assertTrue(self.window.preparation_progress_panel.review_failed_button.isHidden())
 
     def test_unsupported_windows_host_does_not_offer_failed_recovery(self):
         from docking_universal.windows_desktop import CAPABILITIES
@@ -291,6 +295,7 @@ class FailedPreparationReviewExposureTests(unittest.TestCase):
         self.window._apply_runtime_capabilities()
         self.window.refresh()
         self.assertTrue(self.window.study_setup_panel.review_failed_button.isHidden())
+        self.assertTrue(self.window.preparation_progress_panel.review_failed_button.isHidden())
 
     def test_cancel_only_inspects_and_explicit_approval_forwards_exact_choices(self):
         preview = {'residue_inventory': [], 'box_review_pending': True, 'review_stage': 'failed_preparation'}
@@ -301,13 +306,13 @@ class FailedPreparationReviewExposureTests(unittest.TestCase):
              patch.object(self.window.host_controller, 'prepare_receptor_changes') as prepare, \
              patch('docking_universal.gui.receptor_model_review.ReceptorModelReviewDialog') as dialog:
             dialog.return_value.exec.return_value = QtWidgets.QDialog.DialogCode.Rejected
-            self.window.study_setup_panel.review_failed_button.click()
+            self.window.preparation_progress_panel.review_failed_button.click()
             inspect.assert_called_once_with({'exclusions': [], 'alternate_locations': []}, self.window.state.revision)
             prepare.assert_not_called()
             self.assertEqual(dialog.call_args.args[0]['available_preparation_backends'], ['meeko', 'adfr'])
             dialog.return_value.exec.return_value = QtWidgets.QDialog.DialogCode.Accepted
             dialog.return_value.approved_change.return_value = (choices, 'b' * 64, 'Exact fixture review')
-            self.window.study_setup_panel.review_failed_button.click()
+            self.window.preparation_progress_panel.review_failed_button.click()
             prepare.assert_called_once_with(choices, 'b' * 64, 'Exact fixture review', self.window.state.revision)
         self.assertEqual(self.store.path_for('failed-control').read_bytes(), original)
 

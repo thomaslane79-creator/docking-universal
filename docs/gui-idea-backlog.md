@@ -2,7 +2,75 @@
 
 Status: active scope-control record, established 2026-09-24.
 
+### Site evidence and duplicate suggestions before charge surfaces (2026-11-07)
+
+The user explicitly reprioritizes the work: finish preparation/recovery issues,
+then correct site evidence presentation and consolidate near-identical box
+suggestions, then add optional experimental-ligand similarity/template guidance,
+before resuming protein/ligand charge-surface work. This supersedes the relative
+priority in the November 5 handoff without changing that historical document.
+
+Demonstrated case: the real 1N6O GUI recovery produces P1 (a P2Rank proposal)
+and B1 (the exact input GNP A:200 ligand-centered box). Each is 26 Å per side;
+their centers differ by 0.543 Å. They share 97.12% of each volume, with
+intersection-over-union 94.41%. All 32 deposited GNP heavy atoms lie in both.
+The plot/panel currently counts only `experimental_ligand_evidence` observations,
+which are empty because related-PDB lookup was off. It omits the input-ligand
+association, including B1's explicit source identity. No P2Rank score for B1 is
+correct; describing these regions as having no ligand evidence is misleading.
+Evidence: `validation/runs/gui-removal-20261107/candidate-overlap-and-input-ligand.json`.
+
+This is a demonstrated functionality/correctness repair (gate 1), not a new
+detector or a change to scientific scores. Acceptance scope:
+
+- Show the supplied experimental ligand's exact source/identity and geometric
+  relationship to each proposal, including P1. Keep local input observations
+  distinct from independent related-structure observations and control evidence.
+- Make the ligand indicator and visible counts agree with that provenance in
+  local-only, lookup-failed and lookup-enabled runs. An unscored input-ligand
+  box must visibly say why it has no predictor score.
+- Present near-identical proposals as one site option with all original source
+  IDs, evidence and detector scores retained. Expand to inspect constituent
+  geometries/provenance. Define/test the overlap criterion explicitly; do not
+  silently average/union geometries, invent scores, merge different receptor
+  states, or rewrite previously approved boxes/protocols. Preserve model-change
+  warnings for the actual geometry selected for docking.
+- Test the observed P1/B1 duplicate, mixed predictor/input/evidence origins,
+  genuinely distinct neighboring sites, different box sizes and receptor states,
+  reopened decisions and the correspondence between plot and selection counts.
+
+The user also explicitly moves optional similarity/template-guided docking ahead
+of surfaces (gate 5: user changes the prior order). Reuse the bounded design in
+[the retained handoff](results-design-handoff-20261105.md#optional-similaritytemplate-guided-docking):
+rank qualified experimental bound ligands by query similarity, expose chemical/
+stereochemical correspondence and protein alignment, let the user choose a
+template, generate/refine query poses, and compare with independent docking.
+Retain source coordinates, methods/settings and template provenance. Similarity
+alone does not validate a transferable pose. Template-initialized refinement
+must not approve an independent redocking control. Algorithm/cutoff acceptance
+and validation remain implementation work; no schedule or simplicity claim is
+established by this queue entry. No template-guided calculation was added here.
+
 ### Restore usable, auditable preparation fallbacks (2026-11-05)
+
+2026-11-07 interactive acceptance: the actual GUI walkthrough reproduced the
+initial failure, blank exclusion defaults, exact one-atom Mg A201 preview,
+disabled approval before rationale/acknowledgement, cancellation without a job,
+and a completed reviewed retry. The progress page exposed only logs/files;
+connect its existing exact-review action with the same eligibility gates as
+setup (gate 4). The retained source/box audit and reopened offscreen GUI show
+the high-severity inside-box omission warning. Full native acceptance remains
+blocked by a Qt Cocoa accessibility selected-table crash, also reproduced in
+an isolated older runtime; do not count the offscreen render as native success.
+The fixture also initially retained GNP in the scored receptor. Add pre-control
+and native-boundary guards against redocking a reference against itself, and
+withhold the exact selected reference from the scored receptor while preserving
+its full source coordinates (gate 1). A corrected API retry passes the strict
+ADFR audit with all 1,343 receptor heavy atoms, BME retained, only the reviewed
+Mg omitted and warnings preserved. Protein/multi-atom links still require
+explicit covalent-reference review. This does not complete native GUI acceptance.
+See
+[the walkthrough record](gui-receptor-recovery-walkthrough-2026-11-07.md).
 
 2026-11-07 real-structure acceptance: a 14-structure preparation campaign found
 that the PDB2PQR handoff used a filtered mmCIF missing categories required by

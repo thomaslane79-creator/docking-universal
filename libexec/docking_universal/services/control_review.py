@@ -14,6 +14,21 @@ class NoControlSiteSelected(ValueError):
     """The chosen regions are valid but none can test this experimental pose."""
 
 
+def _assert_reference_not_scored(receptor_pdbqt, ligand):
+    """A linked reference can survive generic cofactor retention; never redock
+    it against its own deposited atoms. Keep the source/reference unchanged
+    and require receptor-role review instead of silently deleting components.
+    """
+    for line in Path(receptor_pdbqt).read_text().splitlines():
+        if line.startswith(('ATOM  ', 'HETATM')) and (
+            line[17:20].strip(), line[21:22].strip() or '_', line[22:26].strip()
+        ) == tuple(ligand) and not line[26:27].strip():
+            raise ValueError('Selected experimental reference ' + ':'.join(ligand)
+                + ' is still present in the scored receptor. Review how the reference is separated '
+                  'from the receptor before running its pose-recovery control. Original reference '
+                  'coordinates must remain retained; no component was automatically removed.')
+
+
 def reviewed_control_inputs(state) -> dict:
     setup = state.workflow_data.get("study_setup") or {}
     if setup.get("pathway") != "control" or not setup.get("site_review_first"):
@@ -30,6 +45,7 @@ def reviewed_control_inputs(state) -> dict:
         assets[name] = {"path": artifact.path, "sha256": artifact.sha256}
     ligand = (str(setup["ligand_resname"]), str(setup["ligand_chain_id"]),
               str(setup["ligand_residue_number"]))
+    _assert_reference_not_scored(assets['receptor_pdbqt']['path'], ligand)
     coordinates = []
     for line in Path(assets["source_pdb"]["path"]).read_text().splitlines():
         if line.startswith(("ATOM  ", "HETATM")) and (
@@ -77,6 +93,10 @@ def read_reviewed_control_inputs(path, *, complex_path=None, ligand_id=None, eng
         asset = record["assets"][key]
         if not Path(asset["path"]).is_file() or sha256(Path(asset["path"])) != asset["sha256"]:
             raise ValueError(f"Reviewed control input changed or is missing: {key}")
+    selected_ligand = record.get('ligand_id', '').split(':')
+    if len(selected_ligand) != 3 or any(not item for item in selected_ligand):
+        raise ValueError('Reviewed control lacks an exact experimental reference identity')
+    _assert_reference_not_scored(record['assets']['receptor_pdbqt']['path'], selected_ligand)
     if complex_path is not None and sha256(Path(complex_path)) != record["assets"]["source_pdb"]["sha256"]:
         raise ValueError("Control complex differs from the reviewed input")
     if ligand_id is not None and ligand_id != record["ligand_id"]:
