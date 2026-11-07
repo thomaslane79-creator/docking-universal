@@ -57,6 +57,51 @@ class ReceptorModelReviewGuiTests(unittest.TestCase):
         self.assertIn('exploratory', why)
         self.assertIn('13.44 Å', self.dialog.details.toPlainText())
 
+    def test_guidance_suggests_an_available_method_and_keeps_tool_names_under_advanced(self):
+        self.dialog.close()
+        self.initial.update(preparation_backend='meeko', available_preparation_backends=['meeko', 'adfr'],
+            recovery_guidance={'summary': 'Standard preparation cannot process cobalt.',
+                'next_step': 'Try the alternative method without removing components.',
+                'recommended_backend': 'adfr', 'last_backend': 'meeko', 'details': 'Meeko rejected Co. ADFRsuite is a candidate, not a guarantee.'})
+        callback = self.dialog._preview_callback
+        def preview(choices):
+            record = callback(choices)
+            record['changes'][0]['kind'] = 'preparation_method_change'
+            return record
+        self.dialog = ReceptorModelReviewDialog(self.initial, preview)
+        self.assertTrue(self.dialog.backend_controls.isHidden())
+        self.assertEqual(self.dialog.preparation_backend.currentData(), 'adfr')
+        self.assertIn('Alternative preparation', self.dialog.method_summary.text())
+        self.assertNotIn('ADFR', self.dialog.method_summary.text())
+        self.assertEqual(self.dialog.exclusions.toPlainText(), '')
+        self.assertEqual(self.calls, [])
+        self.assertFalse(self.dialog.prepare_button.isEnabled())
+        self.dialog.preview_button.click()
+        self.assertIn('Keep structure', self.dialog.prepare_button.text())
+        self.dialog.rationale.setText('Keep all components and test the suggested compatible method')
+        self.dialog.acknowledge.setChecked(True)
+        self.assertTrue(self.dialog.prepare_button.isEnabled())
+        self.assertEqual(self.dialog.approved_change()[0]['preparation_backend'], 'adfr')
+        self.assertEqual(self.dialog.approved_change()[0]['exclusions'], [])
+        self.dialog.advanced_backend_toggle.click()
+        self.assertFalse(self.dialog.backend_controls.isHidden())
+        self.dialog.preparation_backend.setCurrentIndex(self.dialog.preparation_backend.findData('meeko'))
+        self.assertFalse(self.dialog.prepare_button.isEnabled())
+
+    def test_unavailable_suggestion_and_already_tried_method_are_explained(self):
+        self.dialog.close()
+        guidance = {'summary': 'Preparation stopped.', 'next_step': 'Review the remaining issues.',
+                    'recommended_backend': 'adfr', 'last_backend': 'adfr', 'details': 'Retained attempt failed charge checks.'}
+        self.initial.update(preparation_backend='meeko', available_preparation_backends=['meeko'], recovery_guidance=guidance)
+        self.dialog = ReceptorModelReviewDialog(self.initial, self.dialog._preview_callback)
+        self.assertEqual(self.dialog.preparation_backend.currentData(), 'meeko')
+        self.assertIn('unavailable', self.dialog.method_summary.text())
+        self.dialog.close()
+        self.initial.update(preparation_backend='adfr', available_preparation_backends=['meeko', 'adfr'])
+        self.dialog = ReceptorModelReviewDialog(self.initial, self.dialog._preview_callback)
+        self.assertIn('already tried', self.dialog.method_summary.text())
+        self.assertFalse(self.dialog.prepare_button.isEnabled())
+
     def test_changing_any_choice_invalidates_the_previous_preview(self):
         self.dialog.exclusions.setPlainText('NAG A 1')
         self.dialog.preview_button.click()

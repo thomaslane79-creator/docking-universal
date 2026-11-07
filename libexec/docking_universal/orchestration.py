@@ -496,11 +496,17 @@ class ProtocolWorkflowRunner:
             source_path = str(normalized.engine_pdb_path)
             regions = []
             review_stage = 'failed_preparation'
+        from .services.failed_preparation_recovery import recovery_guidance
+        guidance = recovery_guidance(state, source_path)
+        previous_backend = (guidance or {}).get('last_backend') or (
+            setup.get('preparation_backend') if setup.get('preparation_backend') in {'meeko', 'adfr'} else 'meeko')
         backend = choices.get('preparation_backend') if isinstance(choices, dict) else None
-        backend = backend or (setup.get('preparation_backend') if setup.get('preparation_backend') in {'meeko', 'adfr'} else 'meeko')
+        backend = backend or previous_backend
         context = {'study_id': study_id, 'revision': state.revision,
                    'original_input_sha256': original_hash, 'review_stage': review_stage,
                    'failed_preparation_job_id': failed_job_id, 'preparation_backend': backend,
+                   'previous_preparation_backend': previous_backend,
+                   'allow_preparation_method_change': guidance is not None and guidance['diagnosis_code'] != 'pocket_runtime',
                    'locked_setup_sha256': sha256_bytes(json.dumps(setup, sort_keys=True, separators=(',', ':')).encode()),
                    'selected_regions': [{'label': r['box_label'], 'sha256': r['box_sha256']} for r in regions]}
         if setup.get('site_mode') == 'ligand':
@@ -562,6 +568,8 @@ class ProtocolWorkflowRunner:
         preview['selected_box_review'] = [{**for_box({'residues': residues}, r['geometry']), 'label': r['box_label'],
             'warning': 'Distances describe the proposed changes relative to each reviewed box; they do not grant permission to ignore them.'}
             for r in regions]
+        if guidance:
+            preview['recovery_guidance'] = guidance
         return preview
 
     def prepare_reviewed_receptor(self, study_id, *, request_id, expected_revision, model_changes=None):

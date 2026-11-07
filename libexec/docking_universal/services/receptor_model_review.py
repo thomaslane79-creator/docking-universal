@@ -76,7 +76,7 @@ def inspect_source_data(data):
 def preview_changes(source, choices, *, context):
     """Return a deterministic preview and in-memory derivative; write nothing."""
     if not isinstance(choices, dict) or set(choices) - {'exclusions', 'alternate_locations', 'sidechain_candidate', 'preparation_backend'}:
-        raise ValueError('Only explicit exclusions, alternate locations and a reviewed side-chain candidate are supported')
+        raise ValueError('Only explicit preparation methods, exclusions, alternate locations and a reviewed side-chain candidate are supported')
     if 'preparation_backend' in choices and (not isinstance(choices['preparation_backend'], str)
                                            or choices['preparation_backend'] not in {'meeko', 'adfr'}):
         raise ValueError('Select an explicit Meeko or ADFRsuite preparation backend')
@@ -159,6 +159,17 @@ def preview_changes(source, choices, *, context):
         result.append(modified)
     derivative = ''.join(result).encode('utf-8')
     changes = []
+    method = choices.get('preparation_backend')
+    previous = context.get('previous_preparation_backend')
+    if context.get('allow_preparation_method_change') and method and method != previous:
+        if previous not in {'meeko', 'adfr'}:
+            raise ValueError('The previously attempted preparation method is unknown')
+        labels = {'meeko': 'standard preparation', 'adfr': 'alternative preparation'}
+        changes.append({'kind': 'preparation_method_change',
+            'description': 'Changed method from ' + labels[previous] + ' to ' + labels[method]
+                + '. Input atoms and coordinates are unchanged; atom typing and charge assignment may differ.',
+            'previous_backend': previous, 'preparation_backend': method,
+            'input_coordinates_unchanged': True, 'input_atom_inventory_unchanged': True})
     if excluded:
         standard = sum(key[0] in STANDARD_AMINO_ACIDS for key in excluded)
         changes.append({'kind': 'component_exclusion',

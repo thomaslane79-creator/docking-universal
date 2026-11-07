@@ -139,11 +139,15 @@ def candidate_with_model_change_review(state, candidate):
             else:
                 raise ValueError('Docking-box evidence is unavailable for receptor-change review')
         inside = [row for row in review['residues'] if row.get('inside_box')]
+        method_changed = any(change['kind'] == 'preparation_method_change' for change in history['changes'])
+        if method_changed:
+            review['warning'] += ' The preparation-method change applies to the whole receptor and every docking box.'
+            review['preparation_method_changed'] = True
         if inside:
             review['severity'] = 'high'
             review['warning'] += ' Reviewed receptor changes affect residues inside this box: ' + ', '.join(
                 f"{row['residue']} {row['chain'] or '(blank)'}:{row['number']}" for row in inside) + '.'
-        review['changes_inside_box'] = bool(inside)
+        review['changes_inside_box'] = bool(inside) or method_changed
         evidence['receptor_model_review'] = review
     except (OSError, ValueError, KeyError, StopIteration, IndexError) as exc:
         evidence['receptor_model_review'] = {

@@ -5,6 +5,7 @@ import os
 import shlex
 from pathlib import Path
 import shlex
+from types import SimpleNamespace
 import tempfile
 import time
 import unittest
@@ -178,16 +179,54 @@ class FailedPreparationRecoveryTests(unittest.TestCase):
         self.assertIn('source changed', response.error)
         self.assertEqual(len(self.store.load('test').jobs), 1)
 
-    def test_backend_only_retry_and_invalid_backend_payload_are_not_model_approval(self):
-        preview = self.preview({'preparation_backend': 'adfr'})
+    def test_unchanged_method_and_invalid_backend_payload_are_not_model_approval(self):
+        preview = self.preview({'preparation_backend': 'meeko'})
         self.assertEqual(preview['changes'], [])
         response = self.dispatch('prepare_receptor_changes', self.payload(preview), self.failed.revision, 'backend-only')
         self.assertEqual(response.status, 'rejected')
-        self.assertIn('No molecular changes', response.error)
+        self.assertIn('No preparation changes', response.error)
         response = self.dispatch('preview_receptor_changes', {'choices': {'preparation_backend': {'arbitrary': 'command'}}},
                                  self.failed.revision, 'invalid-backend')
         self.assertEqual(response.status, 'rejected')
         self.assertFalse((self.root / 'run/preparation/.docking-universal-reviewed-models').exists())
+        self.assertEqual(len(self.store.load('test').jobs), 1)
+
+    def test_method_only_retry_keeps_the_complete_input_and_records_method_scope(self):
+        preview = self.preview({'preparation_backend': 'adfr'})
+        self.assertEqual([row['kind'] for row in preview['changes']], ['preparation_method_change'])
+        self.assertEqual(preview['removed_atom_count'], 0)
+        self.assertEqual(preview['model_input_sha256'], preview['source_sha256'])
+        payload = self.payload(preview)
+        self.successful_worker()
+        response = self.dispatch('prepare_receptor_changes', payload, self.failed.revision, 'keep-all')
+        self.assertEqual(response.status, 'applied', response.error)
+        done = self.wait(lambda state: bool(state.pending_decisions))
+        model = next(a for a in done.artifacts if a.kind == 'reviewed_receptor_input')
+        self.assertEqual(Path(model.path).read_bytes(), self.source.read_bytes())
+        filtered = next(a for a in done.artifacts if a.kind == 'reviewed_receptor_filtered_input')
+        self.assertEqual(Path(filtered.path).read_text().count(' COH '), 4)
+        self.assertEqual(Path(filtered.path).read_text().count(' NAG '), 2)
+        self.assertEqual(done.workflow_data['study_setup'], self.setup)
+        from docking_universal.services.preparation_site_issues import candidate_with_model_change_review
+        impact = candidate_with_model_change_review(done, done.workflow_data['pocket_candidates'][0])['evidence']['receptor_model_review']
+        self.assertTrue(impact['preparation_method_changed'])
+        self.assertTrue(impact['changes_inside_box'])
+        self.assertIn('whole receptor', impact['warning'])
+        history = json.loads(Path(next(a.path for a in done.artifacts if a.kind == 'receptor_model_history')).read_text())
+        history['changes'][0]['removed_other_components'] = 1
+        from docking_universal.services.receptor_model_history import validate_history
+        with self.assertRaisesRegex(ValueError, 'unchanged input'):
+            validate_history(history)
+
+    def test_already_attempted_alternative_is_not_a_fresh_method_only_retry(self):
+        receptor = self.original_log.parent / 'receptor'
+        (receptor / 'adfr_output_audit.json').write_text(json.dumps({'backend': 'adfr',
+            'missing_charge_parameters': ['Unsupported charge assignment']}))
+        preview = self.preview({'preparation_backend': 'adfr'})
+        self.assertEqual(preview['changes'], [])
+        self.assertIn('unsupported charge', preview['recovery_guidance']['summary'])
+        response = self.dispatch('prepare_receptor_changes', self.payload(preview), self.failed.revision, 'repeat-alternative')
+        self.assertEqual(response.status, 'rejected')
         self.assertEqual(len(self.store.load('test').jobs), 1)
 
     def test_failed_reviewed_attempt_keeps_both_attempts_and_locked_settings(self):
@@ -298,6 +337,136 @@ class ReviewedReceptorInventoryTests(unittest.TestCase):
             self.assertNotIn('NAG', text)
             self.assertEqual(text.count(' MAN '), 2)
             self.assertEqual(sha256(retained['path']), retained['sha256'])
+
+
+class RecoveryGuidanceTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.source = self.root / 'Target.pdb'
+        self.receptor = self.root / 'Target_receptor_prep/receptor'
+        self.receptor.mkdir(parents=True)
+        self.state = SimpleNamespace(jobs=[SimpleNamespace(request_id='failed', status=SimpleNamespace(value='failed'))],
+            workflow_data={'study_setup': {'working_directory': str(self.root)}})
+
+    def guidance(self):
+        from docking_universal.services.failed_preparation_recovery import recovery_guidance
+        return recovery_guidance(self.state, self.source)
+
+    def cobalt(self):
+        (self.receptor / 'receptor_backend.log').write_text(
+            "RuntimeError: Element Co doesn't have an implemented covalent radius\n")
+
+    def write_record(self, name, record):
+        (self.receptor / name).write_text(json.dumps(record))
+
+    def test_cobalt_suggests_an_alternative_without_selecting_changes_or_promising_success(self):
+        self.cobalt()
+        self.write_record('reduce2_audit.json', {'status': 'component_definitions_required', 'missing_components': ['COH']})
+        self.write_record('pdbfixer_audit.json', {'status': 'completed_conservative_repair'})
+        before = copy.deepcopy(self.state.workflow_data)
+        result = self.guidance()
+        self.assertEqual(result['recommended_backend'], 'adfr')
+        self.assertIn('cobalt', result['summary'])
+        self.assertIn('must still pass validation', result['next_step'])
+        self.assertIn('Missing component definitions: COH', result['details'])
+        self.assertIn('PDBFixer', result['details'])
+        self.assertEqual(self.state.workflow_data, before)
+
+    def test_alternative_charge_failure_explains_remaining_work(self):
+        self.cobalt()
+        self.write_record('preparation_intervention.json', {'adfr_fallback': {'status': 'validation_failed'}})
+        self.write_record('adfr_output_audit.json', {'missing_charge_parameters': [
+            'Sorry, there are no Gasteiger parameters available for atom Target:B:NAG607:O6']})
+        result = self.guidance()
+        self.assertIn('unsupported charge', result['summary'])
+        self.assertIn('No component is selected for removal', result['next_step'])
+        self.assertIn('NAG607:O6', result['details'])
+        self.assertEqual(result['recommended_backend'], 'adfr')
+
+    def test_unavailable_alternative_does_not_recommend_an_unusable_retry(self):
+        self.cobalt()
+        self.write_record('preparation_intervention.json', {'adfr_fallback': {'status': 'startup_failed', 'reason': 'Bad CPU type'}})
+        result = self.guidance()
+        self.assertIsNone(result['recommended_backend'])
+        self.assertIn('Resolve the unavailable', result['next_step'])
+        self.assertIn('Bad CPU type', result['details'])
+
+    def test_latest_attempt_does_not_reuse_the_original_cobalt_diagnosis(self):
+        self.cobalt()
+        latest = self.root / 'latest'
+        (latest / 'receptor').mkdir(parents=True)
+        self.state.workflow_data['receptor_preparation_attempts'] = [{'request_id': 'failed', 'root': str(latest)}]
+        result = self.guidance()
+        self.assertIsNone(result['recommended_backend'])
+        self.assertNotIn('rejected cobalt', result['details'])
+
+    def test_missing_or_malformed_evidence_is_not_a_claim_of_tool_compatibility(self):
+        self.write_record('adfr_output_audit.json', {'missing_charge_parameters': 'not an atom list', 'reasons': None})
+        (self.receptor / 'reduce2_audit.json').write_text('{broken')
+        result = self.guidance()
+        self.assertIsNone(result['recommended_backend'])
+        self.assertIn('unrecognized reason', result['summary'])
+        self.state.jobs[-1].status.value = 'completed'
+        self.assertIsNone(self.guidance())
+
+    def test_existing_diagnostic_categories_generate_specific_recovery_text(self):
+        cases = (
+            ('Explicit alternate-location selection required', 'alternate conformations', 'Choose'),
+            ('Incomplete deposited backbone requires review', 'backbone', 'corrected structure'),
+            ('Covalently linked nonstandard residues or glycans', 'linked components', 'linkage definitions'),
+            ('Unsupported heme or cofactor template', 'cofactor', 'keep it'),
+            ('Preparation backend valence-validation error', 'valences', 'hydrogens'),
+            ('Ambiguous histidine protonation', 'Histidine', 'state'),
+        )
+        for category, problem, action in cases:
+            with self.subTest(category=category):
+                self.write_record('preparation_intervention.json', {'category': category})
+                result = self.guidance()
+                self.assertNotEqual(result['diagnosis_code'], 'unclassified')
+                self.assertIn(problem, result['summary'])
+                self.assertIn(action, result['next_step'])
+                self.assertIsNone(result['recommended_backend'])
+
+    def test_engine_intervention_publishes_a_stable_diagnostic_identifier(self):
+        from docking_universal.services.preparation_interventions import write_intervention_record, read_intervention_record
+        diagnosis = self.root / 'diagnosis.txt'
+        diagnosis.write_text('Receptor preparation failure category: Explicit alternate-location selection required\n')
+        self.source.write_text('END\n')
+        path = self.receptor / 'preparation_intervention.json'
+        write_intervention_record(diagnosis, self.source, path)
+        self.assertEqual(read_intervention_record(path)['diagnosis_code'], 'alternate_conformation')
+        self.assertEqual(self.guidance()['diagnosis_code'], 'alternate_conformation')
+
+    def test_another_unsupported_element_is_named_without_claiming_cobalt_compatibility(self):
+        self.write_record('preparation_intervention.json', {
+            'category': 'Unsupported element in receptor preparation',
+            'detected_detail': "RuntimeError: Element Se doesn't have an implemented covalent radius"})
+        result = self.guidance()
+        self.assertEqual(result['diagnosis_code'], 'unsupported_element')
+        self.assertIn('selenium', result['summary'])
+        self.assertIsNone(result['recommended_backend'])
+        self.assertIn('no verified alternative', result['next_step'].lower())
+
+    def test_unknown_failure_retains_raw_evidence_and_does_not_invent_a_fix(self):
+        (self.receptor / 'receptor_backend.log').write_text('UnexpectedWidgetError: synthetic failure 729\n')
+        result = self.guidance()
+        self.assertEqual(result['diagnosis_code'], 'unclassified')
+        self.assertIn('No verified workaround', result['next_step'])
+        self.assertIn('UnexpectedWidgetError', result['details'])
+        self.assertIsNone(result['recommended_backend'])
+
+    def test_predictor_startup_failure_does_not_reuse_old_receptor_errors(self):
+        self.cobalt()
+        self.state.workflow_data['study_setup']['preparation_backend'] = 'auto'
+        self.state.jobs[-1].error = 'ERROR: P2Rank launcher not found'
+        result = self.guidance()
+        self.assertEqual(result['diagnosis_code'], 'pocket_runtime')
+        self.assertIn('pocket-prediction', result['summary'])
+        self.assertIsNone(result['recommended_backend'])
+        self.assertEqual(result['last_backend'], 'meeko')
+        self.assertNotIn('rejected element Co', result['details'])
 
 
 class ReviewedSitePrecompletionTests(unittest.TestCase):

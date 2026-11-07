@@ -10,7 +10,7 @@ import re
 SCHEMA = 'docking-universal-receptor-model-history'
 KINDS = {'sidechain_reconstruction', 'component_exclusion', 'manual_receptor_edit',
          'partial_residue_reconstruction', 'alternate_location_selection', 'atom_label_normalization',
-         'standard_residue_connectivity_override'}
+         'standard_residue_connectivity_override', 'preparation_method_change'}
 
 
 def recorded_backend_summary(audit_path):
@@ -68,6 +68,16 @@ def validate_history(history, expected_receptor_sha256=None):
             value = row.get(key, 0)
             if type(value) is not int or value < 0:
                 raise ValueError('Model-change counts must be nonnegative integers')
+        if row['kind'] == 'preparation_method_change':
+            if (not isinstance(row.get('previous_backend'), str)
+                    or not isinstance(row.get('preparation_backend'), str)
+                    or row['previous_backend'] not in {'meeko', 'adfr'}
+                    or row['preparation_backend'] not in {'meeko', 'adfr'}
+                    or row['previous_backend'] == row['preparation_backend']
+                    or row.get('input_coordinates_unchanged') is not True
+                    or row.get('input_atom_inventory_unchanged') is not True
+                    or any(row.get(key, 0) for key in ('removed_standard_amino_acids', 'removed_other_components', 'modeled_heavy_atoms'))):
+                raise ValueError('Preparation-method changes require distinct known methods and unchanged input atoms/coordinates')
         if row['kind'] == 'standard_residue_connectivity_override':
             if (row.get('coordinate_changes') != 0 or row.get('atoms_removed') != 0
                     or row.get('strict_valence_checks_retained') is not True

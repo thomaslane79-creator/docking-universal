@@ -1,5 +1,13 @@
 # Complete interactive GUI workflow plan
 
+2026-11-07 recovery presentation: explain the diagnosed problem, retained
+attempts and recommended next action before exposing named tools under
+Advanced. Suggestions are checked candidates, never guarantees. Permit an
+explicit, hash-bound method-only retry after failure while keeping all input
+atoms/coordinates; preserve its whole-receptor warning through boxes and
+protocols. Do not present an already attempted method as a fresh solution or
+require an unnecessary component exclusion to try an available alternative.
+
 2026-11-05 priority update: protein electrostatic visualization comes first in
 the user's new Results design. Preserve the existing ligand viewer and compact
 explanations. The current 5IKR run first needs cofactor-preserving preparation:

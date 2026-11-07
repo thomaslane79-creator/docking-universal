@@ -4,6 +4,29 @@ Status: active scope-control record, established 2026-09-24.
 
 ### Restore usable, auditable preparation fallbacks (2026-11-05)
 
+2026-11-07 usability clarification: users should not need to know preparation
+tools to choose a recovery. Reuse retained failure evidence to explain the
+problem, attempted stages and the next action. Put named tool selection under
+Advanced, and suggest an available alternative for a diagnosed cobalt failure
+within the existing explicit review. Recommendations are candidates for a
+checked attempt, never promises of successful preparation or scientific
+validation. Keep exclusions unselected and retain the existing preview,
+approval and box-warning contracts. This is gate 4: clarify the existing
+recovery flow without adding a scientific method or automatic model change.
+Use stable diagnostic identifiers and a shared message catalog for recognized
+failure classes; insert the actual element, component, atom and attempt data.
+Cover alternate conformations, missing backbone, residue/cofactor/link
+templates, valence/connectivity, format errors, missing definitions and charge
+failures. Unknown errors retain a diagnostic excerpt and explicitly have no
+verified workaround. A cobalt-specific capability observation must not become
+a claim that another unsupported element works in the same backend.
+An explicit method-only recovery can keep the entire input unchanged; it has
+its own hash-bound preparation-method change record and persistent warning for
+the whole receptor. Selecting the most recently attempted method again is not
+a new action by itself.
+The user still previews and approves changes to typing/charge assignment before
+execution. No artificial component exclusion is needed to enable the retry.
+
 The user requests correction of missing non-Meeko recovery paths. The branch
 history retains ADFRsuite as an independent backend after the Meeko default
 change; it was separately installed, outside the Conda declaration. September's

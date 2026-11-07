@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import fields, replace
 import json
 from pathlib import Path
+import re
 import threading
 import time
 from uuid import uuid4
@@ -19,6 +20,10 @@ from ..protocol_finalization import sha256
 from .preparation import ReceptorPreparationOptions, ReceptorPreparationService, build_receptor_preparation_plan
 from .receptor_model_review import preview_changes, write_model, retain_reviewed_receptor_input, validate_reviewed_model_inputs
 from .structure_input import normalize_structure_input
+
+# Observed parameter coverage, not a claim of target-specific docking accuracy.
+# Extend only after checking the independent backend's parameters and output.
+VERIFIED_ELEMENT_ALTERNATIVES = {'Co': 'adfr'}
 
 
 def failed_preparation_job(state):
@@ -72,6 +77,126 @@ def options_from_setup(setup):
     return values
 
 
+def recovery_guidance(state, source_path):
+    """Explain observed failures without authorizing a change or promising a fix.
+
+    Advice belongs to the most recent failed attempt. The reviewed choices and
+    their preview hash remain the only authority for an eventual retry.
+    """
+    if not state.jobs or state.jobs[-1].status.value != 'failed':
+        return None
+    job = state.jobs[-1]
+    setup = state.workflow_data.get('study_setup') or {}
+    from .preparation_interventions import diagnosis_code, RECOVERY_DESCRIPTIONS
+    process_error = str(getattr(job, 'error', None) or '')
+    if 'P2Rank launcher not found' in process_error or 'P2Rank could not start' in process_error:
+        # Preflight may fail before writing fresh receptor logs. Do not use an
+        # older run directory to propose a molecular workaround for this case.
+        summary, action = RECOVERY_DESCRIPTIONS['pocket_runtime']
+        return {'diagnosis_code': 'pocket_runtime', 'summary': summary, 'next_step': action,
+                'recommended_backend': None, 'last_backend': setup.get('preparation_backend')
+                    if setup.get('preparation_backend') in {'meeko', 'adfr'} else 'meeko',
+                'details': process_error + '\n\nNo molecular correction is inferred from a predictor startup failure.'}
+    from .preparation import _canonical_name
+    root = Path(setup['working_directory']) / (_canonical_name(Path(source_path)) + '_receptor_prep')
+    attempt = next((row for row in reversed(state.workflow_data.get('receptor_preparation_attempts') or [])
+                    if row.get('request_id') == job.request_id), None)
+    if attempt:
+        root = Path(attempt['root'])
+    receptor = root / 'receptor'
+
+    def read_record(name):
+        try:
+            value = json.loads((receptor / name).read_text())
+            return value if isinstance(value, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def record_rows(record, key):
+        value = record.get(key)
+        return value if isinstance(value, list) else []
+
+    logs = []
+    for name in ('receptor_backend.log', 'receptor_after_pdbfixer.log', 'receptor_adfr_fallback.log'):
+        try:
+            with (receptor / name).open(errors='replace') as handle:
+                logs.append(handle.read(256000))
+        except OSError:
+            pass
+    text = '\n'.join(logs)
+    intervention = read_record('preparation_intervention.json')
+    element_match = re.search(r"Element ([A-Z][a-z]?) (?:doesn't|does not) have an implemented covalent radius",
+        text + '\n' + str(intervention.get('detected_detail') or ''))
+    element = element_match.group(1) if element_match else None
+    code = intervention.get('diagnosis_code')
+    if not isinstance(code, str) or code not in RECOVERY_DESCRIPTIONS:
+        code = diagnosis_code(intervention.get('category'))
+    if code == 'unclassified' and element:
+        code = 'unsupported_element'
+    fallback = intervention.get('adfr_fallback') or read_record('ccd_modification_audit.json').get('adfr_fallback') or {}
+    if not isinstance(fallback, dict):
+        fallback = {}
+    output = read_record('adfr_output_audit.json')
+    missing_charges = [row for row in record_rows(output, 'missing_charge_parameters') if isinstance(row, str)]
+    summary, action = RECOVERY_DESCRIPTIONS[code]
+    result = {'summary': summary, 'next_step': action, 'diagnosis_code': code,
+              'recommended_backend': None,
+              'last_backend': setup.get('preparation_backend') if setup.get('preparation_backend') in {'meeko', 'adfr'} else 'meeko'}
+    if output.get('backend') == 'adfr' or fallback.get('status') in {'validation_failed', 'failed', 'succeeded'}:
+        result['last_backend'] = 'adfr'
+    details = []
+    missing_definitions = []
+    for name, label in (('reduce2_audit.json', 'Hydrogen placement (Reduce2)'),
+                        ('pdb2pqr_audit.json', 'Protonation assessment (PDB2PQR/PROPKA)'),
+                        ('pdbfixer_audit.json', 'Structural repair (PDBFixer)')):
+        record = read_record(name)
+        if record:
+            details.append(label + ': ' + str(record.get('status', 'result recorded')).replace('_', ' ') + '.')
+            if name == 'reduce2_audit.json':
+                missing_definitions = [str(item) for item in record_rows(record, 'missing_components')]
+                if missing_definitions:
+                    details.append('Missing component definitions: ' + ', '.join(missing_definitions) + '.')
+    if element:
+        details.append('Standard preparation (Meeko) rejected element ' + element + ' because its covalent-radius definition is unavailable.')
+    if intervention.get('category'):
+        details.append('Recorded diagnosis: ' + str(intervention['category']) + '.')
+    if intervention.get('detected_detail'):
+        details.append('Detected detail: ' + str(intervention['detected_detail']))
+    if fallback:
+        details.append('Alternative preparation (ADFRsuite): ' + str(fallback.get('status', 'result recorded')).replace('_', ' ')
+                       + '. ' + str(fallback.get('reason') or ''))
+    if missing_charges:
+        summary, action = RECOVERY_DESCRIPTIONS['unsupported_charge_assignment']
+        result.update(summary=summary, next_step=action,
+            diagnosis_code='unsupported_charge_assignment',
+            recommended_backend=VERIFIED_ELEMENT_ALTERNATIVES.get(element))
+        details.append('Atoms without supported charge assignments:\n' + '\n'.join(missing_charges))
+    elif fallback.get('status') in {'validation_failed', 'failed', 'startup_failed', 'unavailable', 'disabled'}:
+        unavailable = fallback.get('status') in {'startup_failed', 'unavailable', 'disabled'}
+        failure_code = 'runtime_unavailable' if unavailable else 'output_validation' if fallback['status'] == 'validation_failed' else 'alternative_failed'
+        summary, action = RECOVERY_DESCRIPTIONS[failure_code]
+        result.update(summary=summary, next_step=action, diagnosis_code=failure_code)
+        details.extend(str(reason) for reason in record_rows(output, 'reasons'))
+    elif element and code == 'unsupported_element':
+        names = {'Co': 'cobalt', 'Se': 'selenium', 'Cu': 'copper', 'Ni': 'nickel', 'Zn': 'zinc', 'Fe': 'iron'}
+        result['summary'] = 'Standard preparation lacks parameters for ' + names.get(element, 'element ' + element) + ' in this structure.'
+        # Co coverage has been checked in the independent backend. Other
+        # elements get an explanation without an invented compatibility claim.
+        if element in VERIFIED_ELEMENT_ALTERNATIVES:
+            result.update(next_step='Use the suggested alternative method for a reviewed attempt, if available. Its output must still pass validation.',
+                          recommended_backend=VERIFIED_ELEMENT_ALTERNATIVES[element])
+    elif missing_definitions and code == 'unclassified':
+        summary, action = RECOVERY_DESCRIPTIONS['missing_component_definitions']
+        result.update(summary=summary, next_step=action, diagnosis_code='missing_component_definitions')
+    if result['diagnosis_code'] == 'unclassified' and text.strip():
+        details.append('Unrecognized diagnostic excerpt:\n' + text.strip()[-4000:])
+    details.append('Retained diagnostic directory: ' + str(receptor))
+    details.append('Any suggested method is a candidate to test, not a guarantee. Only explicitly approved changes run; '
+                   'atom retention, types and charges are checked. Successful preparation does not establish docking accuracy.')
+    result['details'] = '\n\n'.join(details)
+    return result
+
+
 def prepare_failed_receptor_changes(runner, state, model_changes, *, request_id, expected_revision):
     """Retry only the existing full preparation route with reviewed input bytes."""
     failed_preparation_job(state)
@@ -84,7 +209,7 @@ def prepare_failed_receptor_changes(runner, state, model_changes, *, request_id,
     if preview['preview_sha256'] != model_changes['preview_sha256']:
         raise ValueError('Receptor changes differ from the reviewed preview')
     if not preview['changes']:
-        raise ValueError('No molecular changes were selected for an exact-model recovery')
+        raise ValueError('No preparation changes were selected for a reviewed recovery')
     if preview.get('connectivity_execution'):
         raise ValueError('Saved coordinate-stage connectivity recovery requires the existing reviewed-site route')
     _, derivative = preview_changes(preview['source_path'], model_changes['choices'], context=preview['context'])

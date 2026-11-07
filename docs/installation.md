@@ -327,6 +327,20 @@ review without switching a control study to a different workflow. No component
 is selected for removal automatically. Choose exact identities and an available
 backend, preview the changes, and supply a rationale and acknowledgement before
 the isolated retry. The bound reference cannot be excluded through this action.
+The review first shows the diagnosed problem and next action; named tool
+selection is under **Advanced…**. Messages use stable diagnostic categories
+and actual run evidence, including missing definitions and failed charge
+assignments. An unrecognized failure keeps its diagnostic excerpt and has no
+invented workaround. Element-specific compatibility is suggested only where
+coverage has been checked.
+
+After a failure, an explicitly reviewed method change can keep the complete
+retained receptor input unchanged. Leave omissions blank, preview the method
+change, then approve **Keep structure and try this method**. This changes atom
+typing/charge preparation, carries a whole-receptor warning, and still must
+pass validation. Selecting the most recently attempted method again without
+any further change does not launch an identical retry.
+
 If no box exists yet, the dialog says so; the generated box later displays which
 reviewed residues lie inside it and the distance to those outside. Warnings stay
 with exported/reopened protocol regions. Original files and control settings

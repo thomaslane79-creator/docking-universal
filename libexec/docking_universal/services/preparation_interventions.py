@@ -14,6 +14,80 @@ from ..decisions import DecisionOption, DecisionRequired
 SCHEMA_NAME = "docking-universal-preparation-intervention"
 SCHEMA_VERSION = 1
 
+# Stable diagnostic identifiers keep recovery wording independent of target,
+# component names and backend-specific tracebacks. Older records can still be
+# interpreted from the retained category text.
+DIAGNOSIS_CODES = {
+    'Ambiguous histidine protonation': 'histidine_state',
+    'Unsupported element in receptor preparation': 'unsupported_element',
+    'Rejected ADFRsuite receptor output': 'output_validation',
+    'Preparation coordinate-format handling error': 'coordinate_format',
+    'Preparation backend mmCIF parsing error': 'mmcif_parsing',
+    'Incomplete deposited backbone requires review': 'incomplete_backbone',
+    'Rejected generated repair geometry': 'repair_geometry',
+    'Preparation backend connectivity-construction error': 'connectivity_construction',
+    'Preparation backend valence-validation error': 'valence_validation',
+    'Covalently linked nonstandard residues or glycans': 'linked_components',
+    'Unsupported heme or cofactor template': 'cofactor_template',
+    'DNA/RNA or mixed protein-nucleic-acid template conflict': 'nucleic_acid_template',
+    'Alternate-location and residue-template conflict': 'alternate_conformation',
+    'Explicit alternate-location selection required': 'alternate_conformation',
+    'Unsupported non-standard amino acid': 'modified_residue',
+    'Unsupported non-standard residue': 'component_template',
+    'Incomplete or template-mismatched residue': 'residue_template',
+}
+
+RECOVERY_DESCRIPTIONS = {
+    'pocket_runtime': ('The pocket-prediction tool could not start.',
+        'Repair the pocket-prediction installation or runtime before making receptor changes.'),
+    'unsupported_charge_assignment': ('Alternative preparation still has unsupported charge assignments.',
+        'Review the reported components or provide corrected parameter definitions. No component is selected for removal.'),
+    'missing_component_definitions': ('Hydrogen preparation needs definitions for some components.',
+        'Provide the missing component definitions or review the affected components before choosing exact changes.'),
+    'runtime_unavailable': ('Alternative preparation did not start during the recorded attempt.',
+        'Resolve the unavailable alternative method before changing components.'),
+    'alternative_failed': ('Alternative preparation did not produce an accepted receptor.',
+        'Review the retained failure diagnostics before another attempt.'),
+    'histidine_state': ('Histidine proton placement needs review.',
+        'Review the histidine-state decision and its local interactions before assigning a state.'),
+    'unsupported_element': ('Preparation lacks support for an element in this structure.',
+        'Review compatible element parameters; no verified alternative is known for this element yet.'),
+    'output_validation': ('Alternative preparation output did not pass validation.',
+        'Review the retained atom, coordinate, type and charge checks before another attempt.'),
+    'coordinate_format': ('The preparation method could not handle the coordinate format.',
+        'Review the input-format diagnostics while preserving the original coordinates and identifiers.'),
+    'mmcif_parsing': ('The preparation method could not read the supplied mmCIF correctly.',
+        'Review the parsing diagnostics and compatible input handling; keep the original source unchanged.'),
+    'incomplete_backbone': ('The deposited protein backbone is incomplete.',
+        'Review a corrected structure. Backbone reconstruction requires a separate structural-model review.'),
+    'repair_geometry': ('An attempted repair did not pass geometry checks.',
+        'Inspect the rejected repair and retained original model before approving any corrected coordinates.'),
+    'connectivity_construction': ('Preparation could not construct a consistent bonding model.',
+        'Review the component and linkage definitions before selecting a recovery.'),
+    'valence_validation': ('The proposed bonding model has incompatible atom valences.',
+        'Review the reported bonds, hydrogens and component definitions before approving a correction.'),
+    'linked_components': ('Covalently linked components need preparation review.',
+        'Review their linkage definitions. Any proposed omissions require exact selection and retain box warnings.'),
+    'cofactor_template': ('A retained cofactor lacks a supported preparation template.',
+        'Review compatible cofactor definitions; keep it unless you explicitly approve an omission.'),
+    'nucleic_acid_template': ('The input includes nucleic-acid chemistry outside the selected template support.',
+        'Review compatible templates or the intended molecular model before continuing.'),
+    'alternate_conformation': ('The input contains unresolved alternate conformations.',
+        'Choose the deposited conformation to retain in the exact preview; none is selected automatically.'),
+    'modified_residue': ('A modified amino acid needs a compatible preparation definition.',
+        'Review its component template and any missing atoms before choosing exact model changes.'),
+    'component_template': ('A nonstandard component lacks a compatible preparation definition.',
+        'Review the component definition or explicitly review its role before proposing any omission.'),
+    'residue_template': ('A residue does not match its preparation template.',
+        'Review the reported residue for missing atoms, alternate conformations or a mismatched definition.'),
+    'unclassified': ('Preparation failed for an unrecognized reason.',
+        'Open the retained diagnostic details. No verified workaround can be recommended automatically.'),
+}
+
+
+def diagnosis_code(category):
+    return DIAGNOSIS_CODES.get(category, 'unclassified') if isinstance(category, str) else 'unclassified'
+
 
 def _diagnosis_fields(path: Path) -> dict[str, str]:
     prefixes = {
@@ -70,6 +144,7 @@ def write_intervention_record(
         "schema_version": SCHEMA_VERSION,
         "kind": kind,
         "category": category,
+        "diagnosis_code": diagnosis_code(category),
         "scientific_concern": fields.get("scientific_concern", ""),
         "recommended_action": fields.get("recommended_action", ""),
         "detected_detail": fields.get("detected_detail", ""),

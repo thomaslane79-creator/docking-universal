@@ -16,6 +16,11 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
             or (initial_preview.get('context') or {}).get('preparation_backend')
             or (initial_preview.get('choices') or {}).get('preparation_backend') or 'meeko')
         self._available_backends = set(initial_preview.get('available_preparation_backends', ['meeko']))
+        guidance = initial_preview.get('recovery_guidance') or {}
+        self._has_recovery_guidance = bool(guidance)
+        self._suggested_backend = guidance.get('recommended_backend')
+        self._suggested_already_tried = bool(self._suggested_backend and guidance.get('last_backend') == self._suggested_backend)
+        self._method_labels = {'meeko': 'Standard preparation', 'adfr': 'Alternative preparation'}
         outer = QtWidgets.QVBoxLayout(self)
         scroll = QtWidgets.QScrollArea()
         scroll.setWidgetResizable(True)
@@ -30,14 +35,30 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
             'you intend. Exclusion is not recommended: it changes the scored receptor. Successful preparation '
             'does not validate the model or binding pose. No missing residues, backbone atoms or loops are built here.')
         introduction.setWordWrap(True)
+        if guidance:
+            introduction.explanation_title = 'Preparation recovery guidance'
+            introduction.set_content(guidance['summary'] + '\n' + guidance['next_step'],
+                guidance['details'] + '\n\n' + introduction.details_text)
+        self.recovery_guidance = introduction
         layout.addWidget(introduction)
         self.box_review_notice = QtWidgets.QLabel(
             'Docking box not available yet; exclusions will be flagged when the box is generated.')
         self.box_review_notice.setWordWrap(True)
         self.box_review_notice.setVisible(self._box_review_pending)
         layout.addWidget(self.box_review_notice)
-        backend_row = QtWidgets.QHBoxLayout()
-        backend_row.addWidget(QtWidgets.QLabel('Preparation backend'))
+        method_row = QtWidgets.QHBoxLayout()
+        self.method_summary = QtWidgets.QLabel()
+        self.method_summary.setObjectName('reviewed_preparation_method_summary')
+        method_row.addWidget(self.method_summary, 1)
+        self.advanced_backend_toggle = QtWidgets.QToolButton()
+        self.advanced_backend_toggle.setText('Advanced…')
+        self.advanced_backend_toggle.setCheckable(True)
+        method_row.addWidget(self.advanced_backend_toggle)
+        layout.addLayout(method_row)
+        self.backend_controls = QtWidgets.QWidget()
+        backend_row = QtWidgets.QHBoxLayout(self.backend_controls)
+        backend_row.setContentsMargins(0, 0, 0, 0)
+        backend_row.addWidget(QtWidgets.QLabel('Preparation tool'))
         self.preparation_backend = QtWidgets.QComboBox()
         self.preparation_backend.setObjectName('reviewed_receptor_preparation_backend')
         for label, value in (('Meeko', 'meeko'), ('ADFRsuite', 'adfr')):
@@ -45,12 +66,21 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
             self.preparation_backend.addItem(label if available else label + ' — unavailable', value)
             self.preparation_backend.model().item(self.preparation_backend.count() - 1).setEnabled(available)
         self.preparation_backend.setCurrentIndex(self.preparation_backend.findData(self._initial_backend))
+        if self._suggested_backend in self._available_backends:
+            # This is a draft suggestion only. choices() includes the change,
+            # and the host binds it to a fresh preview and explicit approval.
+            self.preparation_backend.setCurrentIndex(self.preparation_backend.findData(self._suggested_backend))
         self.preparation_backend.setToolTip(
-            'Choose explicitly. Backend changes can alter atom typing and charges. '
+            'The selected method is included in the exact preview and requires approval. '
+            'Advanced tool changes can alter atom typing and charges. '
             'Preparation success does not validate the changed receptor or binding pose.')
         self.preparation_backend.currentIndexChanged.connect(self.invalidate_preview)
+        self.preparation_backend.currentIndexChanged.connect(self.update_method_summary)
         backend_row.addWidget(self.preparation_backend)
-        layout.addLayout(backend_row)
+        layout.addWidget(self.backend_controls)
+        self.backend_controls.hide()
+        self.advanced_backend_toggle.toggled.connect(self.backend_controls.setVisible)
+        self.update_method_summary()
         layout.addWidget(QtWidgets.QLabel('Deposited alternate conformations (no choice is selected automatically)'))
         rows = [r for r in initial_preview['residue_inventory'] if r['alternate_locations']]
         self.alternates = QtWidgets.QTableWidget(len(rows), 3)
@@ -90,7 +120,7 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
                             'This is not a complete chemistry check.')
         self.partial_note.setWordWrap(True)
         layout.addWidget(self.partial_note)
-        layout.addWidget(QtWidgets.QLabel('Exact residues/components to exclude — optional, not recommended'))
+        layout.addWidget(QtWidgets.QLabel('Optional omissions change the receptor — leave blank to keep all components'))
         self.exclusions = QtWidgets.QPlainTextEdit()
         self.exclusions.setObjectName('receptor_exact_exclusions')
         self.exclusions.setPlaceholderText('One exact identity per line: NAG A 1\nOptional fourth field: insertion code. Use . for a blank chain.')
@@ -125,8 +155,8 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
         layout.addWidget(self.candidate_toggle)
         layout.addWidget(candidate_group)
         candidate_group.setVisible(not self._box_review_pending)
-        self.preview_button = QtWidgets.QPushButton('Preview exact changes' if self._box_review_pending else
-            'Preview exact changes and distances to selected boxes')
+        self.preview_button = QtWidgets.QPushButton('Preview method and optional changes' if guidance else
+            'Preview exact changes' if self._box_review_pending else 'Preview exact changes and distances to selected boxes')
         self.preview_button.clicked.connect(self.preview)
         layout.addWidget(self.preview_button)
         self.details = QtWidgets.QPlainTextEdit()
@@ -155,6 +185,19 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
         buttons.rejected.connect(self.reject)
         self.prepare_button.clicked.connect(self.accept)
         outer.addWidget(buttons)
+
+    def update_method_summary(self, *_):
+        backend = self.preparation_backend.currentData()
+        text = 'Method: ' + self._method_labels.get(backend, 'Unavailable')
+        if self._suggested_backend:
+            if backend == self._suggested_backend and backend in self._available_backends:
+                text += (' (already tried; review remaining issues)' if self._suggested_already_tried
+                         else ' (suggested for a checked attempt)')
+            elif self._suggested_backend not in self._available_backends:
+                text += ' — suggested alternative unavailable; see Explain…'
+            else:
+                text += ' (manual choice)'
+        self.method_summary.setText(text)
 
     def choices(self):
         excluded = []
@@ -195,13 +238,16 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
         try:
             record = self._preview_callback(self.choices())
             if not record['changes']:
-                raise ValueError('Select at least one explicit change, or cancel and use ordinary preparation.')
+                raise ValueError('No new recovery action was selected. Keep all components and review the recorded issues; nothing will run.'
+                    if self._has_recovery_guidance else 'Select at least one explicit change, or cancel and use ordinary preparation.')
             descriptions = [row['description'] for row in record['changes']]
             text = ['HIGH-SEVERITY MODEL CHANGE' if record['severity'] == 'high' else 'Reviewed model change',
                     *descriptions,
                     f"Excluded atom records: {record['removed_atom_count']}. New modeled atoms in the candidate: "
                     f"{record.get('new_atoms_generated', 0)}. Retained coordinates are unchanged."]
-            text.append('Preparation backend: ' + self.preparation_backend.currentText() + '.')
+            text.append('Preparation method: ' + self._method_labels[self.preparation_backend.currentData()] + '.')
+            method_only = all(change.get('kind') == 'preparation_method_change' for change in record['changes'])
+            self.prepare_button.setText('Keep structure and try this method' if method_only else 'Use reviewed model and prepare')
             if record.get('box_review_pending'):
                 text.append('Docking box not available yet; exclusions will be flagged when the box is generated.')
             for change in record['changes']:
