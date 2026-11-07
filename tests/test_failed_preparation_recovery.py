@@ -3,6 +3,7 @@ import copy
 import json
 import os
 from pathlib import Path
+import shlex
 import tempfile
 import time
 import unittest
@@ -206,14 +207,25 @@ class FailedPreparationRecoveryTests(unittest.TestCase):
         payload = self.payload()
         response = self.dispatch('prepare_receptor_changes', payload, self.failed.revision - 1, 'stale')
         self.assertEqual(response.status, 'rejected')
-        self.engine.write_text('#!/bin/sh\nsleep .3\nmkdir -p Target_receptor_prep/receptor\n'
+        ready, release = self.root / 'worker-ready', self.root / 'release-worker'
+        self.engine.write_text('#!/bin/sh\ntouch ' + shlex.quote(str(ready)) + '\n'
+            'while [ ! -f ' + shlex.quote(str(release)) + ' ]; do sleep .01; done\n'
+            'mkdir -p Target_receptor_prep/receptor\n'
             'printf "reviewed attempt failed\\n" > Target_receptor_prep/run.log\nexit 1\n')
         response = self.dispatch('prepare_receptor_changes', payload, self.failed.revision, 'first-worker')
         self.assertEqual(response.status, 'applied', response.error)
-        running = self.store.load('test')
-        rejected = self.dispatch('preview_receptor_changes', {'choices': payload['choices']}, running.revision, 'parallel')
-        self.assertEqual(rejected.status, 'rejected')
-        self.assertIn('active stage', rejected.error)
+        try:
+            # Wait for PID and initial progress registration, then hold the
+            # worker at a barrier. A timed sleep lets those writes race this
+            # request and correctly trigger a stale-revision guard instead.
+            running = self.wait(lambda state: len(state.jobs) == 2 and ready.exists()
+                                and state.jobs[-1].process_id and state.jobs[-1].progress_phase)
+            rejected = self.dispatch('preview_receptor_changes', {'choices': payload['choices']}, running.revision, 'parallel')
+            self.assertEqual(rejected.status, 'rejected')
+            self.assertIn('active stage', rejected.error)
+            self.assertEqual(len(self.store.load('test').jobs), 2)
+        finally:
+            release.touch()
         self.wait(lambda state: len(state.jobs) == 2 and state.jobs[-1].status.value == 'failed')
 
     def test_mmcif_failure_can_preview_without_registered_input_artifacts(self):
