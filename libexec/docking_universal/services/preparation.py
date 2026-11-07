@@ -7,7 +7,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
+from typing import Callable, Mapping
 
 from ..application import StudyController
 from ..jobs import JobService
@@ -203,7 +203,8 @@ class ReceptorPreparationService:
         self.controller = controller
         self.jobs = jobs or JobService(controller)
 
-    def run(self, study_id: str, plan: ReceptorPreparationPlan, **run_options) -> ProcessResult:
+    def run(self, study_id: str, plan: ReceptorPreparationPlan, *,
+            before_finish: Callable[[], None] | None = None, **run_options) -> ProcessResult:
         Path(plan.request.cwd).mkdir(parents=True, exist_ok=True)
         resume_job_id = run_options.pop("resume_job_id", None)
         stage = run_options.pop("stage", "preparation_and_pocket_detection")
@@ -250,6 +251,7 @@ class ReceptorPreparationService:
                 plan.output_root, plan.receptor_pdb, plan.receptor_pdbqt,
             ),
             intervention_probe=intervention_probe,
+            before_finish=before_finish,
             **run_options,
         )
         if result.status.value == "completed":

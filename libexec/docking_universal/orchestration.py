@@ -673,13 +673,28 @@ class ProtocolWorkflowRunner:
                         kind, str(path), sha256(path), 'Explicit exploratory receptor change; not a validated control'))
         retained, _ = self.controller.store.update(study_id, mark, expected_revision=expected_revision)
         cancellation = threading.Event()
+        def validate_before_finish():
+            read_exploration(root)
+            if any(not (root / name).is_file() or sha256(root / name) != digest for name, digest in pins.items()):
+                raise ValueError('Reviewed site evidence changed during preparation')
+            original_pins = {artifact.path: artifact.sha256 for artifact in state.artifacts
+                             if artifact.kind in {'source_receptor_structure', 'normalized_receptor_input',
+                                                  'site_review_receptor_structure', 'site_exploration_record'}}
+            if model_record:
+                from .services.receptor_model_review import validate_reviewed_model_inputs
+                validate_reviewed_model_inputs(model_record, model_root / 'reviewed_model.json',
+                                               model_record_sha256, additional_pins=original_pins)
+            elif any(not expected or not Path(path).is_file() or sha256(Path(path)) != expected
+                     for path, expected in original_pins.items()):
+                raise ValueError('Original receptor input changed during preparation')
         def work():
             try:
                 result = ReceptorPreparationService(self.controller).run(
                     study_id, plan, cancel_event=cancellation, request_id=request_id,
                     expected_revision=retained.revision, allow_template_decision=False,
-                    stage='receptor_parameterization')
+                    stage='receptor_parameterization', before_finish=validate_before_finish)
                 if result.status.value == 'completed':
+                    validate_before_finish()
                     read_exploration(root)
                     if any(not (root / name).is_file() or sha256(root / name) != digest
                            for name, digest in pins.items()):

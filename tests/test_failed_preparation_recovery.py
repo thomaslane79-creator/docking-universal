@@ -2,6 +2,7 @@
 import copy
 import json
 import os
+import shlex
 from pathlib import Path
 import shlex
 import tempfile
@@ -203,6 +204,27 @@ class FailedPreparationRecoveryTests(unittest.TestCase):
         self.assertTrue(any(a.kind == 'preparation_diagnostic' for a in done.artifacts))
         self.assertIsNone(done.active_job)
 
+    def test_worker_source_mutation_fails_before_job_completion_or_prepared_artifacts(self):
+        payload = self.payload(); self.successful_worker()
+        with self.engine.open('a') as worker:
+            worker.write('printf "REMARK mutated after outputs\\n" >> ' + shlex.quote(str(self.source)) + '\n')
+        response = self.dispatch('prepare_receptor_changes', payload, self.failed.revision, 'mutating-worker')
+        self.assertEqual(response.status, 'applied', response.error)
+        done = self.wait(lambda state: len(state.jobs) == 2 and state.jobs[-1].status.value == 'failed'
+                         and bool(state.workflow_data.get('receptor_preparation_attempts')))
+        self.assertIn('Original receptor', done.jobs[-1].error)
+        self.assertIn('changed during preparation', done.jobs[-1].error)
+        self.assertFalse(any(a.kind in {'prepared_receptor', 'prepared_receptor_structure', 'receptor_model_history'}
+                             for a in done.artifacts))
+        self.assertFalse(done.pending_decisions)
+        self.assertEqual(done.workflow_data['study_setup'], self.setup)
+        self.assertEqual(done.workflow_data['receptor_preparation_attempts'][-1]['status'], 'failed')
+        self.assertTrue(Path(response.result['output_root']).is_dir())
+        self.assertEqual(sha256(self.original_log), self.original_log_hash)
+        self.assertTrue(any(event.type.value == 'stage_failed' and 'changed during preparation' in event.explanation
+                            for event in done.events))
+        self.assertFalse(any(event.type.value == 'stage_completed' for event in done.events))
+
     def test_stale_revision_and_parallel_worker_are_rejected(self):
         payload = self.payload()
         response = self.dispatch('prepare_receptor_changes', payload, self.failed.revision - 1, 'stale')
@@ -276,6 +298,36 @@ class ReviewedReceptorInventoryTests(unittest.TestCase):
             self.assertNotIn('NAG', text)
             self.assertEqual(text.count(' MAN '), 2)
             self.assertEqual(sha256(retained['path']), retained['sha256'])
+
+
+class ReviewedSitePrecompletionTests(unittest.TestCase):
+    # Reuse the synthetic coordinate-first fixture without duplicating its tests.
+    from tests.test_receptor_model_review import ReviewedModelWorkflowTests as _fixture
+    setUp = _fixture.setUp
+    wait = _fixture.wait
+    explore = _fixture.explore
+    approve = _fixture.approve
+    ready = _fixture.ready
+    payload = _fixture.payload
+
+    def test_site_first_worker_mutation_cannot_publish_a_prepared_model(self):
+        state = self.ready()
+        payload = self.payload(state)
+        self.engine.write_text('#!/bin/sh\nset -eu\nroot=Target_receptor_prep\n'
+            'mkdir -p "$root/receptor" "$root/cavity"\ncp "$1" "$root/receptor/Target.pdb"\n'
+            'printf "synthetic prepared output\\n" > "$root/receptor/Target.pdbqt"\n'
+            'printf "worker finished\\n" > "$root/run.log"\n'
+            'printf "REMARK source mutation\\n" >> ' + shlex.quote(str(self.source)) + '\n')
+        self.runner.prepare_reviewed_receptor('test', request_id='mutating-site-worker',
+            expected_revision=state.revision, model_changes=payload)
+        done = self.wait(lambda current: current.workflow_data.get('receptor_parameterization_status') == 'failed')
+        self.assertEqual(done.jobs[-1].stage, 'receptor_parameterization')
+        self.assertEqual(done.jobs[-1].status.value, 'failed')
+        self.assertIn('changed', done.jobs[-1].error)
+        self.assertFalse(any(a.kind in {'prepared_receptor', 'prepared_receptor_structure', 'receptor_model_history'}
+                             for a in done.artifacts))
+        self.assertFalse(any(event.message == 'receptor_parameterization completed' for event in done.events))
+        self.assertTrue(Path(done.workflow_data['receptor_parameterization_attempt_root']).is_dir())
 
 
 if __name__ == '__main__':

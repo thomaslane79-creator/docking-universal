@@ -36,6 +36,7 @@ class JobService:
         on_output: Callable[[ProcessOutput], None] | None = None,
         progress_probe: Callable[[], tuple[str, str, int | None, int | None]] | None = None,
         intervention_probe: Callable[[], object | None] | None = None,
+        before_finish: Callable[[], None] | None = None,
         required_outputs: tuple[Path | str, ...] = (),
         request_id: str | None = None,
         expected_revision: int | None = None,
@@ -44,7 +45,7 @@ class JobService:
             return self._run_owned(
                 study_id, stage, request, cancel_event=cancel_event,
                 on_output=on_output, progress_probe=progress_probe, required_outputs=required_outputs,
-                intervention_probe=intervention_probe, request_id=request_id,
+                intervention_probe=intervention_probe, before_finish=before_finish, request_id=request_id,
                 expected_revision=expected_revision, existing_job_id=None,
             )
 
@@ -58,6 +59,7 @@ class JobService:
         on_output: Callable[[ProcessOutput], None] | None = None,
         progress_probe: Callable[[], tuple[str, str, int | None, int | None]] | None = None,
         intervention_probe: Callable[[], object | None] | None = None,
+        before_finish: Callable[[], None] | None = None,
         required_outputs: tuple[Path | str, ...] = (),
     ) -> ProcessResult:
         """Resume the exact queued stage after a persisted scientific decision."""
@@ -66,7 +68,7 @@ class JobService:
             return self._run_owned(
                 study_id, "", request, cancel_event=cancel_event,
                 on_output=on_output, progress_probe=progress_probe,
-                intervention_probe=intervention_probe, required_outputs=required_outputs,
+                intervention_probe=intervention_probe, before_finish=before_finish, required_outputs=required_outputs,
                 request_id=None, expected_revision=None, existing_job_id=job_id,
             )
 
@@ -80,6 +82,7 @@ class JobService:
         on_output: Callable[[ProcessOutput], None] | None,
         progress_probe: Callable[[], tuple[str, str, int | None, int | None]] | None,
         intervention_probe: Callable[[], object | None] | None,
+        before_finish: Callable[[], None] | None,
         required_outputs: tuple[Path | str, ...],
         request_id: str | None,
         expected_revision: int | None,
@@ -212,7 +215,20 @@ class JobService:
                 with stderr_log.open("a") as handle:
                     handle.write(message + "\n")
                 result = replace(result, status=ProcessStatus.FAILED, returncode=1, stderr_tail=message)
-        if result.status is ProcessStatus.FAILED and intervention_probe is not None:
+        validation_failed = False
+        if result.status is ProcessStatus.COMPLETED and before_finish is not None:
+            # Acceptance checks run while the job is still RUNNING, before a
+            # completed-stage event or downstream prepared artifact can exist.
+            try:
+                before_finish()
+            except Exception as exc:
+                validation_failed = True
+                message = 'Stage output validation failed: ' + (str(exc) or type(exc).__name__)
+                with Path(result.stderr_log).open('a') as handle:
+                    handle.write(message + '\n')
+                result = replace(result, status=ProcessStatus.FAILED, returncode=1,
+                                 stderr_tail=(result.stderr_tail + '\n' + message).strip())
+        if result.status is ProcessStatus.FAILED and not validation_failed and intervention_probe is not None:
             decision = intervention_probe()
             if decision is not None:
                 self.controller.pause_for_decision(study_id, decision)

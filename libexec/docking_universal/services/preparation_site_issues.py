@@ -109,6 +109,8 @@ def candidate_with_model_change_review(state, candidate):
                   'distance_is_permission_to_ignore': False}
         record = next((a for a in state.artifacts if a.kind == 'reviewed_receptor_model'
                        and a.sha256 == history.get('review_record_sha256')), None)
+        if record is None:
+            raise ValueError('The matching receptor-change approval record is unavailable')
         if record:
             record_path = Path(record.path)
             if hashlib.sha256(record_path.read_bytes()).hexdigest() != record.sha256:

@@ -17,7 +17,7 @@ from ..application import ActiveStageError
 from ..models import ArtifactRecord
 from ..protocol_finalization import sha256
 from .preparation import ReceptorPreparationOptions, ReceptorPreparationService, build_receptor_preparation_plan
-from .receptor_model_review import preview_changes, write_model, retain_reviewed_receptor_input
+from .receptor_model_review import preview_changes, write_model, retain_reviewed_receptor_input, validate_reviewed_model_inputs
 from .structure_input import normalize_structure_input
 
 
@@ -131,22 +131,24 @@ def prepare_failed_receptor_changes(runner, state, model_changes, *, request_id,
 
     retained, _ = runner.controller.store.update(state.study_id, mark, expected_revision=expected_revision)
     cancellation = threading.Event()
+    original_pins = {str(original.structure_input.source_path): setup['input_structure_sha256'],
+                     str(original.structure_input.engine_pdb_path): sha256(original.structure_input.engine_pdb_path),
+                     str(original.structure_input.metadata_path): sha256(original.structure_input.metadata_path)}
+
+    def validate_before_finish():
+        validate_reviewed_model_inputs(model_record, record_path, record_hash, additional_pins=original_pins)
 
     def work():
         result_status = 'failed'
         try:
             result = ReceptorPreparationService(runner.controller).run(state.study_id, plan,
                 cancel_event=cancellation, request_id=request_id, expected_revision=retained.revision,
-                allow_template_decision=False, stage='preparation_and_pocket_detection')
+                allow_template_decision=False, stage='preparation_and_pocket_detection',
+                before_finish=validate_before_finish)
             result_status = result.status.value
             history_path = None
             if result_status == 'completed':
-                if (sha256(model) != preview['model_input_sha256'] or sha256(record_path) != record_hash
-                        or sha256(Path(preview['source_path'])) != preview['source_sha256']
-                        or sha256(original.structure_input.source_path) != setup['input_structure_sha256']
-                        or sha256(Path(model_record['reviewed_receptor_input']['path'])) != model_record['reviewed_receptor_input']['sha256']
-                        or sha256(Path(model_record['reviewed_receptor_input']['baseline_path'])) != model_record['reviewed_receptor_input']['baseline_sha256']):
-                    raise ValueError('Reviewed model, approval or original source changed during preparation')
+                validate_before_finish()
                 from .receptor_model_history import SCHEMA, normalize_preparation
                 history = {'schema_name': SCHEMA, 'schema_version': 1,
                     'original_input_sha256': setup['input_structure_sha256'],

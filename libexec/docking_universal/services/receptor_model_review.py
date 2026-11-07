@@ -253,3 +253,20 @@ def retain_reviewed_receptor_input(root, preview, derivative):
     return {'path': str(output.resolve()), 'sha256': digest(output.read_bytes()),
             'baseline_path': str(baseline.resolve()), 'baseline_sha256': digest(baseline.read_bytes()),
             'policy': 'original receptor inventory with only the explicitly reviewed model changes'}
+
+
+def validate_reviewed_model_inputs(record, record_path, record_sha256, *, additional_pins=None):
+    """Reject input/approval mutation before a worker can be marked completed."""
+    filtered = record['reviewed_receptor_input']
+    pins = [
+        ('Reviewed receptor model', record['model_path'], record['model_input_sha256']),
+        ('Receptor change approval record', record_path, record_sha256),
+        ('Original receptor review source', record['source_path'], record['source_sha256']),
+        ('Reviewed receptor inventory', filtered['path'], filtered['sha256']),
+        ('Original receptor inventory baseline', filtered['baseline_path'], filtered['baseline_sha256']),
+    ]
+    pins.extend(('Original receptor input', path, expected) for path, expected in (additional_pins or {}).items())
+    for label, path, expected in pins:
+        path = Path(path)
+        if not path.is_file() or digest(path.read_bytes()) != expected:
+            raise ValueError(label + ' changed during preparation: ' + str(path))

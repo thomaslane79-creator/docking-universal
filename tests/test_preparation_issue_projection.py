@@ -97,6 +97,13 @@ class LaterBoxProjectionTests(unittest.TestCase):
         self.set_box(100)
         self.assertEqual(self.shown()['status'], 'model_change_evidence_unverified')
 
+    def test_missing_approval_record_does_not_claim_the_box_is_unaffected(self):
+        self.state.artifacts = [a for a in self.state.artifacts if a.kind != 'reviewed_receptor_model']
+        shown = self.shown()
+        self.assertEqual(shown['status'], 'model_change_evidence_unverified')
+        self.assertEqual(shown['severity'], 'high')
+        self.assertNotIn('changes_inside_box', shown)
+
     def test_box_specific_omission_warning_survives_bundle_export_and_reopen(self):
         from docking_universal_bundle import SITE_GUIDED_EXPLORATORY, create_bundle, extract_bundle
         impact = self.shown()

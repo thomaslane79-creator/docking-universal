@@ -40,6 +40,13 @@ component. Project reviewed residue coordinates onto later-generated boxes and
 retain the per-box warning in exported/reopened protocols. COH remains retained
 unless the user explicitly changes that scientific choice.
 
+Final integrity acceptance: verify source/model/approval and retained receptor
+inventory hashes before recording a successful job or registering prepared
+artifacts. A source edited during execution produces a failed, isolated attempt.
+Missing approval or box-impact evidence remains a visible high-severity review
+failure; it must never be reported as an unaffected box. Synthetic full-control
+and sites-first workers test this boundary before branch acceptance.
+
 ### P2Rank installation path correction (2026-11-05)
 
 The user's ligand-guided control with additional P2Rank prediction failed before

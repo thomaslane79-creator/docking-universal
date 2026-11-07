@@ -45,6 +45,26 @@ class JobServiceTests(unittest.TestCase):
         self.assertEqual({artifact.kind for artifact in state.artifacts}, {"job_stdout_log", "job_stderr_log"})
         self.assertTrue(any(event.message == "fpocket completed" for event in state.events))
 
+    def test_before_finish_validates_outputs_before_publishing_completion(self):
+        marker = self.root / 'output.txt'
+        def reject_output():
+            state = self.controller.get_study('job-study')
+            self.assertEqual(state.jobs[0].status, JobStatus.RUNNING)
+            self.assertFalse(any(event.type.value == 'stage_completed' for event in state.events))
+            self.assertEqual(marker.read_text(), 'worker output')
+            raise ValueError('Original receptor source changed during preparation')
+        result = JobService(self.controller).run('job-study', 'receptor_preparation',
+            self.request(f'from pathlib import Path; Path({str(marker)!r}).write_text("worker output")', 'rejected-output'),
+            required_outputs=(marker,), before_finish=reject_output,
+            intervention_probe=lambda: self.fail('An integrity rejection must not offer a scientific intervention'))
+        state = self.controller.get_study('job-study')
+        self.assertEqual(result.status, ProcessStatus.FAILED)
+        self.assertEqual(state.jobs[0].status, JobStatus.FAILED)
+        self.assertIn('Original receptor source changed', state.jobs[0].error)
+        self.assertIn('Stage output validation failed', Path(result.stderr_log).read_text())
+        self.assertFalse(any(event.type.value == 'stage_completed' for event in state.events))
+        self.assertTrue(any(event.type.value == 'stage_failed' for event in state.events))
+
     def test_structured_progress_is_visible_during_job_and_retained_after_completion(self):
         marker = self.root / "first-output.txt"
         code = (
@@ -144,9 +164,11 @@ class JobServiceTests(unittest.TestCase):
             "job-study", decision.id, ("HIE_CURRENT",), actor="test-user",
         )
 
+        validated = []
         result = jobs.resume(
             "job-study", job_id,
             self.request("print('resumed preparation')", "intervention-resumed"),
+            before_finish=lambda: validated.append('resumed'),
         )
         state = self.controller.get_study("job-study")
 
@@ -154,6 +176,7 @@ class JobServiceTests(unittest.TestCase):
         self.assertEqual(len(state.jobs), 1)
         self.assertEqual(state.jobs[0].id, job_id)
         self.assertEqual(state.jobs[0].status, JobStatus.COMPLETED)
+        self.assertEqual(validated, ['resumed'])
         self.assertEqual(
             len([artifact for artifact in state.artifacts if artifact.kind in {
                 "job_stdout_log", "job_stderr_log",
