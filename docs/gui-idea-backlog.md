@@ -27,6 +27,12 @@ a new action by itself.
 The user still previews and approves changes to typing/charge assignment before
 execution. No artificial component exclusion is needed to enable the retry.
 
+2026-11-07 automatic-route audit: the CYX retry still passed permissive
+unmatched-residue and default-altloc flags. Remove both from that automatic
+route; only the deposited disulfide template assignment is justified there.
+The production route fixture rejects either flag on all CYX attempts. Explicit
+interactive removal remains separately reviewed and audited.
+
 The user requests correction of missing non-Meeko recovery paths. The branch
 history retains ADFRsuite as an independent backend after the Meeko default
 change; it was separately installed, outside the Conda declaration. September's

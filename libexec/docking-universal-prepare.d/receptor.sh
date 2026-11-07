@@ -757,7 +757,7 @@ run_safe_receptor_preparation_attempts() {
           log "Strict Meeko still rejected the PDBFixer output"
         fi
       else
-        log "PDBFixer could not repair this receptor; continuing to the documented batch retry"
+        log "PDBFixer could not repair this receptor; continuing to applicable targeted retries"
       fi
     fi
 
@@ -765,8 +765,10 @@ run_safe_receptor_preparation_attempts() {
       DISULFIDE_TEMPLATES="$DISULFIDE_TEMPLATE_ASSIGNMENTS"
       [ -z "$MEEKO_SET_TEMPLATE" ] || DISULFIDE_TEMPLATES="$MEEKO_SET_TEMPLATE,$DISULFIDE_TEMPLATES"
       log "Retrying Meeko with CYX templates for depositor-annotated disulfides; detailed output -> $DISULFIDE_RETRY_LOG"
+      # Only the deposited disulfide assignment is automatic. Unmatched
+      # components and unresolved alternate locations still require review.
       build_meeko_receptor_command "$PREP_RECEPTOR_BIN" "$RECEPTOR_FILTERED_PDB" \
-        "$RECEPTOR_DIR/${CANONICAL}" "$RECEPTOR_PDBQT" 1 A "$DISULFIDE_TEMPLATES"
+        "$RECEPTOR_DIR/${CANONICAL}" "$RECEPTOR_PDBQT" 0 '' "$DISULFIDE_TEMPLATES"
       DISULFIDE_COMMAND=("${PREPARATION_COMMAND[@]}")
       if run_logged_preparation_command "$DISULFIDE_RETRY_LOG" "${DISULFIDE_COMMAND[@]}"; then
         PREP_SUCCESS=1

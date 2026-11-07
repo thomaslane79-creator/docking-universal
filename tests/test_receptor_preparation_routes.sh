@@ -66,7 +66,14 @@ succeed=0
 case "${PREP_ROUTE_CASE:?}" in
   strict|ligand|parameterize) succeed=1 ;;
   pdbfixer) [ "$count" -ge 2 ] && succeed=1 ;;
-  disulfide) case "$args" in *CYX*) succeed=1 ;; esac ;;
+  disulfide)
+    case "$args" in
+      *--allow_bad_res*|*--default_altloc*)
+        printf 'Automatic disulfide retry attempted unapproved omission or alternate-location selection\n' >&2
+        exit 2 ;;
+    esac
+    case "$args" in *CYX*) succeed=1 ;; esac
+    ;;
   histidine)
     case "$args" in
       *"--set_template A:1=HIE"*) succeed=1 ;;
