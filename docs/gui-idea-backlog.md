@@ -16,6 +16,14 @@ in the workflow and put the full teaching material in the existing separate
 explanation windows. Development updates should also explain unfamiliar build
 and diagnostic tools rather than only naming them.
 
+2026-11-08 native walkthrough follow-up: the user reports unlabeled/inaccessible
+PLIP switches and unreadably small internal PyMOL text after detaching. Actual
+review shows contact controls hidden on the other tab, hyperlink legends without
+checkboxes, and tiny object-list text beside readable Qt menus. Correct these
+existing controls and screen scaling before the one-site consolidation (gate 4).
+The workflow also exposed missing ADFRsuite version provenance blocking its PDF;
+repair recording at preparation time without inventing historical versions.
+
 Latest explicit order: fix the missing green ligand-evidence circles first,
 then finish the generalized preparation-recovery GUI guidance and its acceptance.
 Duplicate-site consolidation and the template/surface features follow those

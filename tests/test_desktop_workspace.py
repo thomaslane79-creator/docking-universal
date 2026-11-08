@@ -612,6 +612,66 @@ class DesktopWorkspaceTests(unittest.TestCase):
         payload.save(self.root / 'exported.png')
         self.assertEqual(original, figure.read_bytes())
 
+    def test_detached_contact_switches_remain_available_on_both_tabs_and_return_to_workspace(self):
+        from docking_universal.gui.full_pymol_study import FullPyMOLStudyPanel
+        from docking_universal.gui.cluster_contacts import ClusterContactControls
+        from docking_universal.gui.qt import QtWidgets
+        from docking_universal.viewer.plip_contacts import STYLES
+        from unittest.mock import Mock
+        original = self.store.path_for('desktop').read_bytes()
+        host = QtWidgets.QWidget()
+        self.window.live_layout = QtWidgets.QVBoxLayout(host)
+        controls = ClusterContactControls(Mock())
+        self.window.live_layout.addWidget(controls)
+        self.window.cluster_contact_controls = controls
+        controls.set_contacts({'hydrogen_bond': STYLES['hydrogen_bond']}, [])
+        panel = FullPyMOLStudyPanel(self.window)
+        try:
+            for tab in (0, 1):
+                panel.tabs.setCurrentIndex(tab)
+                self.assertFalse(panel.tabs.isAncestorOf(controls))
+                self.assertFalse(controls.isHidden())
+                self.assertTrue(controls.types.buttons['hydrogen_bond'].isChecked())
+            panel.dispose()
+            self.assertIs(controls.parent(), host)
+            self.assertEqual(self.store.path_for('desktop').read_bytes(), original)
+        finally:
+            panel.close()
+            host.close()
+
+    def test_background_refresh_preserves_an_open_detached_selector_highlight(self):
+        from docking_universal.gui.full_pymol_study import FullPyMOLStudyPanel
+        from docking_universal.gui.qt import QtWidgets
+        choice = QtWidgets.QComboBox()
+        records = [('First compound','first'),('Second compound','second')]
+        FullPyMOLStudyPanel._copy_choice(choice, records, None)
+        choice.showPopup()
+        choice.view().setCurrentIndex(choice.model().index(1,0))
+        FullPyMOLStudyPanel._copy_choice(choice, records, None)
+        self.assertEqual(choice.view().currentIndex().row(), 1)
+        self.assertEqual(choice.currentIndex(), -1)  # hover is not a commitment
+        choice.hidePopup()
+        choice.close()
+
+    def test_background_refresh_keeps_the_selected_cluster_instead_of_returning_to_first(self):
+        from types import SimpleNamespace
+        from docking_universal.gui.qt import QtCore
+        from unittest.mock import patch
+        choices = [SimpleNamespace(label='Cluster 1',diagram=self.root/'first.png'),
+                   SimpleNamespace(label='Cluster 2',diagram=self.root/'second.png')]
+        original = self.store.path_for('desktop').read_bytes()
+        with patch.object(self.window, '_selected_screening_compound', return_value=self.root/'compound'), \
+             patch.object(self.window.results_model, 'cluster_interactions', return_value=choices), \
+             patch.object(self.window, '_pose_review_mode_changed'):
+            self.window._screening_result_selection_changed()
+            choice = self.window.interaction_diagram_choice
+            blocker = QtCore.QSignalBlocker(choice)
+            choice.setCurrentIndex(1)
+            del blocker
+            self.window._screening_result_selection_changed()
+            self.assertEqual(choice.currentData(), str(self.root/'second.png'))
+        self.assertEqual(self.store.path_for('desktop').read_bytes(), original)
+
     def test_walkthrough_is_optional_modeless_and_available_in_both_interfaces(self):
         from docking_universal.gui.full_pymol_study import FullPyMOLStudyPanel
         from docking_universal.gui.qt import QtWidgets
@@ -804,6 +864,64 @@ class DesktopWorkspaceTests(unittest.TestCase):
         finally:
             browser.dispose()
             browser.close()
+
+    def test_full_pymol_second_click_hides_ligand_in_both_panels_and_viewer(self):
+        from docking_universal.gui.full_pymol_study import FullPyMOLStudyPanel
+        from docking_universal.gui.qt import QtCore, QtWidgets
+        from PyQt6.QtTest import QTest
+        from unittest.mock import Mock
+        candidate = self.window.state.workflow_data['pocket_candidates'][0]
+        candidate['evidence']['input_ligand_evidence'] = {'observations': [
+            {'entry': 'Input', 'ligand': 'GNP A:200', 'source': 'input_structure',
+             'aligned_ligand_pdb': 'input.pdb'},
+            {'entry': 'Input', 'ligand': 'BME A:202', 'source': 'input_structure',
+             'aligned_ligand_pdb': 'support.pdb'}]}
+        self.window.pocket_evidence_panel.set_candidate(candidate)
+        self.window.viewer_coordinator = Mock(connected=True)
+        browser = FullPyMOLStudyPanel(self.window)
+        browser.show()
+        from docking_universal.models import record_to_dict
+        QtWidgets.QApplication.processEvents()
+        before = record_to_dict(self.store.load('desktop'))
+        try:
+            table = browser.evidence.table
+            first = table.visualItemRect(table.item(0, 2)).center()
+            second = table.visualItemRect(table.item(1, 2)).center()
+            QTest.mouseClick(table.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=first)
+            self.assertEqual(self.window.pocket_evidence_panel._selected_paths(), ['input.pdb'])
+            self.window.viewer_coordinator.sync_evidence_ligands.assert_called_with(['input.pdb'])
+            QTest.mouseClick(table.viewport(), QtCore.Qt.MouseButton.LeftButton,
+                             QtCore.Qt.KeyboardModifier.ControlModifier, pos=second)
+            self.assertEqual(browser.evidence._selected_paths(), ['input.pdb', 'support.pdb'])
+            QTest.mouseClick(table.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=first)
+            self.assertEqual(self.window.pocket_evidence_panel._selected_paths(), ['support.pdb'])
+            self.window.viewer_coordinator.sync_evidence_ligands.assert_called_with(['support.pdb'])
+            QTest.mouseClick(table.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=second)
+            self.assertEqual(browser.evidence._selected_paths(), [])
+            self.assertEqual(self.window.pocket_evidence_panel._selected_paths(), [])
+            self.window.viewer_coordinator.sync_evidence_ligands.assert_called_with([])
+            self.assertEqual(record_to_dict(self.store.load('desktop')), before)
+        finally:
+            browser.dispose()
+            browser.close()
+
+    def test_full_pymol_exposes_existing_paired_review_for_retained_diagram(self):
+        from docking_universal.gui.full_pymol_study import FullPyMOLStudyPanel
+        diagram = self.root / 'retained.png'
+        diagram.write_bytes(b'retained diagram')
+        self.window._current_interaction_diagram = diagram
+        with patch.object(self.window, 'open_selected_interaction_diagram') as open_pair:
+            browser = FullPyMOLStudyPanel(self.window)
+            try:
+                self.assertTrue(browser.paired_review.isEnabled())
+                browser.paired_review.click()
+                open_pair.assert_called_once_with()
+                diagram.unlink()
+                browser.refresh()
+                self.assertFalse(browser.paired_review.isEnabled())
+            finally:
+                browser.dispose()
+                browser.close()
 
     def test_main_evidence_panel_highlights_recorded_residue_without_detaching(self):
         from unittest.mock import Mock
@@ -1350,7 +1468,7 @@ class DesktopWorkspaceTests(unittest.TestCase):
                 "Show selected pose in interactive structure",
             )
             self.assertTrue(window.pocket_evidence_panel.compare_button.isHidden())
-            self.assertIn("show/hide their ligands in 3D", window.pocket_evidence_panel.note.text())
+            self.assertIn("click again to hide it", window.pocket_evidence_panel.note.text())
             visible_pymol_buttons = [
                 button.text()
                 for button in window.findChildren(QtWidgets.QPushButton)

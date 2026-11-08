@@ -4,12 +4,22 @@ from unittest.mock import patch
 from pathlib import Path
 
 from docking_universal.stage_feedback import (
-    control_feedback, finalization_feedback, preparation_feedback, screening_feedback,
+    control_feedback, control_result_summary, finalization_feedback, preparation_feedback, screening_feedback,
 )
 from docking_universal.screening_progress import write_screening_progress, read_screening_progress
 
 
 class StageFeedbackTests(unittest.TestCase):
+    def test_unapproved_control_cannot_display_the_old_generic_authority_message(self):
+        data = {'control_site_review': {'scope_warning': 'Control authority covers the tested site.'}}
+        for status in ('not_approved','failed','cancelled','interrupted'):
+            with self.subTest(status=status):
+                result = control_result_summary(dict(data, latest_control_status=status))
+                self.assertNotIn('authority covers', result)
+                self.assertIn('explicit', result)
+        self.assertEqual(control_result_summary(dict(data, latest_control_status='approved')),
+                         data['control_site_review']['scope_warning'])
+
     def test_preparation_and_finalization_milestones_follow_real_outputs(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -59,6 +69,26 @@ class StageFeedbackTests(unittest.TestCase):
             self.assertEqual(control_feedback(root)[0], "assessment")
             (root / "unverified.duprotocol").write_bytes(b"not a bundle")
             self.assertIn("verifying", control_feedback(root)[1])
+
+    def test_reviewed_control_reports_actual_docking_activity_without_success_or_percent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent/'control-output'; root.mkdir()
+            (parent/'reviewed_control_inputs.json').write_text('{}')
+            self.assertIn('Reusing the reviewed receptor', control_feedback(root)[1])
+            for seed in (1, 2):
+                batch = root/f'control/04_redocking/vina/quick/seed_{seed}/docking'
+                batch.mkdir(parents=True)
+                (batch/'batch_request.json').write_text('{}')
+                (batch/'ligand_vina.pdbqt').write_text('MODEL\n')
+                (batch/'unfinished_vina.pdbqt').touch()
+            phase, message, completed, total = control_feedback(root)
+            self.assertEqual(phase, 'redocking')
+            self.assertIn('2 output files written', message)
+            self.assertIn('not yet assessed', message)
+            self.assertEqual((completed,total), (None,None))
+            (root/'study_manifest.json').write_text('{}')
+            self.assertEqual(control_feedback(root)[0], 'assessment')
 
     def test_screening_worker_phases_include_compound_and_do_not_claim_completion(self):
         with tempfile.TemporaryDirectory() as directory:

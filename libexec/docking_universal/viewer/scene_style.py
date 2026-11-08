@@ -1,8 +1,31 @@
 """Display-only scene defaults, shared by embedded and full PyMOL."""
 import math
+import sys
 
 
 SELECTED_BOX_RADIUS = 0.22
+
+
+def apply_native_display_scale(widget, *, system=None):
+    """A saved headless PSE must not dictate the current screen's GUI scale.
+
+    Qt scales the framebuffer separately. PyMOL also needs its own integer
+    display factor for internal object-list text, menus and mouse help. Match
+    the upstream Qt widget rule; do not resize the camera or molecular labels.
+    """
+    ratio = getattr(widget, 'devicePixelRatioF', None)
+    if ratio is None:
+        return
+    value = float(ratio())
+    if math.isfinite(value) and value > 0:
+        widget.cmd.set('display_scale_factor', max(1, int(value)))
+        if ((system or sys.platform) == 'darwin' and value > 1
+                and getattr(widget, '_du_full_interface', False)):
+            # The native Mac profile supports shaders. Its legacy glBitmap path
+            # ignores Retina text scaling, even when control spacing is scaled.
+            # Use textured text only while the full interface is borrowed; the
+            # full-window lifecycle restores the original renderer on return.
+            widget.cmd.set('use_shaders', 1)
 
 
 def expand_scene_clipping(cmd, extra_bounds=None):

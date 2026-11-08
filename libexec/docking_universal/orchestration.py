@@ -279,6 +279,8 @@ class ProtocolWorkflowRunner:
                     + ", ".join(scope["untested_box_labels"] + scope.get("untested_receptor_states", []))
                     if extra_sites else "Control authority covers only its tested receptor, site, engine and settings."
                 )
+                from .stage_feedback import control_result_summary
+                scope['scope_warning'] = control_result_summary(state.workflow_data)
             StudyController._event(
                 state, EventType.ARTIFACT_CREATED,
                 "Known-ligand control result retained",

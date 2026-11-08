@@ -5,7 +5,7 @@ is replaced only during construction on the GUI thread, then restored in a
 finally block. Never call pmg_qt.run(), PyMOL.start(), or launch another process.
 """
 from ..gui.qt import QtCore, QtWidgets
-from .scene_style import expand_scene_clipping
+from .scene_style import apply_native_display_scale, expand_scene_clipping
 
 
 def create_full_pymol_window(widget, parent, restore):
@@ -27,7 +27,7 @@ def create_full_pymol_window(widget, parent, restore):
     original_legacy_gui = pymol._ext_gui
     original_window = getattr(upstream, "window", None)
     settings = {name: cmd.get_setting_int(name) for name in
-                ("internal_gui", "internal_feedback", "seq_view", "button_mode", "mouse_selection_mode")}
+                ("internal_gui", "internal_feedback", "seq_view", "button_mode", "mouse_selection_mode", "use_shaders")}
     original_mouse_ring = list(controlling.mouse_ring)
     original_wizard = cmd.get_wizard()
     camera = cmd.get_view()
@@ -45,6 +45,7 @@ def create_full_pymol_window(widget, parent, restore):
 
         def showEvent(self, event):
             super().showEvent(event)
+            apply_native_display_scale(widget)
             if not getattr(self, '_initial_console_sized', False):
                 self._initial_console_sized = True
                 # macOS maximization finishes after the initial Qt show/layout.
@@ -148,6 +149,7 @@ def create_full_pymol_window(widget, parent, restore):
         widget.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.DefaultContextMenu)
         cmd.set("internal_gui", 1)
         cmd.set("internal_feedback", 0)
+        apply_native_display_scale(widget)
         # Menu, console, and object-popup Quit all return the viewport safely.
         cmd._quit = lambda *_args, **_kwargs: window.returnRequested.emit()
         cmd.set_view(camera)

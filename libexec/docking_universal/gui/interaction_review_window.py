@@ -1,10 +1,10 @@
 """Resizable paired review, borrowing the single owned PyMOL viewport."""
 from .qt import QtCore, QtGui, QtWidgets
 from .linked_pose_review import contact_residues
-import html
 import xml.etree.ElementTree as ET
 from .image_export import save_image_button, diagram_export, pymol_export, paired_export
 from .explanations import ExplanationLabel
+from .cluster_contacts import ContactTypeControls
 
 
 class InteractionReviewWindow(QtWidgets.QDialog):
@@ -76,7 +76,7 @@ class InteractionReviewWindow(QtWidgets.QDialog):
         options.addWidget(self.cartoon)
         self.contacts = QtWidgets.QCheckBox('PLIP contacts')
         self.contacts.setChecked(True)
-        self.contacts.toggled.connect(adapter.set_review_contacts_visible)
+        self.contacts.toggled.connect(self.toggle_contacts)
         options.addWidget(self.contacts)
         self.labels = QtWidgets.QCheckBox('Residue labels')
         self.labels.setObjectName('review_residue_labels')
@@ -139,19 +139,16 @@ class InteractionReviewWindow(QtWidgets.QDialog):
             styles = adapter.show_review_contacts(view.interactions)
             if isinstance(styles, dict) and styles:
                 self._contact_styles = styles
-                self.contact_key = QtWidgets.QLabel()
-                self.contact_key.setWordWrap(True)
-                self.contact_key.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.LinksAccessibleByMouse |
-                                                       QtCore.Qt.TextInteractionFlag.LinksAccessibleByKeyboard)
-                self.contact_key.setOpenExternalLinks(False)
-                self.contact_key.setToolTip('Click a contact type to toggle it in 3D only; the retained 2D diagram stays unchanged.')
+                self.contact_key = ContactTypeControls()
+                self.contact_key.set_styles(styles)
                 for kind, style in sorted(styles.items()):
                     action = QtGui.QAction(style[0], self)
                     action.setCheckable(True)
                     action.setChecked(True)
                     action.toggled.connect(lambda visible, k=kind: self.toggle_contact_type(k, visible))
                     self.contact_type_actions[kind] = action
-                self.contact_key.linkActivated.connect(self._activate_contact_key)
+                self.contact_key.visibilityChanged.connect(
+                    lambda kind, visible: self.contact_type_actions[kind].setChecked(visible))
                 self._update_contact_key()
                 right_layout.addWidget(self.contact_key)
         except (OSError, ET.ParseError, ValueError) as exc:
@@ -249,21 +246,14 @@ class InteractionReviewWindow(QtWidgets.QDialog):
         self.status.setText(f"{label} {'shown' if visible else 'hidden'} in 3D · "
                            'camera and retained 2D diagram unchanged')
 
-    def _activate_contact_key(self, kind):
-        if kind in self.contact_type_actions:
-            self.contact_type_actions[kind].trigger()
-
     def _update_contact_key(self):
-        text_color = self.palette().color(QtGui.QPalette.ColorRole.WindowText).name()
-        entries = []
-        for kind, action in self.contact_type_actions.items():
-            color = self._contact_styles[kind][1] if action.isChecked() else '#888888'
-            text = html.escape(action.text())
-            if not action.isChecked():
-                text = '<s>' + text + '</s>'
-            entries.append(f'<a href="{kind}" style="color:{text_color}; text-decoration:none;">'
-                           f'<span style="color:{color}">{"■" if action.isChecked() else "□"}</span> {text}</a>')
-        self.contact_key.setText('3D contacts: ' + ' &nbsp; · &nbsp; '.join(entries))
+        self.contact_key.sync_visibility({kind: action.isChecked()
+                                          for kind, action in self.contact_type_actions.items()})
+
+    def toggle_contacts(self, visible):
+        self.adapter.set_review_contacts_visible(visible)
+        if hasattr(self, 'contact_key'):
+            self.contact_key.setEnabled(visible)
 
     def dispose(self):
         self.viewer.setToolTip(self._viewer_tooltip)

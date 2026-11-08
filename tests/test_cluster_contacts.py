@@ -26,22 +26,57 @@ class ClusterContactTests(unittest.TestCase):
         controls.set_contacts(styles, residues)
         self.assertFalse(controls.isHidden())
         adapter.set_review_contacts_visible.assert_not_called()
-        controls.key.linkActivated.emit('hydrogen_bond')
+        button = controls.types.buttons['hydrogen_bond']
+        self.assertEqual(button.text(), 'Hydrogen bond')
+        self.assertIn('2D diagram stays unchanged', button.toolTip())
+        button.click()
         adapter.set_review_contact_type_visible.assert_called_once_with('hydrogen_bond', False)
         self.assertTrue(controls.visible_types['hydrophobic_interaction'])
         controls.contacts.setChecked(False)
         adapter.set_review_contacts_visible.assert_called_once_with(False)
+        self.assertFalse(button.isEnabled())
+        controls.contacts.setChecked(True)
+        self.assertFalse(button.isChecked())
         controls.labels.setChecked(True)
         adapter.set_review_labels_visible.assert_called_once_with(residues, True)
         controls.set_contacts({'salt_bridge': STYLES['salt_bridge']}, [])
         self.assertEqual(controls.visible_types, {'salt_bridge': True})
-        self.assertNotIn('Hydrogen bond', controls.key.text())
+        self.assertNotIn('hydrogen_bond', controls.types.buttons)
         self.assertTrue(controls.contacts.isChecked())
         self.assertFalse(controls.labels.isChecked())
         controls.unavailable('Missing exact report')
         self.assertFalse(controls.contacts.isEnabled())
         self.assertEqual(controls.key.text(), 'Missing exact report')
         controls.close()
+
+    def test_native_display_scale_does_not_restore_a_headless_sessions_tiny_gui_or_change_camera(self):
+        from docking_universal.viewer.scene_style import apply_native_display_scale
+        widget = FakeWidget()
+        widget.devicePixelRatioF = lambda: 2.
+        widget.cmd.set = Mock()
+        camera = widget.cmd.get_view()
+        apply_native_display_scale(widget)
+        widget.cmd.set.assert_called_once_with('display_scale_factor', 2)
+        self.assertEqual(widget.cmd.get_view(), camera)
+        widget.cmd.set.reset_mock()
+        widget.devicePixelRatioF = lambda: 1.
+        apply_native_display_scale(widget)
+        widget.cmd.set.assert_called_once_with('display_scale_factor', 1)
+
+    def test_textured_text_is_limited_to_the_native_mac_retina_full_interface(self):
+        from docking_universal.viewer.scene_style import apply_native_display_scale
+        widget = FakeWidget()
+        widget.devicePixelRatioF = lambda: 2.
+        widget.cmd.set = Mock()
+        camera = widget.cmd.get_view()
+        for system, full, expected in [('darwin',True,True), ('darwin',False,False),
+                                       ('win32',True,False), ('linux',True,False)]:
+            widget._du_full_interface = full
+            widget.cmd.set.reset_mock()
+            apply_native_display_scale(widget, system=system)
+            self.assertEqual(('use_shaders',1) in [call.args for call in widget.cmd.set.call_args_list], expected)
+            widget.cmd.set.assert_any_call('display_scale_factor', 2)
+            self.assertEqual(widget.cmd.get_view(), camera)
 
     def test_cluster_switch_maps_exact_residues_and_clears_old_contacts_without_camera_change(self):
         with TemporaryDirectory() as temporary:

@@ -42,7 +42,7 @@ class FullPyMOLStudyPanel(QtWidgets.QWidget):
         # 2D has its own independent detach route; do not offer a render action
         # here which would show its output only in the obscured main window.
         self.evidence.render_2d_button.hide()
-        self.evidence.note.setText("Select observations to show their aligned ligands. Ctrl/Cmd-click selects several. Viewing does not approve a region.")
+        self.evidence.note.setText("Click a ligand to show it; click again to hide it. Ctrl/Cmd-click selects several. Viewing is not approval.")
         evidence_layout.addWidget(self.evidence, 1)
         self.tabs.addTab(evidence_page, "Regions & evidence")
 
@@ -62,12 +62,17 @@ class FullPyMOLStudyPanel(QtWidgets.QWidget):
         self.poses.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
         self.poses.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
         poses_layout.addWidget(self.poses, 1)
+        self.paired_review = QtWidgets.QPushButton("Open 2D/3D review")
+        self.paired_review.clicked.connect(lambda _checked: owner.open_selected_interaction_diagram())
+        poses_layout.addWidget(self.paired_review)
         # Borrow the same controls and adapter state, rather than maintaining
         # independent contact toggles in the detached PyMOL browser.
         self.contact_controls = getattr(owner, 'cluster_contact_controls', None)
         if self.contact_controls is not None:
             visible = not self.contact_controls.isHidden()
-            poses_layout.addWidget(self.contact_controls)
+            # Contacts can remain visible while Regions & evidence is active.
+            # Keep their controls outside the tabs, next to the shared viewport.
+            layout.addWidget(self.contact_controls)
             self.contact_controls.setVisible(visible)
         self.tabs.addTab(poses_page, "Docking poses")
         self.status = QtWidgets.QLabel()
@@ -112,7 +117,9 @@ class FullPyMOLStudyPanel(QtWidgets.QWidget):
             target.clear()
             for label, identity in records:
                 target.addItem(label, identity)
-        target.setCurrentIndex(target.findData(current))
+        index = target.findData(current)
+        if index != target.currentIndex():
+            target.setCurrentIndex(index)
         target.setEnabled(bool(records))
         del blocker
 
@@ -190,6 +197,12 @@ class FullPyMOLStudyPanel(QtWidgets.QWidget):
             del blocker
             self.tabs.setTabVisible(0, bool(candidates))
             self.tabs.setTabVisible(1, bool(compounds))
+            diagram = getattr(owner, '_current_interaction_diagram', None)
+            self.paired_review.setEnabled(bool(diagram and diagram.is_file()))
+            self.paired_review.setToolTip(
+                "Open the selected pose beside its retained 2D interactions."
+                if self.paired_review.isEnabled() else
+                "Select a compound and a cluster with retained 2D interactions first.")
             self.status.setText(owner.viewer_status.text())
         finally:
             self._syncing = False

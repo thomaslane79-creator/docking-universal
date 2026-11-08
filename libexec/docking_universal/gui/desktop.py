@@ -2362,10 +2362,11 @@ if QtWidgets is not None:
                     'Receptor preparation did not complete. Your boxes remain available; select a box to inspect the recorded issues. '
                     'Review the retained diagnostics and any explicit model changes before another strict preparation attempt.')
             elif approved_regions:
+                from ..stage_feedback import control_result_summary
                 self.finalization_status.setText(
                     control_error or "Sites approved. Start the disclosed site-specific control when ready."
                     if needs_control else control_error or
-                    (state.workflow_data.get('control_site_review') or {}).get('scope_warning') or
+                    control_result_summary(state.workflow_data) or
                     "Review the locked settings and explicitly authorize exploratory reuse to finalize."
                 )
             if bundle_artifact and not self.screen_output.text().strip():
@@ -4330,20 +4331,30 @@ if QtWidgets is not None:
             compound = self._selected_screening_compound()
             if not self._applying_session_selection:
                 self.session.select_compound(compound)
-            self.interaction_diagram_choice.blockSignals(True)
-            self.interaction_diagram_choice.clear()
+            records = []
             if compound is not None:
                 for interaction in self.results_model.cluster_interactions(self.state, compound):
-                    self.interaction_diagram_choice.addItem(
-                        interaction.label, str(interaction.diagram)
-                    )
+                    records.append((interaction.label, str(interaction.diagram)))
             control_root = self.state.workflow_data.get("latest_control_output")
             if control_root:
                 for diagram in sorted((Path(control_root) / "report").glob("control_*_plip2d.png")):
                     view = pose_view(diagram)
                     if view is not None:
-                        self.interaction_diagram_choice.addItem(view.label, str(diagram.resolve()))
-            self.interaction_diagram_choice.blockSignals(False)
+                        records.append((view.label, str(diagram.resolve())))
+            choice = self.interaction_diagram_choice
+            existing = [(choice.itemText(i), choice.itemData(i)) for i in range(choice.count())]
+            if existing != records:
+                # Polling must not reset a user's cluster or close an open
+                # selector. Replace choices only when the retained inputs change.
+                selected = choice.currentData()
+                blocker = QtCore.QSignalBlocker(choice)
+                choice.clear()
+                for label, path in records:
+                    choice.addItem(label, path)
+                restored = choice.findData(selected)
+                if restored >= 0:
+                    choice.setCurrentIndex(restored)
+                del blocker
             self._populate_expanded_pose_results(compound)
             self._pose_review_mode_changed()
 

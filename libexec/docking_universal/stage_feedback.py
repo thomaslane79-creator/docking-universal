@@ -88,4 +88,25 @@ def control_feedback(output: Path) -> Feedback:
         return "assessment", "Control docking complete; checking pose recovery and report…", 2, 3
     if any(output.glob("control/**/protocol.json")):
         return "redocking", "Known-ligand redocking complete; evaluating pose recovery…", 1, 3
+    batches = list(output.glob('control/04_redocking/*/*/seed_*/docking/batch_request.json'))
+    if batches:
+        written = sum(_ready(path) for batch in batches for path in batch.parent.glob('*_vina.pdbqt'))
+        # File counts show activity, not valid poses or an approved control.
+        # Chemical-state enumeration can enlarge the initial docking plan.
+        return ('redocking', f'Known-ligand redocking in progress; {written} output files written. '
+                'Pose recovery is not yet assessed.', None, None)
+    if _ready(output.parent / 'reviewed_control_inputs.json'):
+        return 'preparation', 'Reusing the reviewed receptor and box; preparing the control ligand…', 0, 3
     return "preparation", "Preparing the known complex and starting control redocking…", 0, 3
+
+
+def control_result_summary(workflow_data: dict) -> str:
+    """Describe granted authority from the actual outcome, including old studies."""
+    status = workflow_data.get('latest_control_status')
+    if status == 'not_approved':
+        return ('Control not approved. No validated protocol was created. '
+                'Review the control results, or explicitly approve exploratory reuse.')
+    if status in {'failed', 'cancelled', 'interrupted'}:
+        return (f'Control {status}; no control approval was granted. '
+                'Review retained diagnostics before a new attempt. Exploratory reuse requires explicit approval.')
+    return str((workflow_data.get('control_site_review') or {}).get('scope_warning') or '')

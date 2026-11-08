@@ -650,6 +650,8 @@ class EmbeddedPymolAdapter:
         if self._obstruction_highlight:
             self.clear_obstruction_highlight()
         self.cmd.load(str(session), partial=0)
+        from .scene_style import apply_native_display_scale
+        apply_native_display_scale(self.widget)
         self.widget._du_box_bounds = None
         self._pocket_surface_styles = {}
         self._hidden_source_box = None
@@ -921,6 +923,8 @@ class EmbeddedPymolAdapter:
 
     def end_interaction_review(self, snapshot):
         self.cmd.set_session(snapshot["session"])
+        from .scene_style import apply_native_display_scale
+        apply_native_display_scale(self.widget)
         self.cmd.set('float_labels', snapshot.get('float_labels', 0))
         self.cmd.set_view(snapshot["view"])
         self._linked_receptor_hash = snapshot["linked_hash"]

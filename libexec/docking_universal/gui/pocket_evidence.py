@@ -110,6 +110,32 @@ class EvidenceText(QtWidgets.QPlainTextEdit):
         )
 
 
+class EvidenceSelectionTable(QtWidgets.QTableWidget):
+    """A second plain click hides a viewed ligand; modifiers retain Qt semantics."""
+
+    def mousePressEvent(self, event):
+        index = self.indexAt(event.position().toPoint())
+        self._hiding_row = bool(
+            event.button() == QtCore.Qt.MouseButton.LeftButton
+            and event.modifiers() == QtCore.Qt.KeyboardModifier.NoModifier
+            and index.isValid() and self.selectionModel().isRowSelected(index.row())
+        )
+        if self._hiding_row:
+            self.selectionModel().select(index,
+                QtCore.QItemSelectionModel.SelectionFlag.Deselect
+                | QtCore.QItemSelectionModel.SelectionFlag.Rows)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if getattr(self, '_hiding_row', False):
+            self._hiding_row = False
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+
 class PocketEvidencePanel(QtWidgets.QScrollArea):
     ligandRequested = QtCore.pyqtSignal(str)
     ligandsRequested = QtCore.pyqtSignal(list)
@@ -243,7 +269,7 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
                                          + self.guide_button.sizeHint().height() + 4)
         self.highlight_row.hide()
         self.highlight_obstruction_button.hide()
-        self.table = QtWidgets.QTableWidget(0, 6)
+        self.table = EvidenceSelectionTable(0, 6)
         self.table.setHorizontalHeaderLabels(("Class", "PDB", "Ligand", "Cα RMSD (Å)", "Identity", "Coverage"))
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -290,7 +316,7 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
         self._update_residue_action()
         if embedded:
             self.note.setText(
-                "Select observations to show/hide their ligands in 3D. Viewing does not approve a region."
+                "Click a ligand to show it; click again to hide it. Ctrl/Cmd-click selects several. Viewing is not approval."
             )
         else:
             self.note.setText(
