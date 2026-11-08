@@ -26,6 +26,53 @@ from .structure_input import normalize_structure_input
 VERIFIED_ELEMENT_ALTERNATIVES = {'Co': 'adfr'}
 
 
+def _actionable_guidance(result, setup, attempted=(), stages=None, *, element=None, blocked=()):
+    """Route every diagnosis to existing controls and explain each tool's role.
+
+    A fresh independent method is a checked candidate, not a compatibility
+    assertion. Failed/used methods are never presented as fresh suggestions.
+    Availability is additionally filtered by the GUI's current host capabilities.
+    """
+    from .preparation_interventions import RECOVERY_ACTIONS, RECOVERY_ACTION_CODES, PREPARATION_TOOL_ROLES
+    code = result['diagnosis_code']
+    result['attempted_backends'] = sorted(set(attempted))
+    result['stage_statuses'] = stages or {}
+    result['tool_roles'] = PREPARATION_TOOL_ROLES
+    eligible = {'unsupported_element', 'linked_components', 'cofactor_template', 'modified_residue',
+                'component_template', 'residue_template', 'nucleic_acid_template',
+                'connectivity_construction', 'valence_validation', 'output_validation',
+                'alternative_failed', 'unsupported_charge_assignment'}
+    candidates = [backend for backend in ('adfr', 'meeko')
+                  if code in eligible and backend not in attempted and backend not in blocked]
+    result['method_candidates'] = [{'backend': backend,
+        'basis': ('observed element coverage; model still needs output validation'
+                  if VERIFIED_ELEMENT_ALTERNATIVES.get(element) == backend else
+                  'independent method not yet attempted; support for this model is unverified')}
+        for backend in candidates]
+    result['recommended_backend'] = candidates[0] if candidates else None
+    actions = []
+    if candidates:
+        actions.append({'id': 'method', 'label': 'Try an untried preparation method', 'target': 'method',
+            'instructions': 'Review the available method and its role under Advanced. Keep components unchanged '
+                'unless you separately choose an exact model change. Preview, enter your rationale and acknowledge '
+                'the method change before starting. The resulting atoms, coordinates, types and charges must pass '
+                'validation; this is a candidate attempt, not a promise of compatible chemistry.'})
+        result['next_step'] += ' An untried method can be reviewed below; its output must still pass validation.'
+    for key in RECOVERY_ACTION_CODES[code]:
+        label, target, instructions = RECOVERY_ACTIONS[key]
+        actions.append({'id': key, 'label': label, 'target': target, 'instructions': instructions})
+    if not any(row['id'] == 'diagnostics' for row in actions):
+        label, target, instructions = RECOVERY_ACTIONS['diagnostics']
+        actions.append({'id': 'diagnostics', 'label': label, 'target': target, 'instructions': instructions})
+    result['actions'] = actions
+    if code in eligible and not candidates:
+        result['next_step'] += ' The recorded methods have no untried automatic remedy; use the guided review or corrected-input actions below.'
+    statuses = '\n'.join(name + ': ' + str(value).replace('_', ' ') for name, value in (stages or {}).items())
+    result['details'] += ('\n\nRecorded stages:\n' + statuses if statuses else '')
+    result['details'] += '\n\nTool roles:\n' + '\n\n'.join(PREPARATION_TOOL_ROLES.values())
+    return result
+
+
 def failed_preparation_job(state):
     """Require the exact terminal failed stage, never a completed control/run."""
     setup = state.workflow_data.get('study_setup') or {}
@@ -93,12 +140,13 @@ def recovery_guidance(state, source_path):
         # Preflight may fail before writing fresh receptor logs. Do not use an
         # older run directory to propose a molecular workaround for this case.
         summary, action = RECOVERY_DESCRIPTIONS['pocket_runtime']
-        return {'diagnosis_code': 'pocket_runtime', 'summary': summary, 'next_step': action,
+        return _actionable_guidance({'diagnosis_code': 'pocket_runtime', 'summary': summary, 'next_step': action,
                 'recommended_backend': None, 'last_backend': setup.get('preparation_backend')
                     if setup.get('preparation_backend') in {'meeko', 'adfr'} else 'meeko',
-                'details': process_error + '\n\nNo molecular correction is inferred from a predictor startup failure.'}
+                'details': process_error + '\n\nNo molecular correction is inferred from a predictor startup failure.'}, setup)
     from .preparation import _canonical_name
     root = Path(setup['working_directory']) / (_canonical_name(Path(source_path)) + '_receptor_prep')
+    original_root = root
     attempt = next((row for row in reversed(state.workflow_data.get('receptor_preparation_attempts') or [])
                     if row.get('request_id') == job.request_id), None)
     if attempt:
@@ -168,11 +216,23 @@ def recovery_guidance(state, source_path):
     if missing_charges:
         summary, action = RECOVERY_DESCRIPTIONS['unsupported_charge_assignment']
         result.update(summary=summary, next_step=action,
-            diagnosis_code='unsupported_charge_assignment',
-            recommended_backend=VERIFIED_ELEMENT_ALTERNATIVES.get(element))
+            diagnosis_code='unsupported_charge_assignment')
         details.append('Atoms without supported charge assignments:\n' + '\n'.join(missing_charges))
-    elif fallback.get('status') in {'validation_failed', 'failed', 'startup_failed', 'unavailable', 'disabled'}:
-        unavailable = fallback.get('status') in {'startup_failed', 'unavailable', 'disabled'}
+        affected = []
+        for message in missing_charges:
+            match = re.search(r'for atom\s+[^:\s]+:([^:]*):\s*([^:\s]+):([^\s:]+)', message)
+            if match:
+                chain, component_number, atom = match.groups()
+                affected.append(f'{component_number} chain {chain or "(blank)"}, atom {atom}')
+        if affected:
+            result['affected_components'] = affected
+            result['summary'] += ' Affected: ' + '; '.join(affected[:3]) + (f'; {len(affected)-3} more.' if len(affected)>3 else '.')
+    elif output.get('backend') == 'adfr' and output.get('status') == 'rejected':
+        summary, action = RECOVERY_DESCRIPTIONS['output_validation']
+        result.update(summary=summary, next_step=action, diagnosis_code='output_validation')
+        details.extend(str(reason) for reason in record_rows(output, 'reasons'))
+    elif fallback.get('status') in {'validation_failed', 'failed', 'startup_failed', 'unavailable'}:
+        unavailable = fallback.get('status') in {'startup_failed', 'unavailable'}
         failure_code = 'runtime_unavailable' if unavailable else 'output_validation' if fallback['status'] == 'validation_failed' else 'alternative_failed'
         summary, action = RECOVERY_DESCRIPTIONS[failure_code]
         result.update(summary=summary, next_step=action, diagnosis_code=failure_code)
@@ -183,18 +243,63 @@ def recovery_guidance(state, source_path):
         # Co coverage has been checked in the independent backend. Other
         # elements get an explanation without an invented compatibility claim.
         if element in VERIFIED_ELEMENT_ALTERNATIVES:
-            result.update(next_step='Use the suggested alternative method for a reviewed attempt, if available. Its output must still pass validation.',
-                          recommended_backend=VERIFIED_ELEMENT_ALTERNATIVES[element])
-    elif missing_definitions and code == 'unclassified':
+            details.append('The independent backend has observed cobalt element coverage; support for the whole current model still requires output validation.')
+    elif missing_definitions and code == 'unclassified' and setup.get('reduce2') == 'required':
         summary, action = RECOVERY_DESCRIPTIONS['missing_component_definitions']
         result.update(summary=summary, next_step=action, diagnosis_code='missing_component_definitions')
+        result['affected_components'] = missing_definitions
+        result['summary'] += ' Components: ' + ', '.join(missing_definitions[:5]) + '.'
     if result['diagnosis_code'] == 'unclassified' and text.strip():
         details.append('Unrecognized diagnostic excerpt:\n' + text.strip()[-4000:])
+    if result['diagnosis_code'] == 'unclassified':
+        protonation = read_record('pdb2pqr_audit.json')
+        hydrogen = read_record('reduce2_audit.json')
+        repair = read_record('pdbfixer_audit.json')
+        required_code = ('protonation_review' if setup.get('protonation') == 'required'
+                         and protonation and protonation.get('status') != 'compatible' else
+                         'hydrogen_preparation' if setup.get('reduce2') == 'required'
+                         and hydrogen and hydrogen.get('status') not in {'compatible', 'completed'} else
+                         'incomplete_backbone' if repair.get('status') == 'review_required_missing_backbone_atoms' else
+                         'repair_geometry' if repair.get('status') == 'rejected_generated_geometry' else None)
+        if required_code:
+            summary, action = RECOVERY_DESCRIPTIONS[required_code]
+            result.update(diagnosis_code=required_code, summary=summary, next_step=action)
     details.append('Retained diagnostic directory: ' + str(receptor))
     details.append('Any suggested method is a candidate to test, not a guarantee. Only explicitly approved changes run; '
                    'atom retention, types and charges are checked. Successful preparation does not establish docking accuracy.')
     result['details'] = '\n\n'.join(details)
-    return result
+    result['diagnostic_files'] = [{'path': str(path.resolve()), 'sha256': sha256(path)}
+        for path in sorted(receptor.iterdir() if receptor.is_dir() else [])
+        if path.is_file() and path.suffix.lower() in {'.log', '.json', '.txt'}]
+    stages = {}
+    for name, label, option in (('reduce2_audit.json', 'Hydrogen placement', 'reduce2'),
+                                ('pdb2pqr_audit.json', 'Protonation assessment', 'protonation'),
+                                ('pdbfixer_audit.json', 'Structural repair', 'pdbfixer')):
+        record = read_record(name)
+        stages[label] = record.get('status') or ('disabled by settings' if setup.get(option) == 'off' else 'not recorded for this attempt')
+    stages['Alternative preparation'] = str(fallback.get('status') or 'not recorded for this attempt')
+    attempted = set()
+    roots = {root, original_root}
+    roots.update(Path(row['root']) for row in state.workflow_data.get('receptor_preparation_attempts', [])
+                 if row.get('root') and any(j.request_id == row.get('request_id') for j in state.jobs))
+    for prior_root in roots:
+        directory = prior_root / 'receptor'
+        try:
+            prior_output = json.loads((directory / 'adfr_output_audit.json').read_text())
+        except (OSError, ValueError):
+            prior_output = {}
+        if not isinstance(prior_output, dict):
+            prior_output = {}
+        adfr_primary = (setup.get('preparation_backend') == 'adfr' and prior_root == original_root) or (
+            prior_output.get('backend') == 'adfr' and
+            Path(str(prior_output.get('backend_log_path') or '')).name == 'receptor_backend.log')
+        if (directory / 'receptor_backend.log').is_file():
+            attempted.add('adfr' if adfr_primary else 'meeko')
+        if prior_output.get('backend') == 'adfr' or (directory / 'receptor_adfr_fallback.log').is_file():
+            attempted.add('adfr')
+    attempted.add(result['last_backend'])
+    blocked = {'adfr'} if fallback.get('status') in {'startup_failed', 'unavailable'} else set()
+    return _actionable_guidance(result, setup, attempted, stages, element=element, blocked=blocked)
 
 
 def prepare_failed_receptor_changes(runner, state, model_changes, *, request_id, expected_revision):

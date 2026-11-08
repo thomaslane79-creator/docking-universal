@@ -383,7 +383,9 @@ class RecoveryGuidanceTests(unittest.TestCase):
         self.assertIn('unsupported charge', result['summary'])
         self.assertIn('No component is selected for removal', result['next_step'])
         self.assertIn('NAG607:O6', result['details'])
-        self.assertEqual(result['recommended_backend'], 'adfr')
+        self.assertIsNone(result['recommended_backend'])
+        self.assertEqual(result['method_candidates'], [])
+        self.assertEqual(result['attempted_backends'], ['adfr', 'meeko'])
 
     def test_unavailable_alternative_does_not_recommend_an_unusable_retry(self):
         self.cobalt()
@@ -427,7 +429,9 @@ class RecoveryGuidanceTests(unittest.TestCase):
                 self.assertNotEqual(result['diagnosis_code'], 'unclassified')
                 self.assertIn(problem, result['summary'])
                 self.assertIn(action, result['next_step'])
-                self.assertIsNone(result['recommended_backend'])
+                self.assertTrue(result['actions'])
+                if result['recommended_backend']:
+                    self.assertNotIn(result['recommended_backend'], result['attempted_backends'])
 
     def test_engine_intervention_publishes_a_stable_diagnostic_identifier(self):
         from docking_universal.services.preparation_interventions import write_intervention_record, read_intervention_record
@@ -446,8 +450,67 @@ class RecoveryGuidanceTests(unittest.TestCase):
         result = self.guidance()
         self.assertEqual(result['diagnosis_code'], 'unsupported_element')
         self.assertIn('selenium', result['summary'])
+        self.assertEqual(result['recommended_backend'], 'adfr')
+        self.assertIn('unverified', result['method_candidates'][0]['basis'])
+        self.assertIn('does not establish support', result['next_step'])
+
+    def test_all_diagnoses_have_concrete_actions_and_tool_role_explanations(self):
+        from docking_universal.services.preparation_interventions import (
+            RECOVERY_DESCRIPTIONS, RECOVERY_ACTION_CODES)
+        self.assertEqual(set(RECOVERY_DESCRIPTIONS), set(RECOVERY_ACTION_CODES))
+        for code in RECOVERY_DESCRIPTIONS:
+            with self.subTest(code=code):
+                self.write_record('preparation_intervention.json', {'diagnosis_code': code})
+                result = self.guidance()
+                self.assertTrue(result['actions'])
+                self.assertTrue(all(row['instructions'] and row['target'] for row in result['actions']))
+                self.assertEqual(set(result['tool_roles']), {'meeko','adfr','reduce2','pdbfixer','pdb2pqr'})
+
+    def test_disabled_alternative_is_an_explicit_candidate_not_a_broken_runtime(self):
+        self.write_record('preparation_intervention.json', {'diagnosis_code': 'linked_components',
+            'adfr_fallback': {'status': 'disabled'}})
+        result = self.guidance()
+        self.assertEqual(result['diagnosis_code'], 'linked_components')
+        self.assertEqual(result['recommended_backend'], 'adfr')
+        self.assertEqual(result['stage_statuses']['Alternative preparation'], 'disabled')
+
+    def test_optional_hydrogen_failure_does_not_relabel_an_unknown_fatal_error(self):
+        self.write_record('reduce2_audit.json', {'status':'component_definitions_required','missing_components':['LIG']})
+        self.assertEqual(self.guidance()['diagnosis_code'], 'unclassified')
+        self.state.workflow_data['study_setup']['reduce2'] = 'required'
+        self.assertEqual(self.guidance()['diagnosis_code'], 'missing_component_definitions')
+
+    def test_redirected_attempt_root_with_adfr_fallback_does_not_offer_meeko_again(self):
+        self.cobalt()
+        self.write_record('preparation_intervention.json', {'diagnosis_code':'output_validation',
+            'adfr_fallback':{'status':'validation_failed'}})
+        self.write_record('adfr_output_audit.json', {'backend':'adfr',
+            'backend_log_path':'receptor/receptor_adfr_fallback.log',
+            'missing_charge_parameters':['Sorry, there are no Gasteiger parameters available for atom T:A: MG201:MG']})
+        self.state.workflow_data['study_setup']['working_directory']=str(self.root/'unused')
+        self.state.workflow_data['receptor_preparation_attempts']=[{'request_id':'failed','root':str(self.receptor.parent)}]
+        result=self.guidance()
+        self.assertEqual(result['attempted_backends'],['adfr','meeko'])
         self.assertIsNone(result['recommended_backend'])
-        self.assertIn('no verified alternative', result['next_step'].lower())
+        self.assertIn('MG201',result['summary'])
+
+    def test_required_protonation_failure_is_explained_without_switching_charge_backend(self):
+        self.state.workflow_data['study_setup']['protonation']='required'
+        self.write_record('pdb2pqr_audit.json',{'status':'incompatible','missing_input_heavy_atoms':[['A','COH','602']]})
+        result=self.guidance()
+        self.assertEqual(result['diagnosis_code'],'protonation_review')
+        self.assertIsNone(result['recommended_backend'])
+        self.assertIn('protonation',result['actions'][0]['instructions'])
+        self.assertTrue(any('pdb2pqr_audit.json' in row['path'] for row in result['diagnostic_files']))
+
+    def test_rejected_output_or_repair_is_recognized_from_audit_without_intervention_text(self):
+        self.write_record('pdbfixer_audit.json',{'status':'rejected_generated_geometry'})
+        self.assertEqual(self.guidance()['diagnosis_code'],'repair_geometry')
+        self.write_record('adfr_output_audit.json',{'backend':'adfr','status':'rejected',
+            'reasons':['Retained heavy atoms were lost']})
+        result=self.guidance()
+        self.assertEqual(result['diagnosis_code'],'output_validation')
+        self.assertIn('Retained heavy atoms were lost',result['details'])
 
     def test_unknown_failure_retains_raw_evidence_and_does_not_invent_a_fix(self):
         (self.receptor / 'receptor_backend.log').write_text('UnexpectedWidgetError: synthetic failure 729\n')

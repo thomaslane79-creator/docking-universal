@@ -87,6 +87,8 @@ def candidate_with_model_change_review(state, candidate):
     """Decorate a GUI copy; reopening a box must not hide a successful override."""
     if candidate is None:
         return None
+    from .pocket_review import candidate_with_input_ligand_evidence
+    candidate = candidate_with_input_ligand_evidence(state, candidate)
     history_artifact = next((a for a in state.artifacts if a.kind == 'receptor_model_history'), None)
     if history_artifact is None:
         return candidate

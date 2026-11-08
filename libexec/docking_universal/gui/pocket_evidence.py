@@ -155,9 +155,10 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
         header_layout.addWidget(self.evidence_title, 1)
         self.evidence_header.setFixedHeight(max(20, self.evidence_title.fontMetrics().lineSpacing()))
         self.evidence_header.setToolTip(
-            "The green ring in the graph marks deposited-ligand evidence. "
-            "The table lists ligands observed in matching or related protein structures, "
-            "not newly docked poses. This evidence does not approve a docking region."
+            "The green ring in the graph marks retained input-ligand or related deposited-ligand evidence. "
+            "The table distinguishes the input-structure ligand from observations in related protein structures, "
+            "not newly docked poses from this run. Input coordinates alone do not establish experimental validation. "
+            "This evidence does not approve a docking region."
         )
         self.heading = QtWidgets.QLabel("Select a docking-box candidate to inspect its evidence.")
         self.heading.setWordWrap(True)
@@ -360,16 +361,22 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
         self.preparation_issues.setPlainText('\n'.join(lines))
         self.preparation_issues.setVisible(bool(issues or reference_review))
         experimental = evidence.get("experimental_ligand_evidence") or {}
-        observations = experimental.get("observations") or []
+        local = evidence.get('input_ligand_evidence') or {}
+        observations = list(local.get('observations') or []) + list(experimental.get("observations") or [])
         label = (candidate or {}).get("label") or (candidate or {}).get("id") or "No candidate"
         classes = experimental.get("evidence_class_counts") or {}
         self.heading.setText(
+            f"{label}: {local.get('observation_count', 0)} input ligand · "
+            f"{experimental.get('observation_count', 0)} related observations" if local else
             f"{label}: {experimental.get('observation_count', 0)} observations · "
             f"{experimental.get('pdb_entry_count', 0)} PDB entries")
         self.heading.setToolTip(self.heading.text() +
             f" · exact {classes.get('exact_sequence_match', 0)} · homolog {classes.get('close_structural_homolog', 0)}")
         self.note.set_content(self.note.summary_text,
             self.evidence_header.toolTip() + '\n\n' + self.heading.toolTip() +
+            ('\n\nInput ligand: all retained heavy atoms must fit this box (0.25 Å boundary tolerance). '
+             'This is evidence from the loaded structure, not independent validation. '
+             + str(local.get('detail') or '') if local else '') +
             '\n\nSelecting observations updates the 3D view; deselecting hides them. '
             'Experimental correspondence supports a decision; it does not approve a docking region.')
         conformation = evidence.get("conformational_site_evidence") or {}
@@ -575,6 +582,10 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
             "Rendering 2D interactions…" if getattr(self, "rendering_2d", False)
             else "Render 2D interactions"
         )
+        if (self.selected_observation() or {}).get('source') == 'input_structure':
+            self.render_2d_button.setEnabled(False)
+            self.render_2d_button.setToolTip('This input ligand can be shown in 3D. Its exact chemistry is not linked to the deposited-interaction renderer; use the molecule inspector for its 2D drawing.')
+            return
         try:
             evidence_inputs(self.selected_observation() or {})
         except (ValueError, OSError) as exc:

@@ -1,4 +1,6 @@
 import os
+import copy
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,6 +18,61 @@ class PocketPlotTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+
+    def test_local_ligand_marks_both_predicted_and_bound_sites_on_reopening(self):
+        from docking_universal.services.pocket_review import candidate_with_input_ligand_evidence
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ligand = root / 'GNP.pdb'
+            ligand.write_text('HETATM    1  C1  GNP A 200       0.000   0.000   0.000  1.00 20.00           C\n'
+                              'HETATM    2  C2  GNP A 200       1.000   0.000   0.000  1.00 20.00           C\n')
+            def artifact(identity, kind, path):
+                return SimpleNamespace(id=identity, kind=kind, path=str(path),
+                    sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+            assets = [artifact('input-bound-ligand', 'bound_ligand', ligand)]
+            candidates = []
+            for identity, center, score in [('P1', .54, 11.8), ('B1', 0., None), ('P2', 50., 3.2)]:
+                box = root / (identity + '.conf')
+                box.write_text(f'center_x = {center}\ncenter_y = 0\ncenter_z = 0\n'
+                               'size_x = 26\nsize_y = 26\nsize_z = 26\n')
+                assets.append(artifact(identity, 'docking_box', box))
+                candidates.append({'id': identity, 'box_artifact_id': identity,
+                    'evidence': {'score': score, 'experimental_ligand_evidence': {'observation_count': 0}}})
+            state = SimpleNamespace(artifacts=assets, workflow_data={'pocket_candidates': candidates})
+            before = copy.deepcopy(candidates)
+            plot = PocketScorePlot(); plot.resize(500, 270); plot.set_study(state)
+            self.assertEqual(plot.evidence_counts, {'P1': 1, 'B1': 1, 'P2': 0})
+            self.assertEqual([p[:2] for p in plot.points], [('P1', 11.8), ('B1', None), ('P2', 3.2)])
+            # Verify actual rendered ring pixels, including the unscored point.
+            pixmap = plot.grab().toImage()
+            for point in plot.positions()[:2]:
+                x, y = int(point.x()), int(point.y())
+                self.assertTrue(any(pixmap.pixelColor(x+dx, y+dy).name() == '#009b50'
+                    for dx in range(-15,16) for dy in range(-15,16)))
+            panel = PocketEvidencePanel()
+            for candidate in candidates[:2]:
+                panel.set_candidate(candidate_with_input_ligand_evidence(state, candidate))
+                self.assertIn('1 input ligand', panel.heading.text())
+                self.assertIn('0 related observations', panel.heading.text())
+                self.assertEqual(panel.table.item(0, 0).text(), 'input structure')
+                self.assertEqual(panel.table.item(0, 2).text(), 'GNP A:200')
+                panel.table.selectRow(0)
+                self.assertFalse(panel.render_2d_button.isEnabled())
+                self.assertIn('molecule inspector', panel.render_2d_button.toolTip())
+                from docking_universal.gui.desktop import StudyWindow
+                summary, _ = StudyWindow._candidate_evidence_digest(candidate, candidate_with_input_ligand_evidence(state, candidate)['evidence'])
+                self.assertIn('Input ligand: GNP A:200', summary)
+            self.assertEqual(candidates, before)
+            # Related observations remain separate and still count.
+            candidates[0]['evidence']['experimental_ligand_evidence']['observation_count'] = 3
+            plot.set_study(state)
+            self.assertEqual(plot.evidence_counts['P1'], 4)
+            self.assertIn('3 related-PDB', plot.evidence_sources['P1'])
+            ligand.write_text(ligand.read_text() + 'REMARK changed\n')
+            plot.set_study(state)
+            self.assertEqual(plot.evidence_counts['B1'], 0)
+            self.assertEqual(plot.evidence_counts['P1'], 3)
+            panel.close(); plot.close()
 
     def test_preparation_failures_follow_selected_box_not_a_global_clearance(self):
         panel = PocketEvidencePanel()
@@ -67,7 +124,7 @@ class PocketPlotTests(unittest.TestCase):
                 panel.set_candidate({"id": "P1", "evidence": {
                     "conformational_site_evidence": evidence}})
                 self.assertIn(expected, panel.warning.text())
-                self.assertIn(qualification, panel.warning.text())
+                self.assertIn(qualification, panel.warning.toolTip())
 
     def test_ligand_evidence_header_explains_graph_symbol_in_shared_panel(self):
         panel = PocketEvidencePanel()
@@ -88,7 +145,7 @@ class PocketPlotTests(unittest.TestCase):
                          panel.content_layout.indexOf(panel.table))
         self.assertLess(panel.content_layout.indexOf(panel.warning),
                         panel.content_layout.indexOf(panel.evidence_summary))
-        self.assertEqual(panel.warning.height(), panel.warning.fontMetrics().lineSpacing() * 4 + 16)
+        self.assertEqual(panel.warning.height(), panel.warning.fontMetrics().lineSpacing() * 3 + 16)
 
     def test_retained_scores_map_by_identity_not_row_order(self):
         with tempfile.TemporaryDirectory() as directory:

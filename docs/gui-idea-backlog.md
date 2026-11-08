@@ -4,6 +4,23 @@ Status: active scope-control record, established 2026-09-24.
 
 ### Site evidence and duplicate suggestions before charge surfaces (2026-11-07)
 
+Latest explicit order: fix the missing green ligand-evidence circles first,
+then finish the generalized preparation-recovery GUI guidance and its acceptance.
+Duplicate-site consolidation and the template/surface features follow those
+repairs. The guidance must offer an actionable recovery for each recognized
+failure, explain relevant tools and prior attempts, and state clearly when no
+supported automatic remedy exists.
+
+Implemented and installed in that order: the plot and both evidence interfaces
+now include the retained input ligand, with matching table summaries and separate
+local/related provenance. Generalized recovery covers every diagnostic category,
+untried-method eligibility, actual tool roles and existing action destinations.
+Native saved-failure review verifies expanded help, real early-failure diagnostic
+loading, corrected-input navigation and cancellation without state changes.
+See [acceptance and remaining broader GUI limits](gui-evidence-and-recovery-2026-11-07.md).
+The selected-pocket-table accessibility blocker and duplicate-site consolidation
+remain separate open items; this does not close every GUI acceptance gate.
+
 The user explicitly reprioritizes the work: finish preparation/recovery issues,
 then correct site evidence presentation and consolidate near-identical box
 suggestions, then add optional experimental-ligand similarity/template guidance,
@@ -27,8 +44,12 @@ detector or a change to scientific scores. Acceptance scope:
   relationship to each proposal, including P1. Keep local input observations
   distinct from independent related-structure observations and control evidence.
 - Make the ligand indicator and visible counts agree with that provenance in
-  local-only, lookup-failed and lookup-enabled runs. An unscored input-ligand
-  box must visibly say why it has no predictor score.
+  local-only, lookup-failed and lookup-enabled runs. Both P1 and B1 in this case
+  should show the green ligand-evidence circle: P1 contains the deposited GNP,
+  and B1 is defined from it. After consolidation, their shared site option should
+  retain that indicator. Details must identify the input structure as the source;
+  the circle does not establish independent control validation. An unscored
+  input-ligand box must visibly say why it has no predictor score.
 - Present near-identical proposals as one site option with all original source
   IDs, evidence and detector scores retained. Expand to inspect constituent
   geometries/provenance. Define/test the overlap criterion explicitly; do not

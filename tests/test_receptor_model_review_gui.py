@@ -102,6 +102,79 @@ class ReceptorModelReviewGuiTests(unittest.TestCase):
         self.assertIn('already tried', self.dialog.method_summary.text())
         self.assertFalse(self.dialog.prepare_button.isEnabled())
 
+    def test_guided_actions_reach_existing_controls_without_preview_or_approval(self):
+        from docking_universal.services.failed_preparation_recovery import _actionable_guidance
+        self.dialog.close()
+        guidance = _actionable_guidance({'diagnosis_code':'alternate_conformation',
+            'summary':'Alternate conformations need review.', 'next_step':'Choose one.',
+            'details':'Exact deposited alternatives.', 'last_backend':'meeko'}, {}, ['meeko'])
+        self.initial.update(preparation_backend='meeko', recovery_guidance=guidance)
+        self.dialog = ReceptorModelReviewDialog(self.initial, self.dialog._preview_callback)
+        self.assertEqual(self.dialog.recovery_actions.currentData()['target'], 'alternates')
+        self.dialog.recovery_action_button.click()
+        self.assertEqual(self.dialog.alternates.cellWidget(0,2).currentData(), '')
+        self.assertEqual(self.calls, [])
+        self.assertFalse(self.dialog.prepare_button.isEnabled())
+        index = next(i for i in range(self.dialog.recovery_actions.count())
+                     if self.dialog.recovery_actions.itemData(i)['target']=='new_study')
+        self.dialog.recovery_actions.setCurrentIndex(index)
+        self.dialog.recovery_action_button.click()
+        self.assertEqual(self.dialog.navigation_request, 'new_study')
+        self.assertEqual(self.calls, [])
+
+    def test_general_method_candidates_obey_host_availability_and_show_their_limits(self):
+        from docking_universal.services.failed_preparation_recovery import _actionable_guidance
+        self.dialog.close()
+        guidance = _actionable_guidance({'diagnosis_code':'component_template',
+            'summary':'Component definition missing.', 'next_step':'Review it.',
+            'details':'Observed model.', 'last_backend':'meeko'}, {}, ['meeko'])
+        self.initial.update(preparation_backend='meeko', available_preparation_backends=['meeko'],
+                            recovery_guidance=guidance)
+        callback = self.dialog._preview_callback
+        self.dialog = ReceptorModelReviewDialog(self.initial, callback)
+        self.assertIsNone(self.dialog._suggested_backend)
+        self.assertIn('No untried alternative', self.dialog.recovery_guidance.text())
+        self.assertFalse(any(self.dialog.recovery_actions.itemData(i)['target']=='method'
+                             for i in range(self.dialog.recovery_actions.count())))
+        self.dialog.close()
+        self.initial['available_preparation_backends']=['meeko','adfr']
+        self.dialog = ReceptorModelReviewDialog(self.initial, callback)
+        self.assertEqual(self.dialog.preparation_backend.currentData(), 'adfr')
+        self.assertIn('unverified', self.dialog.method_summary.toolTip())
+        self.dialog.recovery_action_button.click()
+        self.assertFalse(self.dialog.backend_controls.isHidden())
+        self.assertFalse(self.dialog.prepare_button.isEnabled())
+        self.assertEqual(self.calls, [])
+        self.dialog.tool_guide.show_explanation()
+        text=self.dialog.tool_guide.explanation_window.content.toPlainText()
+        self.assertIn('Reduce2',text);self.assertIn('PDB2PQR',text)
+        self.dialog.tool_guide.explanation_window.close()
+
+    def test_every_diagnosis_renders_guided_actions_without_launching_work(self):
+        from docking_universal.services.failed_preparation_recovery import _actionable_guidance
+        from docking_universal.services.preparation_interventions import RECOVERY_DESCRIPTIONS
+        callback=self.dialog._preview_callback
+        for code,(summary,next_step) in RECOVERY_DESCRIPTIONS.items():
+            with self.subTest(code=code):
+                guidance=_actionable_guidance({'diagnosis_code':code,'summary':summary,
+                    'next_step':next_step,'details':'Retained evidence','last_backend':'meeko'}, {}, ['meeko'])
+                initial=dict(self.initial, preparation_backend='meeko', available_preparation_backends=['meeko','adfr'], recovery_guidance=guidance)
+                dialog=ReceptorModelReviewDialog(initial,callback)
+                try:
+                    self.assertGreater(dialog.recovery_actions.count(),0)
+                    for index in range(dialog.recovery_actions.count()):
+                        dialog.recovery_actions.setCurrentIndex(index)
+                        self.assertTrue(dialog.recovery_action_note.details_text)
+                        self.assertTrue(dialog.recovery_action_button.text())
+                        if dialog.recovery_actions.currentData()['target']=='exclusions':
+                            dialog.recovery_action_button.click()
+                            self.assertEqual(dialog.exclusions.toPlainText(),'')
+                    self.assertFalse(dialog.prepare_button.isEnabled())
+                    self.assertEqual(dialog.exclusions.toPlainText(),'')
+                finally:
+                    dialog.close()
+        self.assertEqual(self.calls,[])
+
     def test_changing_any_choice_invalidates_the_previous_preview(self):
         self.dialog.exclusions.setPlainText('NAG A 1')
         self.dialog.preview_button.click()
@@ -315,6 +388,35 @@ class FailedPreparationReviewExposureTests(unittest.TestCase):
             self.window.preparation_progress_panel.review_failed_button.click()
             prepare.assert_called_once_with(choices, 'b' * 64, 'Exact fixture review', self.window.state.revision)
         self.assertEqual(self.store.path_for('failed-control').read_bytes(), original)
+
+    def test_guidance_navigation_opens_logs_or_new_study_without_starting_preparation(self):
+        original=self.store.path_for('failed-control').read_bytes()
+        import hashlib
+        diagnostic=self.root/'early-failure.log'
+        diagnostic.write_text('A specific unregistered preparation failure\n')
+        with patch.object(self.window.host_controller, 'preview_receptor_changes', return_value={
+                'residue_inventory':[], 'box_review_pending':True, 'recovery_guidance':{
+                    'summary':'Failure needs review','details':'Retained diagnostics',
+                    'diagnostic_files':[{'path':str(diagnostic),'sha256':hashlib.sha256(diagnostic.read_bytes()).hexdigest()}]}}), \
+             patch.object(self.window.host_controller, 'prepare_receptor_changes') as prepare, \
+             patch.object(self.window, '_choose_another_study') as choose, \
+             patch.object(self.window, '_set_auxiliary_dock_visible') as show, \
+             patch('docking_universal.gui.receptor_model_review.ReceptorModelReviewDialog') as dialog:
+            dialog.return_value.exec.return_value=QtWidgets.QDialog.DialogCode.Rejected
+            dialog.return_value.navigation_request='diagnostics'
+            self.window.review_receptor_changes()
+            self.assertEqual(show.call_count,2)
+            self.assertIn('specific unregistered preparation failure',self.window.log_view.toPlainText())
+            self.assertTrue(any('Recovery diagnostic' in self.window.report_list.item(i).text()
+                                for i in range(self.window.report_list.count())))
+            diagnostic.write_text('changed after inspection')
+            self.window._render_artifacts(self.window.state)
+            self.assertIn('file changed after inspection',self.window.log_view.toPlainText())
+            dialog.return_value.navigation_request='new_study'
+            self.window.review_receptor_changes()
+            choose.assert_called_once_with('create')
+            prepare.assert_not_called()
+        self.assertEqual(self.store.path_for('failed-control').read_bytes(),original)
 
 
 if __name__ == '__main__':

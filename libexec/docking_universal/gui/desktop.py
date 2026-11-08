@@ -3094,6 +3094,16 @@ if QtWidgets is not None:
                 dialog = ReceptorModelReviewDialog(initial,
                     lambda choices: self.host_controller.preview_receptor_changes(choices, revision), self)
                 if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+                    navigation = getattr(dialog, 'navigation_request', None)
+                    if navigation == 'new_study':
+                        self._choose_another_study('create')
+                    elif navigation == 'diagnostics':
+                        guidance = initial.get('recovery_guidance') or {}
+                        self._recovery_diagnostic_context = (self.state.study_id,
+                            self.state.jobs[-1].id if self.state.jobs else None, guidance)
+                        self._render_artifacts(self.state)
+                        self._set_auxiliary_dock_visible(self.logs_dock, QtCore.Qt.DockWidgetArea.BottomDockWidgetArea, True)
+                        self._set_auxiliary_dock_visible(self.reports_dock, QtCore.Qt.DockWidgetArea.BottomDockWidgetArea, True)
                     return
                 choices, preview_sha256, rationale = dialog.approved_change()
                 self.host_controller.prepare_receptor_changes(choices, preview_sha256, rationale, revision)
@@ -4012,9 +4022,10 @@ if QtWidgets is not None:
         def _render_candidates(self, state: StudyState) -> None:
             # Polling repaints evidence; only user navigation should reload 3D.
             from ..services.preparation_site_issues import candidate_with_model_change_review
+            values = [candidate_with_model_change_review(state, candidate)
+                      for candidate in state.workflow_data.get('pocket_candidates', [])]
             fingerprint = json.dumps({
-                "candidates": [candidate_with_model_change_review(state, candidate)
-                               for candidate in state.workflow_data.get("pocket_candidates", [])],
+                "candidates": values,
                 "root": state.workflow_data.get("preparation_root"),
             }, sort_keys=True)
             if fingerprint == getattr(self, "_candidate_table_fingerprint", None):
@@ -4023,7 +4034,6 @@ if QtWidgets is not None:
             blocker = QtCore.QSignalBlocker(self.candidates)
             self.pocket_score_plot.set_study(state)
             self.pocket_score_scroll.setVisible(bool(self.pocket_score_plot.points))
-            values = state.workflow_data.get("pocket_candidates", [])
             self.candidates.setRowCount(len(values))
             # Show short candidate lists in full; selection must not require
             # finding a barely visible scrollbar below the molecular canvas.
@@ -4086,6 +4096,11 @@ if QtWidgets is not None:
             parts.append(summary)
             details.append(explanation)
 
+            local = evidence.get('input_ligand_evidence') or {}
+            if local.get('observation_count'):
+                parts.append('Input ligand: ' + ', '.join(row['ligand'] for row in local.get('observations', [])))
+                details.append('The retained ligand from the loaded structure fits this box. This is not independent control validation.')
+
             experimental = evidence.get("experimental_ligand_evidence") or {}
             observations = int(experimental.get("observation_count") or 0)
             entries = int(experimental.get("pdb_entry_count") or 0)
@@ -4131,6 +4146,28 @@ if QtWidgets is not None:
                 self.report_list.addItem(item)
                 if "log" in artifact.kind and Path(artifact.path).is_file():
                     logs.append(f"[{artifact.description or artifact.kind}]\n{Path(artifact.path).read_text(errors='replace')}")
+            # Early failures may precede artifact registration. The inspected
+            # recovery response pins diagnostics to this exact job, without
+            # mutating its science/history or borrowing a prior run's files.
+            recovery = getattr(self, '_recovery_diagnostic_context', None)
+            if recovery and recovery[:2] == (state.study_id, state.jobs[-1].id if state.jobs else None):
+                from ..protocol_finalization import sha256
+                guidance = recovery[2]
+                logs.insert(0, '[Preparation recovery]\n' + guidance.get('summary', '') + '\n' + guidance.get('details', ''))
+                registered = {a.path for a in state.artifacts}
+                for record in guidance.get('diagnostic_files', []):
+                    path = Path(record['path'])
+                    try:
+                        if sha256(path) != record['sha256']:
+                            raise ValueError('file changed after inspection')
+                        if str(path) not in registered:
+                            item = QtWidgets.QListWidgetItem('Recovery diagnostic: ' + str(path))
+                            item.setData(QtCore.Qt.UserRole, str(path))
+                            self.report_list.addItem(item)
+                        with path.open(errors='replace') as handle:
+                            logs.append('[' + path.name + ']\n' + handle.read(200_000))
+                    except (OSError, ValueError) as exc:
+                        logs.append('[Unverified recovery diagnostic] ' + str(path) + ': ' + str(exc))
             # The widget is bounded; full raw logs remain in their artifacts.
             self.log_view.setPlainText("\n\n".join(logs)[-200_000:])
 

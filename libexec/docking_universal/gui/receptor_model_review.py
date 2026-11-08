@@ -17,12 +17,19 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
             or (initial_preview.get('choices') or {}).get('preparation_backend') or 'meeko')
         self._available_backends = set(initial_preview.get('available_preparation_backends', ['meeko']))
         guidance = initial_preview.get('recovery_guidance') or {}
+        self.navigation_request = None
+        self._guidance = guidance
         self._has_recovery_guidance = bool(guidance)
         self._suggested_backend = guidance.get('recommended_backend')
+        if 'method_candidates' in guidance:
+            self._suggested_backend = next((row['backend'] for row in guidance['method_candidates']
+                if row['backend'] in self._available_backends and
+                row['backend'] not in guidance.get('attempted_backends', [])), None)
         self._suggested_already_tried = bool(self._suggested_backend and guidance.get('last_backend') == self._suggested_backend)
         self._method_labels = {'meeko': 'Standard preparation', 'adfr': 'Alternative preparation'}
         outer = QtWidgets.QVBoxLayout(self)
         scroll = QtWidgets.QScrollArea()
+        self._scroll_area = scroll
         scroll.setWidgetResizable(True)
         body = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(body)
@@ -37,10 +44,29 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
         introduction.setWordWrap(True)
         if guidance:
             introduction.explanation_title = 'Preparation recovery guidance'
-            introduction.set_content(guidance['summary'] + '\n' + guidance['next_step'],
+            next_step = guidance['next_step']
+            if guidance.get('method_candidates') and not self._suggested_backend:
+                next_step = 'No untried alternative method is available on this host. Use the guided review or corrected-input actions below.'
+            introduction.set_content(guidance['summary'] + '\n' + next_step,
                 guidance['details'] + '\n\n' + introduction.details_text)
         self.recovery_guidance = introduction
         layout.addWidget(introduction)
+        self.recovery_actions = QtWidgets.QComboBox()
+        self.recovery_actions.setObjectName('preparation_recovery_actions')
+        for action in guidance.get('actions', []):
+            if action['target'] == 'method' and not self._suggested_backend:
+                continue
+            self.recovery_actions.addItem(action['label'], action)
+        self.recovery_action_note = ExplanationLabel('', 'Recovery steps', '')
+        self.recovery_action_note.setWordWrap(True)
+        self.recovery_action_button = QtWidgets.QPushButton()
+        self.recovery_action_button.setObjectName('open_preparation_recovery_action')
+        self.recovery_action_button.clicked.connect(self.open_recovery_action)
+        self.recovery_actions.currentIndexChanged.connect(self.update_recovery_action)
+        if self.recovery_actions.count():
+            layout.addWidget(self.recovery_actions)
+            layout.addWidget(self.recovery_action_note)
+            layout.addWidget(self.recovery_action_button)
         self.box_review_notice = QtWidgets.QLabel(
             'Docking box not available yet; exclusions will be flagged when the box is generated.')
         self.box_review_notice.setWordWrap(True)
@@ -48,7 +74,11 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
         layout.addWidget(self.box_review_notice)
         method_row = QtWidgets.QHBoxLayout()
         self.method_summary = QtWidgets.QLabel()
+        self.method_summary.setWordWrap(True)
         self.method_summary.setObjectName('reviewed_preparation_method_summary')
+        self.method_summary.setToolTip('\n'.join(
+            self._method_labels.get(row['backend'], row['backend']) + ': ' + row['basis']
+            for row in guidance.get('method_candidates', [])))
         method_row.addWidget(self.method_summary, 1)
         self.advanced_backend_toggle = QtWidgets.QToolButton()
         self.advanced_backend_toggle.setText('Advanced…')
@@ -78,6 +108,15 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
         self.preparation_backend.currentIndexChanged.connect(self.update_method_summary)
         backend_row.addWidget(self.preparation_backend)
         layout.addWidget(self.backend_controls)
+        roles = guidance.get('tool_roles') or {}
+        if roles:
+            self.tool_guide = ExplanationLabel('What each preparation tool does',
+                'Preparation tools and recorded attempts',
+                '\n\n'.join(roles.values()) + '\n\n' +
+                '\n'.join(name + ': ' + str(status).replace('_', ' ')
+                          for name, status in guidance.get('stage_statuses', {}).items()))
+            self.tool_guide.setWordWrap(True)
+            backend_row.addWidget(self.tool_guide, 1)
         self.backend_controls.hide()
         self.advanced_backend_toggle.toggled.connect(self.backend_controls.setVisible)
         self.update_method_summary()
@@ -185,6 +224,52 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
         buttons.rejected.connect(self.reject)
         self.prepare_button.clicked.connect(self.accept)
         outer.addWidget(buttons)
+        self.update_recovery_action()
+
+    def update_recovery_action(self, *_):
+        action = self.recovery_actions.currentData()
+        if not action:
+            return
+        target = action['target']
+        buttons = {'method': 'Review alternative method', 'alternates': 'Choose conformation below',
+                   'candidate': 'Select candidate receipt', 'new_study': 'Open new-study window',
+                   'exclusions': 'Review exact omissions below',
+                   'diagnostics': 'Show complete logs and study files', 'explanation': 'Read recovery steps…'}
+        summary = action['instructions'].split('. ', 1)[0] + '.'
+        if target == 'method':
+            summary = ('Review an available method not yet tried. Its compatibility must be checked.'
+                       if self._suggested_backend else 'No untried alternative method is available on this host.')
+        if target == 'alternates' and not self._alternatives:
+            summary = 'No selectable deposited alternatives were found. Use the corrected-structure action instead.'
+        self.recovery_action_note.set_content(summary,
+            action['instructions'] + '\n\n' + self._guidance.get('details', ''))
+        self.recovery_action_button.setText(buttons[target])
+        self.recovery_action_button.setEnabled(not (target == 'alternates' and not self._alternatives))
+
+    def open_recovery_action(self):
+        action = self.recovery_actions.currentData()
+        if not action:
+            return
+        target = action['target']
+        if target in {'diagnostics', 'new_study'}:
+            self.navigation_request = target
+            self.reject()
+        elif target == 'method':
+            self.advanced_backend_toggle.setChecked(True)
+            self._scroll_area.ensureWidgetVisible(self.backend_controls)
+            self.preparation_backend.setFocus()
+        elif target == 'alternates' and self._alternatives:
+            self._scroll_area.ensureWidgetVisible(self.alternates)
+            self._alternatives[0][1].setFocus()
+        elif target == 'exclusions':
+            self._scroll_area.ensureWidgetVisible(self.exclusions)
+            self.exclusions.setFocus()
+        elif target == 'candidate':
+            self.candidate_toggle.setChecked(True)
+            self._scroll_area.ensureWidgetVisible(self.sidechain_candidate)
+            self.browse_candidate()
+        else:
+            self.recovery_action_note.show_explanation()
 
     def update_method_summary(self, *_):
         backend = self.preparation_backend.currentData()

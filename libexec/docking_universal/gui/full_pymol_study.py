@@ -127,6 +127,8 @@ class FullPyMOLStudyPanel(QtWidgets.QWidget):
             candidates = owner.state.workflow_data.get("pocket_candidates", [])
             rows = owner.candidates.selectionModel().selectedRows()
             candidate = candidates[rows[0].row()] if rows and rows[0].row() < len(candidates) else None
+            from ..services.preparation_site_issues import candidate_with_model_change_review
+            candidate = candidate_with_model_change_review(owner.state, candidate)
             regions = []
             for item in candidates:
                 score = item.get("evidence", {}).get("score")
@@ -136,9 +138,6 @@ class FullPyMOLStudyPanel(QtWidgets.QWidget):
                 regions.append((label, str(item["id"])))
             self._copy_choice(self.regions, regions, str(candidate["id"]) if candidate else None)
             self.evidence.set_candidate(candidate)
-            experimental = (candidate or {}).get("evidence", {}).get("experimental_ligand_evidence") or {}
-            observations = experimental.get("observations") or []
-            self.evidence.heading.setText(f"{candidate['id'] if candidate else 'No region'} · {len(observations)} experimental ligand observations")
             conformation = (candidate or {}).get("evidence", {}).get("conformational_site_evidence") or {}
             self.evidence.warning.set_conformation_text(conformation, compact=True)
             self.evidence.sync_residue_highlight(getattr(owner.viewer_coordinator, "adapter", None))

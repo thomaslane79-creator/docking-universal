@@ -1,5 +1,15 @@
 # Complete interactive GUI workflow plan
 
+Latest user order, 2026-11-07: correct the missing local-ligand green circles,
+then complete the generalized preparation-recovery guidance and GUI acceptance,
+before duplicate-site consolidation, template guidance or charge surfaces.
+
+The local-ligand circles and generalized recovery guidance are now implemented
+and installed, including native saved-failure help/diagnostics/new-study actions
+with unchanged scientific state. See [the bounded acceptance record](gui-evidence-and-recovery-2026-11-07.md).
+Native selected-pocket-table stability and the full remaining workflow walkthrough
+are still open; the guidance correction does not imply whole-GUI completion.
+
 2026-11-07 user priority update: after the preparation/recovery issues are
 resolved, correct input-ligand evidence indicators and consolidate near-identical
 box suggestions into one site option with retained provenance. Then implement

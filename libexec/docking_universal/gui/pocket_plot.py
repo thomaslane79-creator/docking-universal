@@ -24,6 +24,7 @@ class PocketScorePlot(QtWidgets.QWidget):
         self.selected = None
         self.detector = "Pocket"
         self.evidence_counts = {}
+        self.evidence_sources = {}
         self.conflicts = set()
         self.conformations = {}
 
@@ -56,9 +57,12 @@ class PocketScorePlot(QtWidgets.QWidget):
                 pass
         self.points = []
         self.evidence_counts = {}
+        self.evidence_sources = {}
         self.conflicts = set()
         self.conformations = {}
         for index, candidate in enumerate(state.workflow_data.get("pocket_candidates", [])):
+            from ..services.pocket_review import candidate_with_input_ligand_evidence
+            candidate = candidate_with_input_ligand_evidence(state, candidate)
             identity = str(candidate["id"])
             evidence = candidate.get("evidence", {})
             value = scores.get(identity, evidence.get("score"))
@@ -71,7 +75,12 @@ class PocketScorePlot(QtWidgets.QWidget):
             if evidence.get("detector"):
                 self.detector = {"p2rank": "P2Rank", "fpocket": "fpocket"}.get(evidence.get("detector"), "Pocket")
             experimental = evidence.get("experimental_ligand_evidence") or {}
-            self.evidence_counts[identity] = int(experimental.get("observation_count") or 0)
+            local = evidence.get('input_ligand_evidence') or {}
+            local_count = int(local.get('observation_count') or 0)
+            related_count = int(experimental.get('observation_count') or 0)
+            self.evidence_counts[identity] = local_count + related_count
+            self.evidence_sources[identity] = (f'{local_count} input-structure ligand · '
+                f'{related_count} related-PDB observations')
             self.conformations[identity] = evidence.get("conformational_site_evidence") or {}
             if has_obstruction_warning(self.conformations[identity]):
                 self.conflicts.add(identity)
@@ -193,7 +202,7 @@ class PocketScorePlot(QtWidgets.QWidget):
             score = f"{self.detector} score {point[1]:.4g}" if point[1] is not None else "No independent detector score"
             summary, explanation = conformation_summary(self.conformations.get(point[0], {}))
             self.setToolTip(f"{point[0]} · {score}\n"
-                            f"{self.evidence_counts.get(point[0], 0)} deposited-ligand observations\n"
+                            f"{self.evidence_sources.get(point[0], '')}\n"
                             f"{summary}. {explanation}\n"
                             "Click to inspect in 3D. Evidence is not approval.")
         else:

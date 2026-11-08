@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import csv
+import copy
 import hashlib
 import json
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,6 +51,63 @@ def ordered_pocket_boxes(cavity: Path | str) -> list[Path]:
 
 def _safe_label(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._-") or "site"
+
+
+def candidate_with_input_ligand_evidence(state, candidate):
+    """Project retained local ligand evidence without rewriting saved science.
+
+    Also works for older studies. Verify both retained assets and require the
+    entire selected ligand to fit (0.25 Å boundary tolerance). Local observations
+    remain separate from related-PDB evidence and never grant control authority.
+    """
+    if candidate is None:
+        return None
+    artifacts = getattr(state, 'artifacts', ())
+    ligand = next((a for a in artifacts if a.kind == 'bound_ligand'), None)
+    if ligand is None:
+        return candidate
+    result = copy.deepcopy(candidate)
+    evidence = result.setdefault('evidence', {})
+    local = {'observation_count': 0, 'observations': [], 'source': 'input_structure',
+             'decision_role': 'site evidence only; not independent control validation'}
+    evidence['input_ligand_evidence'] = local
+    try:
+        box = next(a for a in artifacts if a.id == candidate.get('box_artifact_id'))
+        for asset in (ligand, box):
+            if not asset.sha256 or _sha256(Path(asset.path)) != asset.sha256:
+                raise ValueError('Retained input ligand or docking box changed')
+        geometry = config_geometry(Path(box.path))
+        if any(not math.isfinite(value) for value in geometry.values()) or any(
+                geometry['size_' + axis] <= 0 for axis in 'xyz'):
+            raise ValueError('Invalid retained box geometry')
+        atoms, identities = [], set()
+        for line in Path(ligand.path).read_text().splitlines():
+            if not line.startswith(('ATOM  ', 'HETATM')) or line[76:78].strip().upper() in {'H', 'D'}:
+                continue
+            identities.add((line[17:20].strip(), line[21:22].strip() or '_',
+                            line[22:26].strip(), line[26:27].strip()))
+            xyz = tuple(float(line[start:start + 8]) for start in (30, 38, 46))
+            if not all(math.isfinite(value) for value in xyz):
+                raise ValueError('Nonfinite retained ligand coordinates')
+            atoms.append(xyz)
+        if not atoms or len(identities) != 1:
+            raise ValueError('Retained input ligand lacks one exact heavy-atom identity')
+        identity = next(iter(identities))
+        inside = sum(all(abs(value - geometry['center_' + axis]) <= geometry['size_' + axis] / 2 + .25
+                         for axis, value in zip('xyz', xyz)) for xyz in atoms)
+        local.update(status='verified', heavy_atom_count=len(atoms), heavy_atoms_inside=inside,
+                     all_heavy_atoms_inside=inside == len(atoms), boundary_tolerance_angstrom=.25,
+                     ligand_sha256=ligand.sha256, box_sha256=box.sha256)
+        if inside == len(atoms):
+            local['observations'] = [{'evidence_class': 'input_structure', 'entry': 'Input',
+                'ligand': f'{identity[0]} {identity[1]}:{identity[2]}{identity[3]}',
+                'aligned_ligand_pdb': str(Path(ligand.path).resolve()),
+                'source_ligand_id': 'input/' + '/'.join((identity[0], identity[1], identity[2] + identity[3])),
+                'source': 'input_structure', 'ligand_sha256': ligand.sha256}]
+            local['observation_count'] = 1
+    except (OSError, ValueError, KeyError, StopIteration) as exc:
+        local.update(status='unverified', detail=str(exc))
+    return result
 
 
 def input_ligand_candidate(target: str, cavity: Path, setup: dict[str, Any]) -> dict[str, Any]:

@@ -44,6 +44,10 @@ RECOVERY_DESCRIPTIONS = {
         'Review the reported components or provide corrected parameter definitions. No component is selected for removal.'),
     'missing_component_definitions': ('Hydrogen preparation needs definitions for some components.',
         'Provide the missing component definitions or review the affected components before choosing exact changes.'),
+    'hydrogen_preparation': ('The required hydrogen-placement stage did not produce an accepted model.',
+        'Open its audit to distinguish missing definitions, a startup failure and a rejected coordinate change before retrying.'),
+    'protonation_review': ('The requested protonation assessment was not accepted.',
+        'Review its reported unsupported components, atom changes or runtime error before supplying a corrected protonated structure.'),
     'runtime_unavailable': ('Alternative preparation did not start during the recorded attempt.',
         'Resolve the unavailable alternative method before changing components.'),
     'alternative_failed': ('Alternative preparation did not produce an accepted receptor.',
@@ -51,7 +55,7 @@ RECOVERY_DESCRIPTIONS = {
     'histidine_state': ('Histidine proton placement needs review.',
         'Review the histidine-state decision and its local interactions before assigning a state.'),
     'unsupported_element': ('Preparation lacks support for an element in this structure.',
-        'Review compatible element parameters; no verified alternative is known for this element yet.'),
+        'Review element and component parameters. A tool being available does not establish support for this structure.'),
     'output_validation': ('Alternative preparation output did not pass validation.',
         'Review the retained atom, coordinate, type and charge checks before another attempt.'),
     'coordinate_format': ('The preparation method could not handle the coordinate format.',
@@ -82,6 +86,96 @@ RECOVERY_DESCRIPTIONS = {
         'Review the reported residue for missing atoms, alternate conformations or a mismatched definition.'),
     'unclassified': ('Preparation failed for an unrecognized reason.',
         'Open the retained diagnostic details. No verified workaround can be recommended automatically.'),
+}
+
+
+# These are routes through existing review controls, not recipes that guess
+# chemistry. Every recognized diagnosis must have a concrete destination.
+RECOVERY_ACTIONS = {
+    'conformation': ('Choose a deposited conformation', 'alternates',
+        'Choose one of the deposited alternatives below, then preview its exact retained atoms. '
+        'Occupancy is a deposited fraction, not a quality ranking. No alternative is chosen for you.'),
+    'sidechain': ('Review a local side-chain candidate', 'candidate',
+        'Open Local side-chain candidate and select its JSON receipt with the accompanying PDB. '
+        'The receipt must match this exact input and name every added standard side-chain atom. '
+        'The app checks unchanged observed coordinates and rejects gross overlaps. '
+        'This imports a separately reviewed candidate; it does not generate a model or rebuild backbone/loops.'),
+    'corrected_structure': ('Use a corrected structure in a new study', 'new_study',
+        'Create a new study, load a corrected local PDB/mmCIF or another deposited structure, '
+        'then reselect the exact reference and study options. Inspect the source/model/chain inventory '
+        'before starting preparation. The current failed study and original coordinates remain retained.'),
+    'definitions': ('See which component definitions are needed', 'explanation',
+        'Open the retained diagnostics and identify the exact component, linkage and atom names below. '
+        'Obtain matching definitions from the structure/component source or a qualified structural modeller. '
+        'Hydrogen geometry definitions, preparation templates and charge parameters are different inputs; '
+        'one cannot replace another. Use a corrected supported structure in a new study when ready. '
+        'This recovery window cannot author or validate new parameter sets.'),
+    'omissions': ('Review optional component omissions', 'exclusions',
+        'Only consider an omission after reviewing the component\'s structural/biological role. '
+        'Leave the field blank to keep everything. To propose an omission, enter its exact residue name, '
+        'chain and number (and insertion code when present), then preview the exact atoms and box impact. '
+        'Enter a rationale and acknowledge the retained warnings before approving. This changes the '
+        'scored receptor and may still fail preparation; a successful retry does not validate the model. '
+        'Warnings persist even when the omitted component lies outside the chosen pocket.'),
+    'bonding': ('Review the reported bonds and repair', 'explanation',
+        'Open the diagnostic details and inspect the named residue/linkage in the original structure. '
+        'Compare any rejected repaired model with its original. A valence/connectivity failure can come '
+        'from the input or inferred bonds; switching tools does not establish which model is correct. '
+        'Use a corrected structure in a new study, or import an eligible reviewed side-chain candidate.'),
+    'histidine': ('Review histidine proton placement', 'explanation',
+        'Use the Scientific decision window when a histidine-state decision is pending; review its '
+        'local interactions and choose the state/scope there. If this failure has no resumable decision, '
+        'use a corrected, explicitly protonated structure in a new study. This model-review dialog '
+        'does not create a histidine assignment by changing the preparation tool.'),
+    'protonation': ('Review the protonation assessment', 'diagnostics',
+        'Open the retained protonation audit and log. Check its requested pH, unsupported residues/metals, '
+        'warnings and missing/added heavy atoms. PDB2PQR/PROPKA assesses protonation; switching the docking '
+        'typing backend does not satisfy a required protonation assessment. Use a supported, explicitly '
+        'reviewed protonated input in a new study. Do not bypass a required stage merely to obtain a pass.'),
+    'runtime': ('Check installation and runtime details', 'diagnostics',
+        'Show the complete logs for the named program and its startup error. Resolve the missing executable, '
+        'Java/runtime, architecture or installation problem before retrying through the normal workflow. '
+        'For an immutable failed setup, start a new study after repairing the installation. '
+        'A molecular omission does not repair a program that cannot start.'),
+    'diagnostics': ('Show the retained failure details', 'diagnostics',
+        'Open the complete logs and study files for this attempt. Keep the original structure and '
+        'the diagnostic directory together when requesting technical or structural help. '
+        'For an unrecognized failure, no automatic workaround is known; do not treat a guessed tool '
+        'or an unreviewed deletion as a solution.'),
+}
+
+RECOVERY_ACTION_CODES = {
+    'pocket_runtime': ('runtime',), 'runtime_unavailable': ('runtime',),
+    'hydrogen_preparation': ('runtime', 'definitions', 'corrected_structure'),
+    'protonation_review': ('protonation', 'corrected_structure'),
+    'histidine_state': ('histidine', 'corrected_structure'),
+    'alternate_conformation': ('conformation', 'corrected_structure'),
+    'incomplete_backbone': ('corrected_structure',),
+    'repair_geometry': ('bonding', 'sidechain', 'corrected_structure'),
+    'coordinate_format': ('corrected_structure', 'diagnostics'),
+    'mmcif_parsing': ('corrected_structure', 'diagnostics'),
+    'connectivity_construction': ('bonding', 'corrected_structure'),
+    'valence_validation': ('bonding', 'corrected_structure'),
+    'residue_template': ('definitions', 'sidechain', 'corrected_structure'),
+    'unsupported_element': ('definitions', 'corrected_structure', 'omissions'),
+    'unsupported_charge_assignment': ('definitions', 'corrected_structure', 'omissions'),
+    'missing_component_definitions': ('definitions', 'corrected_structure'),
+    'linked_components': ('definitions', 'corrected_structure', 'omissions'),
+    'cofactor_template': ('definitions', 'corrected_structure', 'omissions'),
+    'nucleic_acid_template': ('definitions', 'corrected_structure', 'omissions'),
+    'modified_residue': ('definitions', 'corrected_structure', 'omissions'),
+    'component_template': ('definitions', 'corrected_structure', 'omissions'),
+    'output_validation': ('diagnostics', 'corrected_structure'),
+    'alternative_failed': ('diagnostics', 'corrected_structure'),
+    'unclassified': ('diagnostics', 'corrected_structure'),
+}
+
+PREPARATION_TOOL_ROLES = {
+    'meeko': 'Meeko assigns receptor templates, docking atom types and charges. It needs supported residue/component chemistry.',
+    'adfr': 'ADFRsuite is an independent atom-typing/charge backend. A successful exit is insufficient: retained atoms, coordinates, types, charges and missing-parameter messages are checked.',
+    'reduce2': 'Reduce2 places/optimizes hydrogens using component geometry definitions. It does not supply missing docking charges or rebuild missing protein backbone.',
+    'pdbfixer': 'PDBFixer can repair eligible missing standard side-chain atoms and handle alternate conformations. This pipeline does not build missing backbone/loops; generated geometry is audited.',
+    'pdb2pqr': 'PDB2PQR/PROPKA assesses protonation at the requested pH. Its output must retain the supported heavy-atom model; it is not a general replacement for docking atom typing.',
 }
 
 
