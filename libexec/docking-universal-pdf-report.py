@@ -855,6 +855,19 @@ def receptor_preparation_record(study, control=None, protocol=None):
     recorded_preparation = normalize_preparation(
         (protocol or {}).get('receptor_preparation') or summary_preparation,
         ((protocol or {}).get('locked_inputs') or {}).get('receptor_sha256'))
+    if not recorded_preparation.get('backend_identity'):
+        identity_path = retained(['**/receptor/receptor_backend_identity.json'])
+        if identity_path:
+            from docking_universal.services.backend_provenance import validate_identity, digest
+            identity = json.loads(identity_path.read_text())
+            expected = ((protocol or {}).get('locked_inputs') or {}).get('receptor_sha256')
+            if not expected:
+                expected = (read_json(Path(study) / 'report/study_summary.json').get('configured_locked_inputs') or {}).get('receptor_sha256')
+            outputs = [p for p in identity_path.parent.glob('*.pdbqt')
+                       if digest(p) == identity.get('prepared_receptor_sha256')]
+            if not outputs:
+                raise ValueError('Retained backend identity has no matching prepared receptor')
+            recorded_preparation['backend_identity'] = validate_identity(identity, expected or digest(outputs[0]))
     recorded_removal = bool(recorded_preparation.get("user_approved_component_removal"))
     recorded_rows = recorded_preparation.get("user_approved_removed_components") or []
     backend_audit_path = ccd_audit_path or (receptor_dir / "ccd_modification_audit.json" if receptor_dir else None)
@@ -895,7 +908,8 @@ def receptor_preparation_record(study, control=None, protocol=None):
     )
     return {
         "path": path,
-        "preparation_route": ccd_audit.get("preparation_route"),
+        "preparation_route": ccd_audit.get("preparation_route") or (recorded_preparation.get("backend_identity") or {}).get("preparation_route"),
+        "backend_identity": recorded_preparation.get("backend_identity"),
         "pdbfixer_used": used,
         "pdbfixer_audit": str(audit_path) if audit_path else None,
         "user_approved_component_removal_log": str(removal_log) if removal_log else None,
@@ -1106,15 +1120,14 @@ def fpocket_version():
     return "detected; version not recorded" if (prefix / "bin" / "fpocket").is_file() else "not detected"
 
 def adfrsuite_version(summary, preparation):
-    """Recover the suite version used by the retained ADFRsuite fallback."""
-    recorded = str((summary.get("scientific_software") or {}).get("adfrsuite") or "").strip()
-    if recorded:
-        return recorded
-    if preparation.get("adfr_fallback_log"):
-        conventional = Path.home() / "ADFRsuite-1.0" / "bin" / "prepare_receptor"
-        if conventional.is_file():
-            return "1.0"
-    return "not recorded"
+    """Use only preparation-time evidence, never the report machine's install."""
+    identity = preparation.get('backend_identity')
+    if identity:
+        from docking_universal.services.backend_provenance import validate_identity
+        validate_identity(identity)
+        return str(identity.get('version') or 'not recorded')
+    recorded = str((summary.get('scientific_software') or {}).get('adfrsuite') or '').strip()
+    return recorded or 'not recorded'
 
 def compare_scientific_versions(recorded, current, engine_name="AutoDock Vina"):
     """Compare the software that can change preparation, docking, or analysis."""

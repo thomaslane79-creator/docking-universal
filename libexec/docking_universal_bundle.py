@@ -237,6 +237,7 @@ def create_bundle(
                 ccd_audit_copy = _copy(ccd_audit_source, assets / "ccd_modification_audit.json")
                 protocol["receptor_preparation"]["ccd_modification_audit"] = f"assets/{ccd_audit_copy.name}"
         for key, filename in (
+            ("backend_identity_audit", "receptor_backend_identity.json"),
             ("meeko_additional_templates", "meeko_additional_templates.json"),
             ("meeko_ptm_template_audit", "meeko_ptm_template_audit.json"),
             ("meeko_ptm_template_approval", "meeko_ptm_template_approval.json"),
@@ -245,6 +246,10 @@ def create_bundle(
             if value:
                 source = Path(value).expanduser().resolve()
                 if source.is_file():
+                    if key == 'backend_identity_audit':
+                        preparation = protocol['receptor_preparation']
+                        if sha256(source) != preparation.get('backend_identity_audit_sha256') or json.loads(source.read_text()) != preparation.get('backend_identity'):
+                            raise ValueError('Retained receptor backend identity audit changed before export')
                     copied = _copy(source, assets / filename)
                     protocol["receptor_preparation"][key] = f"assets/{copied.name}"
         adfr_log_value = protocol.get("receptor_preparation", {}).get("adfr_fallback_log")

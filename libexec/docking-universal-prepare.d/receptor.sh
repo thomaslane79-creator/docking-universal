@@ -606,6 +606,17 @@ finalize_receptor_preparation_audit() {
   fi
   [ -s "$RECEPTOR_PDBQT" ] || { echo "ERROR: receptor backend did not create PDBQT: $RECEPTOR_PDBQT"; return 1; }
   log "Prepared receptor PDBQT written to $RECEPTOR_PDBQT"
+  case "$PREP_ROUTE" in
+    adfr_primary|adfr_legacy_linked_component_fallback)
+      "$PYTHON_COMMAND" - "$LIBEXEC_DIR" "$RECEPTOR_DIR/adfr_startup_audit.json" "$RECEPTOR_PDBQT" "$PREP_ROUTE" "$RECEPTOR_DIR/receptor_backend_identity.json" <<'PY_BACKEND'
+import sys
+sys.path.insert(0, sys.argv[1])
+from docking_universal.services.backend_provenance import bind_output
+bind_output(*sys.argv[2:])
+PY_BACKEND
+      [ $? -eq 0 ] || return 1
+      ;;
+  esac
 
   RETAINED_MEEKO_TEMPLATE=""
   if [ -n "${MEEKO_ADD_TEMPLATES:-}" ] && [ -f "$MEEKO_ADD_TEMPLATES" ]; then
@@ -739,6 +750,12 @@ run_safe_receptor_preparation_attempts() {
   log "Preparing the selected audited receptor with $PREP_BACKEND (Reduce2 used: $REDUCE2_USED; PDB2PQR used: $PROTONATION_USED); detailed output -> $RECEPTOR_BACKEND_LOG"
   PREP_SUCCESS=0
   PREP_ROUTE=not_completed
+  if [ "$PREP_BACKEND" = adfr ]; then
+    if ! "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-backend-startup.py" "$PREP_RECEPTOR_BIN" \
+        "$RECEPTOR_DIR/adfr_startup_audit.json" --input "$RECEPTOR_PDB" > "$RECEPTOR_DIR/adfr_startup.log" 2>&1; then
+      log "The ADFRsuite startup probe did not complete; retaining its diagnostics and the actual primary preparation outcome. A PDF still requires recorded software identity."
+    fi
+  fi
   if run_logged_preparation_command "$RECEPTOR_BACKEND_LOG" "${PREP_COMMAND[@]}"; then
     if [ "$PREP_BACKEND" = adfr ] && ! validate_adfr_preparation_output "$RECEPTOR_PDB" "$RECEPTOR_BACKEND_LOG"; then
       record_adfr_fallback_status validation_failed "The primary ADFRsuite output failed validation: $ADFR_VALIDATION_DETAIL Inspect $ADFR_OUTPUT_AUDIT and $ADFR_VALIDATION_LOG."
@@ -880,7 +897,7 @@ EOF
       # wrapper can start. Probe help without passing coordinates or changing
       # preparation models. Failure must not replace the original diagnosis.
       if "$PYTHON_COMMAND" "$LIBEXEC_DIR/docking-universal-backend-startup.py" "$ADFR_FALLBACK_BIN" \
-          "$RECEPTOR_DIR/adfr_startup_audit.json" > "$ADFR_FALLBACK_LOG" 2>&1; then
+          "$RECEPTOR_DIR/adfr_startup_audit.json" --input "$RECEPTOR_FILTERED_PDB" > "$ADFR_FALLBACK_LOG" 2>&1; then
       log "Meeko rejected linked deposited chemistry; trying the legacy ADFRsuite receptor-preparation fallback; detailed output -> $ADFR_FALLBACK_LOG"
       build_adfr_linked_fallback_command "$ADFR_FALLBACK_BIN" "$RECEPTOR_FILTERED_PDB" "$RECEPTOR_PDBQT"
       ADFR_FALLBACK_COMMAND=("${PREPARATION_COMMAND[@]}")

@@ -88,6 +88,10 @@ def _read_removal_manifest(path: Path | None) -> list[dict[str, str]]:
 
 
 def _preparation_summary(root: Path) -> str:
+    from .receptor_model_history import recorded_backend_summary
+    recorded = recorded_backend_summary(root / "receptor/ccd_modification_audit.json")
+    if recorded:
+        return recorded
     log = root / "run.log"
     text = log.read_text(errors="replace") if log.is_file() else ""
     if next(iter(sorted(root.glob("receptor/user_approved_component_removal.txt"))), None):
@@ -210,6 +214,8 @@ def build_site_guided_protocol(
         "plip": _version("plip"),
         "engine_version": "recorded when screening runs",
     }
+    if receptor_preparation.get('backend_identity'):
+        software['adfrsuite'] = receptor_preparation['backend_identity']['version']
     scene = next((item.path for item in state.artifacts if item.kind == "pymol_scene"), None)
     if reference_only:
         scene = None

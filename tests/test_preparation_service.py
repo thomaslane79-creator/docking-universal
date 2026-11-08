@@ -133,6 +133,27 @@ class PreparationServiceTests(unittest.TestCase):
         self.assertEqual(Path(plan.request.command[1]).suffix, ".pdb")
         self.assertTrue(Path(plan.request.command[1]).is_file())
 
+    def test_completed_preparation_registers_backend_identity_as_a_hashed_artifact(self):
+        import hashlib
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from docking_universal.application import StudyController
+        from docking_universal.state import JsonStudyStore
+        from docking_universal.services.preparation import ReceptorPreparationService
+        controller = StudyController(JsonStudyStore(self.root/'state'))
+        controller.create_study('prep', 'Backend provenance registration')
+        plan = build_receptor_preparation_plan(self.executable,
+            ReceptorPreparationOptions(self.input, self.root/'prepared', 'pockets'))
+        for path in (plan.receptor_pdb, plan.receptor_pdbqt, plan.run_log):
+            path.parent.mkdir(parents=True, exist_ok=True); path.write_text('retained fixture output')
+        receipt = plan.receptor_pdb.parent/'receptor_backend_identity.json'
+        receipt.write_text('{"software":"ADFRsuite","version":"fixture"}')
+        jobs = Mock(); jobs.run.return_value = SimpleNamespace(status=SimpleNamespace(value='completed'))
+        ReceptorPreparationService(controller, jobs).run('prep', plan)
+        artifact = next(a for a in controller.store.load('prep').artifacts if a.kind=='receptor_backend_identity')
+        self.assertEqual(artifact.path, str(receipt.resolve()))
+        self.assertEqual(artifact.sha256, hashlib.sha256(receipt.read_bytes()).hexdigest())
+
 
 if __name__ == "__main__":
     unittest.main()

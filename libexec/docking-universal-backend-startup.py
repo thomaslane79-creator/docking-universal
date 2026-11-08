@@ -21,8 +21,13 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('executable', type=Path)
     p.add_argument('audit', type=Path)
+    p.add_argument("--input", type=Path)
     args = p.parse_args()
     record = probe(args.executable)
+    from docking_universal.services.backend_provenance import capture_adfr_identity, pinned_file
+    record['backend_identity'] = capture_adfr_identity(args.executable)
+    if args.input:
+        record['input'] = pinned_file(args.input)
     args.audit.write_text(json.dumps(record, indent=2) + '\n')
     print(record['detail'])
     return 0 if record['available'] else 1

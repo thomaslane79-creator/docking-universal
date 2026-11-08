@@ -264,7 +264,9 @@ class ReceptorPreparationService:
                 ("receptor-preparation-run-log", "preparation_log", plan.run_log),
             ]
             receptor_dir = plan.output_root / "receptor"
-            for name, kind in (("pdb2pqr_audit.json", "protonation_audit"),
+            for name, kind in (("receptor_backend_identity.json", "receptor_backend_identity"),
+                               ("adfr_startup_audit.json", "backend_startup_audit"),
+                               ("pdb2pqr_audit.json", "protonation_audit"),
                                ("bound_reference_separation.json", "reference_separation_audit"),
                                ("pdb2pqr.log", "protonation_log"),
                                ("reduce2_audit.json", "reduce2_audit"),

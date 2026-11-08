@@ -8,8 +8,10 @@ and preserved original geometries/provenance. See
 [site grouping and bounded acceptance](site-grouping-and-expansion-2026-11-08.md).
 The current-renderer dependency and native residue/ligand-centering checks now
 pass; see [the current diagram acceptance](current-2d-renderer-2026-11-08.md).
-The screening PDF's missing ADFR version remains open; this does not close
-whole-GUI acceptance.
+The screening PDF's missing ADFR version is repaired for fresh preparations,
+including primary/fallback capture and portable reuse; see
+[the provenance repair](adfr-preparation-provenance-2026-11-08.md). Whole-GUI
+acceptance remains separate.
 
 2026-11-08: the installed, version-bound Qt Cocoa backport passes repeated
 native selected-table, evidence-table, multi-selection and reopen checks.

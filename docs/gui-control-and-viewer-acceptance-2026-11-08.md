@@ -1,5 +1,9 @@
 # Control and interaction-viewer acceptance, November 8
 
+Later continuation: the missing ADFRsuite version blocker described below is
+[repaired and tested on fresh preparation/report runs](adfr-preparation-provenance-2026-11-08.md).
+The older failed screening report remains historical evidence.
+
 The installed native Mac GUI completed a bounded public-1N6O walkthrough using
 an isolated copy of the retained prepared study. The original Cox-2 study and
 5IKR input were unchanged. This is not a claim that every raw-input preparation

@@ -364,6 +364,10 @@ def run_tier(args, tier_name, cli, libexec, tier_root):
         ),
         "policy": "strict Meeko, then conservative PDBFixer plus strict Meeko, documented Meeko retries, and a narrow ADFRsuite fallback only for Meeko-diagnosed linked deposited components; unmatched components are removed only after an explicit final user approval",
     }
+    from docking_universal.services.backend_provenance import attach_retained_backend
+    result['receptor_preparation'] = attach_retained_backend(result['receptor_preparation'], receptor_dir.parent, args.receptor_pdbqt)
+    if result['receptor_preparation'].get('backend_identity'):
+        result['software']['adfrsuite'] = result['receptor_preparation']['backend_identity']['version']
     result["created_utc"] = datetime.now(timezone.utc).isoformat()
     protocol.write_text(json.dumps(result, indent=2) + "\n")
 

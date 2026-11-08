@@ -1,5 +1,13 @@
 # GUI implementation roadmap
 
+### ADFRsuite preparation-time provenance (2026-11-08)
+
+User prioritized the screening PDF blocker first. Fresh primary and fallback
+preparations now capture the actual suite identity, bind it to the receptor,
+and carry it through portable protocol reuse. A fresh public 1HVR screen
+produced the PDF with ADFRsuite 1.0 recorded. Historical versions are not inferred.
+See [acceptance and limits](adfr-preparation-provenance-2026-11-08.md).
+
 ### Native Windows QuickVina-W crash containment (2026-11-01)
 
 Reproduce the pinned engine's heap corruption locally before another full CI

@@ -93,6 +93,9 @@ def validate_history(history, expected_receptor_sha256=None):
 def normalize_preparation(preparation, expected_receptor_sha256=None):
     """Preserve old warnings and regenerate mandatory warnings from inline history."""
     result = copy.deepcopy(preparation or {})
+    if result.get('backend_identity') is not None:
+        from .backend_provenance import validate_identity
+        validate_identity(result['backend_identity'], expected_receptor_sha256)
     if result.get('site_reference_review') is not None:
         from .site_reference_review import normalize
         result['site_reference_review'] = normalize(result['site_reference_review'], expected_receptor_sha256)
@@ -134,5 +137,7 @@ def attach_retained_history(preparation, preparation_root, receptor_pdbqt):
     result = copy.deepcopy(preparation)
     if path.is_file():
         result['model_change_history'] = json.loads(path.read_text())
+    from .backend_provenance import attach_retained_backend
+    result = attach_retained_backend(result, preparation_root, receptor_pdbqt)
     digest = hashlib.sha256(Path(receptor_pdbqt).read_bytes()).hexdigest()
     return normalize_preparation(result, digest)
