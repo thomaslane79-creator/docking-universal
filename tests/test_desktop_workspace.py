@@ -1691,11 +1691,26 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.window.refresh()
         label = self.window.pocket_evidence_panel.lookup_status
         self.assertFalse(label.isHidden())
-        self.assertIn('PDB lookup unavailable', label.text())
+        self.assertIn('PDB search failed', label.text())
+        self.assertIn('does not mean none exists', label.text())
+        self.assertNotIn('no qualifying observations', label.text())
         self.assertIn('DNS lookup failed', label.toolTip())
         before = label.text()
         self.window.refresh()
         self.assertEqual(label.text(), before)
+        label.show_explanation()
+        self.assertIn('DNS lookup failed', label.explanation_window.content.toPlainText())
+        label.explanation_window.close()
+        # A successful empty search is a different visible result, with no stale failure.
+        state = self.store.load('desktop')
+        state.workflow_data['pdb_pocket_evidence'] = {
+            'mode': 'related-structures', 'status': 'completed', 'coverage': {'observation_count': 0}}
+        self.store.save(state)
+        self.window.refresh()
+        self.assertIn('PDB search completed', label.text())
+        self.assertIn('no qualifying observations', label.text())
+        self.assertNotIn('DNS lookup failed', label.toolTip())
+        self.assertNotIn('search failed', label.text())
 
     def test_older_completed_study_recovers_setup_from_retained_artifacts(self):
         receptor = self.root / "legacy-source.pdb"

@@ -19,7 +19,7 @@ def main():
     import gemmi, rdkit, PIL, reportlab  # Required fixture/rendering dependencies.
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     modules = (
-        'test_pocket_sites', 'test_active_study_session', 'test_desktop_workspace',
+        'test_pdb_lookup_status', 'test_pocket_sites', 'test_active_study_session', 'test_desktop_workspace',
         'test_pocket_plot', 'test_pocket_evidence', 'test_study_viewer',
         'test_linked_pose_review', 'test_cluster_contacts',
         'test_embedded_pymol_adapter', 'test_protocol_finalization',

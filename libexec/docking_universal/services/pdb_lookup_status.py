@@ -28,12 +28,16 @@ def lookup_notice(record):
         return ('Local-only evidence · PDB databank search is off. Local information and any retained '
                 'evidence remain usable; additional public evidence has not been sought.', False)
     if status in {'unavailable', 'failed'}:
-        return ('PDB lookup unavailable (internet required). Check connection/service. '
-                'Local work can continue; this does not mean no supporting evidence exists.', True)
+        return ('PDB search failed · Supporting evidence could not be checked. '
+                'This does not mean no supporting evidence exists. A connection problem or PDB service error '
+                'may have prevented the lookup. Local information and previously retained evidence remain usable.', True)
     if (record.get('coverage') or {}).get('failed_entry_count'):
         return ('PDB lookup incomplete · Some related structures could not be retrieved. '
                 'Retained evidence remains usable; missing results are not evidence of absence.', True)
     if status == 'completed' and (record.get('coverage') or {}).get('observation_count') == 0:
         return ('PDB search completed · No qualifying ligand observations were found in the structures '
                 'searched. This is not proof that supporting evidence does not exist.', False)
+    if status == 'completed' and 'observation_count' not in (record.get('coverage') or {}):
+        return ('PDB search completed · Result counts were not retained. Review the available evidence; '
+                'an unknown count does not mean no supporting evidence exists.', False)
     return '', False

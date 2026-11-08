@@ -65,3 +65,21 @@ shared-observation deduplication, obstruction-warning preservation from merged
 sources, read-only restoration for older grouped studies and same-protein
 summary counts. `make test-gui` requires Qt and runs these contracts. Native
 acceptance and a successful automatic search remain distinct checks.
+
+## Explicit lookup outcome wording
+
+The visible failure banner now states: "PDB search failed. Evidence could not be
+checked; this does not mean none exists." Its separate Explain window retains
+the connection or service error. It does not assume that an HTTP 500 means the
+user has no internet connection. A completed empty search explicitly says no
+qualifying observations were found in the structures searched. Unknown legacy
+result counts are displayed as unavailable, never inferred to be zero. Off and
+partial-download states remain distinct.
+
+Native installed acceptance used a separate copy of the seven-observation
+Rab5A fixture with an explicitly retained HTTP 500 failure status. The warning
+was visible alongside one input ligand and seven retained related observations.
+Keyboard activation opened the separate explanation showing HTTP 500 and the
+RCSB UNKNOWN backend response. Original study records were not rewritten.
+The GUI suite passes 225 tests, including failure-to-success status transitions,
+expanded error details, incomplete coverage and unknown result counts.

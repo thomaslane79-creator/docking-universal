@@ -346,12 +346,13 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
         text, warning = lookup_notice(record)
         summary = (
             'Local-only evidence: public PDB search is off.' if record.get('mode') == 'off' else
-            'PDB lookup unavailable. Local work can continue; supporting evidence may be missing.'
+            'PDB search failed. Evidence could not be checked; this does not mean none exists.'
             if record.get('status') in {'unavailable', 'failed'} else
             'PDB lookup incomplete: some structures could not be retrieved; evidence may be missing.'
             if (record.get('coverage') or {}).get('failed_entry_count') else
-            'PDB search completed: no qualifying observations found; this is not proof of absence.'
-            if text else '')
+            'PDB search completed: no qualifying observations found in the structures searched.'
+            if record.get('status') == 'completed' and (record.get('coverage') or {}).get('observation_count') == 0 else
+            'PDB search completed; result counts are unavailable.' if text else '')
         detail = record.get('detail') or record.get('error') or ''
         self.lookup_status.set_content(summary, text + ('\n\nDetails: ' + str(detail) if detail else ''))
         self.lookup_status.setVisible(bool(text))

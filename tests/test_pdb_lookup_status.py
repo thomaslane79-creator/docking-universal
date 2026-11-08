@@ -18,7 +18,8 @@ class PdbLookupStatusTests(unittest.TestCase):
         self.assertFalse(warning)
         text, warning = lookup_notice({'mode': 'related-structures', 'status': 'unavailable'})
         self.assertTrue(warning)
-        self.assertIn('internet required', text)
+        self.assertIn('PDB search failed', text)
+        self.assertIn('could not be checked', text)
         self.assertIn('does not mean no supporting evidence', text)
 
     def test_incomplete_downloads_do_not_become_no_evidence(self):
@@ -38,3 +39,9 @@ class PdbLookupStatusTests(unittest.TestCase):
         self.assertIn('search completed', text)
         self.assertIn('No qualifying', text)
         self.assertEqual(lookup_notice({'status': 'completed', 'coverage': {'observation_count': 5}}), ('', False))
+
+    def test_completed_search_without_counts_is_unknown_not_empty(self):
+        text, warning = lookup_notice({'status': 'completed'})
+        self.assertFalse(warning)
+        self.assertIn('Result counts were not retained', text)
+        self.assertNotIn('No qualifying', text)
