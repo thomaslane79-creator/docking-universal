@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import os
+import sys
 
 # The combined PyMOL environment can retain a Qt 5 ``qt.conf`` from its native
 # dependencies. Select the PyQt6 wheel's plugins before QApplication exists.
@@ -16,6 +17,13 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 _qt6_plugins = Path(PyQt6.__file__).parent / "Qt6" / "plugins"
 if _qt6_plugins.is_dir() and QtCore.QCoreApplication.instance() is None:
     QtCore.QCoreApplication.setLibraryPaths([str(_qt6_plugins)])
+if QtCore.QCoreApplication.instance() is None:
+    from ..qt_cocoa_runtime import verified_plugin_root
+    _cocoa_plugins = verified_plugin_root(sys.prefix, QtCore.qVersion())
+    if _cocoa_plugins is not None:
+        QtCore.QCoreApplication.setLibraryPaths([
+            str(_cocoa_plugins), *QtCore.QCoreApplication.libraryPaths(),
+        ])
 if QtCore.QCoreApplication.instance() is None:
     # Detaching the embedded QOpenGLWidget into its own full-screen window must
     # preserve the live PyMOL context rather than creating another engine.

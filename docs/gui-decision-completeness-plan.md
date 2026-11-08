@@ -1,5 +1,11 @@
 # Complete interactive GUI workflow plan
 
+2026-11-08: the installed, version-bound Qt Cocoa backport passes repeated
+native selected-table, evidence-table, multi-selection and reopen checks.
+Accessibility remains enabled. See [the repair and program explanations](qt-cocoa-accessibility-2026-11-08.md).
+The remaining chronological GUI walkthrough is active in an isolated public
+1N6O copy; no full-workflow acceptance is inferred from table stability.
+
 Latest user order, 2026-11-07: correct the missing local-ligand green circles,
 then complete the generalized preparation-recovery guidance and GUI acceptance,
 before duplicate-site consolidation, template guidance or charge surfaces.
@@ -7,8 +13,9 @@ before duplicate-site consolidation, template guidance or charge surfaces.
 The local-ligand circles and generalized recovery guidance are now implemented
 and installed, including native saved-failure help/diagnostics/new-study actions
 with unchanged scientific state. See [the bounded acceptance record](gui-evidence-and-recovery-2026-11-07.md).
-Native selected-pocket-table stability and the full remaining workflow walkthrough
-are still open; the guidance correction does not imply whole-GUI completion.
+The subsequent Cocoa repair closes the selected-table crash reproduction. The
+full remaining workflow walkthrough is still open; these corrections do not
+imply whole-GUI completion.
 
 2026-11-07 user priority update: after the preparation/recovery issues are
 resolved, correct input-ligand evidence indicators and consolidate near-identical

@@ -190,8 +190,14 @@ run_with_retry "PoseEdit renderer dependency installation" \
   npm install --prefix "$poseedit_root" --omit=dev --ignore-scripts
 
 if [ "$embedded_mac" -eq 1 ]; then
-  printf '\nInstalling relocatable embedded PyMOL (and optional GPU runtime)\n'
   gui_prefix=$("$conda_command" run -n docking-universal-gui-next printenv CONDA_PREFIX)
+  printf '\nBuilding the pinned Qt Cocoa accessibility repair (private app runtime)\n'
+  printf 'CMake/Ninja coordinate Apple’s compiler; this repairs selected-table access, not scientific calculations.\n'
+  "$conda_command" run --no-capture-output -n docking-universal-gui-next \
+    env PYTHONPATH="$scientific_prefix/libexec/docking-universal" \
+    python -m docking_universal.qt_cocoa_runtime --prefix "$gui_prefix" \
+      --build-root "$gui_prefix/share/docking-universal/qt-cocoa-build" --install
+  printf '\nInstalling relocatable embedded PyMOL (and optional GPU runtime)\n'
   if [ "$with_gpu" -eq 1 ]; then
     "$conda_command" run --no-capture-output -n docking-universal \
       python "$scientific_prefix/libexec/docking-universal/docking-universal-runtime-setup.py" \

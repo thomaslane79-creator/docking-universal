@@ -6,7 +6,9 @@ dependencies:
   # Parallel modernization candidate.  Keep the validated Python 3.9
   # environment intact until the real GUI/PyMOL compatibility matrix passes.
   - python=3.12
-  - pyqt6
+  # Exact Qt profile for the upstream Cocoa accessibility backport on Macs.
+  - pyqt6=6.11.0
+  - qt6-main=6.11.2
   - gemmi
   - rdkit
   - numpy

@@ -4,6 +4,18 @@ Status: active scope-control record, established 2026-09-24.
 
 ### Site evidence and duplicate suggestions before charge surfaces (2026-11-07)
 
+Current continuation: the user requests the other issues be fixed now. Finish
+the native selected-pocket-table crash and remaining chronological GUI acceptance,
+then consolidate near-identical site suggestions. Preserve the completed local
+ligand indicators and recovery guidance. Template guidance and charge surfaces
+remain behind these corrections.
+
+Learning preference, 2026-11-08: explain each newly used program's purpose, why
+it is appropriate, inputs/outputs and limits. Keep compact operational summaries
+in the workflow and put the full teaching material in the existing separate
+explanation windows. Development updates should also explain unfamiliar build
+and diagnostic tools rather than only naming them.
+
 Latest explicit order: fix the missing green ligand-evidence circles first,
 then finish the generalized preparation-recovery GUI guidance and its acceptance.
 Duplicate-site consolidation and the template/surface features follow those
@@ -18,8 +30,10 @@ untried-method eligibility, actual tool roles and existing action destinations.
 Native saved-failure review verifies expanded help, real early-failure diagnostic
 loading, corrected-input navigation and cancellation without state changes.
 See [acceptance and remaining broader GUI limits](gui-evidence-and-recovery-2026-11-07.md).
-The selected-pocket-table accessibility blocker and duplicate-site consolidation
-remain separate open items; this does not close every GUI acceptance gate.
+The selected-pocket-table accessibility crash now passes bounded native
+acceptance with the [installed upstream Cocoa backport](qt-cocoa-accessibility-2026-11-08.md).
+The remaining chronological walkthrough and duplicate-site consolidation remain
+open; this does not close every GUI acceptance gate.
 
 The user explicitly reprioritizes the work: finish preparation/recovery issues,
 then correct site evidence presentation and consolidate near-identical box

@@ -1,0 +1,28 @@
+{
+  "qt_version": "6.11.2",
+  "architecture": "arm64",
+  "qt_source": {
+    "commit": "ef55f427f2c8b410d34f8a7681020a3000cf6866",
+    "url": "https://codeload.github.com/qt/qtbase/tar.gz/ef55f427f2c8b410d34f8a7681020a3000cf6866",
+    "sha256": "12b3a9ba00613180caea4da77a1ae6fc1ca054b8822b316ba3a05fb4414fba56"
+  },
+  "patch": {
+    "commit": "b74d6cb3c5e8418602494ae549b60839d88ef858",
+    "url": "https://github.com/qt/qtbase/commit/b74d6cb3c5e8418602494ae549b60839d88ef858.patch",
+    "sha256": "e0158ec9584d0577896ae9112670c3d8212a71c34bf5b3e40969df4a0b424f24",
+    "source_files": {
+      "src/plugins/platforms/cocoa/qcocoaaccessibilityelement.h": ["3ab7fe5168e8a50d988938fd34dd323e628d143cb89b803103b74bafdbd1dbae", "99185a8e33a3b9838e1e24c71b48e52125d1d4090c8d0ea98dcf9fd58163f301"],
+      "src/plugins/platforms/cocoa/qcocoaaccessibilityelement.mm": ["1e1c3699f9de098a0c4979128ce8f43779976416ef3d41ca875073a2a4b26f27", "59323153a0475637cd4170f9af205e8217a02a8ddbb7cb0ade8f49cc491275df"]
+    }
+  },
+  "vulkan_headers": {
+    "commit": "9a0f3099c8a9607a7c0f3127d8abfdc19a93e8c5",
+    "url": "https://codeload.github.com/KhronosGroup/Vulkan-Headers/tar.gz/9a0f3099c8a9607a7c0f3127d8abfdc19a93e8c5",
+    "sha256": "592b3ce6a64708921de3d639e4ade901596f787b041854bc50efa81f6707d709"
+  },
+  "build_tools": {
+    "cmake": "4.4.4",
+    "ninja": "1.13.2",
+    "ninja_reported_version": "1.13.2.git.kitware.jobserver-pipe-1"
+  }
+}

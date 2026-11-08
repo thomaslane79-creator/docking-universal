@@ -29,6 +29,7 @@ test:
 	PYTHONPATH="$(CURDIR)/libexec" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_windows_job.py
 	PYTHONPATH="$(CURDIR)/libexec" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_native_entrypoint.py tests/test_runtime_layout.py
 	PYTHONPATH="$(CURDIR)/libexec" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_browser_runtime.py
+	PYTHONPATH="$(CURDIR)/libexec" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_qt_cocoa_runtime.py
 	PYTHONPATH="$(CURDIR)/libexec" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_file_lock.py
 	PYTHONPATH="$(CURDIR)/libexec" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_runtime_setup.py tests/test_ad4_gpu.py
 	./tests/test_install.sh

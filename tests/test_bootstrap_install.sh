@@ -239,6 +239,24 @@ env PATH="$mock_bin:$PATH" BOOTSTRAP_TEST_STATE="$state_file" \
   "$project_dir/start.sh" --help >/dev/null || fail "beginner launcher"
 grep -q 'run --no-capture-output -n docking-universal docking-universal run --help' "$log_file" || fail "launcher environment routing"
 
+# Apple-Silicon installs build the owned Cocoa fix with the GUI interpreter
+# and installed application code, without replacing Conda's original plugin.
+cat > "$mock_bin/uname" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in -s) printf 'Darwin\n';; -m) printf 'arm64\n';; *) exit 2;; esac
+EOF
+cat > "$mock_bin/sw_vers" <<'EOF'
+#!/usr/bin/env bash
+printf '26.2\n'
+EOF
+chmod +x "$mock_bin/uname" "$mock_bin/sw_vers"
+: > "$log_file"
+env PATH="$mock_bin:$PATH" BOOTSTRAP_TEST_STATE="$state_file" \
+  BOOTSTRAP_TEST_LOG="$log_file" DOCKING_UNIVERSAL_CONDA=conda \
+  "$project_dir/install.sh" >/dev/null || fail "Mac Cocoa repair installer routing"
+grep -F "run --no-capture-output -n docking-universal-gui-next env PYTHONPATH=$mock_scientific_prefix/libexec/docking-universal python -m docking_universal.qt_cocoa_runtime --prefix $mock_gui_prefix --build-root $mock_gui_prefix/share/docking-universal/qt-cocoa-build --install" "$log_file" >/dev/null \
+  || fail "Mac install omitted the pinned Cocoa repair or used the wrong runtime"
+
 # A GPU request must fail before any Conda invocation on unsupported platforms.
 cat > "$mock_bin/uname" <<'EOF'
 #!/usr/bin/env bash
