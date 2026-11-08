@@ -209,6 +209,49 @@ class PocketSiteTests(unittest.TestCase):
         decorated = candidate_with_input_ligand_evidence(result, candidate)
         self.assertEqual(decorated['evidence']['input_ligand_evidence']['observation_count'], 1)
 
+    def test_group_merges_all_related_observations_and_input_without_counting_shared_evidence_twice(self):
+        from docking_universal.services.pocket_review import candidate_with_input_ligand_evidence
+        state = self.pending([('P1', (0., 0., .5156), 26), ('B1', (0., 0., 0.), 26)], ligand=(-1., 1.))
+        self.related_ligand(state, 'P1', (2., 3.))
+        self.related_ligand(state, 'B1', (4., 5.))
+        candidates = state.workflow_data['pocket_candidates']
+        shared = copy.deepcopy(candidates[0]['evidence']['experimental_ligand_evidence']['observations'][0])
+        candidates[1]['evidence']['experimental_ligand_evidence']['observations'].append(shared)
+        before = copy.deepcopy(state.to_dict())
+        grouped = project_pending_site_review(state)
+        self.assertEqual(len(grouped.workflow_data['pocket_candidates']), 1)
+        candidate = candidate_with_input_ligand_evidence(grouped, grouped.workflow_data['pocket_candidates'][0])
+        evidence = candidate['evidence']
+        self.assertEqual(evidence['input_ligand_evidence']['observation_count'], 1)
+        related = evidence['experimental_ligand_evidence']
+        self.assertEqual(related['observation_count'], 2)
+        self.assertEqual(related['pdb_entry_count'], 2)
+        self.assertEqual(len({o['source_ligand_id'] for o in related['observations']}), 2)
+        self.assertEqual(len(evidence['site_group']['ligands']), 3)
+        self.assertEqual(state.to_dict(), before)
+
+    def test_group_preserves_source_conformation_comparisons_and_obstruction_warning(self):
+        from docking_universal.services.pocket_review import candidate_with_input_ligand_evidence
+        state = self.pending([('P1', (0., 0., .5156), 26), ('B1', (0., 0., 0.), 26)], ligand=(-1., 1.))
+        self.related_ligand(state, 'P1', (2., 3.))
+        candidate = state.workflow_data['pocket_candidates'][0]
+        residue = dict(name='LYS', chain='A', number='33')
+        observation = dict(entry='1ABC', alignment_id='1ABC_A_to_A', residue=residue,
+            ligands=[dict(source_ligand_id='P1/LIG/B/601', consistent_with_side_chain_occlusion=True)])
+        candidate['evidence']['conformational_site_evidence'] = dict(
+            observations=[observation], observation_count=1, status='conformationally_incompatible',
+            box_decision_warning='Retained side-chain obstruction', occluding_residues=[residue])
+        state.workflow_data['pocket_candidates'][1]['evidence']['conformational_site_evidence'] = copy.deepcopy(candidate['evidence']['conformational_site_evidence'])
+        grouped = project_pending_site_review(state)
+        evidence = grouped.workflow_data['pocket_candidates'][0]['evidence']
+        self.assertEqual(evidence['conformational_site_evidence']['observation_count'], 1)
+        self.assertEqual(evidence['conformational_site_evidence']['occluding_residues'], [residue])
+        # Reopen a group saved before comparison merging was added.
+        del evidence['conformational_site_evidence']
+        shown = candidate_with_input_ligand_evidence(grouped, grouped.workflow_data['pocket_candidates'][0])
+        self.assertEqual(shown['evidence']['conformational_site_evidence']['status'], 'conformationally_incompatible')
+        self.assertNotIn('conformational_site_evidence', evidence)
+
     def test_nested_boxes_and_boundary_tolerance_do_not_create_false_duplicates(self):
         state = self.pending([('P1', (0., 0., 0.), 4), ('B1', (0., 0., 0.), 2)], ligand=(-1.1, 1.1))
         self.assertIs(project_pending_site_review(state), state)
@@ -365,6 +408,18 @@ class PocketSiteGuiTests(unittest.TestCase):
             self.assertEqual(fixture.store.path_for('sites').read_bytes(), before)
         finally:
             dialog.close(); app.processEvents()
+
+    def test_same_protein_observations_are_included_in_the_compact_summary(self):
+        try:
+            from docking_universal.gui.desktop import StudyWindow
+            from docking_universal.gui.qt import QtWidgets
+        except ImportError as exc:
+            self.skipTest(str(exc))
+        app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+        summary, _ = StudyWindow._candidate_evidence_digest({'id': 'B1'}, {
+            'experimental_ligand_evidence': {'observation_count': 7, 'pdb_entry_count': 7,
+                'evidence_class_counts': {'same_protein': 7}}})
+        self.assertIn('7 same protein', summary)
 
     def test_completed_existing_run_table_plot_and_detached_selector_group_without_reapproval(self):
         from unittest.mock import patch

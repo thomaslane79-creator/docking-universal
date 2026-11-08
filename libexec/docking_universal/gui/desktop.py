@@ -4177,7 +4177,8 @@ if QtWidgets is not None:
             if observations:
                 parts.append(
                     f"{observations} ligand observations / {entries} PDBs "
-                    f"({exact} exact; {homolog} homolog)"
+                    + (f"({classes['same_protein']} same protein; {exact} exact; {homolog} homolog)"
+                     if classes.get("same_protein") else f"({exact} exact; {homolog} homolog)")
                 )
                 details.append(
                     "Select this candidate to inspect individual structures in Experimental PDB Evidence."

@@ -397,7 +397,7 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
             f"{label}: {experimental.get('observation_count', 0)} observations · "
             f"{experimental.get('pdb_entry_count', 0)} PDB entries")
         self.heading.setToolTip(self.heading.text() +
-            f" · exact {classes.get('exact_sequence_match', 0)} · homolog {classes.get('close_structural_homolog', 0)}")
+            f" · same protein {classes.get('same_protein', 0)} · exact {classes.get('exact_sequence_match', 0)} · homolog {classes.get('close_structural_homolog', 0)}")
         self.note.set_content(self.note.summary_text,
             self.evidence_header.toolTip() + '\n\n' + self.heading.toolTip() +
             ('\n\nInput ligand: all retained heavy atoms must fit this box (0.25 Å boundary tolerance). '

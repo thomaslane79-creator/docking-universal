@@ -62,6 +62,13 @@ def candidate_with_input_ligand_evidence(state, candidate, *, boundary_tolerance
     """
     if candidate is None:
         return None
+    group = (candidate.get('evidence') or {}).get('site_group') or (candidate.get('evidence') or {}).get('site_group_presentation')
+    if group:
+        from ..pocket_sites import merged_site_conformation
+        conformation = merged_site_conformation(group)
+        if conformation:
+            candidate = copy.deepcopy(candidate)
+            candidate['evidence']['conformational_site_evidence'] = conformation
     artifacts = getattr(state, 'artifacts', ())
     ligand = next((a for a in artifacts if a.kind == 'bound_ligand'), None)
     if ligand is None:

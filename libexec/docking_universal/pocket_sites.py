@@ -184,6 +184,9 @@ def consolidate_site_candidates(state, *, approved_ids=()):
         receipt['sha256'] = hashlib.sha256(json.dumps(receipt, sort_keys=True).encode()).hexdigest()
         evidence = chosen.setdefault('evidence', {})
         evidence['site_group'] = receipt
+        conformation = merged_site_conformation(receipt)
+        if conformation:
+            evidence['conformational_site_evidence'] = conformation
         evidence['automation_eligible'] = all((c.get('evidence') or {}).get('automation_eligible', True) for c in group)
         evidence['requires_homolog_approval'] = any((c.get('evidence') or {}).get('requires_homolog_approval') for c in group)
         # Only an identical original geometry can inherit the bound-site role.
@@ -207,6 +210,45 @@ def consolidate_site_candidates(state, *, approved_ids=()):
         candidate['rank'] = rank  # Source ranks remain unchanged in members.
     return candidates, {'schema_version': 1, 'original_candidates': copy.deepcopy(originals),
                         'groups': receipts}
+
+
+def merged_site_conformation(group):
+    """Combine retained comparisons for the group's verified ligand placements.
+
+    This reuses existing comparisons; it does not infer new rotamers or rerun
+    an obstruction calculation. Original source comparisons stay in members.
+    """
+    source_ids = {r['observation'].get('source_ligand_id') for r in (group or {}).get('ligands', [])}
+    merged = {}
+    warnings = []
+    for member in (group or {}).get('members', []):
+        record = (member.get('evidence') or {}).get('conformational_site_evidence') or {}
+        if record.get('box_decision_warning'):
+            warnings.append(record['box_decision_warning'])
+        for observation in record.get('observations', []):
+            ligands = [r for r in observation.get('ligands', []) if r.get('source_ligand_id') in source_ids]
+            if not ligands:
+                continue
+            base = {k: copy.deepcopy(v) for k, v in observation.items() if k != 'ligands'}
+            key = json.dumps(base, sort_keys=True)
+            target = merged.setdefault(key, dict(base, ligands=[]))
+            for ligand in ligands:
+                if ligand not in target['ligands']:
+                    target['ligands'].append(copy.deepcopy(ligand))
+    if not merged:
+        return None
+    observations = list(merged.values())
+    residues = []
+    for observation in observations:
+        if any(r.get('consistent_with_side_chain_occlusion') for r in observation['ligands']):
+            residue = observation.get('residue')
+            if residue and residue not in residues:
+                residues.append(residue)
+    incompatible = bool(residues or warnings)
+    return dict(status='conformationally_incompatible' if incompatible else 'reviewed_no_geometric_incompatibility',
+                box_decision_warning=' '.join(dict.fromkeys(warnings)) or None,
+                occluding_residues=residues, observation_count=len(observations), observations=observations,
+                decision_role='evidence_for_box_review_only')
 
 
 def site_prediction_sources(group):
