@@ -85,3 +85,27 @@ These generated private fixtures and backups are not included in Git.
 
 The screening PDF's missing ADFRsuite version remains a separate open provenance
 repair. Template-guided docking and charge surfaces remain queued.
+
+## Existing completed-run correction
+
+The first implementation grouped pending reviews only. That omission left
+P1/B1 separately visible in an already approved or completed study. The session
+now also groups existing-run presentation, retaining the historically approved
+box as representative and keeping source P1/B1 records in expanded details.
+Presentation metadata is separate from scientific approval receipts. Existing
+selected IDs, exact geometry, approvals, protocol construction and saved study
+bytes are unchanged. Two distinct historically approved calculation boxes stay
+identifiable rather than hiding a calculation that actually ran.
+
+Native installed acceptance used the completed public 1N6O study copy (revision
+58): one B1 row in the main table; opening the detached PyMOL Regions selector
+shows exactly one B1 entry; returning to the workspace preserves that view.
+The Mg A201 inside-box warning remains visible. The protected original Cox-2
+state and 5IKR input hashes remain unchanged. Backups are recorded under
+`local-fix-backups/existing-site-display-20261108/manifest.json`.
+
+`make test-gui` now requires real Qt and runs the interaction contract suite,
+including pending and historical grouping, source details, exact 2D/3D pairing,
+diagram mouse activation, centering without zoom, selection persistence,
+deselection and PLIP controls. A dedicated macOS/Windows/Linux Actions matrix
+runs the same suite. Offscreen tests are not native GPU/window acceptance.

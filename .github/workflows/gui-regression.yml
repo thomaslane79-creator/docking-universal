@@ -1,0 +1,32 @@
+name: GUI interaction regression
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  interactions:
+    name: Offscreen Qt interactions (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-15, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          activate-environment: docking-universal-gui-test
+          environment-file: environments/gui-test.yml
+          auto-activate: false
+          conda-remove-defaults: true
+      - name: Exercise existing GUI behavior with a real Qt binding
+        shell: bash -el {0}
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python validation/gui_regression.py

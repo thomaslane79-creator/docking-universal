@@ -1,0 +1,14 @@
+name: docking-universal-gui-test
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12
+  - pyqt6=6.11.0
+  - qt6-main=6.11.2
+  - gemmi
+  - rdkit
+  - numpy
+  - scipy
+  - pillow
+  - reportlab

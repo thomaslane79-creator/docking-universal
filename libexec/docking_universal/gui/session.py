@@ -9,7 +9,7 @@ from weakref import WeakValueDictionary
 
 from ..models import ArtifactRecord
 from ..state import JsonStudyStore, StudyState
-from ..pocket_sites import project_pending_site_review
+from ..pocket_sites import site_review_presentation
 
 try:
     from .qt import QtCore
@@ -69,7 +69,7 @@ if QtCore is not None:
             super().__init__(parent)
             self.store = store
             self.study_id = study_id
-            self.state: StudyState = project_pending_site_review(store.load(study_id))
+            self.state: StudyState = site_review_presentation(store.load(study_id))
             self.selection = StudySelection()
             self.viewer = ViewerState()
             self.detail_level = "guided"
@@ -98,7 +98,7 @@ if QtCore is not None:
 
         def refresh(self) -> bool:
             """Load a newer authoritative revision and notify every observer."""
-            latest = project_pending_site_review(self.store.load(self.study_id))
+            latest = site_review_presentation(self.store.load(self.study_id))
             if latest.revision == self.state.revision:
                 return False
             old_artifacts = self._artifact_signature

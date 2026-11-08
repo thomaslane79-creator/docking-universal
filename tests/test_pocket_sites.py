@@ -9,7 +9,7 @@ from docking_universal.application import StudyController
 from docking_universal.decisions import DecisionOption, DecisionRequired
 from docking_universal.models import ArtifactRecord, Job, JobStatus, CompletionStatus
 from docking_universal.pocket_sites import (project_pending_site_review, site_group_summary,
-    preview_site_expansion, apply_site_expansion)
+    preview_site_expansion, apply_site_expansion, site_review_presentation)
 from docking_universal.protocol_finalization import approved_regions_from_study
 from docking_universal.state import JsonStudyStore
 
@@ -249,6 +249,36 @@ class PocketSiteTests(unittest.TestCase):
         state.selected_pocket_ids = ['B1']
         self.assertIs(project_pending_site_review(state), state)
 
+    def test_historical_view_groups_duplicates_but_keeps_exact_original_approval(self):
+        from unittest.mock import patch
+        for chosen in ('P1', 'B1'):
+            with self.subTest(approved=chosen):
+                self.store = JsonStudyStore(self.root / chosen)
+                self.controller = StudyController(self.store)
+                self.controller.create_study('sites', 'Historical site view')
+                state = self.pending([('P1', (0., 0., .5156), 26), ('B1', (0., 0., 0.), 26)], ligand=(-1., 1.))
+                # Reproduce a pre-grouping approval, not a newly grouped decision.
+                with patch('docking_universal.pocket_sites.project_pending_site_review', side_effect=lambda s: s):
+                    self.controller.resolve_decision('sites', 'choose', (chosen,), actor='historical-user')
+                approved = self.store.load('sites')
+                regions, approval = approved_regions_from_study(approved)
+                before = self.store.path_for('sites').read_bytes()
+                shown = site_review_presentation(approved)
+                candidates = shown.workflow_data['pocket_candidates']
+                self.assertEqual([c['id'] for c in candidates], [chosen])
+                self.assertIn('site_group_presentation', candidates[0]['evidence'])
+                self.assertNotIn('site_group', candidates[0]['evidence'])
+                self.assertEqual(approved_regions_from_study(shown), (regions, approval))
+                self.assertEqual(shown.approvals, approved.approvals)
+                self.assertEqual(shown.decisions, approved.decisions)
+                self.assertEqual(self.store.path_for('sites').read_bytes(), before)
+
+    def test_two_historically_approved_calculation_boxes_remain_identifiable(self):
+        state = self.pending([('P1', (0., 0., .5156), 26), ('B1', (0., 0., 0.), 26)], ligand=(-1., 1.))
+        state.decisions.clear()
+        state.selected_pocket_ids = ['P1', 'B1']
+        self.assertIs(site_review_presentation(state), state)
+
     def test_tampered_group_source_is_rejected_before_approval(self):
         state = self.pending([('P1', (0., 0., .5156), 26), ('B1', (0., 0., 0.), 26)], ligand=(-1., 1.))
         grouped = project_pending_site_review(state)
@@ -326,6 +356,33 @@ class PocketSiteGuiTests(unittest.TestCase):
             self.assertEqual(fixture.store.path_for('sites').read_bytes(), before)
         finally:
             dialog.close(); app.processEvents()
+
+    def test_completed_existing_run_table_plot_and_detached_selector_group_without_reapproval(self):
+        from unittest.mock import patch
+        try:
+            from docking_universal.gui.qt import QtCore, QtWidgets
+        except ImportError as exc:
+            self.skipTest(str(exc))
+        from docking_universal.gui.desktop import StudyWindow
+        from docking_universal.gui.full_pymol_study import FullPyMOLStudyPanel
+        app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+        fixture = PocketSiteTests(); fixture.setUp(); self.addCleanup(fixture.doCleanups)
+        fixture.pending([('P1', (0., 0., .5156), 26), ('B1', (0., 0., 0.), 26)], ligand=(-1., 1.))
+        with patch('docking_universal.pocket_sites.project_pending_site_review', side_effect=lambda s: s):
+            fixture.controller.resolve_decision('sites', 'choose', ('B1',), actor='historical-user')
+        before = fixture.store.path_for('sites').read_bytes()
+        regions = approved_regions_from_study(fixture.store.load('sites'))
+        settings = QtCore.QSettings(str(fixture.root / 'history.ini'), QtCore.QSettings.Format.IniFormat)
+        window = StudyWindow(fixture.store, 'sites', settings=settings)
+        browser = FullPyMOLStudyPanel(window)
+        try:
+            self.assertEqual(window.candidates.rowCount(), 1)
+            self.assertEqual([point[0] for point in window.pocket_score_plot.points], ['B1'])
+            self.assertEqual(browser.regions.count(), 1)
+            self.assertEqual(approved_regions_from_study(window.state), regions)
+            self.assertEqual(fixture.store.path_for('sites').read_bytes(), before)
+        finally:
+            browser.dispose(); browser.close(); window.close(); app.processEvents()
 
     def test_reopened_plot_table_and_detached_selector_show_one_site_without_writes(self):
         try:

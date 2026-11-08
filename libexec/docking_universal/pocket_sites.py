@@ -102,12 +102,13 @@ def candidate_ligands(state, candidate, geometry):
     return records
 
 
-def consolidate_site_candidates(state):
+def consolidate_site_candidates(state, *, approved_ids=()):
     """Return copied candidate records plus a lossless grouping receipt."""
     originals = state.workflow_data.get('pocket_candidates') or []
     if any((c.get('evidence') or {}).get('site_group') for c in originals):
         return originals, None
     artifacts = {a.id: a for a in state.artifacts}
+    approved_ids = set(approved_ids)
     geometries, ligands = {}, {}
     for candidate in originals:
         identity = candidate['id']
@@ -121,6 +122,8 @@ def consolidate_site_candidates(state):
         a, b = left['id'], right['id']
         if a not in geometries or b not in geometries or _frame(left) != _frame(right):
             return None
+        if a in approved_ids and b in approved_ids:
+            return None  # Two historically approved calculation boxes stay identifiable.
         # Two separately reviewed reference anchors retain separate authority.
         if all((c.get('evidence') or {}).get('reviewed_incomplete_reference') for c in (left, right)):
             return None
@@ -155,7 +158,8 @@ def consolidate_site_candidates(state):
         anchors = [c for c in group if (c.get('evidence') or {}).get('reviewed_incomplete_reference')]
         bound = [c for c in group if (c.get('evidence') or {}).get('source') == 'input_bound_ligand']
         exact_bound = [c for c in group if bound and geometries[c['id']] == geometries[bound[0]['id']]]
-        representative = (anchors or exact_bound or group)[0]
+        approved = [c for c in group if c['id'] in approved_ids]
+        representative = (approved or anchors or exact_bound or group)[0]
         chosen = copy.deepcopy(representative)
         members = []
         for member in group:
@@ -229,6 +233,30 @@ def project_pending_site_review(state):
         decision.maximum_selections = min(decision.maximum_selections or len(candidates), len(candidates))
         decision.detected = f'{len(candidates)} candidate docking regions are available'
         decision.payload['candidate_ids'] = [c['id'] for c in candidates]
+    return result
+
+
+def site_review_presentation(state):
+    """Group the visible existing-run sites while preserving approved science.
+
+    Historical presentation metadata deliberately has a different key from a
+    newly approved grouping receipt. Protocol construction must still read the
+    original approval and its exact chosen geometry, with no invented receipt.
+    """
+    if any(d.kind == 'select_pockets' for d in state.pending_decisions):
+        return project_pending_site_review(state)
+    if not state.selected_pocket_ids:
+        return state
+    candidates, receipt = consolidate_site_candidates(state, approved_ids=state.selected_pocket_ids)
+    if receipt is None:
+        return state
+    result = copy.deepcopy(state)
+    for candidate in candidates:
+        evidence = candidate.get('evidence') or {}
+        if evidence.get('site_group'):
+            evidence['site_group_presentation'] = evidence.pop('site_group')
+    result.workflow_data['pocket_candidates'] = candidates
+    result.workflow_data['pocket_site_presentation'] = receipt
     return result
 
 

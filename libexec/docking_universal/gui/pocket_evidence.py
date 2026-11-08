@@ -405,11 +405,12 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
              + str(local.get('detail') or '') if local else '') +
             '\n\nSelecting observations updates the 3D view; deselecting hides them. '
             'Experimental correspondence supports a decision; it does not approve a docking region.')
-        if evidence.get('site_group'):
+        group = evidence.get('site_group') or evidence.get('site_group_presentation')
+        if group:
             from ..pocket_sites import site_group_summary
-            self.heading.setToolTip(self.heading.toolTip() + '\n' + site_group_summary(evidence['site_group']))
+            self.heading.setToolTip(self.heading.toolTip() + '\n' + site_group_summary(group))
             self.note.set_content(self.note.summary_text,
-                                  self.note.details_text + '\n\n' + site_group_summary(evidence['site_group']))
+                                  self.note.details_text + '\n\n' + site_group_summary(group))
         conformation = evidence.get("conformational_site_evidence") or {}
         self._conformation = conformation
         self.obstruction_details_button.setEnabled(bool(conformation))

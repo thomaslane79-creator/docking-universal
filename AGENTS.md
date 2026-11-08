@@ -23,3 +23,15 @@ Preserve explicit scientific decisions, provenance, local-only docked structures
 existing report meanings, and one authoritative active run. Flexible docking,
 parallel jobs, direct 3D box manipulation, a full dark theme, and the GitHub Wiki
 remain deferred until their recorded revisit conditions are satisfied.
+
+## Existing GUI behavior
+
+For interaction, selection, renderer or viewer changes, run `make test-gui` in
+an environment with real Qt support. Do not report scientific-suite GUI skips
+as GUI validation. Cover both reopened existing studies and new reviews when
+changing their presentation. Preserve centering without zoom, paired exact
+2D/3D identity, deselection, PLIP switches and selection through refresh.
+Changes to these established behaviors require an explicit user decision.
+Verify affected native interactions after installation when changing window
+reparenting, rendering or event handling; offscreen tests do not prove GPU or
+native-window acceptance. Record what was actually exercised.

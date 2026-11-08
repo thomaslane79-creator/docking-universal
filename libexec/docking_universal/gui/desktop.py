@@ -3804,7 +3804,7 @@ if QtWidgets is not None:
             close_button.clicked.connect(dialog.close)
             layout.addWidget(heading)
             layout.addWidget(explanation)
-            group = evidence.get('site_group')
+            group = evidence.get('site_group') or evidence.get('site_group_presentation')
             if group:
                 from ..pocket_sites import site_group_summary
                 sources = QtWidgets.QPlainTextEdit(site_group_summary(group))
@@ -4149,7 +4149,7 @@ if QtWidgets is not None:
             """Return a decision-sized summary; never serialize nested evidence into the table."""
             parts = []
             details = []
-            group = evidence.get('site_group')
+            group = evidence.get('site_group') or evidence.get('site_group_presentation')
             if group:
                 from ..pocket_sites import site_group_summary
                 parts.append('Sources: ' + ', '.join(group['member_ids'])

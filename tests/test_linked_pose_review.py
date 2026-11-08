@@ -273,6 +273,14 @@ class LinkedIdentityTests(unittest.TestCase):
             self.assertIn('Center ligand', panel.heading.text())
             panel.heading.click()
             adapter.center_review_ligand.assert_called_once_with()
+            # Exercise the drawn diagram's actual mouse route, not only its heading.
+            from docking_universal.gui.qt import QtCore
+            from PyQt6.QtTest import QTest
+            adapter.center_review_ligand.reset_mock()
+            QTest.mouseClick(panel.query_image, QtCore.Qt.MouseButton.LeftButton,
+                             pos=panel.query_image.rect().center())
+            adapter.center_review_ligand.assert_called_once_with()
+            adapter.set_contact_residue_visible.assert_not_called()
             self.assertEqual(panel.query_image.pixmap().size(), before)
             self.assertFalse('experimental-source' in window.basis.text().lower())
             window.dispose()

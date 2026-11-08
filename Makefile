@@ -2,7 +2,7 @@ PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 LIBEXECDIR ?= $(PREFIX)/libexec/docking-universal
 
-.PHONY: test test-integration test-release setup install install-conda install-launcher uninstall
+.PHONY: test-gui test test-integration test-release setup install install-conda install-launcher uninstall
 
 test:
 	PYTHONPATH="$(CURDIR)/libexec" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_pocket_sites.py
@@ -62,6 +62,10 @@ test:
 	PYTHONPATH="$(CURDIR)/libexec$${PYTHONPATH:+:$$PYTHONPATH}" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_control_pose_landscape.py
 	PYTHONPATH="$(CURDIR)/libexec$${PYTHONPATH:+:$$PYTHONPATH}" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_mmff_variants.py
 	PYTHONPATH="$(CURDIR)/libexec$${PYTHONPATH:+:$$PYTHONPATH}" $${DOCKING_UNIVERSAL_PYTHON:-python} -m unittest tests/test_vina_batch.py tests/test_vina_execution_benchmark.py tests/test_vina_concurrency_benchmark.py
+
+# Requires a real Qt binding: the scientific environment may skip GUI tests.
+test-gui:
+	PYTHONPATH="$(CURDIR)/libexec" QT_QPA_PLATFORM=offscreen $${DOCKING_UNIVERSAL_GUI_PYTHON:-python} validation/gui_regression.py
 
 test-integration:
 	./bin/docking-universal validate integration
