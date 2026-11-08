@@ -109,3 +109,14 @@ including pending and historical grouping, source details, exact 2D/3D pairing,
 diagram mouse activation, centering without zoom, selection persistence,
 deselection and PLIP controls. A dedicated macOS/Windows/Linux Actions matrix
 runs the same suite. Offscreen tests are not native GPU/window acceptance.
+
+## Combined detector and ligand information
+
+The grouped site's table summary now includes its source detector scores,
+without requiring expanded details. With one detector prediction, the graph
+uses that recorded value and labels the source (for the actual public 1N6O
+copy, `P1: 11.85` on site B1). Ligand evidence retains its green ring. Every
+source score remains individually identified; no scores are averaged and no
+new detector calculation or revised box geometry is implied. Native restart
+confirmed `P2Rank 11.85 (P1)` alongside GNP A200 in the single B1 table row;
+the inside-box Mg A201 warning is still present.

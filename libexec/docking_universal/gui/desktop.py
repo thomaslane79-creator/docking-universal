@@ -4151,7 +4151,10 @@ if QtWidgets is not None:
             details = []
             group = evidence.get('site_group') or evidence.get('site_group_presentation')
             if group:
-                from ..pocket_sites import site_group_summary
+                from ..pocket_sites import site_group_summary, site_prediction_text
+                prediction_text = site_prediction_text(group)
+                if prediction_text:
+                    parts.append(prediction_text)
                 parts.append('Sources: ' + ', '.join(group['member_ids'])
                              + '; docking box ' + group['representative_id'])
                 details.append(site_group_summary(group))

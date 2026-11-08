@@ -20,6 +20,7 @@ class PocketScorePlot(QtWidgets.QWidget):
         super().__init__(parent)
         self.setFixedHeight(270)
         self.setMouseTracking(True)
+        self.score_sources = {}
         self.points = []
         self.selected = None
         self.detector = "Pocket"
@@ -55,6 +56,7 @@ class PocketScorePlot(QtWidgets.QWidget):
                                     scores[f"P{match.group(1)}"] = value
             except (OSError, ValueError, TypeError):
                 pass
+        self.score_sources = {}
         self.points = []
         self.evidence_counts = {}
         self.evidence_sources = {}
@@ -65,7 +67,15 @@ class PocketScorePlot(QtWidgets.QWidget):
             candidate = candidate_with_input_ligand_evidence(state, candidate)
             identity = str(candidate["id"])
             evidence = candidate.get("evidence", {})
+            group = evidence.get('site_group') or evidence.get('site_group_presentation')
+            from ..pocket_sites import site_prediction_sources
+            predictions = site_prediction_sources(group)
             value = scores.get(identity, evidence.get("score"))
+            if value is None and len(predictions) == 1:
+                prediction = predictions[0]
+                value = prediction['score']
+                self.score_sources[identity] = prediction['source_id']
+                self.detector = {'p2rank': 'P2Rank', 'fpocket': 'fpocket'}.get(prediction['detector'], 'Pocket')
             try:
                 value = float(value)
             except (ValueError, TypeError):
@@ -148,8 +158,9 @@ class PocketScorePlot(QtWidgets.QWidget):
                 painter.drawEllipse(position, 13, 13)
             painter.setPen(QtGui.QColor("#222222"))
             if score is not None:
-                painter.drawText(QtCore.QRectF(position.x() - 28, position.y() - 35, 56, 20),
-                                 QtCore.Qt.AlignmentFlag.AlignCenter, f"{score:.3g}")
+                painter.drawText(QtCore.QRectF(position.x() - 48, position.y() - 35, 96, 20),
+                                 QtCore.Qt.AlignmentFlag.AlignCenter,
+                                 (self.score_sources[identity] + ": " if identity in self.score_sources else "") + f"{score:.4g}")
             painter.drawText(QtCore.QRectF(position.x() - 25, self.height() - 60, 50, 20),
                              QtCore.Qt.AlignmentFlag.AlignCenter, identity)
             if identity in self.conflicts:
@@ -204,6 +215,8 @@ class PocketScorePlot(QtWidgets.QWidget):
         self.setCursor(QtCore.Qt.CursorShape.PointingHandCursor if point else QtCore.Qt.CursorShape.ArrowCursor)
         if point:
             score = f"{self.detector} score {point[1]:.4g}" if point[1] is not None else "No independent detector score"
+            if point[0] in self.score_sources:
+                score += " from " + self.score_sources[point[0]]
             summary, explanation = conformation_summary(self.conformations.get(point[0], {}))
             self.setToolTip(f"{point[0]} · {score}\n"
                             f"{self.evidence_sources.get(point[0], '')}\n"

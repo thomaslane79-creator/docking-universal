@@ -209,6 +209,25 @@ def consolidate_site_candidates(state, *, approved_ids=()):
                         'groups': receipts}
 
 
+def site_prediction_sources(group):
+    """Expose all detector evidence in a grouped site, preserving its source."""
+    result = []
+    for member in (group or {}).get('members', []):
+        prediction = member.get('pocket_prediction') or member.get('evidence') or {}
+        try:
+            score = float(prediction.get('score'))
+        except (ValueError, TypeError):
+            continue
+        if math.isfinite(score):
+            result.append(dict(source_id=member['id'], detector=prediction.get('detector') or 'Pocket', score=score))
+    return result
+
+
+def site_prediction_text(group):
+    return '; '.join(f"{dict(p2rank='P2Rank', fpocket='fpocket').get(p['detector'], p['detector'])} "
+                     f"{p['score']:.4g} ({p['source_id']})" for p in site_prediction_sources(group))
+
+
 def project_pending_site_review(state):
     """Read-only projection, also reused inside the explicit approval write."""
     decisions = [d for d in state.pending_decisions if d.kind == 'select_pockets']

@@ -273,6 +273,15 @@ class PocketSiteTests(unittest.TestCase):
                 self.assertEqual(shown.decisions, approved.decisions)
                 self.assertEqual(self.store.path_for('sites').read_bytes(), before)
 
+    def test_grouped_summary_retains_every_detector_score_with_its_source(self):
+        from docking_universal.pocket_sites import site_prediction_text
+        group = {'members': [
+            {'id': 'P1', 'evidence': {'detector': 'p2rank', 'score': 11.85}},
+            {'id': 'P2', 'pocket_prediction': {'detector': 'p2rank', 'score': 8.4}},
+            {'id': 'B1', 'evidence': {'source': 'input_bound_ligand'}},
+        ]}
+        self.assertEqual(site_prediction_text(group), 'P2Rank 11.85 (P1); P2Rank 8.4 (P2)')
+
     def test_two_historically_approved_calculation_boxes_remain_identifiable(self):
         state = self.pending([('P1', (0., 0., .5156), 26), ('B1', (0., 0., 0.), 26)], ligand=(-1., 1.))
         state.decisions.clear()
@@ -377,7 +386,9 @@ class PocketSiteGuiTests(unittest.TestCase):
         browser = FullPyMOLStudyPanel(window)
         try:
             self.assertEqual(window.candidates.rowCount(), 1)
-            self.assertEqual([point[0] for point in window.pocket_score_plot.points], ['B1'])
+            self.assertEqual([point[:2] for point in window.pocket_score_plot.points], [('B1', 11.8)])
+            self.assertEqual(window.pocket_score_plot.score_sources, {'B1': 'P1'})
+            self.assertIn('P2Rank 11.8 (P1)', window.candidates.item(0, 3).text())
             self.assertEqual(browser.regions.count(), 1)
             self.assertEqual(approved_regions_from_study(window.state), regions)
             self.assertEqual(fixture.store.path_for('sites').read_bytes(), before)
@@ -402,7 +413,9 @@ class PocketSiteGuiTests(unittest.TestCase):
         browser = FullPyMOLStudyPanel(window)
         try:
             self.assertEqual(window.candidates.rowCount(), 1)
-            self.assertEqual([point[0] for point in window.pocket_score_plot.points], ['B1'])
+            self.assertEqual([point[:2] for point in window.pocket_score_plot.points], [('B1', 11.8)])
+            self.assertEqual(window.pocket_score_plot.score_sources, {'B1': 'P1'})
+            self.assertIn('P2Rank 11.8 (P1)', window.candidates.item(0, 3).text())
             self.assertEqual(window.pocket_score_plot.evidence_counts['B1'], 1)
             self.assertEqual(browser.regions.count(), 1)
             self.assertEqual([o.value for o in window.state.pending_decisions[0].options], ['B1'])
