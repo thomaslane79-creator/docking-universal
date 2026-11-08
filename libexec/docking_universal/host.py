@@ -71,6 +71,7 @@ class CommandDispatcher:
         "prepare_reviewed_receptor",
         "prepare_receptor_changes",
         "review_site_reference",
+        "apply_site_expansion",
         "start_pose_interaction",
         "cancel_active_job",
         "import_protocol_bundle",
@@ -144,6 +145,24 @@ class CommandDispatcher:
         if command.operation == "snapshot":
             state = self.controller.get_study(command.study_id)
             return Response(command.request_id, "applied", state.revision, {"study": state.to_dict()})
+        if command.operation in {'preview_site_expansion', 'apply_site_expansion'}:
+            from .pocket_sites import preview_site_expansion, apply_site_expansion
+            if command.expected_revision is None:
+                raise RevisionConflictError('A study revision is required for site expansion review')
+            state = self.controller.get_study(command.study_id)
+            if command.operation == 'preview_site_expansion' and state.revision != command.expected_revision:
+                raise RevisionConflictError('Study changed before site expansion review')
+            ids = command.payload.get('candidate_ids')
+            if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+                raise ValueError('Site selections must be a list of candidate IDs')
+            base = str(command.payload.get('base_id') or '')
+            if command.operation == 'preview_site_expansion':
+                result = {'preview': preview_site_expansion(state, ids, base)}
+            else:
+                result = {'review': apply_site_expansion(self.controller, command.study_id, ids, base,
+                    str(command.payload.get('preview_sha256') or ''), command.payload.get('rationale'),
+                    str(command.payload.get('actor') or 'desktop-user'), command.expected_revision, command.request_id)}
+            return Response(command.request_id, 'applied', self.controller.get_study(command.study_id).revision, result)
         if command.operation in {"inspect_ligand_library", "ligand_record_preview"}:
             from .services.ligand_library import inspect_ligand_library, ligand_record_preview
             state = self.controller.get_study(command.study_id)

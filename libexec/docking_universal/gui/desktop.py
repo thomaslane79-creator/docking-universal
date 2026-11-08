@@ -370,6 +370,7 @@ if QtWidgets is not None:
             self.candidates.itemDoubleClicked.connect(self._show_candidate_evidence_details)
             self.candidates.itemClicked.connect(self._schedule_initial_candidate_review)
             self._candidate_evidence_dialogs = []
+            self._site_expansion_dialog = None
             central = QtWidgets.QWidget()
             layout = QtWidgets.QVBoxLayout(central)
             layout.addWidget(self.automation_banner)
@@ -449,6 +450,11 @@ if QtWidgets is not None:
             self.approve_button.setObjectName("approve_regions_button")
             self.approve_button.clicked.connect(self.approve_selected_regions)
             approval_row.addWidget(self.candidate_review_button)
+            self.combine_sites_button = QtWidgets.QPushButton('Combine selected sites…')
+            self.combine_sites_button.setObjectName('combine_sites_button')
+            self.combine_sites_button.setToolTip('Preview a box covering the experimental ligands of two or more selected sites.')
+            self.combine_sites_button.clicked.connect(self.combine_selected_sites)
+            approval_row.addWidget(self.combine_sites_button)
             approval_row.addWidget(self.rationale, 1)
             approval_row.addWidget(self.approve_button)
             layout.addWidget(self.region_approval_controls)
@@ -3566,6 +3572,9 @@ if QtWidgets is not None:
                 )
             )
             self.candidate_review_button.setEnabled(available)
+            combine = len(rows) >= 2 and any(d.kind == 'select_pockets' for d in self.state.pending_decisions)
+            self.combine_sites_button.setVisible(combine)
+            self.combine_sites_button.setEnabled(combine and self.host_controller.available)
             # Embedded candidate selection already loads the scene. Keep the
             # explicit launcher only for the companion viewer.
             self.candidate_review_button.setVisible(self.viewer_widget is None)
@@ -3577,6 +3586,46 @@ if QtWidgets is not None:
                 self.candidate_review_button.setText("Review selected region in PyMOL")
             else:
                 self.candidate_review_button.setText("3D review unavailable")
+
+        def combine_selected_sites(self):
+            from .site_expansion import SiteExpansionDialog
+            if self._site_expansion_dialog is not None:
+                self._site_expansion_dialog.raise_()
+                self._site_expansion_dialog.activateWindow()
+                return
+            rows = self.candidates.selectionModel().selectedRows()
+            candidates = self.state.workflow_data.get('pocket_candidates', [])
+            ids = [candidates[i.row()]['id'] for i in sorted(rows, key=lambda i: i.row())]
+            if len(ids) < 2:
+                return
+            revision = self.state.revision
+            adapter = getattr(self.viewer_coordinator, 'adapter', None)
+
+            def show_box(geometry, base_id):
+                adapter.show_box([geometry['center_' + a] for a in 'xyz'],
+                    [geometry['size_' + a] for a in 'xyz'], color='yellow',
+                    source_object_name='candidate_box_' + base_id,
+                    redundant_object_names=tuple('candidate_box_' + i for i in ids if i != base_id))
+
+            dialog = SiteExpansionDialog(ids,
+                lambda base: self.host_controller.preview_site_expansion(ids, base, revision),
+                show_box if adapter is not None and self.viewer_coordinator.connected else None, self)
+            self._site_expansion_dialog = dialog
+
+            def apply_box():
+                try:
+                    self.host_controller.apply_site_expansion(dialog.preview, dialog.rationale.text(), revision)
+                except Exception as exc:
+                    QtWidgets.QMessageBox.critical(self, 'Site expansion could not be applied', str(exc))
+
+            def finish():
+                self._site_expansion_dialog = None
+                dialog.deleteLater()
+                self.refresh()
+                self._candidate_highlight_changed()
+            dialog.accepted.connect(apply_box)
+            dialog.finished.connect(finish)
+            dialog.show()
 
         def open_selected_candidate_review(self) -> None:
             """Open retained structural evidence without requiring a report figure."""
@@ -3755,6 +3804,14 @@ if QtWidgets is not None:
             close_button.clicked.connect(dialog.close)
             layout.addWidget(heading)
             layout.addWidget(explanation)
+            group = evidence.get('site_group')
+            if group:
+                from ..pocket_sites import site_group_summary
+                sources = QtWidgets.QPlainTextEdit(site_group_summary(group))
+                sources.setReadOnly(True)
+                sources.setObjectName('site_sources')
+                sources.setMaximumHeight(160)
+                layout.addWidget(sources)
             layout.addWidget(content, 1)
             layout.addWidget(close_button, 0, QtCore.Qt.AlignmentFlag.AlignRight)
             self._candidate_evidence_dialogs.append(dialog)
@@ -4092,6 +4149,12 @@ if QtWidgets is not None:
             """Return a decision-sized summary; never serialize nested evidence into the table."""
             parts = []
             details = []
+            group = evidence.get('site_group')
+            if group:
+                from ..pocket_sites import site_group_summary
+                parts.append('Sources: ' + ', '.join(group['member_ids'])
+                             + '; docking box ' + group['representative_id'])
+                details.append(site_group_summary(group))
             conformational = evidence.get("conformational_site_evidence") or {}
             summary, explanation = conformation_summary(conformational)
             parts.append(summary)
@@ -4841,6 +4904,8 @@ if QtWidgets is not None:
             self._schedule_initial_candidate_review()
 
         def closeEvent(self, event) -> None:
+            if self._site_expansion_dialog is not None:
+                self._site_expansion_dialog.close()
             if self._input_preview_dialog is not None:
                 self._input_preview_dialog.close()
             self._close_interaction_review()

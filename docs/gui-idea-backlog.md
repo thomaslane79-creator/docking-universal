@@ -16,6 +16,14 @@ in the workflow and put the full teaching material in the existing separate
 explanation windows. Development updates should also explain unfamiliar build
 and diagnostic tools rather than only naming them.
 
+2026-11-08 explicit grouping clarification: 95% was an example of obviously
+duplicate boxes, not an agreed cutoff. Group when each box fully contains both
+experimental ligands (including the special case of the same exact input
+ligand). No overlap percentage defines site identity. Offer a previewed box
+expansion to cover the ligands, keeping all original geometries and evidence;
+the user chooses it before normal region approval. This is an explicitly
+requested continuation of the demonstrated duplicate-site repair (gate 5).
+
 2026-11-08 native walkthrough follow-up: the user reports unlabeled/inaccessible
 PLIP switches and unreadably small internal PyMOL text after detaching. Actual
 review shows contact controls hidden on the other tab, hyperlink legends without

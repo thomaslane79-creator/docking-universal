@@ -131,7 +131,7 @@ class InteractionReviewWindow(QtWidgets.QDialog):
         if failures:
             self.status.setText("Some residue links could not be mapped: " + "; ".join(failures))
         elif residues:
-            self.status.setText(f"All {len(residues)} recorded contact residues are shown. Click a 2D label to center; uncheck below to hide sticks.")
+            self.status.setText(f"All {len(residues)} recorded contact residues are shown. Uncheck a residue to hide its sticks.")
         elif not self.status.text():
             self.status.setText("No PLIP contact residues were recorded for this ligand.")
         adapter.focus_interaction_review()

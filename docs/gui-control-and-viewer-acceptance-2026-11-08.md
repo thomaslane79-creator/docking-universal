@@ -53,8 +53,8 @@ renderer regeneration or 2D residue picking as accepted.
 The focused offscreen Qt suite passes **155 tests** across contact controls,
 linked review, embedded adapters, desktop workspace, evidence plots and stage
 feedback. These event/adapter checks supplement, and do not replace, the native
-observations above. The last two additions (second-click hiding and detached
-paired-review access) still need a native confirmation after restart.
+observations above. The last two additions subsequently passed native checks
+after restart; see [the continuation](site-grouping-and-expansion-2026-11-08.md).
 
 Installed modules retain original backups and before/after hashes under
 `local-fix-backups/plip-detached-controls-20261108/manifest.json` and

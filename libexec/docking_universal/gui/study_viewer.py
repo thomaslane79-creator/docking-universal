@@ -199,10 +199,15 @@ class StudyViewerCoordinator:
             ligand_evidence.get("observation_count")
             or "direct deposited-ligand correspondence" in str(candidate.get("summary", ""))
         )
+        group = evidence.get('site_group') or {}
+        redundant = tuple('candidate_box_' + identity for identity in group.get('member_ids', [])
+                          if identity != candidate_id)
+        if has_corresponding_ligand_evidence:
+            redundant += ('ligand_site_box',)
         self.adapter.show_box(
             center, size, color=color,
             source_object_name=f"candidate_box_{candidate_id}",
-            redundant_object_names=("ligand_site_box",) if has_corresponding_ligand_evidence else (),
+            redundant_object_names=redundant,
             visible_associated_object_names=(
                 ("ligand_site_representative",)
                 if has_corresponding_ligand_evidence else ()

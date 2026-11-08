@@ -133,6 +133,12 @@ class StudyViewerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Required prepared-receptor"):
             self.viewer.open(self.state)
 
+    def test_grouped_candidate_hides_other_source_box_in_retained_scene(self):
+        candidate = self.state.workflow_data['pocket_candidates'][0]
+        candidate['evidence']['site_group'] = {'member_ids': ['P1', 'B1']}
+        self.viewer.show_candidate(self.state, 'P1')
+        self.assertEqual(self.adapter.calls[-1][-2], ('candidate_box_B1',))
+
     def test_report_session_is_the_primary_live_view_and_can_be_reset(self):
         session = Path(self.temporary.name) / "cavity_selected_box.pse"
         session.write_bytes(b"retained report view")

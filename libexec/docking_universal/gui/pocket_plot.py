@@ -81,6 +81,9 @@ class PocketScorePlot(QtWidgets.QWidget):
             self.evidence_counts[identity] = local_count + related_count
             self.evidence_sources[identity] = (f'{local_count} input-structure ligand · '
                 f'{related_count} related-PDB observations')
+            if evidence.get('site_group'):
+                from ..pocket_sites import site_group_summary
+                self.evidence_sources[identity] += '\n' + site_group_summary(evidence['site_group'])
             self.conformations[identity] = evidence.get("conformational_site_evidence") or {}
             if has_obstruction_warning(self.conformations[identity]):
                 self.conflicts.add(identity)

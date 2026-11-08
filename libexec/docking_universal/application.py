@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 from uuid import uuid4
 
@@ -110,6 +111,14 @@ class StudyController:
             if artifact.id not in known_artifacts:
                 state.artifacts.append(artifact)
                 known_artifacts.add(artifact.id)
+        from .pocket_sites import consolidate_site_candidates
+        grouped, grouping = consolidate_site_candidates(state)
+        if grouping:
+            candidates = [PocketCandidate(**candidate) for candidate in grouped]
+            state.workflow_data['pocket_candidates'] = grouped
+            state.workflow_data['pocket_site_grouping'] = grouping
+            if source:
+                source['candidate_count'] = len(candidates)
         if automation and automation.enabled:
             state.workflow_data["active_automation_policy"] = record_to_dict(automation)
             self._event(
@@ -206,6 +215,8 @@ class StudyController:
 
     def get_decision(self, study_id: str, decision_id: str) -> DecisionRequired:
         state = self.get_study(study_id)
+        from .pocket_sites import project_pending_site_review
+        state = project_pending_site_review(state)
         decision = next((item for item in state.decisions if item.id == decision_id), None)
         if decision is None:
             raise KeyError(f"Unknown decision: {decision_id}")
@@ -233,11 +244,15 @@ class StudyController:
             raise RevisionConflictError(
                 f"Study {study_id} changed from revision {expected_revision} to {state.revision}"
             )
+        from .pocket_sites import project_pending_site_review, verify_site_group_approval
+        state = project_pending_site_review(state)
         decision = next((item for item in state.decisions if item.id == decision_id), None)
         if decision is None:
             raise KeyError(f"Unknown decision: {decision_id}")
         decision.validate_response(selections)
         decision.validate_continuation()
+        if decision.kind == 'select_pockets':
+            verify_site_group_approval(state, selections)
         method = "automated_policy" if policy_id else "explicit_user"
         if policy_id and decision.requires_explicit_user:
             raise ExplicitApprovalRequired(f"Decision {decision.id} cannot be resolved by automation")
@@ -270,6 +285,9 @@ class StudyController:
                 ],
                 "decision_created_at": decision.created_at,
                 "study_revision": state.revision,
+                "site_groups": [copy.deepcopy((c.get('evidence') or {})['site_group'])
+                    for c in state.workflow_data.get('pocket_candidates', [])
+                    if c['id'] in selections and (c.get('evidence') or {}).get('site_group')],
             },
             request_id=request_id,
         )

@@ -42,6 +42,15 @@ class ApplicationHostController:
     def prepare_reviewed_receptor(self, revision):
         return self._request('prepare_reviewed_receptor', {}, revision)
 
+    def preview_site_expansion(self, candidate_ids, base_id, revision):
+        return self._request('preview_site_expansion', {'candidate_ids': list(candidate_ids),
+            'base_id': base_id}, revision)['result']['preview']
+
+    def apply_site_expansion(self, preview, rationale, revision):
+        return self._request('apply_site_expansion', {'candidate_ids': preview['candidate_ids'],
+            'base_id': preview['base_id'], 'preview_sha256': preview['preview_sha256'],
+            'rationale': rationale, 'actor': 'desktop-user'}, revision)
+
     def preview_receptor_changes(self, choices, revision):
         return self._request('preview_receptor_changes', {'choices': choices}, revision)['result']['preview']
 

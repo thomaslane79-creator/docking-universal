@@ -1,5 +1,14 @@
 # Complete interactive GUI workflow plan
 
+2026-11-08 viewer/site continuation: labeled PLIP switches and native Retina
+text pass interactive checks. Second-click input-ligand hiding and detached
+paired-view access also pass. Duplicate proposals now use the user's complete
+experimental-ligand containment rule, with a separate reviewed expansion option
+and preserved original geometries/provenance. See
+[site grouping and bounded acceptance](site-grouping-and-expansion-2026-11-08.md).
+Current-renderer dependency acceptance and the screening PDF's missing ADFR
+version remain open; this does not close whole-GUI acceptance.
+
 2026-11-08: the installed, version-bound Qt Cocoa backport passes repeated
 native selected-table, evidence-table, multi-selection and reopen checks.
 Accessibility remains enabled. See [the repair and program explanations](qt-cocoa-accessibility-2026-11-08.md).

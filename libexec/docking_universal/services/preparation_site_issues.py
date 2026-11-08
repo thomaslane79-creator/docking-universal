@@ -83,7 +83,7 @@ def _project_reviewed_changes(record, geometry):
     return for_box({'residues': residues}, geometry)['residues']
 
 
-def candidate_with_model_change_review(state, candidate):
+def candidate_with_model_change_review(state, candidate, *, geometry_override=None):
     """Decorate a GUI copy; reopening a box must not hide a successful override."""
     if candidate is None:
         return None
@@ -128,10 +128,13 @@ def candidate_with_model_change_review(state, candidate):
                 # an early failed-preparation exclusion review. Never interpret
                 # an empty pre-box preview as evidence of no affected residues.
                 if retained.get('source_path') and retained.get('source_sha256'):
-                    review['residues'] = _project_reviewed_changes(retained, config_geometry(box_path))
+                    review['residues'] = _project_reviewed_changes(retained,
+                        geometry_override if geometry_override is not None else config_geometry(box_path))
                 else:
                     # Older retained records may contain only the original
                     # hash-bound per-box review; preserve that compatibility.
+                    if geometry_override is not None and geometry_override != config_geometry(box_path):
+                        raise ValueError('Original coordinates are unavailable for reviewing changes in an expanded box')
                     for index, region in enumerate(retained['context']['selected_regions']):
                         if region['sha256'] == box.sha256:
                             review['residues'] = retained['selected_box_review'][index]['residues']

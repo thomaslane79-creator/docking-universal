@@ -93,6 +93,19 @@ class LaterBoxProjectionTests(unittest.TestCase):
         self.assertEqual(shown['status'], 'model_change_evidence_unverified')
         self.assertEqual(shown['severity'], 'high')
 
+    def test_expansion_preview_recomputes_warning_without_changing_original_box(self):
+        self.set_box(100)
+        self.state.artifacts[-1].sha256 = digest(self.box)
+        original = self.box.read_bytes()
+        self.assertFalse(self.shown()['changes_inside_box'])
+        geometry = dict(center_x=50., center_y=0., center_z=0., size_x=100., size_y=4., size_z=4.)
+        reviewed = candidate_with_model_change_review(self.state, self.candidate, geometry_override=geometry)
+        warning = reviewed['evidence']['receptor_model_review']
+        self.assertTrue(warning['changes_inside_box'])
+        self.assertIn('inside this box', warning['warning'])
+        self.assertEqual(self.box.read_bytes(), original)
+        self.assertFalse(self.shown()['changes_inside_box'])
+
     def test_tampered_box_is_a_visible_evidence_failure(self):
         self.set_box(100)
         self.assertEqual(self.shown()['status'], 'model_change_evidence_unverified')

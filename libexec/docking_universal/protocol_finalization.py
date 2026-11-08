@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
@@ -419,6 +420,15 @@ def approved_regions_from_study(state: StudyState):
         artifact_id = candidates[candidate_id]["box_artifact_id"]
         if approved_hashes.get(artifact_id) != region["box_sha256"]:
             raise ValueError(f"Approved evidence hash is missing or changed for {candidate_id}")
+        group = (candidates[candidate_id].get('evidence') or {}).get('site_group')
+        if group:
+            approved_group = next((g for g in approval.evidence.get('site_groups', [])
+                                   if g.get('representative_id') == candidate_id), None)
+            if approved_group != group:
+                raise ValueError('Grouped site differs from its explicit approval')
+            # Inline source geometries and digests remain portable even when
+            # the original workspace paths are unavailable on another machine.
+            region['site_group'] = copy.deepcopy(group)
         from .services.preparation_site_issues import candidate_with_model_change_review
         reviewed = candidate_with_model_change_review(state, candidates[candidate_id])
         impact = reviewed.get('evidence', {}).get('receptor_model_review')

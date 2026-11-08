@@ -53,7 +53,7 @@ def _safe_label(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._-") or "site"
 
 
-def candidate_with_input_ligand_evidence(state, candidate):
+def candidate_with_input_ligand_evidence(state, candidate, *, boundary_tolerance=.25):
     """Project retained local ligand evidence without rewriting saved science.
 
     Also works for older studies. Verify both retained assets and require the
@@ -93,10 +93,10 @@ def candidate_with_input_ligand_evidence(state, candidate):
         if not atoms or len(identities) != 1:
             raise ValueError('Retained input ligand lacks one exact heavy-atom identity')
         identity = next(iter(identities))
-        inside = sum(all(abs(value - geometry['center_' + axis]) <= geometry['size_' + axis] / 2 + .25
+        inside = sum(all(abs(value - geometry['center_' + axis]) <= geometry['size_' + axis] / 2 + boundary_tolerance
                          for axis, value in zip('xyz', xyz)) for xyz in atoms)
         local.update(status='verified', heavy_atom_count=len(atoms), heavy_atoms_inside=inside,
-                     all_heavy_atoms_inside=inside == len(atoms), boundary_tolerance_angstrom=.25,
+                     all_heavy_atoms_inside=inside == len(atoms), boundary_tolerance_angstrom=boundary_tolerance,
                      ligand_sha256=ligand.sha256, box_sha256=box.sha256)
         if inside == len(atoms):
             local['observations'] = [{'evidence_class': 'input_structure', 'entry': 'Input',
@@ -435,17 +435,9 @@ class PocketReviewService:
         )
         if inputs.bound_ligand_setup:
             bound = input_ligand_candidate(inputs.target, cavity, inputs.bound_ligand_setup)
-            geometry = config_geometry(bound["path"])
-            # Do not resurrect the earlier duplicate-box bug. An effectively
-            # identical box keeps both provenance sources, not two options.
-            duplicate = next((item for item in mappings if all(
-                abs(config_geometry(item["path"])[key] - value) <= .5 for key, value in geometry.items()
-            )), None)
-            if duplicate:
-                duplicate["description"] += "; also the exact input bound-ligand site"
-                duplicate["evidence"]["input_bound_ligand"] = bound["evidence"]
-            else:
-                mappings.append(bound)
+            # Retain every original box. The shared site grouping chooses one
+            # exact geometry and preserves the others as inspectable sources.
+            mappings.append(bound)
         if not mappings:
             raise ValueError("No selectable pocket candidates could be built from the retained artifacts")
 
@@ -498,6 +490,21 @@ class PocketReviewService:
         for artifact in self._supporting_artifacts(inputs, evidence):
             artifacts.append(artifact)
             review_ids.append(artifact.id)
+        # Pin aligned ligand files themselves, in addition to their source
+        # evidence record. Complete-ligand grouping and later expansion must
+        # recheck exactly these coordinates at approval time.
+        retained_paths = {a.path for a in artifacts}
+        for candidate in candidates:
+            observations = (candidate.evidence.get('experimental_ligand_evidence') or {}).get('observations') or []
+            for observation in observations:
+                path = Path(str(observation.get('aligned_ligand_pdb') or '')).resolve()
+                if not path.is_file() or str(path) in retained_paths:
+                    continue
+                identity = 'evidence-ligand-' + hashlib.sha256(str(path).encode()).hexdigest()[:16]
+                artifacts.append(ArtifactRecord(identity, 'aligned_ligand', str(path), _sha256(path),
+                    'Exact aligned deposited ligand for site review'))
+                review_ids.append(identity)
+                retained_paths.add(str(path))
         source = {
             "cavity_directory": str(cavity.resolve()),
             "pocket_evidence_record": (
