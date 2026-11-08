@@ -132,7 +132,16 @@ class ControlSiteReviewTests(unittest.TestCase):
         self.assertEqual(state.workflow_data["study_setup"]["pocket_engine"], "p2rank")
         # Native detector fixture supplies P1; B1 remains an unscored exact-input site.
         self.assertIn("B1", [row["id"] for row in state.workflow_data["pocket_candidates"]])
-        self.assertIn("P1", [row["id"] for row in state.workflow_data["pocket_candidates"]])
+        candidates = state.workflow_data['pocket_candidates']
+        source_ids = {row['id'] for row in candidates}
+        source_ids.update(identity for row in candidates
+                          for identity in (row.get('evidence', {}).get('site_group') or {}).get('member_ids', []))
+        self.assertIn('P1', source_ids)
+        # Prediction still ran and its source is retained. A proposal covering
+        # the same complete experimental ligand need not be a second option.
+        if len(candidates) == 1:
+            self.assertIn('P1', candidates[0]['evidence']['site_group']['member_ids'])
+            self.assertIn('B1', candidates[0]['evidence']['site_group']['member_ids'])
         self.assertFalse(any(job.stage == "control_validation" for job in state.jobs))
 
     def test_downloaded_inputs_in_existing_study_folder_are_allowed(self):

@@ -32,6 +32,12 @@ existing controls and screen scaling before the one-site consolidation (gate 4).
 The workflow also exposed missing ADFRsuite version provenance blocking its PDF;
 repair recording at preparation time without inventing historical versions.
 
+The installed current 2D renderer now has its private Chromium dependency and
+passes native same-pose diagram/residue/ligand-centering checks. Centering keeps
+zoom unchanged, as explicitly clarified by the user. Older retained images stay
+historical artifacts; the current-image acceptance used an isolated regenerated
+copy. See [the renderer record](current-2d-renderer-2026-11-08.md).
+
 Latest explicit order: fix the missing green ligand-evidence circles first,
 then finish the generalized preparation-recovery GUI guidance and its acceptance.
 Duplicate-site consolidation and the template/surface features follow those

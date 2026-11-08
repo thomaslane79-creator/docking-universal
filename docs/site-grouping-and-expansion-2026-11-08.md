@@ -75,8 +75,8 @@ instead of claiming that a changed box is unaffected.
 - Native detached Rilpivirine cluster-002 selection enables **Open 2D/3D review**
   and opens its exact retained side-by-side pair with PLIP/residue controls.
   The retained diagram is an older static style with no verified 2D residue
-  links. Current-renderer dependency/diagram acceptance is separate ongoing
-  work, not implied by successful access to that saved image.
+  links. Subsequent [current-renderer dependency/diagram acceptance](current-2d-renderer-2026-11-08.md)
+  passes in a separate regenerated copy; it is not inferred from that saved image.
 
 Local evidence is retained in `validation/runs/site-consolidation-20261108/`
 and `validation/runs/site-expansion-native-20261108/`. Installed changes retain

@@ -188,6 +188,11 @@ poseedit_root="$scientific_prefix/libexec/docking-universal/docking_universal/po
 run_with_retry "PoseEdit renderer dependency installation" \
   "$conda_command" run --no-capture-output -n docking-universal \
   npm install --prefix "$poseedit_root" --omit=dev --ignore-scripts
+printf 'Checking the local diagram browser (private Chromium only when needed)\n'
+"$conda_command" run --no-capture-output -n docking-universal \
+  env PYTHONPATH="$scientific_prefix/libexec/docking-universal" \
+  python -m docking_universal.browser_runtime --install-private "$scientific_prefix" \
+    --renderer-root "$poseedit_root"
 
 if [ "$embedded_mac" -eq 1 ]; then
   gui_prefix=$("$conda_command" run -n docking-universal-gui-next printenv CONDA_PREFIX)
