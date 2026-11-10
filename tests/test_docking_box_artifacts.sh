@@ -30,4 +30,25 @@ grep -q '^center_z = 5.5$' "$tmp/box.conf" || fail "configuration Z center chang
 [ "$(grep -c '^size_[xyz] = 26.0$' "$tmp/box.conf")" -eq 3 ] || fail "configuration dimensions changed"
 grep -q '^# Input: /data/example.pdb$' "$tmp/box.conf" || fail "configuration provenance changed"
 
+# The preparation wrapper must keep the P2Rank rank and exact dimensions.
+(
+  CAVITY_DIR="$tmp" FROZEN_DIR="$tmp" CANONICAL=target
+  POCKET_ENGINE=p2rank LIG_PRESENT=0 MAX_POCKETS=3
+  TIMESTAMP=test INPUT_PDB=test RECEPTOR_PDB=test
+  BOX_SIZE=26 HALF_BOX=13 SHOW_POCKET_SURFACE=1 SHOW_ADJACENT_CAVITY=0
+  LIGAND_DIR="$tmp" SHOW_LIGAND_VOLUME=0 SHOW_REFERENCE_LIGANDS=0 LIGANDS=(XK2)
+  SORTED=("8.2|$tmp/pocket4_atm.pdb|10|-2|5.5|8.2")
+  cp "$tmp/center.pdb" "$tmp/target_pocket4_center.pdb"
+  cp "$tmp/box.pdb" "$tmp/target_pocket4_box.pdb"
+  sed 's/^size_x = 26.0$/size_x = 29.0/' "$tmp/box.conf" > "$tmp/target_pocket4.conf"
+  build_adjacent_pocket_extension() { :; }
+  write_pymol_review_scene() {
+    [ "$7" = 4 ] && [ "$9" = "$tmp/target_pocket4_box.pdb" ] ||
+      fail "scene lost the P2Rank detector identity"
+  }
+  materialize_selected_site_artifacts
+  grep -q '^size_x = 29.0$' "$tmp/target_pocket4.conf" || fail "P2Rank geometry overwritten"
+  [ ! -e "$tmp/target_pocket1.conf" ] || fail "P2Rank rank replaced by an ordinal"
+)
+
 printf 'PASS: docking-box artifact equivalence checks\n'

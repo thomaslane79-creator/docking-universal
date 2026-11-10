@@ -8,6 +8,8 @@ import math
 import re
 from pathlib import Path
 
+from docking_universal_region import write_box_files
+
 from docking_universal.pocket_equivalence import find_pocket_equivalences
 
 
@@ -15,12 +17,14 @@ def _residue_keys(value: str) -> set[tuple[str, str]]:
     return {(match.group(1), match.group(2)) for match in re.finditer(r"([A-Za-z0-9]+)_(-?\d+[A-Za-z]?)", value)}
 
 
-def _protein_atoms(path: Path) -> dict[tuple[str, str], list[str]]:
-    residues = {}
+def _receptor_atoms(path: Path):
+    residues, serials = {}, {}
     for line in path.read_text(errors="replace").splitlines():
+        if line.startswith(("ATOM  ", "HETATM")):
+            serials.setdefault(line[6:11].strip(), []).append(line)
         if line.startswith("ATOM  ") and line[16:17] in {" ", "A"}:
             residues.setdefault((line[21:22].strip() or "_", line[22:27].strip()), []).append(line)
-    return residues
+    return residues, serials
 
 
 def _overlap(left: dict, right: dict) -> float:
@@ -39,7 +43,7 @@ def materialize_p2rank_candidates(
     predictions_csv: Path | str, receptor_pdb: Path | str, cavity_directory: Path | str,
     target: str, *, maximum_pockets: int = 3, minimum_box_size: float = 26.0,
     margin: float = 4.0, maximum_box_size: float = 48.0, maximum_overlap: float = 0.60,
-    p2rank_version: str | None = None,
+    p2rank_version: str | None = None, surface_margin: float = 1.0,
 ) -> dict:
     """Convert P2Rank rows into the stable downstream pocket contract."""
     if maximum_pockets < 0:
@@ -47,7 +51,7 @@ def materialize_p2rank_candidates(
     predictions_csv, receptor_pdb, cavity = Path(predictions_csv), Path(receptor_pdb), Path(cavity_directory)
     cavity.mkdir(parents=True, exist_ok=True)
     frozen = cavity / "frozen_pockets"; frozen.mkdir(exist_ok=True)
-    residues = _protein_atoms(receptor_pdb)
+    residues, serials = _receptor_atoms(receptor_pdb)
     rows = []
     with predictions_csv.open(newline="") as handle:
         for fallback, raw in enumerate(csv.DictReader(handle), 1):
@@ -56,18 +60,44 @@ def materialize_p2rank_candidates(
             score = float(row["score"])
             probability = float(row["probability"]) if row.get("probability") else None
             center = {axis: float(row[f"center_{axis}"]) for axis in "xyz"}
+            if not all(math.isfinite(value) for value in center.values()):
+                raise ValueError(f"P2Rank pocket {rank} has a non-finite center")
             keys = _residue_keys(row.get("residue_ids", row.get("residue ids", "")))
             atom_lines = [line for key in keys for line in residues.get(key, [])]
-            points = []
-            for line in atom_lines:
-                points.append(tuple(float(line[start:start + 8]) for start in (30, 38, 46)))
+            surface_ids = set(row.get("surf_atom_ids", "").split())
+            # A partial or ambiguous serial match cannot define the pocket.
+            surface_lines = []
+            if surface_ids and all(len(serials.get(atom_id, ())) == 1 for atom_id in surface_ids):
+                surface_lines = [serials[atom_id][0] for atom_id in surface_ids]
+            # Legacy prediction tables contain residue IDs but no surface IDs.
+            # Keep their original geometry. Current tables with unresolved
+            # surface IDs get an explicit center-based proposal for review.
+            legacy_lines = atom_lines if "surf_atom_ids" not in row else []
+            sizing_lines = surface_lines or legacy_lines
+            basis = ("p2rank_surface_atoms" if surface_lines else
+                     "legacy_residue_extent" if legacy_lines else "prediction_center_default")
+            points = [tuple(float(line[start:start + 8]) for start in (30, 38, 46))
+                      for line in sizing_lines]
             geometry = {}
             for index, axis in enumerate("xyz"):
-                extent = (max(p[index] for p in points) - min(p[index] for p in points) + 2 * margin) if points else minimum_box_size
-                geometry[f"center_{axis}"] = center[axis]
-                geometry[f"size_{axis}"] = min(maximum_box_size, max(minimum_box_size, extent))
+                box_center = round(center[axis], 3)
+                required = 0.0
+                if surface_lines:
+                    # Keep P2Rank's center and cover its lining atoms on
+                    # either side. The upper limit constrains padding only.
+                    required = 2 * max(abs(point[index] - box_center) for point in points)
+                    extent = required + 2 * surface_margin
+                elif points:
+                    extent = max(point[index] for point in points) - min(point[index] for point in points) + 2 * margin
+                else:
+                    extent = minimum_box_size
+                size = max(required, min(maximum_box_size, max(minimum_box_size, extent)))
+                geometry[f"center_{axis}"] = box_center
+                geometry[f"size_{axis}"] = round(size, 3)
             rows.append({"rank": rank, "score": score, "probability": probability,
                          "name": row.get("name") or f"pocket{rank}", "geometry": geometry,
+                         "sizing_basis": basis, "prediction_center": center,
+                         "surface_atom_count": len(surface_lines),
                          "residue_ids": sorted(f"{c}_{n}" for c, n in keys), "atom_lines": atom_lines})
     rows.sort(key=lambda item: (item["rank"], -item["score"]))
     # Zero means all eligible regions; the default CLI limit remains three.
@@ -76,9 +106,11 @@ def materialize_p2rank_candidates(
     diagnostics = []
     for item in rows:
         observed = max((_overlap(item["geometry"], prior["geometry"]) for prior in retained), default=0.0)
-        selected = len(retained) < limit and observed <= maximum_overlap
+        # Overlap is diagnostic only. Site identity is decided later using
+        # experimental ligand evidence, so do not discard a prediction here.
+        selected = len(retained) < limit
         diagnostics.append((item, selected, observed, "selected" if selected else
-                            "maximum_candidates_reached" if len(retained) >= limit else "overlaps_higher_ranked_box"))
+                            "maximum_candidates_reached"))
         if selected:
             retained.append(item)
     selection = cavity / "pocket_selection_diagnostics.tsv"
@@ -97,10 +129,15 @@ def materialize_p2rank_candidates(
         pocket.write_text("\n".join(lines) + "\nEND\n")
         g = item["geometry"]
         config = cavity / f"{target}_pocket{number}.conf"
-        config.write_text("\n".join(f"{key} = {value:.3f}" for key, value in g.items()) + "\n")
+        write_box_files(config, g)
         with selection.open("a") as handle:
             handle.write(f"{number}\t{pocket.name}\t{item['score']}\t{item['probability'] if item['probability'] is not None else 'NA'}\t{'selected' if selected else 'skipped'}\t{reason}\t{observed:.4f}\tp2rank\n")
         if selected:
+            center = tuple(g[f"center_{axis}"] for axis in "xyz")
+            config.with_name(config.stem + "_center.pdb").write_text(
+                "HETATM    1 CTR  CTR A   1    "
+                + "".join(f"{value:8.3f}" for value in center) + "\nEND\n"
+            )
             with selected_records.open("a") as handle:
                 handle.write(f"{item['score']}|{pocket}|{g['center_x']}|{g['center_y']}|{g['center_z']}|{item['score']}\n")
     equivalences = find_pocket_equivalences([
@@ -112,7 +149,14 @@ def materialize_p2rank_candidates(
                   "receptor": str(receptor_pdb.resolve()), "candidate_count": len(rows),
                   "retained_count": len(retained), "box_policy": {"minimum_size_angstrom": minimum_box_size,
                   "margin_angstrom": margin, "maximum_size_angstrom": maximum_box_size,
-                  "maximum_overlap_fraction": maximum_overlap},
+                                      "surface_atom_margin_angstrom": surface_margin,
+                                      "maximum_overlap_fraction": maximum_overlap,
+                                      "overlap_is_selection_criterion": False},
+                  "box_sizing": {f"P{item['rank']}": {
+                      "basis": item["sizing_basis"],
+                      "prediction_center": item["prediction_center"],
+                      "surface_atom_count": item["surface_atom_count"],
+                  } for item in rows},
                   "pocket_equivalences": equivalences}
     (cavity / "pocket_detection_provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
     return provenance

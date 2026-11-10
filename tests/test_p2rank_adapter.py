@@ -1,9 +1,36 @@
 import csv, json, tempfile, unittest
 from pathlib import Path
+from docking_universal_region import parse_box_config
 from docking_universal.p2rank_adapter import materialize_p2rank_candidates
 from docking_universal.pocket_equivalence import find_pocket_equivalences
 
 class P2RankAdapterTests(unittest.TestCase):
+    def test_box_follows_lining_atoms_and_preview_keeps_detector_rank(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            receptor = root / "target.pdb"
+            receptor.write_text(
+                "ATOM      1  CA  TYR A  10       2.000   0.000   0.000  1.00 20.00           C\n"
+                "ATOM      2  CA  TYR A  11      23.000   0.000   0.000  1.00 20.00           C\n"
+                "ATOM      3  CB  TYR A  11      49.000   0.000   0.000  1.00 20.00           C\nEND\n"
+            )
+            predictions = root / "predictions.csv"
+            predictions.write_text(
+                "name,rank,score,probability,center_x,center_y,center_z,residue_ids,surf_atom_ids\n"
+                "pocket4,4,8.2,0.91,10,0,0,A_10 A_11,1 2\n"
+            )
+            cavity = root / "cavity"
+            record = materialize_p2rank_candidates(predictions, receptor, cavity, "target")
+            config = parse_box_config(cavity / "target_pocket4.conf")
+            self.assertEqual(config, dict(center_x=10, center_y=0, center_z=0,
+                                          size_x=28, size_y=26, size_z=26))
+            self.assertFalse((cavity / "target_pocket1.conf").exists())
+            preview = (cavity / "target_pocket4_box.pdb").read_text().splitlines()
+            self.assertEqual({float(line[30:38]) for line in preview if line.startswith("HETATM")}, {-4, 24})
+            self.assertIn("49.000", (cavity / "frozen_pockets/pocket4_atm.pdb").read_text())
+            self.assertEqual(record["box_sizing"]["P4"]["surface_atom_count"], 2)
+            self.assertEqual(record["box_sizing"]["P4"]["prediction_center"]["x"], 10)
+
     def test_zero_limit_retains_all_nonoverlapping_predictions(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -17,9 +44,10 @@ class P2RankAdapterTests(unittest.TestCase):
             )
             all_record = materialize_p2rank_candidates(predictions, receptor, root / "all", "target", maximum_pockets=0)
             limited = materialize_p2rank_candidates(predictions, receptor, root / "limited", "target")
-            self.assertEqual(all_record["retained_count"], 6)
+            self.assertEqual(all_record["retained_count"], 7)
             self.assertEqual(limited["retained_count"], 3)
-            self.assertIn("overlaps_higher_ranked_box", (root / "all/pocket_selection_diagnostics.tsv").read_text())
+            diagnostics = (root / "all/pocket_selection_diagnostics.tsv").read_text()
+            self.assertIn("pocket7_atm.pdb\t1.0\t0.2\tselected\tselected\t1.0000", diagnostics)
 
     def test_large_p2rank_pocket_can_expand_beyond_legacy_36_angstrom_cap(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -283,11 +283,13 @@ centroid:
 Box Definition
 ###############################################################################
 
-Box size (A):
+Fixed box size for fpocket or ligand-centered modes (A):
 $BOX_SIZE
 
-Half box size (A):
+Fixed half box size (A):
 $HALF_BOX
+
+P2Rank dimensions are recorded per pocket in the engine configuration.
 
 Each pocket has:
   - *_center.pdb  -> center point
@@ -418,7 +420,7 @@ EOF
 # Protected by: tests/test_docking_box_artifacts.sh,
 # tests/test_pymol_review_scene.sh, and tests/test_receptor_preparation_routes.sh.
 materialize_selected_site_artifacts() {
-  local index=1 record distance geometry center_x center_y center_z score
+  local index=1 pocket_index record distance geometry center_x center_y center_z score
   local center_file box_file config_file scene_file adjacent_file merged_scene_pocket
 
   for record in "${SORTED[@]}"; do
@@ -430,27 +432,38 @@ materialize_selected_site_artifacts() {
     fi
 
     IFS='|' read -r distance geometry center_x center_y center_z score <<< "$record"
-    center_file="$CAVITY_DIR/${CANONICAL}_pocket${index}_center.pdb"
-    box_file="$CAVITY_DIR/${CANONICAL}_pocket${index}_box.pdb"
-    config_file="$CAVITY_DIR/${CANONICAL}_pocket${index}.conf"
-    scene_file="$CAVITY_DIR/${CANONICAL}_pocket${index}.pml"
+    pocket_index="$index"
+    if [ "${POCKET_ENGINE:-}" = p2rank ] && [ "$LIG_PRESENT" -eq 0 ]; then
+      # The normalizer already wrote the exact engine and preview geometry.
+      # Name the scene by detector rank, including when a rank was skipped.
+      [[ "${geometry##*/}" =~ ^pocket([0-9]+)_atm\.pdb$ ]] || return 1
+      pocket_index="${BASH_REMATCH[1]}"
+    fi
+    center_file="$CAVITY_DIR/${CANONICAL}_pocket${pocket_index}_center.pdb"
+    box_file="$CAVITY_DIR/${CANONICAL}_pocket${pocket_index}_box.pdb"
+    config_file="$CAVITY_DIR/${CANONICAL}_pocket${pocket_index}.conf"
+    scene_file="$CAVITY_DIR/${CANONICAL}_pocket${pocket_index}.pml"
 
-    write_docking_box_artifacts "$center_file" "$box_file" "$config_file" "$TIMESTAMP" \
-      "$INPUT_PDB" "$center_x" "$center_y" "$center_z" "$BOX_SIZE" "$HALF_BOX"
+    if [ "${POCKET_ENGINE:-}" = p2rank ] && [ "$LIG_PRESENT" -eq 0 ]; then
+      [ -s "$center_file" ] && [ -s "$box_file" ] && [ -s "$config_file" ] || return 1
+    else
+      write_docking_box_artifacts "$center_file" "$box_file" "$config_file" "$TIMESTAMP" \
+        "$INPUT_PDB" "$center_x" "$center_y" "$center_z" "$BOX_SIZE" "$HALF_BOX"
+    fi
 
     adjacent_file=""
     if [ "$LIG_PRESENT" -eq 0 ]; then
-      adjacent_file="$FROZEN_DIR/adjacent_pocket${index}.pdb"
+      adjacent_file="$FROZEN_DIR/adjacent_pocket${pocket_index}.pdb"
       build_adjacent_pocket_extension "$geometry" "$FROZEN_DIR" "$adjacent_file" 8.0
     fi
     merged_scene_pocket="$(cd "$CAVITY_DIR" && pwd)/fpocket_input_local_out/pockets/pocket_ligand_merged_atm.pdb"
     write_pymol_review_scene "$scene_file" "$TIMESTAMP" "$INPUT_PDB" "$CAVITY_DIR" \
-      "$RECEPTOR_PDB" "$CANONICAL" "$index" "$center_file" "$box_file" "$LIG_PRESENT" \
+      "$RECEPTOR_PDB" "$CANONICAL" "$pocket_index" "$center_file" "$box_file" "$LIG_PRESENT" \
       "$geometry" "$adjacent_file" "$SHOW_POCKET_SURFACE" "$SHOW_ADJACENT_CAVITY" \
       "$LIGAND_DIR" "${LIG:-}" "$SHOW_LIGAND_VOLUME" "$SHOW_REFERENCE_LIGANDS" \
       "$score" "$merged_scene_pocket" "${LIGANDS[@]}"
 
-    echo "Selected cavity $index"
+    echo "Selected cavity $pocket_index"
     index=$((index+1))
   done
 }

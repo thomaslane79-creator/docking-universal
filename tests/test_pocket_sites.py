@@ -119,6 +119,15 @@ class PocketSiteTests(unittest.TestCase):
         self.assertEqual(len(group['ligands']), 2)
         self.assertLess(min(group['relationships'][0]['overlap_fractions']), .65)
 
+    def test_one_related_ligand_can_group_both_boxes_when_assigned_to_one(self):
+        state = self.pending([('P1', (0., 0., 0.), 26), ('P2', (8., 0., 0.), 26)])
+        self.related_ligand(state, 'P1', (1., 2.))
+        result = project_pending_site_review(state)
+        self.assertEqual(len(result.workflow_data['pocket_candidates']), 1)
+        group = result.workflow_data['pocket_candidates'][0]['evidence']['site_group']
+        self.assertEqual(group['member_ids'], ['P1', 'P2'])
+        self.assertEqual(group['relationships'][0]['reason'], 'both_boxes_contain_all_experimental_ligands')
+
     def test_partial_ligand_containment_remains_explicit_and_preview_writes_nothing(self):
         state = self.two_ligand_sites()
         self.assertEqual(len(project_pending_site_review(state).workflow_data['pocket_candidates']), 2)

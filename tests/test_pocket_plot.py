@@ -62,6 +62,22 @@ class PocketPlotTests(unittest.TestCase):
                 from docking_universal.gui.desktop import StudyWindow
                 summary, _ = StudyWindow._candidate_evidence_digest(candidate, candidate_with_input_ligand_evidence(state, candidate)['evidence'])
                 self.assertIn('Input ligand: GNP A:200', summary)
+                self.assertIn('Ligand edge:', summary)
+            edge = root / 'edge.conf'
+            edge.write_text('center_x = 0\ncenter_y = 0\ncenter_z = 0\n'
+                            'size_x = 2.02\nsize_y = 26\nsize_z = 26\n')
+            assets.append(artifact('edge', 'docking_box', edge))
+            edge_candidate = {'id': 'P3', 'box_artifact_id': 'edge', 'evidence': {}}
+            edge_evidence = candidate_with_input_ligand_evidence(state, edge_candidate)['evidence']
+            summary, _ = StudyWindow._candidate_evidence_digest(edge_candidate, edge_evidence)
+            self.assertIn('Ligand edge: 0.01 Å', summary)
+            outside = root / 'outside.conf'
+            outside.write_text(edge.read_text().replace('size_x = 2.02', 'size_x = 1.8'))
+            assets.append(artifact('outside', 'docking_box', outside))
+            outside_candidate = {'id': 'P4', 'box_artifact_id': 'outside', 'evidence': {}}
+            outside_evidence = candidate_with_input_ligand_evidence(state, outside_candidate)['evidence']
+            summary, _ = StudyWindow._candidate_evidence_digest(outside_candidate, outside_evidence)
+            self.assertIn('Ligand extends 0.10 Å outside box', summary)
             self.assertEqual(candidates, before)
             # Related observations remain separate and still count.
             candidates[0]['evidence']['experimental_ligand_evidence']['observation_count'] = 3

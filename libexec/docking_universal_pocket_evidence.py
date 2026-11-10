@@ -519,17 +519,10 @@ def group_ligand_sites(record, evidence_root, atom_contact_cutoff=4.0,
                        maximum_box_dimension=DEFAULT_MAXIMUM_BOX_DIMENSION):
     """Merge aligned ligand observations into unified spatial sites.
 
-    Two observations describe the same site when a meaningful fraction of one
-    ligand's heavy atoms lies within ``atom_contact_cutoff`` of the other, or
-    when both observations have the same unique fpocket-cavity assignment.
-    Those direct molecular relationships first define preliminary sites.
-    Preliminary sites are then consolidated when their evidence boxes overlap
-    by at least ``minimum_box_overlap`` and the recomputed combined box remains
-    below ``maximum_combined_box_volume`` and no dimension exceeds
-    ``maximum_box_dimension``.  Every recomputed box contains the accepted
-    ligand atoms.  Uniquely corresponding retained fpocket geometry is also
-    included when doing so remains within those limits; otherwise it remains
-    supporting evidence without inflating the docking region.
+    Observations share a site when each ligand fits completely inside both
+    ligand-centered evidence boxes. Complete-link grouping prevents unrelated
+    sites from joining through an intermediate box. Size limits still bound
+    the proposed combined box.
     """
     evidence_root = Path(evidence_root)
     usable = []
@@ -547,30 +540,22 @@ def group_ligand_sites(record, evidence_root, atom_contact_cutoff=4.0,
     for left in range(len(usable)):
         for right in range(left + 1, len(usable)):
             left_atoms, right_atoms = usable[left][1], usable[right][1]
-            ligand_overlap = _ligand_overlap_fraction(
-                left_atoms, right_atoms, atom_contact_cutoff,
+            left_center, left_size = usable[left][2], usable[left][3]
+            right_center, right_size = usable[right][2], usable[right][3]
+            both_fit = (
+                np.all(np.abs(left_atoms - right_center) <= right_size / 2)
+                and np.all(np.abs(right_atoms - left_center) <= left_size / 2)
             )
-            left_pocket = validated_matched_cavity(usable[left][0])
-            right_pocket = validated_matched_cavity(usable[right][0])
-            shared_unique_cavity = (
-                left_pocket is not None and left_pocket == right_pocket
-            )
-            # A cavity identifier alone is not enough to merge observations:
-            # stale or chain-mismatched fpocket assignments can associate
-            # spatially distant ligands with the same numbered pocket.  A
-            # shared cavity may support grouping only when the two
-            # ligand-centered evidence boxes also overlap at the configured
-            # minimum.  This preserves separate exploratory boxes for
-            # genuinely different sites while retaining the compact box for
-            # aligned ligands that occupy the same region.
-            boxes_overlap = _box_overlap_fraction(
-                (usable[left][2], usable[left][3]),
-                (usable[right][2], usable[right][3]),
-            )
-            if ((ligand_overlap >= minimum_ligand_overlap and
-                 boxes_overlap >= minimum_box_overlap) or
-                    (shared_unique_cavity and boxes_overlap >= minimum_box_overlap)):
-                compatible[left].add(right); compatible[right].add(left)
+            if both_fit:
+                _, size = _evidence_box([left_atoms, right_atoms], minimum_box_size, ligand_margin)
+                if max(size) <= maximum_box_dimension and float(np.prod(size)) <= maximum_combined_box_volume:
+                    compatible[left].add(right)
+                    compatible[right].add(left)
+
+    def fits_size_limits(indices):
+        _, size = _evidence_box([usable[index][1] for index in indices],
+                                minimum_box_size, ligand_margin)
+        return max(size) <= maximum_box_dimension and float(np.prod(size)) <= maximum_combined_box_volume
 
     # Complete-link clustering prevents transitive site inflation.  A chain of
     # pairwise contacts (A near B, B near C) is not enough to place A and C in
@@ -582,6 +567,7 @@ def group_ligand_sites(record, evidence_root, atom_contact_cutoff=4.0,
         candidates = [
             component_index for component_index, component in enumerate(components)
             if all(member in compatible[index] for member in component)
+            and fits_size_limits(component + [index])
         ]
         if candidates:
             # Prefer the largest established compatible site; stable index is
@@ -621,48 +607,6 @@ def group_ligand_sites(record, evidence_root, atom_contact_cutoff=4.0,
         atom_sets, _ = component_evidence(component)
         return _evidence_box(atom_sets, minimum_box_size, ligand_margin)
 
-    # Preserve direct ligand/cavity groupings, then merge overlapping
-    # preliminary evidence regions in descending-overlap order.  Cross-cluster
-    # overlap is the strongest original pairwise overlap, while the volume cap
-    # is evaluated on the complete proposed merged region.  This permits a
-    # compact chain of mutually supported sites without allowing transitive
-    # growth into an unbounded whole-protein box.
-    preliminary = list(components)
-    preliminary_boxes = [component_box(component) for component in preliminary]
-    clusters = [{index} for index in range(len(preliminary))]
-    while True:
-        choices = []
-        for left in range(len(clusters)):
-            for right in range(left + 1, len(clusters)):
-                # Complete-link overlap avoids recreating the same transitive
-                # growth across preliminary groups.
-                overlap = min(
-                    _box_overlap_fraction(preliminary_boxes[a], preliminary_boxes[b])
-                    for a in clusters[left] for b in clusters[right]
-                )
-                if overlap < minimum_box_overlap:
-                    continue
-                merged_component = sorted({
-                    member
-                    for preliminary_index in clusters[left] | clusters[right]
-                    for member in preliminary[preliminary_index]
-                })
-                _, merged_size = component_box(merged_component)
-                merged_volume = float(np.prod(merged_size))
-                if (max(merged_size) <= maximum_box_dimension and
-                        merged_volume <= maximum_combined_box_volume):
-                    choices.append((overlap, -merged_volume, -left, -right,
-                                    left, right, merged_component))
-        if not choices:
-            break
-        _, _, _, _, left, right, _ = max(choices)
-        clusters[left] |= clusters[right]
-        clusters.pop(right)
-    components = [
-        sorted({member for preliminary_index in cluster
-                for member in preliminary[preliminary_index]})
-        for cluster in clusters
-    ]
     groups = []
     for component in components:
         members = [usable[index] for index in component]
@@ -725,12 +669,12 @@ def group_ligand_sites(record, evidence_root, atom_contact_cutoff=4.0,
             "minimum_box_size_angstrom": minimum_box_size,
             "ligand_margin_angstrom": ligand_margin,
             "site_grouping_rule": (
-                "aligned heavy-atom overlap, shared unique fpocket cavity, or "
-                "overlapping evidence boxes within the recorded volume limit"
+                "both ligands fully contained in both evidence boxes"
             ),
             "atom_contact_cutoff_angstrom": atom_contact_cutoff,
             "minimum_ligand_overlap_fraction": minimum_ligand_overlap,
             "minimum_box_overlap_fraction": minimum_box_overlap,
+            "box_overlap_used_for_grouping": False,
             "maximum_combined_box_volume_angstrom3": maximum_combined_box_volume,
             "maximum_box_dimension_angstrom": maximum_box_dimension,
             "box_evidence": {
@@ -807,16 +751,21 @@ def sequence_search(sequence, identity_cutoff=0.9, rows=40, opener=urllib.reques
             "evalue_cutoff": 1e-5, "identity_cutoff": identity_cutoff,
             "sequence_type": "protein", "value": sequence,
         }},
-        "request_options": {"paginate": {"start": 0, "rows": rows},
-                            "scoring_strategy": "sequence"},
+        "request_options": {"scoring_strategy": "sequence"},
         "return_type": "polymer_entity",
     }
+    if rows is None:
+        payload["request_options"]["return_all_hits"] = True
+    else:
+        payload["request_options"]["paginate"] = {"start": 0, "rows": rows}
     request = urllib.request.Request(
         SEARCH_URL, data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json", "User-Agent": "Docking-Universal"},
         method="POST",
     )
     with opener(request, timeout=30) as response:
+        if getattr(response, "status", None) == 204:
+            return []
         result = json.load(response)
     return [item["identifier"] for item in result.get("result_set", [])]
 
@@ -855,7 +804,7 @@ def collect_pocket_evidence(
     minimum_alignment_identity=0.90,
     minimum_query_coverage=0.70,
     maximum_ca_rmsd_angstrom=2.0,
-    max_entries=20,
+    max_entries=None,
     opener=urllib.request.urlopen,
 ):
     """Collect sequence-screened, backbone-verified ligand-site evidence.
@@ -886,7 +835,8 @@ def collect_pocket_evidence(
     reference_id, reference = max(reference_chains.items(), key=lambda item: len(item[1]))
     reference_identifiers = reference_identifiers_by_chain.get(reference_id, set())
     sequence = "".join(item.one_letter for item in reference)
-    identifiers = sequence_search(sequence, query_identity_cutoff, max_entries * 2, opener)
+    identifiers = sequence_search(sequence, query_identity_cutoff,
+                                  None if max_entries is None else max_entries * 2, opener)
     entries = []
     excluded_reference_entries = set()
     for identifier in identifiers:
@@ -896,15 +846,17 @@ def collect_pocket_evidence(
             continue
         if entry not in entries:
             entries.append(entry)
-        if len(entries) >= max_entries:
+        if max_entries is not None and len(entries) >= max_entries:
             break
     # The GUI host owns stdout for framed JSON replies. Progress belongs on
     # stderr (retained by the job log), never interleaved with host responses.
     print(f"  Verifying {len(entries)} candidate related PDB entr{'y' if len(entries) == 1 else 'ies'}...", file=sys.stderr, flush=True)
-    geometries = [
-        (index, Path(box), *read_box_geometry(box))
-        for index, box in enumerate(boxes, 1)
-    ]
+    geometries = []
+    for index, box in enumerate(boxes, 1):
+        box = Path(box)
+        match = re.search(r'_pocket(\d+)\.conf$', box.name, re.IGNORECASE)
+        pocket_number = int(match.group(1)) if match else index
+        geometries.append((pocket_number, box, *read_box_geometry(box)))
     pocket_atoms_by_number = {}
     for pocket_number, box, _, _ in geometries:
         pocket_file = box.parent / "frozen_pockets" / f"pocket{pocket_number}_atm.pdb"
@@ -924,8 +876,8 @@ def collect_pocket_evidence(
         print(f"  Checking related structure {index}/{len(entries)}: {entry}", file=sys.stderr, flush=True)
         try:
             text = download_entry(entry, opener)
-        except (OSError, urllib.error.URLError) as exc:
-            skipped.append({"entry": entry, "reason": f"download failed: {exc}"})
+        except (OSError, urllib.error.URLError, ValueError, RuntimeError) as exc:
+            skipped.append({"entry": entry, "reason": f"download or coordinate conversion failed: {exc}"})
             continue
         ensemble_sources.append(retain_source_structure(ensemble_root, entry, text))
         candidates = protein_chains(text)
@@ -1086,6 +1038,7 @@ def collect_pocket_evidence(
                 key=lambda item: (-item["heavy_atom_fraction_inside"],
                                   item["minimum_distance_to_box_angstrom"],
                                   item["centroid_distance_angstrom"]),
+                default=None,
             )
             evidence.append({
                 "entry": entry, "reference_chain": reference_id, "aligned_chain": chain_id,
@@ -1108,11 +1061,11 @@ def collect_pocket_evidence(
                 "alignment_selection_basis": "ligand contact to structurally accepted protein chain",
                 "ligand_chain_matches_aligned_chain": same_chain_assignment,
                 "chain_assignment_ambiguous": chain_assignment_ambiguous,
-                "nearest_pocket": nearest["pocket_number"],
-                "ligand_centroid_inside_box": nearest["centroid_inside"],
-                "ligand_heavy_atom_fraction_inside_box": nearest["heavy_atom_fraction_inside"],
-                "ligand_fully_inside_box": nearest["all_heavy_atoms_inside"],
-                "minimum_distance_to_box_angstrom": nearest["minimum_distance_to_box_angstrom"],
+                "nearest_pocket": nearest["pocket_number"] if nearest else None,
+                "ligand_centroid_inside_box": nearest["centroid_inside"] if nearest else None,
+                "ligand_heavy_atom_fraction_inside_box": nearest["heavy_atom_fraction_inside"] if nearest else None,
+                "ligand_fully_inside_box": nearest["all_heavy_atoms_inside"] if nearest else None,
+                "minimum_distance_to_box_angstrom": nearest["minimum_distance_to_box_angstrom"] if nearest else None,
                 "matched_cavity": matched_pocket,
                 "cavity_match_reason": cavity_match_reason,
                 "pocket_relationships": relationships,
@@ -1150,6 +1103,7 @@ def collect_pocket_evidence(
     ambiguous_rows = [row for row in evidence if row.get("chain_assignment_ambiguous")]
     record["site_grouping_audit"] = {
         "minimum_box_overlap_fraction": DEFAULT_MINIMUM_BOX_OVERLAP,
+        "box_overlap_used_for_grouping": False,
         "maximum_combined_box_volume_angstrom3": DEFAULT_MAXIMUM_COMBINED_BOX_VOLUME,
         "maximum_box_dimension_angstrom": DEFAULT_MAXIMUM_BOX_DIMENSION,
         "box_basis": "accepted aligned ligand heavy atoms, with corresponding fpocket geometry included only within the recorded size limits",
@@ -1233,8 +1187,10 @@ def summarize_pocket_evidence(record):
         for relationship in relationships:
             if has_cavity_classification and not relationship.get("cavity_match", False):
                 continue
-            fraction = float(relationship.get("heavy_atom_fraction_inside", 0.0))
             pocket_number = relationship.get("pocket_number")
+            if pocket_number is None:
+                continue
+            fraction = float(relationship.get("heavy_atom_fraction_inside") or 0.0)
             if fraction <= 0 or pocket_number is None:
                 continue
             bucket = summary.setdefault(

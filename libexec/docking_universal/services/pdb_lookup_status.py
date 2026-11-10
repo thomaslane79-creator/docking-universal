@@ -3,7 +3,8 @@
 
 def lookup_coverage(record):
     skipped = record.get('skipped') or []
-    failures = [item for item in skipped if str(item.get('reason', '')).startswith('download failed:')]
+    failures = [item for item in skipped if str(item.get('reason', '')).startswith(
+        ('download failed:', 'download or coordinate conversion failed:'))]
     return {'candidate_entry_count': len(record.get('candidate_entries') or []),
             'observation_count': len(record.get('evidence') or []),
             'failed_entry_count': len(failures),
@@ -32,7 +33,7 @@ def lookup_notice(record):
                 'This does not mean no supporting evidence exists. A connection problem or PDB service error '
                 'may have prevented the lookup. Local information and previously retained evidence remain usable.', True)
     if (record.get('coverage') or {}).get('failed_entry_count'):
-        return ('PDB lookup incomplete · Some related structures could not be retrieved. '
+        return ('PDB lookup incomplete · Some related structures could not be retrieved or processed. '
                 'Retained evidence remains usable; missing results are not evidence of absence.', True)
     if status == 'completed' and (record.get('coverage') or {}).get('observation_count') == 0:
         return ('PDB search completed · No qualifying ligand observations were found in the structures '

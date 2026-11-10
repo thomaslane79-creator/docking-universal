@@ -4167,6 +4167,14 @@ if QtWidgets is not None:
             if local.get('observation_count'):
                 parts.append('Input ligand: ' + ', '.join(row['ligand'] for row in local.get('observations', [])))
                 details.append('The retained ligand from the loaded structure fits this box. This is not independent control validation.')
+            clearance = local.get('minimum_face_clearance_angstrom')
+            if local.get('status') == 'verified' and clearance is not None:
+                if clearance >= 0:
+                    parts.append(f'Ligand edge: {clearance:.2f} Å from box face')
+                else:
+                    parts.append(f'Ligand extends {-clearance:.2f} Å outside box')
+                details.append('Distance is measured from retained input ligand heavy atoms to the box faces. '
+                               'The input-ligand evidence count also uses a 0.25 Å boundary tolerance.')
 
             experimental = evidence.get("experimental_ligand_evidence") or {}
             observations = int(experimental.get("observation_count") or 0)

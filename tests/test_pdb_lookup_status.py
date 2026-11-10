@@ -32,6 +32,10 @@ class PdbLookupStatusTests(unittest.TestCase):
         self.assertTrue(warning)
         self.assertIn('incomplete', text)
         self.assertNotIn('No qualifying', text)
+        conversion = lookup_coverage({'skipped': [
+            {'entry': '7BL1', 'reason': 'download or coordinate conversion failed: unsupported chain'}]})
+        self.assertEqual(conversion['failed_entries'], ['7BL1'])
+        self.assertTrue(lookup_notice({'status': 'completed', 'coverage': conversion})[1])
 
     def test_successful_no_match_query_remains_distinct(self):
         text, warning = lookup_notice({'status': 'completed', 'coverage': lookup_coverage({})})

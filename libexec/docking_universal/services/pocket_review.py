@@ -102,8 +102,11 @@ def candidate_with_input_ligand_evidence(state, candidate, *, boundary_tolerance
         identity = next(iter(identities))
         inside = sum(all(abs(value - geometry['center_' + axis]) <= geometry['size_' + axis] / 2 + boundary_tolerance
                          for axis, value in zip('xyz', xyz)) for xyz in atoms)
+        clearance = min(geometry['size_' + axis] / 2 - abs(value - geometry['center_' + axis])
+                        for xyz in atoms for axis, value in zip('xyz', xyz))
         local.update(status='verified', heavy_atom_count=len(atoms), heavy_atoms_inside=inside,
                      all_heavy_atoms_inside=inside == len(atoms), boundary_tolerance_angstrom=boundary_tolerance,
+                     minimum_face_clearance_angstrom=clearance,
                      ligand_sha256=ligand.sha256, box_sha256=box.sha256)
         if inside == len(atoms):
             local['observations'] = [{'evidence_class': 'input_structure', 'entry': 'Input',
@@ -299,6 +302,11 @@ def build_labeled_candidate_mappings(
         number = int(match.group(1)) if match else fallback_index
         supporting = groups_by_pocket.get(str(number), [])
         description = f"individual {detector} pocket box"
+        sizing = (provenance.get("box_sizing") or {}).get(f"P{number}", {})
+        if sizing.get("basis") == "p2rank_surface_atoms":
+            description = "P2Rank box around the pocket-lining atoms"
+        elif sizing.get("basis") == "prediction_center_default":
+            description = "Default box at the prediction center. Pocket extent unavailable."
         if supporting:
             description += "; direct deposited-ligand correspondence recorded"
         equivalences = equivalence_by_pocket.get(number, [])
@@ -324,6 +332,7 @@ def build_labeled_candidate_mappings(
             "evidence": {
                 "kind": detector,
                 "detector": detector,
+                **({"box_sizing": sizing} if sizing else {}),
                 "direct_ligand_site_groups": len(supporting),
                 "pocket_equivalences": equivalences,
                 "symmetry_equivalence_shown_in_box_selection": bool(equivalences),
@@ -336,7 +345,7 @@ def build_labeled_candidate_mappings(
         })
 
     diagnostics = cavity / "pocket_selection_diagnostics.tsv"
-    if include_predicted and diagnostics.is_file():
+    if include_predicted and detector != 'p2rank' and diagnostics.is_file():
         with diagnostics.open(newline="") as handle:
             retained = [
                 row for row in csv.DictReader(handle, delimiter="\t")

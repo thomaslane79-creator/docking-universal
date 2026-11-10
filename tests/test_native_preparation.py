@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libexec"))
-from docking_universal.native_preparation import meeko_command, prepare_native_candidate, PreparationReviewRequired, retain_exact_selected_boxes
+from docking_universal.native_preparation import meeko_command, prepare_native_candidate, PreparationReviewRequired
 from docking_universal.services.preparation import ReceptorPreparationOptions
 
 
@@ -96,27 +96,43 @@ class NativePreparationTests(unittest.TestCase):
             self.assertFalse(any("--allow_bad_res" in command for command in calls))
             self.assertFalse(any("predict" in command for command in calls))
 
-    def test_box_center_precision_and_nonsequential_detector_identity(self):
+    def test_native_preparation_preserves_p2rank_geometry_by_detector_rank(self):
+        fixture = Path(__file__).resolve().parents[1] / "examples/tutorials/02_ligand_free_cavity/inputs/2R8N.pdb"
         with tempfile.TemporaryDirectory() as temporary:
-            cavity = Path(temporary)
-            text = "center_x = 40.018\ncenter_y = 34.735\ncenter_z = -6.211\nsize_x = 26\nsize_y = 26\nsize_z = 26\n"
-            config = cavity / "target_pocket1.conf"
-            config.write_text(text)
-            fourth = cavity / "target_pocket4.conf"
-            fourth.write_text(text.replace("size_y = 26", "size_y = 27.948"))
-            records = cavity / "selected_pocket_records.txt"
-            records.write_text("2.4|pocket1_atm.pdb|40.0182|34.7353|-6.2114|2.4\n1.1|pocket4_atm.pdb|40.0182|34.7353|-6.2114|1.1\n")
-            retain_exact_selected_boxes(cavity, "target")
-            self.assertIn("center_x = 40.0182", config.read_text())
-            self.assertIn("size_y = 27.948", fourth.read_text())
-            self.assertFalse((cavity / "target_pocket2.conf").exists())
-            self.assertTrue((cavity / "target_pocket4_box.pdb").exists())
-            (cavity / "target_pocket3.conf").write_text(text)
-            records.write_text(records.read_text().replace("1.1|pocket4", "1.2|pocket3_atm.pdb|40|34|-6|1.2\n1.1|pocket4"))
-            before = config.read_bytes()
-            with self.assertRaisesRegex(ValueError, "collides"):
-                retain_exact_selected_boxes(cavity, "target")
-            self.assertEqual(config.read_bytes(), before)
+            root = Path(temporary)
+            p2rank = root / "p2rank"
+            (p2rank / "bin/lib").mkdir(parents=True)
+            (p2rank / "bin/p2rank.jar").touch()
+            java = root / "java.exe"
+            java.touch()
+
+            def runner(command, **kwargs):
+                if command[-1] == "-v":
+                    kwargs["stdout"].write("P2Rank 2.5.1\n")
+                elif "meeko.cli.mk_prepare_receptor" in command:
+                    Path(command[command.index("-p") + 1]).write_text("synthetic receptor fixture\n")
+                elif "predict" in command:
+                    pdb = Path(command[command.index("-f") + 1])
+                    atoms = sorted((float(line[30:38]), line[6:11].strip())
+                                   for line in pdb.read_text().splitlines() if line.startswith("ATOM  "))
+                    first, last = atoms[0], atoms[-1]
+                    prediction = Path(command[command.index("-o") + 1]) / "fixture_predictions.csv"
+                    prediction.parent.mkdir(exist_ok=True)
+                    prediction.write_text(
+                        "name,rank,score,probability,center_x,center_y,center_z,residue_ids,surf_atom_ids\n"
+                        f"pocket4,4,8.2,0.91,0,0,0,,{first[1]} {last[1]}\n"
+                    )
+                return subprocess.CompletedProcess(command, 0)
+
+            options = ReceptorPreparationOptions(fixture, root / "outputs", "pockets", reduce2="off")
+            with patch("docking_universal.native_preparation.importlib.util.find_spec", return_value=object()):
+                output = prepare_native_candidate(options, p2rank=p2rank, java=java, runner=runner)
+            from docking_universal_region import parse_box_config
+            cavity = output / "cavity"
+            config = parse_box_config(cavity / "2R8N_pocket4.conf")
+            self.assertGreater(config["size_x"], 26)
+            self.assertTrue((cavity / "2R8N_pocket4_box.pdb").is_file())
+            self.assertFalse((cavity / "2R8N_pocket1.conf").exists())
 
 
 if __name__ == "__main__":

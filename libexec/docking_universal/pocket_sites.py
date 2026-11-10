@@ -116,6 +116,8 @@ def consolidate_site_candidates(state, *, approved_ids=()):
             geometries[identity] = _verified_geometry(artifacts[candidate['box_artifact_id']])
         except (OSError, KeyError, ValueError):
             continue  # Missing/unverified assets cannot justify consolidation.
+        # A related ligand may be assigned to one candidate while fitting
+        # several boxes. Compare every retained observation in the same frame.
         ligands[identity] = candidate_ligands(state, candidate, geometries[identity])
 
     def relationship(left, right):
@@ -129,7 +131,17 @@ def consolidate_site_candidates(state, *, approved_ids=()):
             return None
         fractions = volume_overlap(geometries[a], geometries[b])
         combined = {**(ligands.get(a) or {}), **(ligands.get(b) or {})}
-        complete_ligands = bool(ligands.get(a) and ligands.get(b)) and all(
+        # Include an observation assigned elsewhere only when it fits both
+        # boxes. Ligands belonging to either box still all have to fit both.
+        shared = {}
+        for other in originals:
+            if _frame(other) != _frame(left):
+                continue
+            for key, record in (ligands.get(other['id']) or {}).items():
+                if ligand_fits(record['points'], geometries[a]) and ligand_fits(record['points'], geometries[b]):
+                    shared[key] = record
+        combined.update(shared)
+        complete_ligands = bool(combined) and all(
             ligand_fits(record['points'], geometries[identity])
             for record in combined.values() for identity in (a, b))
         identical_box = geometries[a] == geometries[b]

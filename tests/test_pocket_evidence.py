@@ -8,6 +8,7 @@ import json
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 import numpy as np
@@ -43,12 +44,35 @@ class FakeResponse(io.BytesIO):
 
 
 class PocketEvidenceTests(unittest.TestCase):
+    def test_sequence_search_accepts_no_content_response(self):
+        class EmptyResponse(FakeResponse):
+            status = 204
+        self.assertEqual(EVIDENCE.sequence_search("ACDE", rows=None,
+                         opener=lambda request, timeout: EmptyResponse(b"")), [])
+
+    def test_default_search_processes_all_matching_entries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            receptor = root / "target.pdb"
+            receptor.write_text(protein())
+            requested = []
+            hits = [{"identifier": f"A{index:03d}_1"} for index in range(25)]
+            def opener(request, timeout=30):
+                requested.append(json.loads(request.data))
+                return FakeResponse(json.dumps({"result_set": hits}).encode())
+            with patch.object(EVIDENCE, "download_entry", side_effect=RuntimeError("unavailable")):
+                result = EVIDENCE.collect_pocket_evidence(receptor, [], root / "evidence", opener=opener)
+            self.assertTrue(requested[0]["request_options"]["return_all_hits"])
+            self.assertEqual(len(result["candidate_entries"]), 25)
+            self.assertEqual(len(result["skipped"]), 25)
+            self.assertIsNone(result["query"]["maximum_entries"])
+
     def test_evidence_class_separates_same_protein_exact_sequence_and_homolog(self):
         self.assertEqual(EVIDENCE.evidence_class({"UNP:P1"}, 0.92, 1.0), "same_protein")
         self.assertEqual(EVIDENCE.evidence_class(set(), 1.0, 1.0), "exact_sequence_match")
         self.assertEqual(EVIDENCE.evidence_class(set(), 0.94, 1.0), "close_structural_homolog")
 
-    def test_overlapping_evidence_boxes_merge_when_combined_volume_is_allowed(self):
+    def test_overlapping_boxes_do_not_merge_when_ligands_do_not_fit_both(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             rows = []
@@ -69,10 +93,9 @@ class PocketEvidenceTests(unittest.TestCase):
                 {"evidence": rows, "pocket_engine": "p2rank"}, root,
                 atom_contact_cutoff=1.1, minimum_ligand_overlap=0.5,
             )
-            self.assertEqual([group["member_count"] for group in groups], [3])
+            self.assertEqual([group["member_count"] for group in groups], [2, 1])
             self.assertEqual(groups[0]["box"]["size_x"], 26.0)
-            self.assertEqual(groups[0]["box"]["center_x"], 8.5)
-            self.assertEqual(groups[0]["representative_ligand"]["entry"], "E3")
+            self.assertEqual(groups[0]["box"]["center_x"], 3.5)
             self.assertEqual(groups[0]["site_identity"]["canonical_label"], "L1")
             self.assertTrue(groups[0]["site_identity"]["is_separate_from_predicted_pocket"])
             self.assertEqual(groups[0]["pocket_recovery"]["status"], "not_recovered")
@@ -330,6 +353,27 @@ class PocketEvidenceTests(unittest.TestCase):
             self.assertEqual(record["evidence"][0]["nearest_pocket"], 1)
             self.assertTrue(record["evidence"][0]["ligand_fully_inside_box"])
             self.assertEqual(record["evidence"][0]["ligand_heavy_atom_count"], 6)
+            ranked_boxes = []
+            for box, number in zip(boxes, (4, 9)):
+                ranked = root / f"target_pocket{number}.conf"
+                ranked.write_text(box.read_text())
+                ranked_boxes.append(ranked)
+            ranked_record = EVIDENCE.collect_pocket_evidence(
+                receptor, ranked_boxes, root / "ranked-evidence", max_entries=5, opener=opener,
+            )
+            self.assertEqual(ranked_record["evidence"][0]["nearest_pocket"], 4)
+            self.assertEqual([r["pocket_number"] for r in ranked_record["evidence"][0]["pocket_relationships"]], [4, 9])
+            no_boxes = EVIDENCE.collect_pocket_evidence(
+                receptor, [], root / "no-predictions", max_entries=5, opener=opener,
+            )
+            self.assertEqual(len(no_boxes["evidence"]), 1)
+            self.assertIsNone(no_boxes["evidence"][0]["nearest_pocket"])
+            self.assertEqual(no_boxes["evidence"][0]["pocket_relationships"], [])
+            with patch.object(EVIDENCE, "download_entry", side_effect=RuntimeError("chain name too long")):
+                failed_entry = EVIDENCE.collect_pocket_evidence(
+                    receptor, boxes, root / "unsupported-entry", max_entries=5, opener=opener,
+                )
+            self.assertIn("chain name too long", failed_entry["skipped"][0]["reason"])
             aligned = root / "evidence" / record["evidence"][0]["aligned_ligand_pdb"]
             self.assertTrue(aligned.is_file())
             self.assertNotIn("selected_pocket", record)
