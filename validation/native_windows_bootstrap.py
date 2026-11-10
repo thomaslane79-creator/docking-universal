@@ -82,6 +82,9 @@ def main():
             # Existing-browser discovery already has a separate passed record.
             command.append('-PrivateBrowser')
         installer_environment = dict(os.environ)
+        test_desktop = out / 'test desktop'
+        test_desktop.mkdir()
+        installer_environment['DOCKING_UNIVERSAL_DESKTOP_DIR'] = str(test_desktop)
         if args.without_prerequisites:
             # This driver uses setup-python, but the actual PowerShell child
             # sees OS tools only. Do not remove/rename hosted runner software.
@@ -111,6 +114,21 @@ def main():
         with (out / "install.log").open("w", encoding="utf-8") as log:
             subprocess.run(command, env=installer_environment, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=2700)
         status["checks"].append("native_powershell_fresh_bootstrap")
+        shortcut = test_desktop / 'Docking Universal.lnk'
+        icon = destination / 'app/docking_universal/gui/assets/branding/docking-universal-app-icon.ico'
+        shortcut_environment = {**os.environ, 'DU_SHORTCUT': str(shortcut),
+            'DU_TARGET': str(destination / 'bin/docking-universal.cmd'), 'DU_ICON': str(icon)}
+        shortcut_check = subprocess.run(['powershell.exe', '-NoProfile', '-Command',
+            "$ErrorActionPreference='Stop'; if (!(Test-Path -LiteralPath $env:DU_SHORTCUT) -or "
+            "!(Test-Path -LiteralPath $env:DU_ICON)) { exit 2 }; "
+            "$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:DU_SHORTCUT); "
+            "if ($s.TargetPath -ne $env:DU_TARGET -or $s.Arguments -ne 'desktop' -or "
+            "$s.IconLocation -ne ($env:DU_ICON + ',0')) { exit 3 }"],
+            env=shortcut_environment, capture_output=True, text=True, timeout=30)
+        if shortcut_check.returncode:
+            raise ValueError('Installed Windows desktop shortcut, target, or logo did not verify: '
+                             + shortcut_check.stderr)
+        status['checks'].append('branded_desktop_shortcut')
         installed = json.loads((destination / "bootstrap-status.json").read_text(encoding="utf-8"))
         if installed["status"] != ("scientific_dependencies_installed" if args.with_scientific else "bootstrap_installed"):
             raise ValueError("Bootstrap did not reach its explicit installed state")

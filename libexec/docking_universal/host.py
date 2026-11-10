@@ -66,7 +66,7 @@ class CommandDispatcher:
 
     MUTATIONS = {
         "create_study", "remove_study", "start_pocket_review", "resolve_decision",
-        "start_receptor_preparation", "start_protocol_finalization", "start_screening",
+        "start_receptor_preparation", "retry_site_exploration", "retry_recorded_stage", "start_protocol_finalization", "start_screening",
         "start_control_validation",
         "prepare_reviewed_receptor",
         "prepare_receptor_changes",
@@ -211,10 +211,11 @@ class CommandDispatcher:
         if command.operation == 'prepare_reviewed_receptor':
             if command.expected_revision is None or self.workflow_runner is None:
                 raise ValueError('A configured host and current revision are required')
-            if command.payload:
+            if command.payload not in ({}, {'retry': True}):
                 raise ValueError('Reviewed preparation uses the retained setup, not replacement inputs')
             result = self.workflow_runner.prepare_reviewed_receptor(command.study_id,
-                request_id=command.request_id, expected_revision=command.expected_revision)
+                request_id=command.request_id, expected_revision=command.expected_revision,
+                retry=command.payload.get('retry', False))
             state = self.controller.get_study(command.study_id)
             return Response(command.request_id, 'applied', state.revision, result)
         if command.operation in {'preview_receptor_changes', 'prepare_receptor_changes'}:
@@ -247,6 +248,25 @@ class CommandDispatcher:
                            expected_revision=command.expected_revision, request_id=command.request_id)
             state = self.controller.get_study(command.study_id)
             return Response(command.request_id, 'applied', state.revision, {'review': record})
+        if command.operation == 'retry_recorded_stage':
+            if command.expected_revision is None or self.workflow_runner is None:
+                raise ValueError('A configured host and current revision are required')
+            if command.payload:
+                raise ValueError('Restart uses only the retained scientific settings')
+            result = self.workflow_runner.retry_recorded_stage(
+                command.study_id, request_id=command.request_id, expected_revision=command.expected_revision)
+            state = self.controller.get_study(command.study_id)
+            return Response(command.request_id, 'applied', state.revision, result)
+        if command.operation == "retry_site_exploration":
+            if command.expected_revision is None or self.workflow_runner is None:
+                raise ValueError('A configured host and current revision are required')
+            if command.payload:
+                raise ValueError('Site detection retry uses only the retained setup')
+            result = self.workflow_runner.retry_site_exploration(
+                command.study_id, request_id=command.request_id,
+                expected_revision=command.expected_revision)
+            state = self.controller.get_study(command.study_id)
+            return Response(command.request_id, 'applied', state.revision, result)
         if command.operation == "start_receptor_preparation":
             if command.expected_revision is None:
                 raise RevisionConflictError("A state revision is required for scientific mutations")

@@ -39,8 +39,14 @@ class ApplicationHostController:
     def start_preparation(self, payload, revision):
         return self._request("start_receptor_preparation", payload, revision)
 
-    def prepare_reviewed_receptor(self, revision):
-        return self._request('prepare_reviewed_receptor', {}, revision)
+    def retry_site_exploration(self, revision):
+        return self._request('retry_site_exploration', {}, revision)
+
+    def retry_recorded_stage(self, revision):
+        return self._request('retry_recorded_stage', {}, revision)
+
+    def prepare_reviewed_receptor(self, revision, *, retry=False):
+        return self._request('prepare_reviewed_receptor', {'retry': True} if retry else {}, revision)
 
     def preview_site_expansion(self, candidate_ids, base_id, revision):
         return self._request('preview_site_expansion', {'candidate_ids': list(candidate_ids),

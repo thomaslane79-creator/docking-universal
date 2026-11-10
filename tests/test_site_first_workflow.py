@@ -116,6 +116,36 @@ class SiteFirstWorkflowTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'not parameterized'):
             request_from_study(state, FinalizationSettings(), self.root / 'final', exploratory_use_approved=True)
 
+    def test_failed_site_detection_restarts_without_overwriting_attempt_or_setup(self):
+        worker = self.engine.parent / 'docking-universal-explore-sites.py'
+        worker.unlink()
+        worker.write_text('import pathlib, sys\n'
+                          'out = pathlib.Path(sys.argv[sys.argv.index("--out") + 1])\n'
+                          'out.mkdir(parents=True)\n(out / "partial.txt").write_text("retained")\n'
+                          'print("first attempt failed")\nsys.exit(1)\n')
+        self.runner.start_preparation('test', {
+            'input_pdb': str(self.source), 'working_directory': str(self.root / 'work'),
+            'site_mode': 'ligand', 'ligand_resname': 'BEN', 'ligand_chain_id': 'A',
+            'ligand_residue_number': '100', 'pdb_pocket_evidence': 'off',
+            'explore_sites_first': True,
+        }, request_id='failed-explore', expected_revision=self.store.load('test').revision)
+        failed = self.wait(lambda s: s.jobs and s.jobs[-1].status.value == 'failed' and not s.active_job)
+        original = self.root / 'work/Target_receptor_prep-site-review/partial.txt'
+        log = self.root / 'work/.docking-universal-application-logs/Target-receptor-preparation-site-exploration.stdout.log'
+        self.assertEqual(original.read_text(), 'retained')
+        original_log = log.read_text()
+        setup = failed.workflow_data['study_setup'].copy()
+        worker.unlink()
+        worker.symlink_to(ROOT / 'libexec/docking-universal-explore-sites.py')
+        self.runner.retry_site_exploration('test', request_id='retry-explore', expected_revision=failed.revision)
+        done = self.wait(lambda s: bool(s.pending_decisions))
+        self.assertEqual(done.workflow_data['study_setup'], setup)
+        self.assertEqual(original.read_text(), 'retained')
+        self.assertEqual(log.read_text(), original_log)
+        self.assertIn('.docking-universal-site-attempts', done.workflow_data['site_exploration_root'])
+        self.assertEqual([j.status.value for j in done.jobs[:2]], ['failed', 'completed'])
+        self.assertEqual(done.pending_decisions[0].kind, 'select_pockets')
+
     def test_preparation_preserves_reviewed_boxes_and_does_not_predict_again(self):
         state = self.approve(self.explore())
         boxes = {a.path: sha256(a.path) for a in state.artifacts if a.kind == 'docking_box'}
@@ -145,6 +175,25 @@ class SiteFirstWorkflowTests(unittest.TestCase):
         self.assertIsNone(failed.active_job)
         with self.assertRaisesRegex(ValueError, 'already attempted'):
             self.runner.prepare_reviewed_receptor('test', request_id='retry', expected_revision=failed.revision)
+
+    def test_failed_parameterization_restarts_in_a_separate_folder(self):
+        original_engine = self.engine.read_text()
+        self.engine.write_text('#!/bin/sh\nmkdir -p Target_receptor_prep/receptor\n'
+                               'printf "failed evidence\\n" > Target_receptor_prep/receptor/receptor.log\nexit 1\n')
+        state = self.approve(self.explore())
+        boxes = {a.path: sha256(a.path) for a in state.artifacts if a.kind == 'docking_box'}
+        self.runner.prepare_reviewed_receptor('test', request_id='failed', expected_revision=state.revision)
+        failed = self.wait(lambda s: s.workflow_data.get('receptor_parameterization_status') == 'failed' and not s.active_job)
+        old_root = Path(failed.workflow_data['receptor_parameterization_attempt_root'])
+        diagnostic = old_root / 'receptor/receptor.log'
+        self.engine.write_text(original_engine)
+        self.runner.prepare_reviewed_receptor('test', request_id='retry', expected_revision=failed.revision, retry=True)
+        done = self.wait(lambda s: s.workflow_data.get('receptor_parameterization_status') == 'completed')
+        self.assertEqual(diagnostic.read_text(), 'failed evidence\n')
+        self.assertIn('.docking-universal-parameterization-attempts', done.workflow_data['preparation_root'])
+        self.assertEqual(done.selected_pocket_ids, state.selected_pocket_ids)
+        self.assertEqual({p: sha256(p) for p in boxes}, boxes)
+        self.assertEqual([x['status'] for x in done.workflow_data['receptor_preparation_attempts']], ['failed', 'completed'])
 
     def test_input_mutation_invalidates_site_review(self):
         state = self.approve(self.explore())

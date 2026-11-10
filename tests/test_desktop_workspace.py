@@ -16,6 +16,48 @@ from docking_universal.state import JsonStudyStore
 
 @unittest.skipIf(QT_IMPORT_ERROR is not None, "selected Qt 6 binding is unavailable")
 class DesktopWorkspaceTests(unittest.TestCase):
+    def test_failed_site_detection_exposes_revisioned_retry_only_when_supported(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        StudyController(self.store).create_study('failed-site-study', 'Failed site')
+        state = self.store.load('failed-site-study')
+        state.workflow_data['study_setup'] = {'explore_sites_first': True}
+        state.jobs.append(Job(id='failed-site', stage='site_exploration', status=JobStatus.FAILED))
+        self.store.save(state)
+        client = SimpleNamespace(runtime={'retry_site_exploration_supported': True},
+                                 connected=True, request=Mock(return_value={}))
+        window = StudyWindow(self.store, 'failed-site-study', settings=self.settings, host_client=client)
+        self.addCleanup(window.close)
+        window.refresh()
+        self.assertFalse(window.retry_site_button.isHidden())
+        self.assertTrue(window.retry_site_button.isEnabled())
+        revision = window.state.revision
+        window.retry_site_button.click()
+        client.request.assert_called_once_with('failed-site-study', 'retry_site_exploration', {}, expected_revision=revision)
+        client.runtime.clear()
+        window.refresh()
+        self.assertTrue(window.retry_site_button.isHidden())
+
+    def test_failed_screening_retry_uses_the_recorded_host_request(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        StudyController(self.store).create_study('failed-screen-study', 'Failed screen')
+        state = self.store.load('failed-screen-study')
+        state.jobs.append(Job(id='screen-job', stage='screening', status=JobStatus.FAILED,
+                              request_id='screen-request'))
+        state.workflow_data['restartable_stage_requests'] = [
+            {'stage': 'screening', 'request_id': 'screen-request', 'payload': {}}]
+        self.store.save(state)
+        client = SimpleNamespace(runtime={'retry_recorded_stage_supported': True},
+                                 connected=True, request=Mock(return_value={}))
+        window = StudyWindow(self.store, 'failed-screen-study', settings=self.settings, host_client=client)
+        self.addCleanup(window.close)
+        self.assertFalse(window.retry_site_button.isHidden())
+        self.assertEqual(window.retry_site_button.text(), 'Restart screening')
+        revision = window.state.revision
+        window.retry_site_button.click()
+        client.request.assert_called_once_with('failed-screen-study', 'retry_recorded_stage', {}, expected_revision=revision)
+
     def test_inspector_has_both_input_components_and_screening_records_in_one_list(self):
         from tests.test_molecule_inspection import component_fixture
         from rdkit import Chem

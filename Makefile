@@ -104,6 +104,7 @@ install:
 	install -m 0644 libexec/docking_universal/services/*.py "$(DESTDIR)$(LIBEXECDIR)/docking_universal/services/"
 	cp -R libexec/docking_universal/data "$(DESTDIR)$(LIBEXECDIR)/docking_universal/"
 	install -m 0644 libexec/docking_universal/gui/*.py "$(DESTDIR)$(LIBEXECDIR)/docking_universal/gui/"
+	cp -R libexec/docking_universal/gui/assets "$(DESTDIR)$(LIBEXECDIR)/docking_universal/gui/"
 	install -m 0644 libexec/docking_universal/viewer/*.py "$(DESTDIR)$(LIBEXECDIR)/docking_universal/viewer/"
 	install -d "$(DESTDIR)$(LIBEXECDIR)/docking_universal/poseedit_renderer/assets"
 	install -m 0644 libexec/docking_universal/poseedit_renderer/*.py libexec/docking_universal/poseedit_renderer/*.md "$(DESTDIR)$(LIBEXECDIR)/docking_universal/poseedit_renderer/"

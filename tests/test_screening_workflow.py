@@ -148,6 +148,34 @@ class ScreeningWorkflowTests(unittest.TestCase):
         args = json.loads((self.root / "screen-out/launch_args.json").read_text())
         self.assertEqual(args[args.index("--cluster-rmsd") + 1], "2.0")
 
+    def test_failed_screening_restarts_with_same_inputs_and_preserves_partial_output(self):
+        worker = self.preparation.parent / 'docking-universal-run.py'
+        successful = worker.read_text()
+        worker.write_text('import sys\nfrom pathlib import Path\n'
+                          'a=sys.argv; p=Path(a[a.index("--out")+1]); p.mkdir(parents=True)\n'
+                          '(p / "partial.txt").write_text("retained")\nsys.exit(1)\n')
+        state = self.store.load('screen')
+        started = self.dispatcher.dispatch(Command('screen', 'session', 'failed-screen', 'start_screening',
+            {'ligand_source': str(self.ligands), 'output_directory': str(self.root / 'screen-out'),
+             'cluster_rmsd': 2.0, 'exploratory_use_approved': True}, state.revision))
+        self.assertEqual(started.status, 'applied', started.error)
+        failed = self.wait_for(lambda s: s.workflow_data.get('latest_screening_status') == 'failed' and not s.active_job)
+        original = self.ligands.read_text()
+        self.ligands.write_text(original + 'changed\n')
+        rejected = self.dispatcher.dispatch(Command('screen', 'session', 'changed-retry', 'retry_recorded_stage', {}, failed.revision))
+        self.assertEqual(rejected.status, 'rejected')
+        self.assertIn('changed', rejected.error)
+        self.ligands.write_text(original)
+        worker.write_text(successful)
+        retried = self.dispatcher.dispatch(Command('screen', 'session', 'retry-screen', 'retry_recorded_stage', {}, failed.revision))
+        self.assertEqual(retried.status, 'applied', retried.error)
+        done = self.wait_for(lambda s: s.workflow_data.get('latest_screening_status') == 'completed')
+        self.assertEqual((self.root / 'screen-out/partial.txt').read_text(), 'retained')
+        output = Path(done.workflow_data['latest_screening_output'])
+        self.assertIn('.docking-universal-restart-attempts', str(output))
+        args = json.loads((output / 'launch_args.json').read_text())
+        self.assertEqual(args[args.index('--cluster-rmsd') + 1], '2.0')
+
     def test_selected_library_snapshot_is_passed_to_the_worker_and_stale_input_is_rejected(self):
         from rdkit import Chem
         from docking_universal.services.ligand_library import inspect_ligand_library

@@ -68,6 +68,19 @@ if [ "${1:-}" = "desktop" ]; then
   [ -x "$host_python" ] || { printf 'Error: Python was not found in %s\n' "$scientific_environment" >&2; exit 1; }
   [ -f "$desktop_script" ] || { printf 'Error: Docking Universal desktop is not installed in %s\n' "$scientific_environment" >&2; exit 1; }
   shift
+  app_bundle="$scientific_prefix/share/docking-universal/Docking Universal.app"
+  if [ "$(uname -s)" = Darwin ] && [ -d "$app_bundle" ] && \
+     [ "${DOCKING_UNIVERSAL_MAC_BUNDLE:-0}" != 1 ] && [ "${1:-}" != --help ]; then
+    # LaunchServices gives the Python process the app's name and Dock icon.
+    # Explicitly carry user overrides across its process boundary.
+    launch_options=(--env "PATH=$PATH")
+    while IFS= read -r variable; do
+      case "$variable" in
+        DOCKING_UNIVERSAL_*) launch_options+=(--env "$variable=${!variable}") ;;
+      esac
+    done < <(compgen -e)
+    exec open -n -W "${launch_options[@]}" "$app_bundle" --args "$@"
+  fi
   if [ -n "$custom_gui_python" ]; then
     # Do not activate another Conda environment over the registered runtime.
     # Fail visibly if embedding is unavailable; --viewer-backend companion

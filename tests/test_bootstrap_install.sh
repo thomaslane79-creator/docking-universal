@@ -11,6 +11,8 @@ mock_scientific_prefix="$work_dir/mock-scientific-prefix"
 mock_gui_prefix="$work_dir/mock-gui-prefix"
 mock_pymol_prefix="$work_dir/mock-pymol-prefix"
 mkdir -p "$mock_bin"
+mkdir -p "$work_dir/desktop"
+export DOCKING_UNIVERSAL_DESKTOP_DIR="$work_dir/desktop"
 mkdir -p "$mock_scientific_prefix/share/docking-universal/p2rank-2.5.1"
 mkdir -p "$mock_scientific_prefix/share/docking-universal/p2rank-2.6-alpha"
 : > "$mock_scientific_prefix/share/docking-universal/p2rank-2.6-alpha/prank"
@@ -256,6 +258,31 @@ env PATH="$mock_bin:$PATH" BOOTSTRAP_TEST_STATE="$state_file" \
   "$project_dir/install.sh" >/dev/null || fail "Mac Cocoa repair installer routing"
 grep -F "run --no-capture-output -n docking-universal-gui-next env PYTHONPATH=$mock_scientific_prefix/libexec/docking-universal python -m docking_universal.qt_cocoa_runtime --prefix $mock_gui_prefix --build-root $mock_gui_prefix/share/docking-universal/qt-cocoa-build --install" "$log_file" >/dev/null \
   || fail "Mac install omitted the pinned Cocoa repair or used the wrong runtime"
+mac_app="$mock_scientific_prefix/share/docking-universal/Docking Universal.app"
+[ -x "$mac_app/Contents/MacOS/DockingUniversal" ] || fail "Mac application bundle executable"
+[ -s "$mac_app/Contents/Resources/DockingUniversal.icns" ] || fail "Mac application bundle icon"
+[ "$(readlink "$DOCKING_UNIVERSAL_DESKTOP_DIR/Docking Universal.app")" = "$mac_app" ] || fail "Mac desktop shortcut"
+grep -q '<string>Docking Universal</string>' "$mac_app/Contents/Info.plist" || fail "Mac application name"
+cat > "$mock_bin/open" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$BOOTSTRAP_TEST_OPEN_LOG"
+EOF
+chmod +x "$mock_bin/open"
+env PATH="$mock_bin:$PATH" BOOTSTRAP_TEST_STATE="$state_file" \
+  BOOTSTRAP_TEST_LOG="$log_file" BOOTSTRAP_TEST_OPEN_LOG="$work_dir/open.log" \
+  DOCKING_UNIVERSAL_CONDA=conda DOCKING_UNIVERSAL_SAMPLE_OVERRIDE='value with spaces' \
+  "$mock_bin/docking-universal" desktop --state-root 'folder with spaces' || fail "Mac bundle launch"
+grep -Fxq "$mac_app" "$work_dir/open.log" || fail "Mac bundle launch path"
+grep -Fxq 'DOCKING_UNIVERSAL_SAMPLE_OVERRIDE=value with spaces' "$work_dir/open.log" || fail "Mac launch lost environment override"
+grep -Fxq 'folder with spaces' "$work_dir/open.log" || fail "Mac launch lost desktop arguments"
+
+# A desktop shortcut owned by somebody else must survive a reinstall.
+rm "$DOCKING_UNIVERSAL_DESKTOP_DIR/Docking Universal.app"
+printf 'unrelated shortcut\n' > "$DOCKING_UNIVERSAL_DESKTOP_DIR/Docking Universal.app"
+env PATH="$mock_bin:$PATH" BOOTSTRAP_TEST_STATE="$state_file" \
+  BOOTSTRAP_TEST_LOG="$log_file" DOCKING_UNIVERSAL_CONDA=conda \
+  "$project_dir/install.sh" >/dev/null || fail "Mac installer with existing desktop item"
+grep -q '^unrelated shortcut$' "$DOCKING_UNIVERSAL_DESKTOP_DIR/Docking Universal.app" || fail "Mac installer replaced an existing desktop item"
 
 # A GPU request must fail before any Conda invocation on unsupported platforms.
 cat > "$mock_bin/uname" <<'EOF'

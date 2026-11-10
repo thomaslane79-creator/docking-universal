@@ -276,6 +276,12 @@ if QtWidgets is not None:
             )
             feedback_layout.addWidget(self.feedback_heading)
             feedback_layout.addWidget(self.feedback_text)
+            self.retry_site_button = QtWidgets.QPushButton('Restart site detection')
+            self.retry_site_button.setObjectName('retry_site_detection')
+            self.retry_site_button.setToolTip('Repeat site detection with the retained setup in a new attempt folder. Previous output and logs are kept.')
+            self.retry_site_button.clicked.connect(self.retry_site_detection)
+            self.retry_site_button.hide()
+            feedback_layout.addWidget(self.retry_site_button, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
             self.running_indicator = QtWidgets.QProgressBar()
             self.running_indicator.setObjectName("central_running_indicator")
             self.running_indicator.setRange(0, 0)
@@ -1672,7 +1678,7 @@ if QtWidgets is not None:
             """Expose lifecycle progress without skipping a scientific decision."""
             pending_pockets = any(item.kind == "select_pockets" for item in state.pending_decisions)
             preparation_started = any(
-                job.stage in {"preparation_and_pocket_detection", "control_validation"}
+                job.stage in {"preparation_and_pocket_detection", "control_validation", "site_exploration", "receptor_parameterization"}
                 for job in state.jobs
             )
             preparation_done = pending_pockets or bool(state.selected_pocket_ids) or any(
@@ -1703,6 +1709,41 @@ if QtWidgets is not None:
             failed_job = latest_job if latest_job and latest_job.status.value in {
                 "failed", "cancelled", "interrupted",
             } else None
+            can_retry_site = bool(failed_job and failed_job.stage == 'site_exploration'
+                and not state.active_job and not state.pending_decisions
+                and not any(job.stage == 'site_exploration' and job.status.value == 'completed' for job in state.jobs)
+                and (getattr(self.host_client, 'runtime', {}) or {}).get('retry_site_exploration_supported'))
+            can_retry_initial = bool(failed_job and failed_job.stage == 'preparation_and_pocket_detection'
+                and not state.active_job and not state.pending_decisions
+                and (state.workflow_data.get('study_setup') or {}).get('input_structure_sha256')
+                and not any(job.stage == 'preparation_and_pocket_detection' and job.status.value == 'completed' for job in state.jobs)
+                and not any(item.get('request_id') == failed_job.request_id
+                            for item in state.workflow_data.get('reviewed_receptor_models', []))
+                and (getattr(self.host_client, 'runtime', {}) or {}).get('retry_site_exploration_supported'))
+            can_retry_control = bool(failed_job and failed_job.stage == 'control_validation'
+                and not state.active_job and not state.pending_decisions
+                and (state.workflow_data.get('study_setup') or {}).get('site_review_first')
+                and state.workflow_data.get('latest_control_status') in {'failed', 'cancelled', 'interrupted'}
+                and (getattr(self.host_client, 'runtime', {}) or {}).get('retry_reviewed_control_supported'))
+            attempts = state.workflow_data.get('receptor_preparation_attempts') or []
+            can_retry_preparation = bool(failed_job and failed_job.stage == 'receptor_parameterization'
+                and not state.active_job and not state.pending_decisions and attempts
+                and not attempts[-1].get('reviewed_model')
+                and state.workflow_data.get('receptor_parameterization_status') in {'failed', 'cancelled', 'interrupted'}
+                and (getattr(self.host_client, 'runtime', {}) or {}).get('retry_reviewed_preparation_supported'))
+            recorded_requests = state.workflow_data.get('restartable_stage_requests') or []
+            can_retry_recorded = bool(failed_job and failed_job.stage in {'screening', 'final_report'}
+                and not state.active_job and not state.pending_decisions
+                and any(item.get('request_id') == failed_job.request_id and item.get('stage') == failed_job.stage
+                        for item in recorded_requests)
+                and (getattr(self.host_client, 'runtime', {}) or {}).get('retry_recorded_stage_supported'))
+            self.retry_site_button.setText('Restart receptor preparation' if can_retry_preparation or can_retry_initial else
+                'Restart known-ligand control' if can_retry_control else
+                'Restart screening' if can_retry_recorded and failed_job.stage == 'screening' else
+                'Restart protocol report' if can_retry_recorded else 'Restart site detection')
+            self.retry_site_button.setToolTip('Start a new attempt with the retained scientific choices. Previous output and logs are kept.')
+            self.retry_site_button.setVisible(can_retry_site or can_retry_initial or can_retry_control or can_retry_preparation or can_retry_recorded)
+            self.retry_site_button.setEnabled((can_retry_site or can_retry_initial or can_retry_control or can_retry_preparation or can_retry_recorded) and self.host_controller.available)
 
             labels = (
                 "Study setup",
@@ -1763,6 +1804,9 @@ if QtWidgets is not None:
             elif failed_job and not screening_done:
                 active_row = {
                     "preparation_and_pocket_detection": 1,
+                    "site_exploration": 1,
+                    "receptor_parameterization": 1,
+                    "control_validation": 3 if site_first_control else 1,
                     "final_report": 3,
                     "screening": 4,
                 }.get(failed_job.stage, 0)
@@ -2961,6 +3005,20 @@ if QtWidgets is not None:
             finally:
                 self._stage_submission_in_progress = False
                 self.refresh()
+
+        def retry_site_detection(self) -> None:
+            try:
+                if self.state.jobs and self.state.jobs[-1].stage == 'control_validation':
+                    self.host_controller.start_control_validation({'retry': True}, self.state.revision)
+                elif self.state.jobs and self.state.jobs[-1].stage == 'receptor_parameterization':
+                    self.host_controller.prepare_reviewed_receptor(self.state.revision, retry=True)
+                elif self.state.jobs and self.state.jobs[-1].stage in {'screening', 'final_report'}:
+                    self.host_controller.retry_recorded_stage(self.state.revision)
+                else:
+                    self.host_controller.retry_site_exploration(self.state.revision)
+            except Exception as exc:
+                QtWidgets.QMessageBox.critical(self, 'Scientific stage could not restart', str(exc))
+            self.refresh()
 
         def _submit_preparation(self) -> None:
             if not self.host_controller.available:

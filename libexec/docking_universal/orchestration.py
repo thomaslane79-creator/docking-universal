@@ -50,6 +50,50 @@ class ProtocolWorkflowRunner:
         self._cancellations: dict[str, threading.Event] = {}
         self._threads: dict[str, threading.Thread] = {}
 
+    @staticmethod
+    def _screening_source_hashes(source):
+        from .services.ligand_input import ligand_input_files
+        return {str(path.resolve()): sha256(path) for path in ligand_input_files(source)}
+
+    def _retain_restart_request(self, study_id, stage, payload, request_id, revision):
+        record = {'stage': stage, 'request_id': request_id, 'payload': dict(payload)}
+        if stage == 'screening':
+            record['source_hashes'] = self._screening_source_hashes(payload['ligand_source'])
+        def retain(state):
+            state.workflow_data.setdefault('restartable_stage_requests', []).append(record)
+        state, _ = self.controller.store.update(study_id, retain, expected_revision=revision)
+        return state.revision
+
+    def retry_recorded_stage(self, study_id, *, request_id, expected_revision):
+        """Repeat a recorded failed report or screen with pinned inputs/settings."""
+        state = self.controller.get_study(study_id)
+        prior = next((j for j in state.jobs if j.request_id == request_id), None)
+        if prior:
+            return {'job_id': prior.id, 'stage': prior.stage, 'replayed': True}
+        if state.revision != expected_revision:
+            from .state import RevisionConflictError
+            raise RevisionConflictError('Study changed before the stage could be restarted')
+        latest = state.jobs[-1] if state.jobs else None
+        if (not latest or latest.stage not in {'screening', 'final_report'}
+                or latest.status.value not in {'failed', 'cancelled', 'interrupted'}
+                or state.active_job or state.pending_decisions):
+            raise ValueError('Only the latest unfinished report or screening stage can be restarted')
+        records = state.workflow_data.get('restartable_stage_requests') or []
+        recorded = next((item for item in reversed(records) if item.get('request_id') == latest.request_id
+                         and item.get('stage') == latest.stage), None)
+        if not recorded:
+            raise ValueError('This older attempt did not retain enough settings for an exact restart')
+        payload = dict(recorded['payload'])
+        if latest.stage == 'screening':
+            if self._screening_source_hashes(payload['ligand_source']) != recorded.get('source_hashes'):
+                raise ValueError('Ligand source files changed since the failed attempt; review them before a new screening')
+        old_output = Path(payload['output_directory']).resolve()
+        payload['output_directory'] = str(old_output.parent / '.docking-universal-restart-attempts' /
+                                          uuid4().hex / old_output.name)
+        if latest.stage == 'screening':
+            return self.start_screening(study_id, payload, request_id=request_id, expected_revision=expected_revision)
+        return self.start_finalization(study_id, payload, request_id=request_id, expected_revision=expected_revision)
+
     def start_control_validation(
         self, study_id: str, payload: dict[str, Any], *, request_id: str,
         expected_revision: int,
@@ -140,19 +184,31 @@ class ProtocolWorkflowRunner:
     def _start_reviewed_control(self, study_id, state, payload, *, request_id):
         """Continue only after an explicit region decision; never reprepare."""
         from .services.control_review import reviewed_control_inputs
-        if payload:
+        if payload not in ({}, {'retry': True}):
             raise ValueError("Reviewed control uses the retained setup; no replacement inputs/settings are accepted")
-        if state.workflow_data.get("latest_control_status"):
+        retry = payload == {'retry': True}
+        latest = state.jobs[-1] if state.jobs else None
+        if retry and (not latest or latest.stage != 'control_validation'
+                      or latest.status.value not in {'failed', 'cancelled', 'interrupted'}
+                      or state.workflow_data.get('latest_control_status') not in {'failed', 'cancelled', 'interrupted'}):
+            raise ValueError('Only an unfinished reviewed control can be restarted')
+        if state.workflow_data.get("latest_control_status") and not retry:
             raise ActiveStageError("This control already has a retained result; review it before starting another study")
         reviewed = reviewed_control_inputs(state)
         setup = state.workflow_data["study_setup"]
         output = Path(setup["control_output_directory"])
+        if retry:
+            output = output.parent / '.docking-universal-control-attempts' / uuid4().hex / output.name
         if output.exists():
             raise ValueError("Control output already exists; completed/partial work is not overwritten")
         script = self.preparation_executable.with_name("docking-universal-run.py")
         record_path = output.parent / "reviewed_control_inputs.json"
+        record_path.parent.mkdir(parents=True, exist_ok=True)
         record_path.write_text(json.dumps(reviewed, indent=2) + "\n")
         def register(current):
+            if retry and current.workflow_data.get('control_site_review'):
+                current.workflow_data.setdefault('control_site_review_history', []).append(
+                    dict(current.workflow_data['control_site_review']))
             current.workflow_data["control_site_review"] = {
                 "tested_box_label": reviewed["tested_box_label"],
                 "untested_box_labels": reviewed["untested_box_labels"],
@@ -292,6 +348,48 @@ class ProtocolWorkflowRunner:
             )
         self.controller.store.update(study_id, mutation)
 
+    def retry_site_exploration(self, study_id: str, *, request_id: str,
+                               expected_revision: int) -> dict[str, Any]:
+        """Repeat failed initial detection/preparation using the locked setup."""
+        state = self.controller.get_study(study_id)
+        prior = next((job for job in state.jobs if job.request_id == request_id), None)
+        if prior:
+            return {"job_id": prior.id, "stage": prior.stage, "replayed": True}
+        if state.revision != expected_revision:
+            from .state import RevisionConflictError
+            raise RevisionConflictError('Study changed before site detection could be restarted')
+        setup = state.workflow_data.get('study_setup') or {}
+        latest = state.jobs[-1] if state.jobs else None
+        stage = 'site_exploration' if setup.get('explore_sites_first') else 'preparation_and_pocket_detection'
+        reviewed = any(item.get('request_id') == (latest.request_id if latest else None)
+                       for item in state.workflow_data.get('reviewed_receptor_models', []))
+        if (not latest or latest.stage != stage or reviewed
+                or latest.status.value not in {'failed', 'cancelled', 'interrupted'}
+                or state.active_job or state.pending_decisions
+                or any(job.stage == stage and job.status.value == 'completed'
+                       for job in state.jobs)):
+            raise ValueError('Only an unfinished initial preparation attempt can be restarted without another model review')
+        source = Path(setup.get('input_structure') or '')
+        if not source.is_file() or not setup.get('input_structure_sha256') or sha256(source) != setup['input_structure_sha256']:
+            raise ValueError('The retained input structure changed; create a new study for a different source')
+        names = ('site_mode', 'ligand_resname', 'ligand_chain_id', 'ligand_residue_number',
+                 'ligand_insertion_code', 'ligand_altloc', 'feedback_level', 'cavity_mode',
+                 'max_pockets', 'center_mode', 'centroid_mode', 'pdbfixer',
+                 'preparation_backend', 'pocket_engine', 'meeko_templates',
+                 'meeko_template_file', 'geostd_library', 'pdb_pocket_evidence',
+                 'predict_pockets_with_ligand')
+        payload = {name: setup[name] for name in names if name in setup}
+        payload.update(input_pdb=str(source), working_directory=setup['working_directory'],
+                       explore_sites_first=bool(setup.get('explore_sites_first')))
+        control = None
+        if setup.get('site_review_first'):
+            control = {name: setup[name] for name in ('pathway', 'site_review_first', 'engine',
+                       'control_tier', 'control_output_directory') if name in setup}
+        return self.start_preparation(study_id, payload, request_id=request_id,
+                                      expected_revision=expected_revision, control_setup=control,
+                                      retry_site_exploration=bool(setup.get('explore_sites_first')),
+                                      retry_legacy_preparation=not setup.get('explore_sites_first'))
+
     def start_preparation(
         self,
         study_id: str,
@@ -300,6 +398,8 @@ class ProtocolWorkflowRunner:
         request_id: str,
         expected_revision: int,
         control_setup: dict | None = None,
+        retry_site_exploration: bool = False,
+        retry_legacy_preparation: bool = False,
     ) -> dict[str, Any]:
         state = self.controller.get_study(study_id)
         prior = next((job for job in state.jobs if job.request_id == request_id), None)
@@ -357,9 +457,19 @@ class ProtocolWorkflowRunner:
         plan = build_receptor_preparation_plan(self.preparation_executable, options)
         if explore_first:
             from .services.site_exploration import exploration_request, exploration_root
+            if retry_site_exploration:
+                # Keep the original folder and logs untouched, while retaining
+                # the original target name used by downstream site review.
+                attempt_id = uuid4().hex
+                attempt = options.working_directory / '.docking-universal-site-attempts' / attempt_id
+                plan = replace(plan, output_root=attempt / plan.output_root.name,
+                               request=replace(plan.request,
+                                   log_name=plan.request.log_name + '-retry-' + attempt_id))
             exploration_request(plan, options)  # Validate worker/engine before locking setup.
             if exploration_root(plan).exists():
                 raise ValueError('Site-review output already exists and will not be overwritten')
+        elif retry_site_exploration:
+            raise ValueError('Only coordinate-first site exploration can use this retry')
         setup_record = {
             "input_pdb": str(plan.structure_input.engine_pdb_path),
             "input_structure": str(plan.structure_input.source_path),
@@ -419,6 +529,16 @@ class ProtocolWorkflowRunner:
             study_id, retain_setup, expected_revision=expected_revision,
         )
         preparation_revision = retained_state.revision
+        if retry_legacy_preparation:
+            # Build the same scientific request in a new working directory;
+            # the locked study setup and old partial outputs stay unchanged.
+            working = options.working_directory / '.docking-universal-preparation-attempts' / uuid4().hex
+            original_input = plan.structure_input
+            retry_plan = build_receptor_preparation_plan(self.preparation_executable,
+                                                        replace(options, working_directory=working))
+            if sha256(original_input.engine_pdb_path) != sha256(retry_plan.structure_input.engine_pdb_path):
+                raise ValueError('Retry normalization differs from the retained receptor input')
+            plan = replace(retry_plan, structure_input=original_input)
         cancellation = threading.Event()
 
         def work() -> None:
@@ -574,7 +694,7 @@ class ProtocolWorkflowRunner:
             preview['recovery_guidance'] = guidance
         return preview
 
-    def prepare_reviewed_receptor(self, study_id, *, request_id, expected_revision, model_changes=None):
+    def prepare_reviewed_receptor(self, study_id, *, request_id, expected_revision, model_changes=None, retry=False):
         """Explicit second stage: selected sites survive a preparation failure."""
         from dataclasses import fields
         from .services.site_exploration import read_exploration, parameterization_plan
@@ -595,7 +715,16 @@ class ProtocolWorkflowRunner:
             raise ValueError('Review and approve docking regions before receptor preparation')
         self._assert_no_active_stage()
         preparation_status = state.workflow_data.get('receptor_parameterization_status')
-        if preparation_status != 'not_started' and not (model_changes and preparation_status == 'failed'):
+        attempts = state.workflow_data.get('receptor_preparation_attempts') or []
+        latest = state.jobs[-1] if state.jobs else None
+        retry_allowed = bool(retry and model_changes is None and latest
+            and latest.stage == 'receptor_parameterization'
+            and latest.status.value in {'failed', 'cancelled', 'interrupted'}
+            and preparation_status in {'failed', 'cancelled', 'interrupted'}
+            and attempts and not attempts[-1].get('reviewed_model'))
+        if retry and not retry_allowed:
+            raise ValueError('This preparation attempt cannot be repeated without reviewing its retained model')
+        if preparation_status != 'not_started' and not retry_allowed and not (model_changes and preparation_status == 'failed'):
             raise ValueError('Preparation was already attempted; review its retained evidence before any new attempt')
         root = Path(state.workflow_data['site_exploration_root'])
         from .protocol_finalization import approved_regions_from_study
@@ -611,6 +740,9 @@ class ProtocolWorkflowRunner:
         # Keep the original mmCIF handoff/identity, rather than treating its
         # normalized legacy PDB as a newly chosen deposited input.
         values['input_pdb'] = setup.get('input_structure', values['input_pdb'])
+        if retry_allowed:
+            values['working_directory'] = str(Path(setup['working_directory']) /
+                '.docking-universal-parameterization-attempts' / uuid4().hex)
         for key in ('input_pdb', 'working_directory', 'geostd_library', 'meeko_template_file'):
             if values.get(key):
                 values[key] = Path(values[key])
@@ -1261,6 +1393,8 @@ class ProtocolWorkflowRunner:
             log_directory=paths.root / ".docking-universal-application-logs",
             log_name="protocol-finalization", check=False,
         )
+        expected_revision = self._retain_restart_request(
+            study_id, 'final_report', payload, request_id, expected_revision)
         cancellation = threading.Event()
 
         def work() -> None:
@@ -1396,6 +1530,8 @@ class ProtocolWorkflowRunner:
             log_directory=output.parent / f".{output.name}.docking-universal-application-logs",
             log_name="locked-protocol-screening", check=False,
         )
+        expected_revision = self._retain_restart_request(
+            study_id, 'screening', payload, request_id, expected_revision)
         cancellation = threading.Event()
 
         def work() -> None:

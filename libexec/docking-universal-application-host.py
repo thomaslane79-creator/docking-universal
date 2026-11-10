@@ -24,6 +24,10 @@ def main() -> int:
     guard = None
     capabilities = {"scientific_stages_supported": os.name != "nt",
                     "coordinate_site_review_supported": sys.platform == 'darwin',
+                    "retry_site_exploration_supported": sys.platform == 'darwin',
+                    "retry_reviewed_control_supported": sys.platform == 'darwin',
+                    "retry_reviewed_preparation_supported": sys.platform == 'darwin',
+                    "retry_recorded_stage_supported": os.name != 'nt',
                     "reviewed_receptor_changes_supported": sys.platform == 'darwin',
                     "failed_preparation_model_review_supported": sys.platform == 'darwin',
                     "reviewed_receptor_preparation_backends": ["meeko"]}

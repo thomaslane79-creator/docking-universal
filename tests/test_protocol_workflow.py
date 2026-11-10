@@ -204,6 +204,55 @@ class ProtocolWorkflowTests(unittest.TestCase):
         finally:
             runner.shutdown()
 
+    def test_failed_initial_preparation_restarts_with_locked_inputs(self):
+        executable = self.executable()
+        successful = executable.read_text()
+        executable.write_text('#!/bin/sh\nmkdir -p Target_receptor_prep\n'
+                              'printf retained > Target_receptor_prep/partial.txt\nexit 1\n')
+        dispatcher = CommandDispatcher(self.controller, 'session', executable)
+        self.addCleanup(dispatcher.shutdown)
+        command = self.start_command(dispatcher, 'failed-initial')
+        command.payload['pdb_pocket_evidence'] = 'off'
+        started = dispatcher.dispatch(command)
+        self.assertEqual(started.status, 'applied', started.error)
+        failed = self.wait_for(lambda s: s.jobs and s.jobs[-1].status == JobStatus.FAILED and not s.active_job)
+        old_setup = failed.workflow_data['study_setup'].copy()
+        old_output = self.root / 'work/Target_receptor_prep/partial.txt'
+        executable.write_text(successful)
+        retried = dispatcher.dispatch(Command('workflow', 'session', 'retry-initial',
+                                               'retry_site_exploration', {}, failed.revision))
+        self.assertEqual(retried.status, 'applied', retried.error)
+        done = self.wait_for(lambda s: bool(s.pending_decisions))
+        self.assertEqual(old_output.read_text(), 'retained')
+        self.assertEqual(done.workflow_data['study_setup'], old_setup)
+        self.assertIn('.docking-universal-preparation-attempts', done.workflow_data['preparation_root'])
+        self.assertEqual(done.pending_decisions[0].kind, 'select_pockets')
+
+    def test_failed_bound_mmcif_preparation_retains_original_input_identity_on_restart(self):
+        from tests.test_structure_input import MMCIF
+        source = self.root / 'entry.cif'
+        source.write_text(MMCIF)
+        executable = self.executable()
+        successful = executable.read_text()
+        executable.write_text('#!/bin/sh\nmkdir -p entry_receptor_prep\n'
+                              'printf retained > entry_receptor_prep/partial.txt\nexit 1\n')
+        dispatcher = CommandDispatcher(self.controller, 'session', executable)
+        self.addCleanup(dispatcher.shutdown)
+        state = self.store.load('workflow')
+        started = dispatcher.dispatch(Command('workflow', 'session', 'failed-cif', 'start_receptor_preparation',
+            {'input_pdb': str(source), 'working_directory': str(self.root / 'work'), 'site_mode': 'ligand',
+             'ligand_resname': 'LIG', 'ligand_chain_id': 'B', 'ligand_residue_number': '401',
+             'pdb_pocket_evidence': 'off'}, state.revision))
+        self.assertEqual(started.status, 'applied', started.error)
+        failed = self.wait_for(lambda s: s.jobs and s.jobs[-1].status == JobStatus.FAILED and not s.active_job)
+        executable.write_text(successful)
+        retried = dispatcher.dispatch(Command('workflow', 'session', 'retry-cif', 'retry_site_exploration', {}, failed.revision))
+        self.assertEqual(retried.status, 'applied', retried.error)
+        done = self.wait_for(lambda s: bool(s.pending_decisions))
+        source_artifact = next(a for a in done.artifacts if a.kind == 'normalized_receptor_input')
+        self.assertEqual(source_artifact.path, done.workflow_data['study_setup']['input_pdb'])
+        self.assertEqual(done.pending_decisions[0].kind, 'select_pockets')
+
     def test_offline_evidence_failure_preserves_preparation_and_region_decision(self):
         executable = self.executable()
         executable.write_text('\n'.join(
@@ -535,6 +584,18 @@ class ProtocolWorkflowTests(unittest.TestCase):
         ))
         self.assertFalse(any(artifact.kind == "protocol_bundle" for artifact in state.artifacts))
         self.assertFalse(state.active_job)
+        partial = self.root / 'cancelled-final' / 'partial.txt'
+        partial.write_text('retained cancelled attempt')
+        finalizer = self.root / 'bin/docking-universal-finalize-protocol.py'
+        finalizer.unlink()
+        finalizer.symlink_to(ROOT / 'libexec/docking-universal-finalize-protocol.py')
+        retried = dispatcher.dispatch(Command('workflow', 'session', 'retry-final',
+                                             'retry_recorded_stage', {}, state.revision))
+        self.assertEqual(retried.status, 'applied', retried.error)
+        done = self.wait_for(lambda item: any(a.kind == 'protocol_bundle' for a in item.artifacts), timeout=15)
+        bundle = next(a for a in done.artifacts if a.kind == 'protocol_bundle')
+        self.assertIn('.docking-universal-restart-attempts', bundle.path)
+        self.assertEqual(partial.read_text(), 'retained cancelled attempt')
         dispatcher.shutdown()
 
 

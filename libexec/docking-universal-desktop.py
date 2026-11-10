@@ -45,7 +45,7 @@ def main() -> int:
         return 0
     from docking_universal.gui.desktop import StudyWindow, require_qt
     from docking_universal.gui.qt import QtCore, QtGui, QtWidgets
-    from docking_universal.gui.branding import application_icon_path
+    from docking_universal.gui.branding import application_icon_path, set_windows_application_identity
     from docking_universal.gui.host_client import ApplicationHostClient
     from docking_universal.gui.study_viewer import StudyViewerCoordinator
     from docking_universal.gui.study_launcher import choose_study
@@ -53,6 +53,7 @@ def main() -> int:
     from docking_universal.viewer.pymol_adapter import PymolAdapter
 
     require_qt()
+    set_windows_application_identity()
     application = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     application.setApplicationName("Docking Universal")
     application.setWindowIcon(QtGui.QIcon(str(application_icon_path())))

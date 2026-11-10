@@ -51,6 +51,8 @@ done
 [ -f "$libexec/docking_universal/services/pocket_review.py" ] || fail "installed pocket-review service"
 [ -f "$libexec/docking_universal/host.py" ] || fail "installed application host"
 [ -f "$libexec/docking_universal/gui/desktop.py" ] || fail "installed desktop workspace"
+[ -f "$libexec/docking_universal/gui/assets/branding/docking-universal-app-icon.png" ] || fail "installed desktop icon"
+[ -f "$libexec/docking_universal/gui/assets/branding/docking-universal-app-icon.ico" ] || fail "installed Windows shortcut icon"
 [ -f "$libexec/docking_universal/viewer/pymol_adapter.py" ] || fail "installed PyMOL adapter"
 [ -f "$libexec/VERSION" ] || fail "installed version file"
 [ -f "$libexec/validation-assets/test_inputs/two_compounds.sdf" ] || fail "installed test input"

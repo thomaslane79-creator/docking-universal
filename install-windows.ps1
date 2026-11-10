@@ -126,6 +126,34 @@ try {
     if ($ownedManager) { $installerOptions += @('--owned-manager', '--manager-root', $ManagerRoot) }
     & $python (Join-Path $PSScriptRoot 'tools/install_native_windows.py') @installerOptions
     if ($LASTEXITCODE -ne 0) { throw 'Native bootstrap failed. Inspect bootstrap-status.json in the destination; partial files were retained.' }
+    # A normal Windows shortcut retains the installation-owned launcher and logo.
+    # Never replace another application's or another installation's shortcut.
+    try {
+        $desktopDirectory = if ($env:DOCKING_UNIVERSAL_DESKTOP_DIR) {
+            $env:DOCKING_UNIVERSAL_DESKTOP_DIR
+        } else { [Environment]::GetFolderPath('DesktopDirectory') }
+        if (-not $desktopDirectory -or -not (Test-Path -LiteralPath $desktopDirectory -PathType Container)) {
+            Write-Warning 'The Desktop folder was not found; launch from the installation bin folder.'
+        } else {
+            $shortcutPath = Join-Path $desktopDirectory 'Docking Universal.lnk'
+            if (Test-Path -LiteralPath $shortcutPath) {
+                Write-Warning "Desktop shortcut already exists and was not replaced: $shortcutPath"
+            } else {
+                $shell = New-Object -ComObject WScript.Shell
+                $shortcut = $shell.CreateShortcut($shortcutPath)
+                $shortcut.TargetPath = Join-Path $Destination 'bin/docking-universal.cmd'
+                $shortcut.Arguments = 'desktop'
+                $shortcut.WorkingDirectory = $Destination
+                $shortcut.IconLocation = (Join-Path $Destination 'app/docking_universal/gui/assets/branding/docking-universal-app-icon.ico') + ',0'
+                $shortcut.Description = 'Open Docking Universal'
+                $shortcut.WindowStyle = 7
+                $shortcut.Save()
+                Write-Host "Created desktop shortcut: $shortcutPath"
+            }
+        }
+    } catch {
+        Write-Warning "The installation succeeded, but its desktop shortcut could not be created: $_"
+    }
 } finally {
     foreach ($key in $saved.Keys) {
         [Environment]::SetEnvironmentVariable($key, $saved[$key], 'Process')

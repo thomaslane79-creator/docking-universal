@@ -15,3 +15,6 @@ def test_application_icon_is_packaged_simplified_asset():
     assert icon.is_file()
     assert icon.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     assert icon.stat().st_size > 10_000
+    windows_icon = icon.with_suffix('.ico')
+    assert windows_icon.is_file()
+    assert windows_icon.read_bytes().startswith(b'\x00\x00\x01\x00')

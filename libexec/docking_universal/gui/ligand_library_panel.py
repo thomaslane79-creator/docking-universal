@@ -37,10 +37,14 @@ class CompoundPreview(QtWidgets.QWidget):
 
     def paintEvent(self, event):
         painter = QtGui.QPainter(self)
-        painter.fillRect(self.rect(), QtGui.QColor('white'))
-        painter.setPen(QtGui.QColor('#aaa'))
-        painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
-        area = self.rect().adjusted(8, 8, -8, -8)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        border = QtCore.QRectF(self.rect()).adjusted(0.75, 0.75, -0.75, -0.75)
+        outline = QtGui.QPainterPath()
+        outline.addRoundedRect(border, 12, 12)
+        painter.fillPath(outline, QtGui.QColor('white'))
+        painter.save()
+        painter.setClipPath(outline)
+        area = self.rect().adjusted(10, 10, -10, -10)
         if self.picture is not None and not self.picture.isNull():
             size = self.picture.size().scaled(area.size(), QtCore.Qt.AspectRatioMode.KeepAspectRatio)
             target = QtCore.QRect(QtCore.QPoint(), size)
@@ -50,6 +54,9 @@ class CompoundPreview(QtWidgets.QWidget):
         else:
             painter.setPen(QtGui.QColor('#222'))
             painter.drawText(area, QtCore.Qt.AlignmentFlag.AlignCenter | QtCore.Qt.TextFlag.TextWordWrap, self.message)
+        painter.restore()
+        painter.setPen(QtGui.QPen(QtGui.QColor('#111'), 1.5))
+        painter.drawPath(outline)
 
 
 class LibraryReadTask(QtCore.QObject):

@@ -203,6 +203,28 @@ class ControlSiteReviewTests(unittest.TestCase):
         self.assertTrue(state.workflow_data["control_site_review"]["all_selected_sites_validated"])
         self.assertEqual(state.scientific_authority.value, 'control_approved')
 
+    def test_failed_control_retry_keeps_partial_attempt_and_approved_site(self):
+        self.prepare()
+        state = self.approve(['B1'])
+        script = self.executable.parent / 'docking-universal-run.py'
+        successful_script = script.read_text()
+        script.write_text('import sys\nfrom pathlib import Path\n'
+                          'a=sys.argv; out=Path(a[a.index("--out")+1]); out.mkdir(parents=True)\n'
+                          '(out / "partial.txt").write_text("retained")\nsys.exit(1)\n')
+        self.runner.start_control_validation('workflow', {}, request_id='failed-control', expected_revision=state.revision)
+        failed = self.wait(lambda s: s.workflow_data.get('latest_control_status') == 'failed' and not s.active_job)
+        old_output = Path(failed.workflow_data['latest_control_output'])
+        old_review = failed.workflow_data['control_site_review'].copy()
+        self.assertEqual((old_output / 'partial.txt').read_text(), 'retained')
+        script.write_text(successful_script)
+        self.runner.start_control_validation('workflow', {'retry': True}, request_id='retry-control', expected_revision=failed.revision)
+        done = self.wait(lambda s: s.workflow_data.get('latest_control_status') == 'approved')
+        self.assertEqual((old_output / 'partial.txt').read_text(), 'retained')
+        self.assertIn(old_review, done.workflow_data['control_site_review_history'])
+        self.assertIn('.docking-universal-control-attempts', done.workflow_data['latest_control_output'])
+        self.assertEqual(done.selected_pocket_ids, state.selected_pocket_ids)
+        self.assertTrue(any(item.kind == 'protocol_bundle' for item in done.artifacts))
+
     def test_remote_site_only_cannot_test_the_other_experimental_ligand(self):
         self.prepare()
         state = self.approve(["L1"])

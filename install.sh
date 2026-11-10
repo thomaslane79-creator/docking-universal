@@ -226,6 +226,49 @@ printf '\nInstalling the user-facing launcher: %s\n' "$launcher_path"
 cp "$project_dir/bin/docking-universal-launcher" "$launcher_path"
 chmod +x "$launcher_path"
 
+if [ "$(uname -s)" = Darwin ]; then
+  # LaunchServices identifies a Python process by the enclosing .app bundle.
+  # Keep the bundle private to this installation; do not alter Conda's Python.
+  app_root="$scientific_prefix/share/docking-universal/Docking Universal.app"
+  app_contents="$app_root/Contents"
+  mkdir -p "$app_contents/MacOS" "$app_contents/Resources"
+  cat > "$app_contents/Info.plist" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleName</key><string>Docking Universal</string>
+<key>CFBundleDisplayName</key><string>Docking Universal</string>
+<key>CFBundleIdentifier</key><string>org.dockinguniversal.desktop</string>
+<key>CFBundleExecutable</key><string>DockingUniversal</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleIconFile</key><string>DockingUniversal.icns</string>
+<key>NSHighResolutionCapable</key><true/>
+</dict></plist>
+EOF
+  # Quote the installed path as shell syntax; spaces in Miniforge paths are valid.
+  { printf '#!/usr/bin/env bash\nexport DOCKING_UNIVERSAL_MAC_BUNDLE=1\nexec '
+    printf '%q' "$launcher_path"
+    printf ' desktop "$@"\n'; } > "$app_contents/MacOS/DockingUniversal"
+  chmod +x "$app_contents/MacOS/DockingUniversal"
+  icon_source="$project_dir/libexec/docking_universal/gui/assets/branding/docking-universal-app-icon.png"
+  sips -s format icns "$icon_source" --out "$app_contents/Resources/DockingUniversal.icns" >/dev/null
+  desktop_dir=${DOCKING_UNIVERSAL_DESKTOP_DIR:-"$HOME/Desktop"}
+  desktop_shortcut="$desktop_dir/Docking Universal.app"
+  if [ -d "$desktop_dir" ]; then
+    if [ ! -e "$desktop_shortcut" ] && [ ! -L "$desktop_shortcut" ]; then
+      ln -s "$app_root" "$desktop_shortcut"
+      printf 'Created desktop shortcut: %s\n' "$desktop_shortcut"
+    elif [ -L "$desktop_shortcut" ] && [ "$(readlink "$desktop_shortcut")" = "$app_root" ]; then
+      printf 'Desktop shortcut already points to this installation.\n'
+    else
+      printf 'Desktop shortcut already exists and was not replaced: %s\n' "$desktop_shortcut"
+    fi
+  else
+    printf 'Desktop folder not found; application is available at %s\n' "$app_root"
+  fi
+fi
+
 cat <<'EOF'
 
 Docking Universal installation completed successfully.
