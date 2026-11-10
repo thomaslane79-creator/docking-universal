@@ -1,4 +1,5 @@
 import json
+import importlib.util
 from pathlib import Path
 import subprocess
 import sys
@@ -96,6 +97,7 @@ class NativePreparationTests(unittest.TestCase):
             self.assertFalse(any("--allow_bad_res" in command for command in calls))
             self.assertFalse(any("predict" in command for command in calls))
 
+    @unittest.skipUnless(importlib.util.find_spec("numpy"), "P2Rank geometry requires NumPy")
     def test_native_preparation_preserves_p2rank_geometry_by_detector_rank(self):
         fixture = Path(__file__).resolve().parents[1] / "examples/tutorials/02_ligand_free_cavity/inputs/2R8N.pdb"
         with tempfile.TemporaryDirectory() as temporary:
