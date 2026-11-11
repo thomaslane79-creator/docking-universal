@@ -13,6 +13,15 @@ mock_pymol_prefix="$work_dir/mock-pymol-prefix"
 mkdir -p "$mock_bin"
 mkdir -p "$work_dir/desktop"
 export DOCKING_UNIVERSAL_DESKTOP_DIR="$work_dir/desktop"
+# The Mac branch is simulated on Linux in CI; sips is a macOS system utility.
+if ! command -v sips >/dev/null 2>&1; then
+  cat > "$mock_bin/sips" <<'EOF'
+#!/usr/bin/env bash
+set -eu
+cp "$4" "$6"
+EOF
+  chmod +x "$mock_bin/sips"
+fi
 mkdir -p "$mock_scientific_prefix/share/docking-universal/p2rank-2.5.1"
 mkdir -p "$mock_scientific_prefix/share/docking-universal/p2rank-2.6-alpha"
 : > "$mock_scientific_prefix/share/docking-universal/p2rank-2.6-alpha/prank"

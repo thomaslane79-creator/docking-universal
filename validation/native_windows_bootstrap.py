@@ -119,15 +119,19 @@ def main():
         shortcut_environment = {**os.environ, 'DU_SHORTCUT': str(shortcut),
             'DU_TARGET': str(destination / 'bin/docking-universal.cmd'), 'DU_ICON': str(icon)}
         shortcut_check = subprocess.run(['powershell.exe', '-NoProfile', '-Command',
-            "$ErrorActionPreference='Stop'; if (!(Test-Path -LiteralPath $env:DU_SHORTCUT) -or "
-            "!(Test-Path -LiteralPath $env:DU_ICON)) { exit 2 }; "
+            "$ErrorActionPreference='Stop'; "
+            "if (!(Test-Path -LiteralPath $env:DU_SHORTCUT)) { Write-Output 'shortcut missing'; exit 2 }; "
+            "if (!(Test-Path -LiteralPath $env:DU_ICON)) { Write-Output 'icon missing'; exit 2 }; "
             "$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:DU_SHORTCUT); "
             "if ($s.TargetPath -ne $env:DU_TARGET -or $s.Arguments -ne 'desktop' -or "
-            "$s.IconLocation -ne ($env:DU_ICON + ',0')) { exit 3 }"],
+            "($s.IconLocation -split ',')[0].Trim() -ne $env:DU_ICON) "
+            "{ Write-Output ('target=' + $s.TargetPath + '; arguments=' + $s.Arguments + '; icon=' + $s.IconLocation); exit 3 }"],
             env=shortcut_environment, capture_output=True, text=True, timeout=30)
         if shortcut_check.returncode:
+            install_log = (out / 'install.log').read_text(encoding='utf-8', errors='replace')
+            warnings = [line for line in install_log.splitlines() if 'shortcut' in line.lower()]
             raise ValueError('Installed Windows desktop shortcut, target, or logo did not verify: '
-                             + shortcut_check.stderr)
+                             + shortcut_check.stdout + shortcut_check.stderr + ' '.join(warnings))
         status['checks'].append('branded_desktop_shortcut')
         installed = json.loads((destination / "bootstrap-status.json").read_text(encoding="utf-8"))
         if installed["status"] != ("scientific_dependencies_installed" if args.with_scientific else "bootstrap_installed"):
