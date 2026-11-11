@@ -139,15 +139,53 @@ try {
             if (Test-Path -LiteralPath $shortcutPath) {
                 Write-Warning "Desktop shortcut already exists and was not replaced: $shortcutPath"
             } else {
-                $shell = New-Object -ComObject WScript.Shell
-                $shortcut = $shell.CreateShortcut($shortcutPath)
-                $shortcut.TargetPath = Join-Path $Destination 'bin/docking-universal.cmd'
-                $shortcut.Arguments = 'desktop'
-                $shortcut.WorkingDirectory = $Destination
-                $shortcut.IconLocation = (Join-Path $Destination 'app/docking_universal/gui/assets/branding/docking-universal-app-icon.ico') + ',0'
-                $shortcut.Description = 'Open Docking Universal'
-                $shortcut.WindowStyle = 7
-                $shortcut.Save()
+                # WScript.Shell can silently replace Unicode folder characters
+                # through the active ANSI code page. IShellLinkW stores exact
+                # UTF-16 paths, including on machines with non-ASCII names.
+                Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+using System.Text;
+[ComImport, Guid("00021401-0000-0000-C000-000000000046")]
+class DockingShellLink { }
+[ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("000214F9-0000-0000-C000-000000000046")]
+interface IDockingShellLinkW {
+    void GetPath(StringBuilder p, int n, IntPtr data, uint flags);
+    void GetIDList(out IntPtr p);
+    void SetIDList(IntPtr p);
+    void GetDescription(StringBuilder p, int n);
+    void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string p);
+    void GetWorkingDirectory(StringBuilder p, int n);
+    void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string p);
+    void GetArguments(StringBuilder p, int n);
+    void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string p);
+    void GetHotkey(out short p);
+    void SetHotkey(short p);
+    void GetShowCmd(out int p);
+    void SetShowCmd(int p);
+    void GetIconLocation(StringBuilder p, int n, out int index);
+    void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string p, int index);
+    void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string p, uint reserved);
+    void Resolve(IntPtr hwnd, uint flags);
+    void SetPath([MarshalAs(UnmanagedType.LPWStr)] string p);
+}
+public static class DockingShortcut {
+    public static void Create(string shortcut, string target, string working, string icon) {
+        var link = (IDockingShellLinkW)new DockingShellLink();
+        link.SetPath(target);
+        link.SetArguments("desktop");
+        link.SetWorkingDirectory(working);
+        link.SetIconLocation(icon, 0);
+        link.SetDescription("Open Docking Universal");
+        link.SetShowCmd(7);
+        ((IPersistFile)link).Save(shortcut, true);
+    }
+}
+'@
+                [DockingShortcut]::Create($shortcutPath,
+                    (Join-Path $Destination 'bin/docking-universal.cmd'), $Destination,
+                    (Join-Path $Destination 'app/docking_universal/gui/assets/branding/docking-universal-app-icon.ico'))
                 Write-Host "Created desktop shortcut: $shortcutPath"
             }
         }

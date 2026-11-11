@@ -118,19 +118,46 @@ def main():
         icon = destination / 'app/docking_universal/gui/assets/branding/docking-universal-app-icon.ico'
         shortcut_environment = {**os.environ, 'DU_SHORTCUT': str(shortcut),
             'DU_TARGET': str(destination / 'bin/docking-universal.cmd'), 'DU_ICON': str(icon)}
-        shortcut_check = subprocess.run(['powershell.exe', '-NoProfile', '-Command',
-            "$ErrorActionPreference='Stop'; "
-            "if (!(Test-Path -LiteralPath $env:DU_SHORTCUT)) { Write-Output 'shortcut missing'; exit 2 }; "
-            "if (!(Test-Path -LiteralPath $env:DU_ICON)) { Write-Output 'icon missing'; exit 2 }; "
-            "$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:DU_SHORTCUT); "
-            "if ($s.TargetPath -ne $env:DU_TARGET -or $s.Arguments -ne 'desktop' -or "
-            "($s.IconLocation -split ',')[0].Trim() -ne $env:DU_ICON) "
-            "{ Write-Output ('target-match=' + ($s.TargetPath -eq $env:DU_TARGET) + "
-            "'; target-exists=' + (Test-Path -LiteralPath $s.TargetPath) + "
-            "'; args-match=' + ($s.Arguments -eq 'desktop') + "
-            "'; icon-match=' + (($s.IconLocation -split ',')[0].Trim() -eq $env:DU_ICON) + "
-            "'; target-codepoints=' + (($s.TargetPath.ToCharArray() | ForEach-Object {[int]$_}) -join ',') + "
-            "'; expected-codepoints=' + (($env:DU_TARGET.ToCharArray() | ForEach-Object {[int]$_}) -join ',')); exit 3 }"],
+        # Read with the Unicode ShellLink interface too: WScript's accessor
+        # can itself transliterate a valid shortcut through an ANSI code page.
+        shortcut_probe = r"""
+$ErrorActionPreference='Stop'
+if (!(Test-Path -LiteralPath $env:DU_SHORTCUT) -or !(Test-Path -LiteralPath $env:DU_ICON)) { exit 2 }
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+using System.Text;
+[ComImport, Guid("00021401-0000-0000-C000-000000000046")] class TestShellLink { }
+[ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("000214F9-0000-0000-C000-000000000046")]
+interface ITestShellLinkW {
+ void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder p, int n, IntPtr data, uint flags);
+ void GetIDList(out IntPtr p); void SetIDList(IntPtr p);
+ void GetDescription(StringBuilder p, int n); void SetDescription(string p);
+ void GetWorkingDirectory(StringBuilder p, int n); void SetWorkingDirectory(string p);
+ void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder p, int n); void SetArguments(string p);
+ void GetHotkey(out short p); void SetHotkey(short p); void GetShowCmd(out int p); void SetShowCmd(int p);
+ void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder p, int n, out int index);
+ void SetIconLocation(string p, int index); void SetRelativePath(string p, uint reserved);
+ void Resolve(IntPtr hwnd, uint flags); void SetPath(string p);
+}
+public static class UnicodeShortcutProbe {
+ public static string Check(string file, string target, string icon) {
+  var link=(ITestShellLinkW)new TestShellLink(); ((IPersistFile)link).Load(file,0);
+  var path=new StringBuilder(32768); var args=new StringBuilder(32768); var image=new StringBuilder(32768);
+  int index; link.GetPath(path,path.Capacity,IntPtr.Zero,4); link.GetArguments(args,args.Capacity);
+  link.GetIconLocation(image,image.Capacity,out index);
+  return "target=" + String.Equals(path.ToString(),target,StringComparison.OrdinalIgnoreCase)
+   + "; arguments=" + (args.ToString()=="desktop")
+   + "; icon=" + String.Equals(image.ToString(),icon,StringComparison.OrdinalIgnoreCase)
+   + "; icon-index=" + index;
+ }
+}
+'@
+$result=[UnicodeShortcutProbe]::Check($env:DU_SHORTCUT,$env:DU_TARGET,$env:DU_ICON)
+if ($result -ne 'target=True; arguments=True; icon=True; icon-index=0') { Write-Output $result; exit 3 }
+"""
+        shortcut_check = subprocess.run(['powershell.exe', '-NoProfile', '-Command', shortcut_probe],
             env=shortcut_environment, capture_output=True, text=True, timeout=30)
         if shortcut_check.returncode:
             install_log = (out / 'install.log').read_text(encoding='utf-8', errors='replace')
