@@ -245,12 +245,17 @@ class ProtocolWorkflowTests(unittest.TestCase):
              'pdb_pocket_evidence': 'off'}, state.revision))
         self.assertEqual(started.status, 'applied', started.error)
         failed = self.wait_for(lambda s: s.jobs and s.jobs[-1].status == JobStatus.FAILED and not s.active_job)
+        setup = failed.workflow_data['study_setup']
+        retained_paths = [Path(setup['input_structure']), Path(setup['input_pdb']),
+                          Path(setup['structure_input_metadata'])]
+        before = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in retained_paths}
         executable.write_text(successful)
         retried = dispatcher.dispatch(Command('workflow', 'session', 'retry-cif', 'retry_site_exploration', {}, failed.revision))
         self.assertEqual(retried.status, 'applied', retried.error)
         done = self.wait_for(lambda s: bool(s.pending_decisions))
         source_artifact = next(a for a in done.artifacts if a.kind == 'normalized_receptor_input')
         self.assertEqual(source_artifact.path, done.workflow_data['study_setup']['input_pdb'])
+        self.assertEqual({p: (p.read_bytes(), p.stat().st_mtime_ns) for p in retained_paths}, before)
         self.assertEqual(done.pending_decisions[0].kind, 'select_pockets')
 
     def test_offline_evidence_failure_preserves_preparation_and_region_decision(self):

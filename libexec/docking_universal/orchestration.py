@@ -454,17 +454,30 @@ class ProtocolWorkflowRunner:
         if evidence_mode not in {"related-structures", "off"}:
             raise ValueError("PDB pocket evidence must be related-structures or off")
         options = ReceptorPreparationOptions(**values)
-        plan = build_receptor_preparation_plan(self.preparation_executable, options)
+        is_retry = retry_site_exploration or retry_legacy_preparation
+        if is_retry:
+            # Normalize into the new attempt from the outset. Normalization
+            # writes files; running it in the old study directory would
+            # otherwise rewrite its retained coordinate and metadata files.
+            retained = state.workflow_data.get('study_setup') or {}
+            kind = '.docking-universal-site-attempts' if retry_site_exploration else '.docking-universal-preparation-attempts'
+            working = options.working_directory / kind / uuid4().hex
+            plan = build_receptor_preparation_plan(self.preparation_executable,
+                                                  replace(options, working_directory=working))
+            old_pdb = Path(retained.get('input_pdb') or '')
+            old_metadata = Path(retained.get('structure_input_metadata') or '')
+            if (not old_pdb.is_file() or not old_metadata.is_file()
+                    or sha256(old_pdb) != sha256(plan.structure_input.engine_pdb_path)):
+                raise ValueError('Retained receptor coordinates are missing or differ from the retry input')
+            # Preserve the original source identity used by site review and
+            # audit records; the subprocess reads the verified attempt copy.
+            plan = replace(plan, structure_input=replace(plan.structure_input,
+                source_path=Path(retained['input_structure']), engine_pdb_path=old_pdb,
+                metadata_path=old_metadata))
+        else:
+            plan = build_receptor_preparation_plan(self.preparation_executable, options)
         if explore_first:
             from .services.site_exploration import exploration_request, exploration_root
-            if retry_site_exploration:
-                # Keep the original folder and logs untouched, while retaining
-                # the original target name used by downstream site review.
-                attempt_id = uuid4().hex
-                attempt = options.working_directory / '.docking-universal-site-attempts' / attempt_id
-                plan = replace(plan, output_root=attempt / plan.output_root.name,
-                               request=replace(plan.request,
-                                   log_name=plan.request.log_name + '-retry-' + attempt_id))
             exploration_request(plan, options)  # Validate worker/engine before locking setup.
             if exploration_root(plan).exists():
                 raise ValueError('Site-review output already exists and will not be overwritten')
@@ -529,16 +542,6 @@ class ProtocolWorkflowRunner:
             study_id, retain_setup, expected_revision=expected_revision,
         )
         preparation_revision = retained_state.revision
-        if retry_legacy_preparation:
-            # Build the same scientific request in a new working directory;
-            # the locked study setup and old partial outputs stay unchanged.
-            working = options.working_directory / '.docking-universal-preparation-attempts' / uuid4().hex
-            original_input = plan.structure_input
-            retry_plan = build_receptor_preparation_plan(self.preparation_executable,
-                                                        replace(options, working_directory=working))
-            if sha256(original_input.engine_pdb_path) != sha256(retry_plan.structure_input.engine_pdb_path):
-                raise ValueError('Retry normalization differs from the retained receptor input')
-            plan = replace(retry_plan, structure_input=original_input)
         cancellation = threading.Event()
 
         def work() -> None:
