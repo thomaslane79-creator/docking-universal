@@ -93,6 +93,11 @@ class StudyLauncherDialog(QtWidgets.QDialog):
             create_group.hide()
 
         buttons = QtWidgets.QHBoxLayout()
+        about_button = QtWidgets.QPushButton('About…')
+        about_button.setObjectName('about_docking_universal_button')
+        from .branding import show_about
+        about_button.clicked.connect(lambda: show_about(self))
+        buttons.addWidget(about_button)
         self.create_button = QtWidgets.QPushButton("Create study")
         self.open_button = QtWidgets.QPushButton("Open selected study")
         self.open_button.setEnabled(False)

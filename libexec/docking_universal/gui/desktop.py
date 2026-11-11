@@ -777,6 +777,12 @@ if QtWidgets is not None:
             self.open_study_action.setObjectName("open_study_action")
             self.new_study_action.triggered.connect(lambda: self._choose_another_study("create"))
             self.open_study_action.triggered.connect(lambda: self._choose_another_study("open"))
+            menu.addSeparator()
+            self.about_action = menu.addAction('About Docking Universal…')
+            self.about_action.setObjectName('about_docking_universal_action')
+            self.about_action.setMenuRole(QtGui.QAction.MenuRole.AboutRole)
+            from .branding import show_about
+            self.about_action.triggered.connect(lambda: show_about(self))
 
         def _choose_another_study(self, mode: str) -> None:
             if not self.host_controller.available:

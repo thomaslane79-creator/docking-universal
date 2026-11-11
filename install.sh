@@ -251,7 +251,7 @@ EOF
     printf '%q' "$launcher_path"
     printf ' desktop "$@"\n'; } > "$app_contents/MacOS/DockingUniversal"
   chmod +x "$app_contents/MacOS/DockingUniversal"
-  icon_source="$project_dir/libexec/docking_universal/gui/assets/branding/docking-universal-app-icon.png"
+  icon_source="$project_dir/libexec/docking_universal/gui/assets/branding/docking-universal-app-icon-white.png"
   sips -s format icns "$icon_source" --out "$app_contents/Resources/DockingUniversal.icns" >/dev/null
   desktop_dir=${DOCKING_UNIVERSAL_DESKTOP_DIR:-"$HOME/Desktop"}
   desktop_shortcut="$desktop_dir/Docking Universal.app"

@@ -54,7 +54,10 @@ def main() -> int:
 
     require_qt()
     set_windows_application_identity()
-    application = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    # Cocoa builds its native About/Hide/Quit labels during QApplication
+    # construction. Use the product name there, not the Python script path.
+    QtCore.QCoreApplication.setApplicationName("Docking Universal")
+    application = QtWidgets.QApplication.instance() or QtWidgets.QApplication(["Docking Universal", *sys.argv[1:]])
     application.setApplicationName("Docking Universal")
     application.setWindowIcon(QtGui.QIcon(str(application_icon_path())))
     state_root = args.state_root or (

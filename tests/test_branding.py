@@ -11,10 +11,10 @@ from docking_universal.gui.branding import application_icon_path
 def test_application_icon_is_packaged_simplified_asset():
     icon = application_icon_path()
 
-    assert icon.name == "docking-universal-app-icon.png"
+    assert icon.name == "docking-universal-app-icon-white.png"
     assert icon.is_file()
     assert icon.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     assert icon.stat().st_size > 10_000
-    windows_icon = icon.with_suffix('.ico')
+    windows_icon = icon.with_name('docking-universal-app-icon.ico')
     assert windows_icon.is_file()
     assert windows_icon.read_bytes().startswith(b'\x00\x00\x01\x00')

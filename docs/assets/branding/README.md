@@ -21,3 +21,7 @@ The GUI carries a runtime copy of the 512 px simplified full-color icon under
 `libexec/docking_universal/gui/assets/branding`. Complex protein-render marks,
 photorealistic molecular artwork, and grayscale variants are not approved GUI
 or report branding and must not be substituted for these assets.
+
+The desktop icon places that same mark on a pure-white rounded tile with a
+compact margin. The PNG and multi-size Windows ICO are packaged alongside the
+original transparent logo; the macOS installer converts the white PNG to ICNS.

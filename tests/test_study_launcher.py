@@ -44,6 +44,22 @@ class StudyLauncherTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
+    def test_about_window_shows_shipped_version_and_branding(self):
+        from docking_universal.gui.branding import about_dialog, application_version, render_white_icon
+        from docking_universal.gui.qt import QtCore
+        chooser = StudyLauncherDialog(self.store, self.host)
+        button = chooser.findChild(QtWidgets.QPushButton, 'about_docking_universal_button')
+        self.assertIsNotNone(button)
+        dialog = about_dialog(chooser)
+        self.assertIn(application_version(), dialog.text())
+        self.assertIn('reviewing docking regions', dialog.informativeText())
+        self.assertFalse(dialog.iconPixmap().isNull())
+        self.assertEqual(render_white_icon().toImage().pixelColor(256, 60).name(), '#ffffff')
+        self.assertEqual(render_white_icon().toImage().pixelColor(256, 5).alpha(), 0)
+        self.assertEqual(dialog.textFormat(), QtCore.Qt.TextFormat.PlainText)
+        dialog.close()
+        chooser.close()
+
     def test_lists_persisted_studies_and_opens_exact_identity(self):
         self.controller.create_study("older", "Older study")
         self.controller.create_study("newer", "Newer study")
