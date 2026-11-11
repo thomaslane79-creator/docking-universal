@@ -1,5 +1,6 @@
 """Local inspection entries, independent of scientific input selections."""
 
+import base64
 import hashlib
 from pathlib import Path
 
@@ -219,3 +220,18 @@ def compound_3d_block(entry):
     if not molecule.GetNumConformers() or not molecule.GetConformer().Is3D():
         raise ValueError('This compound has no supplied 3D coordinates. Its 2D drawing is available; no new geometry is generated automatically.')
     return Chem.MolToMolBlock(molecule)
+
+
+def inspection_preview(entry, mode='drawing'):
+    """Return read-only molecule inspection data across the host boundary."""
+    if not isinstance(entry, dict) or entry.get('origin') not in {'input', 'library', 'smiles'}:
+        raise ValueError('A loaded input component or local compound is required for inspection.')
+    if mode == 'drawing':
+        png, basis = drawing_for_entry(entry)
+        return {'png_base64': base64.b64encode(png).decode('ascii'), 'basis': basis}
+    if mode == 'coordinates':
+        return {'mol_block': compound_3d_block(entry)}
+    if mode == 'validate':
+        molecule_for_entry(entry)
+        return {'valid': True}
+    raise ValueError('Unknown molecule inspection mode')

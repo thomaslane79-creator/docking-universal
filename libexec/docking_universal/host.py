@@ -163,6 +163,11 @@ class CommandDispatcher:
                     str(command.payload.get('preview_sha256') or ''), command.payload.get('rationale'),
                     str(command.payload.get('actor') or 'desktop-user'), command.expected_revision, command.request_id)}
             return Response(command.request_id, 'applied', self.controller.get_study(command.study_id).revision, result)
+        if command.operation == 'molecule_inspection':
+            from .services.molecule_inspection import inspection_preview
+            state = self.controller.get_study(command.study_id)
+            preview = inspection_preview(command.payload.get('entry'), command.payload.get('mode', 'drawing'))
+            return Response(command.request_id, 'applied', state.revision, {'preview': preview})
         if command.operation in {"inspect_ligand_library", "ligand_record_preview"}:
             from .services.ligand_library import inspect_ligand_library, ligand_record_preview
             state = self.controller.get_study(command.study_id)

@@ -1,17 +1,24 @@
 """One molecule list shared by local 2D and 3D inspection."""
 
+import base64
+
 from .qt import QtCore, QtGui, QtWidgets
 from .ligand_library_panel import CompoundPreview, LibraryReadTask
 from .explanations import ExplanationLabel
 from ..services.molecule_inspection import (
-    input_molecules, library_molecules, drawing_for_entry, verify_input,
-    compound_3d_block, molecule_for_entry,
+    input_molecules, inspection_preview, library_molecules, verify_input,
 )
 
 
 class MoleculeInspectorPanel(QtWidgets.QWidget):
     bothRequested = QtCore.pyqtSignal()
     referenceRequested = QtCore.pyqtSignal(dict)
+
+    def _inspect(self, entry, mode='drawing'):
+        controller = self._window.host_controller
+        if controller.available:
+            return controller.inspect_molecule(entry, mode)
+        return inspection_preview(entry, mode)
 
     def __init__(self, window):
         super().__init__()
@@ -283,7 +290,9 @@ class MoleculeInspectorPanel(QtWidgets.QWidget):
             return
         self.origin.set_content(entry['label'], entry['label'] + '\n\n' + self._inspection_help)
         try:
-            png, basis = drawing_for_entry(entry)
+            preview = self._inspect(entry)
+            png = base64.b64decode(preview['png_base64'], validate=True)
+            basis = preview['basis']
             image = QtGui.QPixmap()
             if not image.loadFromData(png):
                 raise ValueError('The chemical drawing could not be displayed.')
@@ -318,7 +327,7 @@ class MoleculeInspectorPanel(QtWidgets.QWidget):
             block = None
         else:
             key = ('compound', entry.get('record_id'), entry.get('fingerprint'), entry.get('smiles'))
-            block = compound_3d_block(entry)
+            block = self._inspect(entry, 'coordinates')['mol_block']
         if key != self._preview_key:
             self._release_viewer()
             self._split_sizes = self._window.pose_split.sizes()
@@ -400,7 +409,9 @@ class MoleculeInspectorPanel(QtWidgets.QWidget):
         self._loading = True
         self.open_file.setEnabled(False)
         self.origin.setText('Reading local molecule file…')
-        self._read_task.start(lambda: inspect_ligand_library(path))
+        controller = self._window.host_controller
+        operation = controller.inspect_ligand_library if controller.available else inspect_ligand_library
+        self._read_task.start(lambda: operation(str(path)))
 
     def _local_file_loaded(self, library, error):
         self._loading = False
@@ -424,7 +435,7 @@ class MoleculeInspectorPanel(QtWidgets.QWidget):
         entry = {'origin': 'smiles', 'kind': 'compound', 'smiles': text,
                  'label': 'Entered SMILES — ' + text}
         try:
-            molecule_for_entry(entry)
+            self._inspect(entry, 'validate')
         except Exception as exc:
             self.picture.setText(str(exc))
             self.origin.setText('SMILES could not be read; the list was not changed.')

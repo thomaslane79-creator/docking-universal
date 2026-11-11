@@ -97,6 +97,10 @@ class ApplicationHostController:
             payload['column_mapping'] = column_mapping
         return self._request("ligand_record_preview", payload)["result"]["preview"]
 
+    def inspect_molecule(self, entry, mode='drawing'):
+        payload = {'entry': dict(entry), 'mode': mode}
+        return self._request('molecule_inspection', payload)['result']['preview']
+
     def screening_plan(self, ligand_source, ligand_selection=None):
         payload = {"ligand_source": ligand_source}
         if ligand_selection is not None:

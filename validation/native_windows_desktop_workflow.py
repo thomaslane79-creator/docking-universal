@@ -178,6 +178,26 @@ def main():
         structure = inputs / "2R8N.cif"; shutil.copyfile(args.structure, structure)
         ligand = inputs / "synthetic_carbamate.sdf"; shutil.copyfile(args.ligand, ligand)
 
+        def inspect_molecules():
+            inspector = window.molecule_inspector
+            study_path = store.path_for('desktop-fixture')
+            original_study = study_path.read_bytes()
+            original_ligand = ligand.read_bytes()
+            inspector.smiles.setText('CCO')
+            inspector.draw_smiles_button.click()
+            if inspector.picture.picture is None or inspector.picture.picture.isNull():
+                raise GateError('Inline SMILES inspection did not render through the scientific host')
+            inspector.load_file(ligand)
+            wait_for(lambda _state: inspector.open_file.isEnabled(), seconds=30)
+            entry = inspector.choices.currentData() or {}
+            if entry.get('origin') != 'library' or inspector.picture.picture is None or inspector.picture.picture.isNull():
+                raise GateError('Inline local SDF inspection did not render through the scientific host')
+            if 'rdkit' in sys.modules:
+                raise GateError('Inline inspection imported RDKit into the isolated GUI runtime')
+            if study_path.read_bytes() != original_study or ligand.read_bytes() != original_ligand:
+                raise GateError('Inline inspection modified study or ligand input bytes')
+        stage('qt_inline_smiles_and_sdf_preview_uses_scientific_host', inspect_molecules)
+
         def prepare():
             window.input_pdb.setText(str(structure))
             window.output_directory.setText(str(out / "Preparation Ω"))

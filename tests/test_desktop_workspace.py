@@ -145,12 +145,17 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.assertFalse(window.study_setup_panel.preview_input_button.isEnabled())
 
     def test_inline_reference_action_selects_exact_instance_and_retains_redocking_choice(self):
+        from docking_universal.services.molecule_inspection import inspection_preview
         from tests.test_molecule_inspection import component_fixture
         from types import SimpleNamespace
         from unittest.mock import Mock
         source, _ = component_fixture(self.root)
         StudyController(self.store).create_study('reference-selection', 'Reference selection')
-        client = SimpleNamespace(runtime={}, connected=True, request=Mock())
+        def inspect(_study, operation, payload):
+            self.assertEqual(operation, 'molecule_inspection')
+            return {'result': {'preview': inspection_preview(payload['entry'], payload['mode'])}}
+
+        client = SimpleNamespace(runtime={}, connected=True, request=Mock(side_effect=inspect))
         window = StudyWindow(self.store, 'reference-selection', settings=self.settings, host_client=client)
         self.addCleanup(window.close)
         window.input_pdb.setText(str(source))
@@ -173,7 +178,8 @@ class DesktopWorkspaceTests(unittest.TestCase):
             self.assertEqual(values.pathway, 'control' if redock else 'exploratory')
             self.assertEqual(self.store.path_for('reference-selection').read_bytes(), original)
             self.assertEqual(source.read_bytes(), source_bytes)
-        client.request.assert_not_called()
+        self.assertTrue(client.request.called)
+        self.assertEqual({call.args[1] for call in client.request.call_args_list}, {'molecule_inspection'})
         window.close()
         reopened = StudyWindow(self.store, 'reference-selection', settings=self.settings, host_client=client)
         self.addCleanup(reopened.close)
