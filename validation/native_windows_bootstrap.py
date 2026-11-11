@@ -125,7 +125,12 @@ def main():
             "$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:DU_SHORTCUT); "
             "if ($s.TargetPath -ne $env:DU_TARGET -or $s.Arguments -ne 'desktop' -or "
             "($s.IconLocation -split ',')[0].Trim() -ne $env:DU_ICON) "
-            "{ Write-Output ('target=' + $s.TargetPath + '; arguments=' + $s.Arguments + '; icon=' + $s.IconLocation); exit 3 }"],
+            "{ Write-Output ('target-match=' + ($s.TargetPath -eq $env:DU_TARGET) + "
+            "'; target-exists=' + (Test-Path -LiteralPath $s.TargetPath) + "
+            "'; args-match=' + ($s.Arguments -eq 'desktop') + "
+            "'; icon-match=' + (($s.IconLocation -split ',')[0].Trim() -eq $env:DU_ICON) + "
+            "'; target-codepoints=' + (($s.TargetPath.ToCharArray() | ForEach-Object {[int]$_}) -join ',') + "
+            "'; expected-codepoints=' + (($env:DU_TARGET.ToCharArray() | ForEach-Object {[int]$_}) -join ',')); exit 3 }"],
             env=shortcut_environment, capture_output=True, text=True, timeout=30)
         if shortcut_check.returncode:
             install_log = (out / 'install.log').read_text(encoding='utf-8', errors='replace')
