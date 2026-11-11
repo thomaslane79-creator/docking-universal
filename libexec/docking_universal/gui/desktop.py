@@ -467,9 +467,6 @@ if QtWidgets is not None:
             self.setCentralWidget(central)
 
             self.view_toolbar = self.addToolBar("View")
-            self.inspect_molecules_action = self.view_toolbar.addAction('Molecules…')
-            self.inspect_molecules_action.setToolTip('Choose a loaded receptor component or screening compound and inspect it in 2D or 3D.')
-            self.inspect_molecules_action.triggered.connect(self.preview_molecule_2d)
             self.view_toolbar.setObjectName("view_toolbar")
             self.scientific_detail_action = self.view_toolbar.addAction("Scientific Detail")
             self.scientific_detail_action.setCheckable(True)
