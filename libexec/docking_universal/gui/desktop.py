@@ -4979,6 +4979,13 @@ if QtWidgets is not None:
             QtCore.QTimer.singleShot(0, self._poll_refresh)
             self._schedule_initial_candidate_review()
 
+        def hideEvent(self, event) -> None:
+            super().hideEvent(event)
+            # Stop immediately rather than waiting for the next timer tick;
+            # a busy event loop can defer that tick after the window is hidden.
+            if hasattr(self, 'workspace_controller'):
+                self.workspace_controller.closed()
+
         def closeEvent(self, event) -> None:
             if self._site_expansion_dialog is not None:
                 self._site_expansion_dialog.close()
