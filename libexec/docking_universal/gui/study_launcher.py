@@ -14,6 +14,11 @@ def study_id_from_name(name: str) -> str:
 
 
 class StudyLauncherDialog(QtWidgets.QDialog):
+    def showEvent(self, event):
+        super().showEvent(event)
+        from .branding import hide_macos_services
+        QtCore.QTimer.singleShot(0, hide_macos_services)
+
     def __init__(
         self, store, host_client, parent=None, *, mode="all",
         current_study_id: str | None = None,

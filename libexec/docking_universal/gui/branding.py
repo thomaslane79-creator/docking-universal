@@ -101,6 +101,47 @@ def show_about(parent=None) -> None:
     about_dialog(parent).exec()
 
 
+def hide_macos_services() -> bool:
+    """Hide this app's unused macOS Services item, without changing system settings.
+
+    Qt creates the native application menu itself. Identify the Services item
+    by its actual NSApplication submenu, rather than by localized menu text.
+    """
+    if sys.platform != 'darwin':
+        return False
+    import ctypes
+    try:
+        objc = ctypes.CDLL('/usr/lib/libobjc.A.dylib')
+        objc.objc_getClass.argtypes = [ctypes.c_char_p]
+        objc.objc_getClass.restype = ctypes.c_void_p
+        objc.sel_registerName.argtypes = [ctypes.c_char_p]
+        objc.sel_registerName.restype = ctypes.c_void_p
+        address = ctypes.cast(objc.objc_msgSend, ctypes.c_void_p).value
+        get = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)(address)
+        count = ctypes.CFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p, ctypes.c_void_p)(address)
+        at = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong)(address)
+        set_hidden = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_bool)(address)
+        sel = lambda name: objc.sel_registerName(name.encode('ascii'))
+        app = get(objc.objc_getClass(b'NSApplication'), sel('sharedApplication'))
+        services = get(app, sel('servicesMenu'))
+        main = get(app, sel('mainMenu'))
+        if not services or not main or not count(main, sel('numberOfItems')):
+            return False
+        first = at(main, sel('itemAtIndex:'), 0)
+        application_menu = get(first, sel('submenu'))
+        if not application_menu:
+            return False
+        for index in range(count(application_menu, sel('numberOfItems'))):
+            item = at(application_menu, sel('itemAtIndex:'), index)
+            if get(item, sel('submenu')) == services:
+                set_hidden(item, sel('setHidden:'), True)
+                return True
+    except (OSError, AttributeError, TypeError, ValueError):
+        # Branding must never stop the application from opening.
+        return False
+    return False
+
+
 def set_windows_application_identity() -> None:
     """Give Windows a distinct taskbar group before Qt creates any windows."""
     if sys.platform == 'win32':

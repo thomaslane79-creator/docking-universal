@@ -4976,6 +4976,8 @@ if QtWidgets is not None:
         def showEvent(self, event) -> None:
             super().showEvent(event)
             self.workspace_controller.shown()
+            from .branding import hide_macos_services
+            QtCore.QTimer.singleShot(0, hide_macos_services)
             QtCore.QTimer.singleShot(0, self._poll_refresh)
             self._schedule_initial_candidate_review()
 
