@@ -1098,7 +1098,6 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.application.processEvents()
         for action, dock in (
             (self.window.scientific_detail_action, self.window.workflow_detail_dock),
-            (self.window.selections_action, self.window.selection_dock),
             (self.window.logs_action, self.window.logs_dock),
             (self.window.artifacts_action, self.window.reports_dock),
         ):

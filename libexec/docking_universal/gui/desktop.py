@@ -136,7 +136,6 @@ if QtWidgets is not None:
             self.workflow_detail_dock.hide()
             self.logs_dock.hide()
             self.reports_dock.hide()
-            self.selection_dock.hide()
             self._restore_form_values()
             self._apply_runtime_capabilities()
             self.refresh()
@@ -484,8 +483,6 @@ if QtWidgets is not None:
             self.log_view.setReadOnly(True)
             self.report_list = QtWidgets.QListWidget()
             self.report_list.itemDoubleClicked.connect(self.open_artifact)
-            self.selection_view = QtWidgets.QTreeWidget()
-            self.selection_view.setHeaderLabels(("Proposed selection", "Identity"))
             self.workflow_detail_dock = self._dock("Scientific Workflow Detail", self.scientific_detail_panel, QtCore.Qt.DockWidgetArea.RightDockWidgetArea, "workflow_detail_dock")
             self.scientific_detail_action.triggered.connect(
                 lambda checked: self._set_auxiliary_dock_visible(
@@ -495,11 +492,6 @@ if QtWidgets is not None:
             )
             self.workflow_detail_dock.visibilityChanged.connect(
                 self.scientific_detail_action.setChecked
-            )
-            self.selection_dock = self._dock("Selections", self.selection_view, QtCore.Qt.DockWidgetArea.RightDockWidgetArea, "selection_dock")
-            self.selection_dock.hide()
-            self.selections_action = self._add_auxiliary_dock_action(
-                "Selections", self.selection_dock, QtCore.Qt.DockWidgetArea.RightDockWidgetArea,
             )
             self.logs_dock = self._dock("Complete Logs", self.log_view, QtCore.Qt.DockWidgetArea.BottomDockWidgetArea, "logs_dock")
             self.reports_dock = self._dock("Reports and Study Files", self.report_list, QtCore.Qt.DockWidgetArea.BottomDockWidgetArea, "reports_dock")
