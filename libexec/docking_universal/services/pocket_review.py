@@ -8,6 +8,7 @@ import hashlib
 import json
 import math
 import re
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -53,7 +54,184 @@ def _safe_label(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._-") or "site"
 
 
-def candidate_with_input_ligand_evidence(state, candidate, *, boundary_tolerance=.25):
+def _shared_group_ligands_in_representative_box(state, candidate):
+    """Recover verified legacy grouping evidence without changing the saved study."""
+    from ..pocket_sites import ligand_coordinates, ligand_fits
+    from .molecule_inspection import is_supporting_component_observation
+    evidence = candidate.get('evidence') or {}
+    group = evidence.get('site_group') or evidence.get('site_group_presentation') or {}
+    hashes = {digest for relation in group.get('relationships', [])
+              for digest in relation.get('ligand_sha256s', [])}
+    grouping = (state.workflow_data.get('pocket_site_grouping')
+                or state.workflow_data.get('pocket_site_presentation') or {})
+    originals = grouping.get('original_candidates') or []
+    if not hashes or not originals:
+        return []
+    artifacts = {str(Path(a.path).resolve()): a for a in state.artifacts if a.kind == 'aligned_ligand'}
+    box = next((a for a in state.artifacts if a.id == candidate.get('box_artifact_id')), None)
+    if box is None:
+        return []
+    try:
+        if not box.sha256 or _sha256(Path(box.path)) != box.sha256:
+            return []
+        geometry = config_geometry(Path(box.path))
+    except (OSError, ValueError, KeyError):
+        return []
+    found = {}
+    for source in originals:
+        observations = ((source.get('evidence') or {}).get('experimental_ligand_evidence') or {}).get('observations') or []
+        for observation in observations:
+            if is_supporting_component_observation(observation):
+                continue
+            try:
+                path = Path(observation['aligned_ligand_pdb']).resolve()
+                artifact = artifacts[str(path)]
+                if artifact.sha256 not in hashes or _sha256(path) != artifact.sha256:
+                    continue
+                inside = ligand_fits(ligand_coordinates(path), geometry)
+            except (OSError, KeyError, ValueError, TypeError):
+                continue
+            identity = (str(observation.get('source_ligand_id') or path), artifact.sha256)
+            relationships = [f"{relation.get('left')}/{relation.get('right')}"
+                             for relation in group.get('relationships', [])
+                             if artifact.sha256 in relation.get('ligand_sha256s', [])]
+            found.setdefault(identity, {**observation,
+                'evidence_role': 'shared_grouping_ligand_in_box' if inside else 'shared_grouping_ligand_outside_box',
+                'original_evidence_site': source.get('id'), 'supporting_relationships': relationships})
+    return list(found.values())
+
+
+_INPUT_LIGAND_CACHE = {}
+
+
+def _related_ligands_in_box(state, candidate):
+    """Project verified related-structure ligands by their coordinates, not pocket assignment."""
+    from .molecule_inspection import is_supporting_component_observation
+    from ..pocket_sites import ligand_coordinates, ligand_fits
+    grouping = state.workflow_data.get('pocket_site_grouping') or state.workflow_data.get('pocket_site_presentation') or {}
+    originals = grouping.get('original_candidates') or state.workflow_data.get('pocket_candidates') or []
+    artifacts = getattr(state, 'artifacts', ())
+    box = next((a for a in artifacts if a.id == candidate.get('box_artifact_id')), None)
+    if box is None or not originals:
+        return []
+    try:
+        if not box.sha256 or _sha256(Path(box.path)) != box.sha256:
+            return []
+        geometry = config_geometry(Path(box.path))
+    except (OSError, ValueError, KeyError):
+        return []
+    index = getattr(state, '_related_ligand_box_index', None)
+    if index is None:
+        assets = {str(Path(a.path).resolve()): a for a in artifacts if a.kind == 'aligned_ligand'}
+        index, seen = [], set()
+        for source in originals:
+            observations = ((source.get('evidence') or {}).get('experimental_ligand_evidence') or {}).get('observations') or []
+            for observation in observations:
+                if is_supporting_component_observation(observation):
+                    continue
+                try:
+                    path = Path(observation['aligned_ligand_pdb']).resolve()
+                    asset = assets[str(path)]
+                    key = (str(observation.get('source_ligand_id') or path), asset.sha256)
+                    if key in seen or not asset.sha256 or _sha256(path) != asset.sha256:
+                        continue
+                    points = ligand_coordinates(path)
+                    bounds = tuple((min(p[i] for p in points), max(p[i] for p in points)) for i in range(3))
+                    index.append((bounds, path, asset.sha256, path.stat().st_mtime_ns,
+                                  {**observation, 'evidence_role': 'related_ligand_in_box',
+                                   'original_evidence_site': source.get('id')}))
+                    seen.add(key)
+                except (OSError, KeyError, ValueError, TypeError):
+                    continue
+        state._related_ligand_box_index = index
+    result = []
+    for bounds, path, digest, mtime, observation in index:
+        if not all(low >= geometry['center_' + axis] - geometry['size_' + axis] / 2 and
+                   high <= geometry['center_' + axis] + geometry['size_' + axis] / 2
+                   for (low, high), axis in zip(bounds, 'xyz')):
+            continue
+        try:
+            if path.stat().st_mtime_ns == mtime and _sha256(path) == digest:
+                result.append(observation)
+        except OSError:
+            continue
+    return result
+
+
+def _other_input_ligands(state, selected):
+    """Extract eligible deposited instances for presentation, preserving provenance.
+
+    These are observations inside a search box, not proof of a predicted
+    cavity or a replacement for the selected pose-recovery reference.
+    """
+    artifacts = getattr(state, 'artifacts', ())
+    source = next((a for a in artifacts if a.kind == 'source_receptor_structure'), None)
+    normalized = next((a for a in artifacts if a.kind == 'normalized_receptor_input'), None)
+    if not source or not normalized or not source.sha256 or not normalized.sha256:
+        return []
+    try:
+        stats = tuple((Path(a.path).stat().st_mtime_ns, Path(a.path).stat().st_size)
+                      for a in (source, normalized, selected))
+    except OSError:
+        return []
+    key = (source.path, source.sha256, normalized.path, normalized.sha256, selected.sha256, stats)
+    cached = getattr(state, '_input_ligand_observations', None)
+    if cached and cached[0] == key:
+        return cached[1]
+    if key in _INPUT_LIGAND_CACHE:
+        return _INPUT_LIGAND_CACHE[key]
+    from .molecule_inspection import input_molecules
+    try:
+        if _sha256(Path(source.path)) != source.sha256 or _sha256(Path(normalized.path)) != normalized.sha256:
+            return []
+        entries = [item for item in input_molecules(source.path)
+                   if item.get('kind') == 'component' and not item.get('supporting_component')]
+        selected_lines = Path(selected.path).read_text().splitlines()
+        selected_ids = {(line[17:20].strip(), line[21:22].strip() or '_',
+                         line[22:26].strip(), line[26:27].strip()) for line in selected_lines
+                        if line.startswith(('ATOM  ', 'HETATM'))}
+        by_id = {}
+        for line in Path(normalized.path).read_text().splitlines():
+            if line.startswith('ENDMDL'):
+                break
+            if line.startswith(('ATOM  ', 'HETATM')):
+                identity = (line[17:20].strip(), line[21:22].strip() or '_',
+                            line[22:26].strip(), line[26:27].strip())
+                by_id.setdefault(identity, []).append(line)
+        directory = Path(tempfile.mkdtemp(prefix='docking-input-ligands-'))
+        observations = []
+        for entry in entries:
+            identity = (entry['resname'], entry['chain'] or '_', entry['residue_number'], entry['insertion_code'])
+            all_lines = by_id.get(identity, [])
+            if identity in selected_ids or not all_lines:
+                continue
+            altlocs = sorted({line[16:17].strip() for line in all_lines if line[16:17].strip()}) or ['']
+            for altloc in altlocs:
+                lines = [line for line in all_lines if not line[16:17].strip() or line[16:17].strip() == altloc]
+                atoms = [tuple(float(line[i:i + 8]) for i in (30, 38, 46)) for line in lines
+                         if line[76:78].strip().upper() not in {'H', 'D'}]
+                if not atoms or not all(math.isfinite(v) for xyz in atoms for v in xyz):
+                    continue
+                path = directory / (hashlib.sha256(repr((identity, altloc)).encode()).hexdigest() + '.pdb')
+                path.write_text('\n'.join(lines) + '\nEND\n')
+                observations.append((atoms, {'evidence_class': 'input_structure', 'entry': 'Input',
+                'ligand': f'{identity[0]} {identity[1]}:{identity[2]}{identity[3]}' + (f' (alt {altloc})' if altloc else ''),
+                'aligned_ligand_pdb': str(path), 'ligand_sha256': _sha256(path),
+                'source_ligand_id': 'input/' + '/'.join((identity[0], identity[1], identity[2] + identity[3])),
+                'altloc': altloc,
+                'source': 'input_structure', 'evidence_role': 'input ligand inside docking box; not proof of a predicted pocket',
+                'deposited_source': normalized.path, 'deposited_source_sha256': normalized.sha256,
+                'component_source': source.path, 'component_source_sha256': source.sha256}))
+        state._input_ligand_observations = (key, observations)
+        if len(_INPUT_LIGAND_CACHE) >= 8:
+            _INPUT_LIGAND_CACHE.pop(next(iter(_INPUT_LIGAND_CACHE)))
+        _INPUT_LIGAND_CACHE[key] = observations
+        return observations
+    except (OSError, ValueError, KeyError):
+        return []
+
+
+def candidate_with_input_ligand_evidence(state, candidate, *, boundary_tolerance=.25, include_box_related=True):
     """Project retained local ligand evidence without rewriting saved science.
 
     Also works for older studies. Verify both retained assets and require the
@@ -63,18 +241,65 @@ def candidate_with_input_ligand_evidence(state, candidate, *, boundary_tolerance
     if candidate is None:
         return None
     group = (candidate.get('evidence') or {}).get('site_group') or (candidate.get('evidence') or {}).get('site_group_presentation')
-    if group:
+    if group and not (candidate.get('evidence') or {}).get('conformational_site_evidence'):
         from ..pocket_sites import merged_site_conformation
         conformation = merged_site_conformation(group)
         if conformation:
-            candidate = copy.deepcopy(candidate)
+            candidate = {**candidate, 'evidence': dict(candidate.get('evidence') or {})}
             candidate['evidence']['conformational_site_evidence'] = conformation
+    shared = _shared_group_ligands_in_representative_box(state, candidate) if group else []
+    if shared:
+        candidate = {**candidate, 'evidence': dict(candidate.get('evidence') or {})}
+        candidate['evidence']['grouping_ligand_evidence'] = {
+            'observations': [item for item in shared if item['evidence_role'] == 'shared_grouping_ligand_outside_box'],
+            'decision_role': 'grouping evidence outside selected box; not evidence inside this box',
+        }
+        original = candidate['evidence'].get('experimental_ligand_evidence') or {}
+        related = list(original.get('observations') or [])
+        seen = {(str(item.get('source_ligand_id') or ''), str(item.get('aligned_ligand_pdb') or '')) for item in related}
+        for item in shared:
+            if item['evidence_role'] != 'shared_grouping_ligand_in_box':
+                continue
+            key = (str(item.get('source_ligand_id') or ''), str(item.get('aligned_ligand_pdb') or ''))
+            if key not in seen:
+                related.append(item)
+                seen.add(key)
+        classes = {}
+        for item in related:
+            kind = item.get('evidence_class') or 'unclassified'
+            classes[kind] = classes.get(kind, 0) + 1
+        candidate['evidence']['experimental_ligand_evidence'] = {
+            **original, 'observations': related, 'observation_count': len(related),
+            'pdb_entry_count': len({item.get('entry') for item in related if item.get('entry')}),
+            'evidence_class_counts': classes,
+        }
+    inside_related = _related_ligands_in_box(state, candidate) if include_box_related else []
+    if inside_related:
+        candidate = {**candidate, 'evidence': dict(candidate.get('evidence') or {})}
+        existing = candidate['evidence'].get('experimental_ligand_evidence') or {}
+        related = list(existing.get('observations') or [])
+        seen = {(str(item.get('source_ligand_id') or ''), str(item.get('aligned_ligand_pdb') or '')) for item in related}
+        for item in inside_related:
+            key = (str(item.get('source_ligand_id') or ''), str(item.get('aligned_ligand_pdb') or ''))
+            if key not in seen:
+                related.append(item)
+                seen.add(key)
+        classes = {}
+        for item in related:
+            kind = item.get('evidence_class') or 'unclassified'
+            classes[kind] = classes.get(kind, 0) + 1
+        candidate['evidence']['experimental_ligand_evidence'] = {
+            **existing, 'observations': related, 'observation_count': len(related),
+            'pdb_entry_count': len({item.get('entry') for item in related if item.get('entry')}),
+            'evidence_class_counts': classes}
     artifacts = getattr(state, 'artifacts', ())
     ligand = next((a for a in artifacts if a.kind == 'bound_ligand'), None)
     if ligand is None:
         return candidate
-    result = copy.deepcopy(candidate)
-    evidence = result.setdefault('evidence', {})
+    # Only add a presentation field. Large retained evidence is read-only and
+    # may be shared; copying all residue comparisons stalls the GUI.
+    result = {**candidate, 'evidence': dict(candidate.get('evidence') or {})}
+    evidence = result['evidence']
     local = {'observation_count': 0, 'observations': [], 'source': 'input_structure',
              'decision_role': 'site evidence only; not independent control validation'}
     evidence['input_ligand_evidence'] = local
@@ -115,6 +340,18 @@ def candidate_with_input_ligand_evidence(state, candidate, *, boundary_tolerance
                 'source_ligand_id': 'input/' + '/'.join((identity[0], identity[1], identity[2] + identity[3])),
                 'source': 'input_structure', 'ligand_sha256': ligand.sha256}]
             local['observation_count'] = 1
+            # Preserve the original source and its normalized coordinate file
+            # so the exact input ligand can be analyzed without a PDB lookup.
+            normalized = next((a for a in artifacts if a.kind == 'normalized_receptor_input'), None)
+            deposited = next((a for a in artifacts if a.kind == 'source_receptor_structure'), None)
+            if normalized and deposited:
+                local['observations'][0].update(
+                    deposited_source=normalized.path, deposited_source_sha256=normalized.sha256,
+                    component_source=deposited.path, component_source_sha256=deposited.sha256)
+        for other_atoms, observation in _other_input_ligands(state, ligand):
+            if all(all(abs(value - geometry['center_' + axis]) <= geometry['size_' + axis] / 2 + boundary_tolerance
+                       for axis, value in zip('xyz', xyz)) for xyz in other_atoms):
+                local.setdefault('additional_observations', []).append(observation)
     except (OSError, ValueError, KeyError, StopIteration) as exc:
         local.update(status='unverified', detail=str(exc))
     return result
@@ -178,10 +415,11 @@ def _conformational_site_evidence(
     groups: list[dict[str, Any]], conformational: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Return box-review evidence tied to the groups' deposited ligands."""
+    from .molecule_inspection import is_supporting_component_observation
     source_ids = {
         member.get("source_ligand_id")
         for group in groups for member in group.get("members", [])
-        if member.get("source_ligand_id")
+        if member.get("source_ligand_id") and not is_supporting_component_observation(member)
     }
     observations = []
     for observation in (conformational or {}).get("observations", []):
@@ -252,6 +490,8 @@ def _experimental_site_evidence(
             "ca_rmsd_angstrom": item.get("ca_rmsd_angstrom"),
             "aligned_ligand_pdb": str(aligned.resolve()) if aligned.is_file() else None,
         })
+    from .molecule_inspection import split_component_observations
+    records, supporting = split_component_observations(records)
     classes: dict[str, int] = {}
     for item in records:
         key = str(item.get("evidence_class") or "unclassified")
@@ -265,6 +505,8 @@ def _experimental_site_evidence(
         "minimum_ca_rmsd_angstrom": min(rmsds) if rmsds else None,
         "maximum_ca_rmsd_angstrom": max(rmsds) if rmsds else None,
         "observations": records,
+        "supporting_components": {"observation_count": len(supporting), "observations": supporting,
+                                  "decision_role": "supporting_components_not_ligand_evidence"},
         "decision_role": "evidence_for_box_review_only",
     }
 
@@ -307,8 +549,11 @@ def build_labeled_candidate_mappings(
             description = "P2Rank box around the pocket-lining atoms"
         elif sizing.get("basis") == "prediction_center_default":
             description = "Default box at the prediction center. Pocket extent unavailable."
-        if supporting:
+        related_record = _experimental_site_evidence(supporting, pocket_evidence, evidence_root)
+        if related_record['observation_count']:
             description += "; direct deposited-ligand correspondence recorded"
+        elif related_record['supporting_components']['observation_count']:
+            description += "; supporting components observed (not ligand evidence)"
         equivalences = equivalence_by_pocket.get(number, [])
         if equivalences:
             equivalence_phrases = []
@@ -337,9 +582,7 @@ def build_labeled_candidate_mappings(
                 "pocket_equivalences": equivalences,
                 "symmetry_equivalence_shown_in_box_selection": bool(equivalences),
                 "conformational_site_evidence": _conformational_site_evidence(supporting, conformational),
-                "experimental_ligand_evidence": _experimental_site_evidence(
-                    supporting, pocket_evidence, evidence_root,
-                ),
+                "experimental_ligand_evidence": related_record,
                 "automation_eligible": True,
             },
         })
@@ -378,12 +621,14 @@ def build_labeled_candidate_mappings(
             cavity / f"{target}_evidence_{_safe_label(label)}.conf",
             group["box"],
         )
-        classes = group.get("evidence_class_counts") or {}
+        related_record = _experimental_site_evidence([group], pocket_evidence, evidence_root)
+        classes = related_record.get("evidence_class_counts") or {}
         requires_homolog_approval = bool(classes.get("close_structural_homolog"))
         candidates.append({
             "label": label,
             "path": path,
-            "description": (f"ligand-defined box without a corresponding {detector} cavity" if include_predicted
+            "description": ("supporting-component location; not ligand evidence" if not related_record['observation_count'] and related_record['supporting_components']['observation_count'] else
+                            f"ligand-defined box without a corresponding {detector} cavity" if include_predicted
                             else "ligand-defined box from independent related-structure evidence; pocket prediction not requested"),
             "requires_homolog_approval": requires_homolog_approval,
             "evidence": {
@@ -391,9 +636,7 @@ def build_labeled_candidate_mappings(
                 "evidence_class_counts": classes,
                 "automation_eligible": not requires_homolog_approval,
                 "conformational_site_evidence": _conformational_site_evidence([group], conformational),
-                "experimental_ligand_evidence": _experimental_site_evidence(
-                    [group], pocket_evidence, evidence_root,
-                ),
+                "experimental_ligand_evidence": related_record,
             },
         })
     return candidates
@@ -511,7 +754,8 @@ class PocketReviewService:
         # recheck exactly these coordinates at approval time.
         retained_paths = {a.path for a in artifacts}
         for candidate in candidates:
-            observations = (candidate.evidence.get('experimental_ligand_evidence') or {}).get('observations') or []
+            record = candidate.evidence.get('experimental_ligand_evidence') or {}
+            observations = list(record.get('observations') or []) + list((record.get('supporting_components') or {}).get('observations') or [])
             for observation in observations:
                 path = Path(str(observation.get('aligned_ligand_pdb') or '')).resolve()
                 if not path.is_file() or str(path) in retained_paths:
@@ -529,7 +773,7 @@ class PocketReviewService:
             ),
             "candidate_count": len(candidates),
             "related_structure_evidence": (
-                evidence.get("status") in {"completed", "available"}
+                evidence.get("status") in {"completed", "available", "partial"}
                 and bool(evidence.get("evidence") or evidence.get("ligand_site_groups"))
             ),
         }

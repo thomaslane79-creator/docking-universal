@@ -56,3 +56,27 @@ def introduced_heavy_atom_overlaps_from_atoms(source_atoms, repaired_atoms):
                     hits.append({'first':a,'second':b,'distance_angstrom':distance})
         grid.setdefault(cell,[]).append((a,xyz))
     return hits
+
+
+def introduced_interresidue_bond_contacts(original, atoms, assigned_bonds):
+    """Flag generated, unassigned contacts within the backend's bonding radius."""
+    if not atoms:
+        return []
+    max_radius = max(radius for _, _, radius in atoms)
+    cell_size = 2.4 * max_radius
+    grid = {}
+    hits = []
+    for identity, xyz, radius in atoms:
+        cell = tuple(math.floor(value / cell_size) for value in xyz)
+        for offset in product((-1, 0, 1), repeat=3):
+            neighbor = tuple(value + delta for value, delta in zip(cell, offset))
+            for other, position, other_radius in grid.get(neighbor, ()):
+                if identity[:3] == other[:3] or (identity in original and other in original):
+                    continue
+                if frozenset((identity, other)) in assigned_bonds:
+                    continue
+                distance = math.dist(xyz, position)
+                if distance < 1.2 * (radius + other_radius):
+                    hits.append({'first': other, 'second': identity, 'distance_angstrom': distance})
+        grid.setdefault(cell, []).append((identity, xyz, radius))
+    return hits

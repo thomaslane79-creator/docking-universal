@@ -65,7 +65,7 @@ class CommandDispatcher:
     """Apply a small command whitelist under one serialized mutation lock."""
 
     MUTATIONS = {
-        "create_study", "remove_study", "start_pocket_review", "resolve_decision",
+        "create_study", "remove_study", "start_pocket_review", "resolve_decision", "reopen_site_review",
         "start_receptor_preparation", "retry_site_exploration", "retry_recorded_stage", "start_protocol_finalization", "start_screening",
         "start_control_validation",
         "prepare_reviewed_receptor",
@@ -73,7 +73,7 @@ class CommandDispatcher:
         "review_site_reference",
         "apply_site_expansion",
         "start_pose_interaction",
-        "cancel_active_job",
+        "cancel_active_job", "stop_pdb_evidence_search",
         "import_protocol_bundle",
     }
 
@@ -166,7 +166,16 @@ class CommandDispatcher:
         if command.operation == 'molecule_inspection':
             from .services.molecule_inspection import inspection_preview
             state = self.controller.get_study(command.study_id)
-            preview = inspection_preview(command.payload.get('entry'), command.payload.get('mode', 'drawing'))
+            mode = command.payload.get('mode', 'drawing')
+            protocol = None
+            if mode == 'generated_coordinates':
+                from .services.screening import read_protocol_record
+                from .protocol_finalization import sha256
+                artifact = next((item for item in state.artifacts if item.kind == 'protocol_bundle'), None)
+                if not artifact or not artifact.sha256 or sha256(artifact.path) != artifact.sha256:
+                    raise ValueError('A verified finalized docking protocol is required for this preview.')
+                protocol = read_protocol_record(artifact.path)
+            preview = inspection_preview(command.payload.get('entry'), mode, protocol=protocol)
             return Response(command.request_id, 'applied', state.revision, {'preview': preview})
         if command.operation in {"inspect_ligand_library", "ligand_record_preview"}:
             from .services.ligand_library import inspect_ligand_library, ligand_record_preview
@@ -327,6 +336,13 @@ class CommandDispatcher:
             )
             state = self.controller.get_study(command.study_id)
             return Response(command.request_id, "applied", state.revision, result)
+        if command.operation == "stop_pdb_evidence_search":
+            if command.payload:
+                raise ValueError('Stopping the PDB search does not accept replacement inputs')
+            if self.workflow_runner is None or not self.workflow_runner.stop_pdb_evidence_search(command.study_id):
+                raise RuntimeError('No PDB evidence search is currently running')
+            state = self.controller.get_study(command.study_id)
+            return Response(command.request_id, 'applied', state.revision, {'stop_requested': True})
         if command.operation == "cancel_active_job":
             if command.expected_revision is None:
                 raise RevisionConflictError("A state revision is required to cancel scientific work")
@@ -341,6 +357,16 @@ class CommandDispatcher:
             if self.workflow_runner is None or not self.workflow_runner.cancel(command.study_id):
                 raise RuntimeError("No cancellable scientific job is active for this study")
             return Response(command.request_id, "applied", state.revision, {"cancellation_requested": True})
+        if command.operation == 'reopen_site_review':
+            if command.expected_revision is None:
+                raise RevisionConflictError('A state revision is required to reopen site review')
+            if command.payload:
+                raise ValueError('Reopening site review does not accept replacement inputs')
+            self._assert_no_other_active_study(command.study_id)
+            decision = self.controller.reopen_site_review(command.study_id,
+                expected_revision=command.expected_revision, request_id=command.request_id)
+            state = self.controller.get_study(command.study_id)
+            return Response(command.request_id, 'applied', state.revision, {'decision': record_to_dict(decision)})
         if command.operation == "start_pocket_review":
             if command.expected_revision is None:
                 raise RevisionConflictError("A state revision is required for scientific mutations")

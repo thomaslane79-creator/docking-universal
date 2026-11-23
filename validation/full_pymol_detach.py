@@ -196,14 +196,22 @@ def main():
                     check("offline lookup warning visible in main and detached interfaces",
                           window.pocket_evidence_panel.lookup_status.isVisible()
                           and browser.evidence.lookup_status.isVisible()
-                          and "PDB lookup unavailable" in browser.evidence.lookup_status.text()
+                          and "PDB search failed" in browser.evidence.lookup_status.text()
                           and browser.evidence.lookup_status.text() == window.pocket_evidence_panel.lookup_status.text())
                     check("lookup warning wraps without truncation in narrow study dock",
                           browser.evidence.lookup_status.height() >= browser.evidence.lookup_status.heightForWidth(
                               browser.evidence.lookup_status.width()))
                     browser.regions.setCurrentIndex(browser.regions.findData("P2"))
+                    browser.site_list.item(0).setSelected(True)
+                    selected_sites = {item.data(QtCore.Qt.ItemDataRole.UserRole)
+                                      for item in browser.site_list.selectedItems()}
+                    check('detached multi-selection synchronizes both sites', selected_sites == {'P1', 'P2'}
+                          and len(window.candidates.selectionModel().selectedRows()) == 2
+                          and 'P1, P2' in browser.approval_selection.text())
+                    check('detached multi-selection does not approve', store.load('validation').selected_pocket_ids == [])
+                    browser.regions.setCurrentIndex(browser.regions.findData("P2"))
                     check("candidate navigation does not erase lookup warning",
-                          "PDB lookup unavailable" in browser.evidence.lookup_status.text())
+                          "PDB search failed" in browser.evidence.lookup_status.text())
                     check("detached region updates live box", "du_box" in widget.cmd.get_names("objects"))
                     box_data = widget.cmd.get_session('du_box', partial=1, cache=0, compress=0)['names'][0][5][2][0][0][1]
                     check("selected box keeps all twelve edges at restrained radius", len(box_data) == 12 * 14
@@ -212,6 +220,9 @@ def main():
                     check("detached region preserves framing and only widens clipping", camera[:15] == changed[:15]
                           and camera[17] == changed[17] and changed[15] <= camera[15] and changed[16] >= camera[16])
                     camera = changed
+                    # The fixture uses glycerol, now grouped as a supporting component.
+                    window.pocket_evidence_panel.supporting_toggle.setChecked(True)
+                    browser.evidence.supporting_toggle.setChecked(True)
                     browser.evidence.table.selectAll()
                     enabled = [name for name in widget.cmd.get_names("objects", enabled_only=1) if name.startswith("du_evidence_")]
                     check("detached multi-evidence loads both ligands", len(enabled) == 2)

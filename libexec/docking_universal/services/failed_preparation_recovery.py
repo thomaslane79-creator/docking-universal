@@ -11,13 +11,12 @@ import json
 from pathlib import Path
 import re
 import threading
-import time
 from uuid import uuid4
 
 from ..application import ActiveStageError
 from ..models import ArtifactRecord
 from ..protocol_finalization import sha256
-from .preparation import ReceptorPreparationOptions, ReceptorPreparationService, build_receptor_preparation_plan
+from .preparation import PreparationStartup, ReceptorPreparationOptions, ReceptorPreparationService, build_receptor_preparation_plan
 from .receptor_model_review import preview_changes, write_model, retain_reviewed_receptor_input, validate_reviewed_model_inputs
 from .structure_input import normalize_structure_input
 
@@ -61,6 +60,9 @@ def _actionable_guidance(result, setup, attempted=(), stages=None, *, element=No
     for key in RECOVERY_ACTION_CODES[code]:
         label, target, instructions = RECOVERY_ACTIONS[key]
         actions.append({'id': key, 'label': label, 'target': target, 'instructions': instructions})
+    if not any(row['id'] == 'omissions' for row in actions):
+        label, target, instructions = RECOVERY_ACTIONS['omissions']
+        actions.append({'id': 'omissions', 'label': label, 'target': target, 'instructions': instructions})
     if not any(row['id'] == 'diagnostics' for row in actions):
         label, target, instructions = RECOVERY_ACTIONS['diagnostics']
         actions.append({'id': 'diagnostics', 'label': label, 'target': target, 'instructions': instructions})
@@ -124,6 +126,41 @@ def options_from_setup(setup):
     return values
 
 
+def _repair_exclusion_candidates(repair, text):
+    def record_rows(record, key):
+        value = record.get(key)
+        return value if isinstance(value, list) else []
+
+    reported = {}
+    generated = {}
+    for row in record_rows(repair, 'missing_atom_inventory'):
+        if not isinstance(row, dict):
+            continue
+        key = tuple(row.get(field, '') for field in ('residue', 'chain', 'number', 'insertion_code'))
+        names = record_rows(row, 'missing_atom_names')
+        if all(isinstance(field, str) for field in key) and key[0] and key[2]:
+            generated[(key[1], key[2] + key[3], key[0])] = (key, names)
+    contacts = record_rows(repair, 'introduced_unassigned_interresidue_bond_contacts')
+    for contact in contacts:
+        if not isinstance(contact, dict):
+            continue
+        for endpoint in (contact.get('first'), contact.get('second')):
+            if not isinstance(endpoint, list) or len(endpoint) != 4 or not all(isinstance(v, str) for v in endpoint):
+                continue
+            chain, number, resname, atom_name = endpoint
+            match = generated.get((chain, number, resname))
+            if match and atom_name in match[1]:
+                reported[match[0]] = 'Generated side chain introduced an unassigned short contact'
+    if not contacts and text:
+        # Earlier attempts recorded failed residue pairs in Meeko's log.
+        pairs = re.findall(r'Expected \d+ paddings for \(([^,]+),\s*([^)]+)\) with bonds', text)
+        endpoints = {endpoint.strip() for pair in pairs for endpoint in pair}
+        for (chain, number, _), (key, _) in generated.items():
+            if f'{chain}:{number}' in endpoints:
+                reported[key] = 'Repaired side chain is part of a failed connectivity pair'
+    return reported
+
+
 def recovery_guidance(state, source_path):
     """Explain observed failures without authorizing a change or promising a fix.
 
@@ -151,11 +188,24 @@ def recovery_guidance(state, source_path):
                     if row.get('request_id') == job.request_id), None)
     if attempt:
         root = Path(attempt['root'])
+    else:
+        # Legacy full-stage retries retain their own job log but do not add a
+        # receptor_preparation_attempts entry. Bind diagnosis to that job's
+        # attempt directory, never to an older run with different failures.
+        attempt_base = (Path(setup['working_directory']) / '.docking-universal-preparation-attempts').resolve()
+        for artifact in getattr(state, 'artifacts', []):
+            if (artifact.kind != 'job_stdout_log' or
+                    (artifact.metadata or {}).get('job_id') != getattr(job, 'id', None)):
+                continue
+            log = Path(artifact.path).resolve()
+            if log.parent.name == '.docking-universal-application-logs' and attempt_base in log.parents:
+                root = log.parent.parent / (_canonical_name(Path(source_path)) + '_receptor_prep')
+                break
     receptor = root / 'receptor'
 
-    def read_record(name):
+    def read_record(name, *, directory=receptor):
         try:
-            value = json.loads((receptor / name).read_text())
+            value = json.loads((directory / name).read_text())
             return value if isinstance(value, dict) else {}
         except (OSError, ValueError):
             return {}
@@ -249,12 +299,51 @@ def recovery_guidance(state, source_path):
         result.update(summary=summary, next_step=action, diagnosis_code='missing_component_definitions')
         result['affected_components'] = missing_definitions
         result['summary'] += ' Components: ' + ', '.join(missing_definitions[:5]) + '.'
+    # Offer only exact residue identities supported by this attempt and its input.
+    repair = read_record('pdbfixer_audit.json')
+    reported = _repair_exclusion_candidates(repair, text)
+    failed_requests = {entry.request_id for entry in state.jobs if entry.status.value == 'failed'}
+    for attempt in reversed(state.workflow_data.get('receptor_preparation_attempts') or []):
+        attempt_root = attempt.get('root')
+        if (not attempt_root or attempt.get('request_id') == job.request_id
+                or attempt.get('status') != 'failed' or attempt.get('request_id') not in failed_requests):
+            continue
+        prior_receptor = Path(attempt_root) / 'receptor'
+        prior_repair = read_record('pdbfixer_audit.json', directory=prior_receptor)
+        if not prior_repair:
+            continue
+        try:
+            with (prior_receptor / 'receptor_after_pdbfixer.log').open(errors='replace') as handle:
+                prior_log = handle.read(256000)
+        except OSError:
+            prior_log = ''
+        for key, reason in _repair_exclusion_candidates(prior_repair, prior_log).items():
+            reported.setdefault(key, reason + ' (earlier attempt)')
+    repair_exclusion_keys = set(reported)
+    for message in missing_charges:
+        match = re.search(r'for atom\s+[^:\s]+:([^:\s]*):([A-Za-z0-9]{3})(-?\d+)([A-Za-z]?):[^\s:]+', message)
+        if match:
+            chain, resname, number, insertion = match.groups()
+            reported[(resname, chain, number, insertion)] = 'Missing charge assignment'
+    try:
+        from .receptor_model_review import inspect_source
+        _, _, source_atoms, _ = inspect_source(source_path)
+        if element:
+            for key, lines in source_atoms.items():
+                if any(line[76:78].strip().lower() == element.lower() for line in lines):
+                    reported.setdefault(key, 'Unsupported element ' + element)
+        result['prefer_guarded_sidechain_repair'] = bool(repair_exclusion_keys & source_atoms.keys())
+        result['affected_residues'] = [
+            dict(zip(('resname', 'chain', 'number', 'insertion_code'), key), reason=reported[key])
+            for key in sorted(reported.keys() & source_atoms.keys())
+        ]
+    except (OSError, ValueError):
+        result['affected_residues'] = []
     if result['diagnosis_code'] == 'unclassified' and text.strip():
         details.append('Unrecognized diagnostic excerpt:\n' + text.strip()[-4000:])
     if result['diagnosis_code'] == 'unclassified':
         protonation = read_record('pdb2pqr_audit.json')
         hydrogen = read_record('reduce2_audit.json')
-        repair = read_record('pdbfixer_audit.json')
         required_code = ('protonation_review' if setup.get('protonation') == 'required'
                          and protonation and protonation.get('status') != 'compatible' else
                          'hydrogen_preparation' if setup.get('reduce2') == 'required'
@@ -326,13 +415,14 @@ def prepare_failed_receptor_changes(runner, state, model_changes, *, request_id,
     model, model_record = write_model(model_root, original.receptor_pdb.name, preview, derivative,
         actor=model_changes['actor'], rationale=model_changes['rationale'])
     model_record['reviewed_receptor_input'] = retain_reviewed_receptor_input(model_root, preview, derivative)
+    repair_mode = 'auto' if preview['choices'].get('repair_after_exclusions') else 'off'
     model_record['execution_policy'] = dict(preparation_backend=preview['preparation_backend'],
-        pdbfixer='off', reduce2='off', protonation='off', reviewed_model_only=True,
+        pdbfixer=repair_mode, reduce2='off', protonation='off', reviewed_model_only=True,
         parameterization_only=False)
     record_path = model_root / 'reviewed_model.json'
     record_path.write_text(json.dumps(model_record, indent=2) + '\n')
     record_hash = sha256(record_path)
-    values.update(input_pdb=model, working_directory=model_root / 'preparation', pdbfixer='off',
+    values.update(input_pdb=model, working_directory=model_root / 'preparation', pdbfixer=repair_mode,
                   reduce2='off', protonation='off',
                   preparation_backend=preview['preparation_backend'])
     plan = build_receptor_preparation_plan(runner.preparation_executable, ReceptorPreparationOptions(**values))
@@ -368,13 +458,15 @@ def prepare_failed_receptor_changes(runner, state, model_changes, *, request_id,
     def validate_before_finish():
         validate_reviewed_model_inputs(model_record, record_path, record_hash, additional_pins=original_pins)
 
+    startup = PreparationStartup()
+
     def work():
         result_status = 'failed'
         try:
             result = ReceptorPreparationService(runner.controller).run(state.study_id, plan,
                 cancel_event=cancellation, request_id=request_id, expected_revision=retained.revision,
                 allow_template_decision=False, stage='preparation_and_pocket_detection',
-                before_finish=validate_before_finish)
+                before_finish=validate_before_finish, on_job_persisted=startup.acknowledge)
             result_status = result.status.value
             history_path = None
             if result_status == 'completed':
@@ -425,6 +517,7 @@ def prepare_failed_receptor_changes(runner, state, model_changes, *, request_id,
                     runner._collect_pdb_pocket_evidence(state.study_id, plan)
                 runner._start_review(state.study_id, plan.output_root)
         except Exception as exc:
+            startup.error = str(exc)
             def retain_failure(latest):
                 latest.workflow_data['receptor_parameterization_status'] = 'failed'
                 latest.workflow_data['receptor_parameterization_attempt_root'] = str(plan.output_root)
@@ -438,6 +531,7 @@ def prepare_failed_receptor_changes(runner, state, model_changes, *, request_id,
             runner.controller.store.update(state.study_id, retain_failure)
             runner._record_orchestration_failure(state.study_id, exc)
         finally:
+            startup.ready.set()
             with runner._guard:
                 runner._cancellations.pop(state.study_id, None)
                 runner._threads.pop(state.study_id, None)
@@ -449,13 +543,4 @@ def prepare_failed_receptor_changes(runner, state, model_changes, *, request_id,
         runner._threads[state.study_id] = thread
         runner._cancellations[state.study_id] = cancellation
         thread.start()
-    deadline = time.monotonic() + 2
-    while time.monotonic() < deadline:
-        latest = runner.controller.get_study(state.study_id)
-        job = next((job for job in latest.jobs if job.request_id == request_id), None)
-        if job:
-            return {'job_id': job.id, 'stage': job.stage, 'output_root': str(plan.output_root)}
-        if not thread.is_alive():
-            break
-        time.sleep(.01)
-    raise RuntimeError('Reviewed preparation worker did not persist its job start')
+    return startup.result(plan.output_root)

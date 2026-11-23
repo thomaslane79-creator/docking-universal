@@ -7,7 +7,27 @@ import argparse
 import shutil
 import subprocess
 import sys
+import traceback
+from datetime import datetime
 from pathlib import Path
+
+def desktop_exception_hook(log_path, report, exit_application):
+    """Retain Qt callback tracebacks even when the launcher has no terminal."""
+    def handle(exc_type, error, trace):
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with log_path.open('a', encoding='utf-8') as log:
+                log.write(f'\n{datetime.now().astimezone().isoformat()} Desktop exception\n')
+                traceback.print_exception(exc_type, error, trace, file=log)
+        except OSError as log_error:
+            print(f'Unable to write the Docking Universal desktop log: {log_error}', file=sys.stderr)
+        try:
+            report(exc_type, error, trace)
+        finally:
+            exit_application(1)
+
+    return handle
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -128,6 +148,8 @@ def main() -> int:
             return window
 
         window = show_study(study_id)
+        previous_hook = sys.excepthook
+        sys.excepthook = desktop_exception_hook(state_root / 'desktop-errors.log', previous_hook, application.exit)
         try:
             if args.screenshot:
                 screenshot = args.screenshot.resolve()
@@ -143,6 +165,7 @@ def main() -> int:
                 QtCore.QTimer.singleShot(1200, capture_window)
             return application.exec()
         finally:
+            sys.excepthook = previous_hook
             if active["viewer"]:
                 active["viewer"].close()
 

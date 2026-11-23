@@ -1,6 +1,10 @@
 # Docking Universal
 
-**v0.7.0 · Research preview**
+**v1.0.0-rc.1 · Research preview**
+
+This checkout is the first 1.0 release candidate. The published 0.7.0
+release describes the earlier workflow; release-candidate validation is
+tracked in [Validation status](docs/validation-status.md).
 
 Recovery branch: the [2026-11-01 source and validation checkpoint](docs/recovery-checkpoint-20261101.md)
 identifies the recovered Mac working copy, Windows checks, focused Mac/Windows
@@ -441,6 +445,11 @@ Additional component commands can also be used independently in compatible workf
 Known preparation limitations include some covalent adducts, linked glycans, metals/heme, modified backbones, and nucleic-acid complexes. These results test workflow behavior and safeguards; they do not establish broad prospective docking accuracy or biological validity. See the [validation index](docs/validation.md) and [100-PDB receptor-preparation record](docs/receptor-preparation-validation-2026-08-21.md).
 
 ## Example scientific reports
+
+The control, protocol, and screening report menus offer **Compressed** and
+**High resolution** PDF export. Compressed is suited to sharing. High resolution
+keeps all pixels in the retained figures for zooming. Both use the same report
+layout and results.
 
 - [Preliminary evidence and docking-box review report—not yet a protocol](docs/assets/pocket-evidence-review-example.pdf)
 - [Final protocol report after a docking region is selected](docs/assets/pocket-evidence-protocol-example.pdf)

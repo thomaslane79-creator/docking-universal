@@ -39,6 +39,14 @@ def discover_poseedit_runtime(
         str(Path(explicit_node).resolve()) if explicit_node and Path(explicit_node).is_file()
         else which("node")
     )
+    if not node:
+        # Desktop launches may not inherit a shell PATH. The renderer lives
+        # under the scientific environment's libexec, beside its bundled Node.
+        libexec = next((parent for parent in renderer_root.parents if parent.name == 'libexec'), None)
+        if libexec:
+            prefix = libexec.parent
+            candidates = (prefix / 'bin' / 'node', prefix / 'node.exe', prefix / 'Scripts' / 'node.exe')
+            node = next((str(path) for path in candidates if path.is_file()), None)
     node = str(Path(node).resolve()) if node else None
     browser = find_chromium(environment=values, which=which, system=platform.system())
     chrome = str(browser) if browser else None

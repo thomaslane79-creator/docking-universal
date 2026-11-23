@@ -213,6 +213,53 @@ class StudyController:
                 )
         return self.get_decision(study_id, decision.id)
 
+    def reopen_site_review(self, study_id: str, *, expected_revision: int, request_id: str | None = None) -> DecisionRequired:
+        """Create a new site decision without erasing the earlier approval."""
+        from .state import RevisionConflictError
+        state = self.get_study(study_id)
+        previous_request = (state.workflow_data.get('reopened_site_review_requests') or {}).get(request_id) if request_id else None
+        if previous_request:
+            return self.get_decision(study_id, previous_request)
+        if state.revision != expected_revision:
+            raise RevisionConflictError('Study changed before the site review could be reopened')
+        if state.active_job or state.pending_decisions:
+            raise ValueError('Finish or stop the current stage or decision before changing approved sites')
+        if not state.selected_pocket_ids:
+            raise ValueError('There is no approved site selection to reopen')
+        downstream = {'control_validation', 'final_report', 'screening', 'pose_interaction'}
+        if (any(job.stage in downstream for job in state.jobs)
+                or any(a.kind in {'protocol_bundle', 'control_protocol_bundle', 'control_report', 'final_report', 'screening_report'} for a in state.artifacts)
+                or state.workflow_data.get('latest_control_status')):
+            raise ValueError('This study already has downstream calculations or results. Start a separate study to change its sites while preserving those results.')
+        from .protocol_finalization import approved_regions_from_study
+        _regions, approval = approved_regions_from_study(state)
+        original = next(d for d in state.decisions if d.id == approval.decision_id)
+        decision = copy.deepcopy(original)
+        decision.id = self._id('decision')
+        decision.status = DecisionStatus.PENDING
+        decision.created_at = utc_now()
+        decision.resolved_at = None
+        # A reopened review is a fresh explicit choice, not a replay of an
+        # automation rule that might immediately approve the old selection.
+        decision.automation_eligible = False
+        previous = list(state.selected_pocket_ids)
+        state.selected_pocket_ids = []
+        state.scientific_authority = ScientificAuthority.NOT_ESTABLISHED
+        state.decisions.append(decision)
+        state.jobs.append(Job(id=self._id('job'), stage='pocket_review',
+                              status=JobStatus.WAITING_FOR_DECISION, started_at=utc_now(), progress=1.0,
+                              request_id=request_id))
+        state.current_stage = 'pocket_review'
+        state.completion_status = CompletionStatus.WAITING_FOR_DECISION
+        if request_id:
+            state.workflow_data.setdefault('reopened_site_review_requests', {})[request_id] = decision.id
+        self._event(state, EventType.DECISION_REQUIRED, 'Docking-site review reopened',
+                    explanation='Choose and approve sites again. The previous approval remains in the study history.',
+                    technical={'decision_id': decision.id, 'previous_approval_id': approval.id},
+                    data={'previous_sites': previous}, mandatory=True)
+        self.store.save(state)
+        return decision
+
     def get_decision(self, study_id: str, decision_id: str) -> DecisionRequired:
         state = self.get_study(study_id)
         from .pocket_sites import project_pending_site_review

@@ -21,9 +21,17 @@ GEOSTD_CSO = b"""data_comp_list
 _chem_comp.id CSO
 data_comp_CSO
 loop_
-_chem_comp_tree.comp_id
-_chem_comp_tree.atom_id
+_chem_comp_atom.comp_id
+_chem_comp_atom.atom_id
 CSO N
+CSO CA
+loop_
+_chem_comp_bond.comp_id
+_chem_comp_bond.atom_id_1
+_chem_comp_bond.atom_id_2
+_chem_comp_bond.value_dist
+_chem_comp_bond.value_dist_esd
+CSO N CA 1.46 0.02
 """
 
 
@@ -74,6 +82,17 @@ class GeoStdComponentTests(unittest.TestCase):
                 (root / "docking-universal-component-provenance.json").read_text()
             )
             self.assertEqual(retained["disclosure"]["component_ids"], ["CSO"])
+
+    def test_rejects_wrong_component_and_unusable_restraints(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "geostd"
+            for payload in (GEOSTD_CSO.replace(b"CSO", b"CYS"),
+                            GEOSTD_CSO.replace(b"1.46 0.02", b"1.46 ?")):
+                with self.subTest(payload=payload):
+                    with self.assertRaisesRegex(OSError, "not a GeoStd restraint definition"):
+                        download_components(["CSO"], root, approved=True,
+                                            opener=lambda *args, **kwargs: _Response(payload))
+                    self.assertFalse((root / "c" / "data_CSO.cif").exists())
 
     def test_ordinary_bound_ligand_is_not_requested_but_modres_is(self):
         pdb = """MODRES 1ABC CSO A   2  CYS  S-HYDROXYCYSTEINE

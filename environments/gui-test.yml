@@ -12,3 +12,4 @@ dependencies:
   - scipy
   - pillow
   - reportlab
+  - pypdf=6.21.4

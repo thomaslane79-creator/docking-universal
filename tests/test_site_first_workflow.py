@@ -116,6 +116,17 @@ class SiteFirstWorkflowTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'not parameterized'):
             request_from_study(state, FinalizationSettings(), self.root / 'final', exploratory_use_approved=True)
 
+    def test_new_study_can_reuse_a_folder_with_retained_site_review(self):
+        old_review = self.root / 'work/Target_receptor_prep-site-review'
+        old_review.mkdir(parents=True)
+        retained = old_review / 'site_exploration.json'
+        retained.write_text('previous output')
+        state = self.explore()
+        new_review = Path(state.workflow_data['site_exploration_root'])
+        self.assertTrue(new_review.is_relative_to(self.root.resolve() / 'work/study-runs'))
+        self.assertEqual(Path(state.workflow_data['study_setup']['working_directory']), new_review.parent)
+        self.assertEqual(retained.read_text(), 'previous output')
+
     def test_failed_site_detection_restarts_without_overwriting_attempt_or_setup(self):
         worker = self.engine.parent / 'docking-universal-explore-sites.py'
         worker.unlink()
@@ -158,6 +169,23 @@ class SiteFirstWorkflowTests(unittest.TestCase):
         self.assertTrue(any(a.kind == 'prepared_receptor' for a in done.artifacts))
         with self.assertRaisesRegex(ValueError, 'already attempted'):
             self.runner.prepare_reviewed_receptor('test', request_id='duplicate', expected_revision=done.revision)
+
+    def test_parameterization_acknowledges_a_slow_job_start(self):
+        from unittest.mock import patch
+        from docking_universal.services.preparation import ReceptorPreparationService
+
+        state = self.approve(self.explore())
+        run = ReceptorPreparationService.run
+
+        def slow_start(service, *args, **kwargs):
+            time.sleep(2.1)
+            return run(service, *args, **kwargs)
+
+        with patch.object(ReceptorPreparationService, 'run', slow_start):
+            result = self.runner.prepare_reviewed_receptor(
+                'test', request_id='slow-start', expected_revision=state.revision)
+        done = self.wait(lambda s: s.workflow_data.get('receptor_parameterization_status') == 'completed')
+        self.assertEqual(done.jobs[-1].id, result['job_id'])
 
     def test_failure_keeps_box_review_without_automatic_retry(self):
         self.engine.write_text('#!/bin/sh\nmkdir -p Target_receptor_prep/receptor\n'

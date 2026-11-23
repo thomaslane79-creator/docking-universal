@@ -151,3 +151,13 @@ def target_identity_text(identity: dict[str, Any], fallback: str) -> tuple[str, 
     if not names:
         target += " (protein name not recorded in the supplied structure)"
     return target, "; ".join(organisms) or "Not recorded in the supplied structure"
+
+
+def report_target_heading(identity: dict[str, Any], fallback: str) -> str:
+    """Name the deposited target in a heading, leaving construct details to provenance."""
+    names = _unique(protein.get("name", "") for protein in identity.get("proteins") or [])
+    heading = " / ".join(names) or fallback
+    structure = identity.get("structure_id")
+    if structure and structure.casefold() != heading.casefold():
+        return f"{heading} ({structure})"
+    return heading

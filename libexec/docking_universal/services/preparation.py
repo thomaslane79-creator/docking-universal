@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+from threading import Event
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping
@@ -16,6 +17,25 @@ from ..processes import ProcessRequest, ProcessResult
 from ..stage_feedback import preparation_feedback
 from .structure_input import NormalizedStructureInput, normalize_structure_input
 from .preparation_interventions import decision_from_intervention
+
+
+class PreparationStartup:
+    """Acknowledge startup only after JobService saves the job."""
+    def __init__(self):
+        self.ready = Event()
+        self.job = None
+        self.error = None
+
+    def acknowledge(self, job):
+        self.job = job
+        self.ready.set()
+
+    def result(self, output_root):
+        if not self.ready.wait(45):
+            raise RuntimeError('Preparation startup is still pending. Check the study status before retrying.')
+        if self.job is None:
+            raise RuntimeError(self.error or 'Preparation stopped before recording its startup.')
+        return {'job_id': self.job.id, 'stage': self.job.stage, 'output_root': str(output_root)}
 
 
 @dataclass(frozen=True)

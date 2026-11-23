@@ -40,12 +40,17 @@ def finalization_feedback(protocol: Path, report: Path, bundle: Path) -> Feedbac
     return "setup", "Building the protocol from approved preparation and regions…", 0, 3
 
 
+def _docking_output_count(directories) -> int:
+    return sum(_ready(path) for directory in directories for path in directory.glob("*.pdbqt"))
+
+
 def screening_feedback(output: Path, total_docking_jobs: int) -> Feedback:
     # These are advisory worker milestones, never a successful terminal status.
     record = read_screening_progress(output)
-    completed = sum(1 for pattern in ('compounds/*/seed_*/docking/*_vina.pdbqt',
-                                     'compounds/*/site_*/seed_*/docking/*_vina.pdbqt')
-                    for path in output.glob(pattern) if _ready(path)) if output.is_dir() else 0
+    completed = _docking_output_count(
+        directory for pattern in ("compounds/*/seed_*/docking", "compounds/*/site_*/seed_*/docking")
+        for directory in output.glob(pattern)
+    )
     if record:
         phase = record['phase']
         message = record['message'][:600]
@@ -88,9 +93,10 @@ def control_feedback(output: Path) -> Feedback:
         return "assessment", "Control docking complete; checking pose recovery and report…", 2, 3
     if any(output.glob("control/**/protocol.json")):
         return "redocking", "Known-ligand redocking complete; evaluating pose recovery…", 1, 3
-    batches = list(output.glob('control/04_redocking/*/*/seed_*/docking/batch_request.json'))
-    if batches:
-        written = sum(_ready(path) for batch in batches for path in batch.parent.glob('*_vina.pdbqt'))
+    docking = list(output.glob("control/04_redocking/*/*/seed_*/docking"))
+    written = _docking_output_count(docking)
+    if written or any(_ready(directory / marker) for directory in docking
+                      for marker in ("run_manifest.tsv", "batch_request.json")):
         # File counts show activity, not valid poses or an approved control.
         # Chemical-state enumeration can enlarge the initial docking plan.
         return ('redocking', f'Known-ligand redocking in progress; {written} output files written. '

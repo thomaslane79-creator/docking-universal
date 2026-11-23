@@ -15,6 +15,7 @@ dependencies:
   - scipy
   - pillow
   - reportlab
+  - pypdf=6.21.4
   - pycairo
   # ABI dependencies of the relocatable Apple-Silicon embedded PyMOL wheel.
   # No Qt5 PyMOL package is installed into this Qt6 environment.

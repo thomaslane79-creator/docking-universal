@@ -106,7 +106,7 @@ class StudyLauncherDialog(QtWidgets.QDialog):
         self.create_button = QtWidgets.QPushButton("Create study")
         self.open_button = QtWidgets.QPushButton("Open selected study")
         self.open_button.setEnabled(False)
-        self.delete_button = QtWidgets.QPushButton("Delete selected study…")
+        self.delete_button = QtWidgets.QPushButton("Remove from study library…")
         self.delete_button.setObjectName("delete_selected_study_button")
         self.delete_button.setEnabled(False)
         cancel = QtWidgets.QPushButton("Cancel")
@@ -177,12 +177,12 @@ class StudyLauncherDialog(QtWidgets.QDialog):
             if unfinished else ""
         )
         answer = QtWidgets.QMessageBox.question(
-            self, "Delete study from Docking Universal?",
+            self, "Remove study from the library?",
             (
-                f"Delete '{name}' from the active Docking Universal study list?\n\n"
+                f"Remove '{name}' from the Docking Universal study library?\n\n"
                 + stage_notice +
-                "This does not delete external reports, .duprotocol bundles, receptor files, "
-                "or docking output directories. The retained application-state record remains "
+                "External reports, .duprotocol bundles, receptor files, "
+                "and docking outputs stay on disk. The study record remains "
                 "recoverable on disk."
             ),
             QtWidgets.QMessageBox.StandardButton.Yes

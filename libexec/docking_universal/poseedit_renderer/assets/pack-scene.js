@@ -84,7 +84,7 @@ window.packScene = function(scene) {
       const dx=anchor.x-nearestAtom.coordinates.x,dy=anchor.y-nearestAtom.coordinates.y,len=Math.hypot(dx,dy)||1;
       const nx=dx/len,ny=dy/len;
       // Position the text edge, rather than its centre, a fixed gap from the curve.
-      for(const gap of [7,14,22,30,40]) for(const slide of [-48,-32,-16,0,16,32,48]) for(const side of [1,-1]) {
+      for(const gap of [2,4,7,10,14,22,30,40]) for(const slide of [-48,-40,-32,-24,-16,-8,0,8,16,24,32,40,48]) for(const side of [1,-1]) {
         const support=Math.abs(nx)*w/2+Math.abs(ny)*h/2;
         const p={x:anchor.x+side*nx*(support+gap)-ny*slide,y:anchor.y+side*ny*(support+gap)+nx*slide};
         const box=rect(p.x,p.y,w,h),hits=occupied.filter(o=>hit(box,o)).length;

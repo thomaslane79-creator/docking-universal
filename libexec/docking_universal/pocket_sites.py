@@ -11,6 +11,8 @@ import copy
 import hashlib
 import json
 import math
+import gzip
+import re
 from dataclasses import replace
 from pathlib import Path
 
@@ -75,15 +77,70 @@ def ligand_fits(points, geometry):
                for point in points for axis, v in zip('xyz', point))
 
 
+_GRID_CACHE = {}
+
+
+def _verified_pocket_grids(state):
+    """Use only the grid bound to the retained receptor and predictions."""
+    from .services.pocket_space import inputs, cached
+    try:
+        record = inputs(state)
+        if not record:
+            return {}
+        manifest_path = Path(record['cache']) / 'manifest.json'
+        if not manifest_path.is_file():
+            return {}
+        grid_path = Path(json.loads(manifest_path.read_text())['grid'])
+        key = (str(manifest_path), manifest_path.stat().st_mtime_ns,
+               Path(record['receptor']).stat().st_mtime_ns, Path(record['predictions']).stat().st_mtime_ns,
+               grid_path.stat().st_mtime_ns, grid_path.stat().st_size)
+        if key in _GRID_CACHE:
+            return _GRID_CACHE[key]
+        manifest = cached(record)
+        if not manifest:
+            return {}
+        points = {}
+        with gzip.open(manifest['grid'], 'rt') as handle:
+            for line in handle:
+                if line.startswith(('ATOM  ', 'HETATM')):
+                    rank = int(line[22:26])
+                    points.setdefault('P' + str(rank), []).append(
+                        tuple(float(line[i:i + 8]) for i in (30, 38, 46)))
+        if len(_GRID_CACHE) >= 4:
+            _GRID_CACHE.pop(next(iter(_GRID_CACHE)))
+        _GRID_CACHE[key] = points
+        return points
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return {}
+
+
+def _pocket_regions_compatible(left, right, geometries, grids):
+    """Shared ligand in large boxes does not establish common pocket space."""
+    a, b = left['id'], right['id']
+    if not (re.fullmatch(r'P\d+', a) and re.fullmatch(r'P\d+', b)):
+        return True
+    if grids:
+        return bool(grids.get(a) and grids.get(b) and
+                    any(ligand_fits([point], geometries[b]) for point in grids[a]) and
+                    any(ligand_fits([point], geometries[a]) for point in grids[b]))
+    # If a grid has not been generated, reject the obvious case where a
+    # predicted pocket's center lies outside the other original box.
+    return all(ligand_fits([tuple(geometries[x]['center_' + axis] for axis in 'xyz')], geometries[y])
+               for x, y in ((a, b), (b, a)))
+
+
 def candidate_ligands(state, candidate, geometry):
     """Verified local/related observations that completely fit their own box."""
     from .services.pocket_review import candidate_with_input_ligand_evidence
-    evidence = candidate_with_input_ligand_evidence(state, candidate, boundary_tolerance=0.)['evidence']
+    from .services.molecule_inspection import is_supporting_component_observation
+    evidence = candidate_with_input_ligand_evidence(state, candidate, boundary_tolerance=0., include_box_related=False)['evidence']
     local = (evidence.get('input_ligand_evidence') or {}).get('observations') or []
     related = (evidence.get('experimental_ligand_evidence') or {}).get('observations') or []
     assets = {str(Path(a.path).resolve()): a for a in state.artifacts}
     records = {}
     for observation in local + related:
+        if is_supporting_component_observation(observation):
+            continue  # Supporting components do not justify merging ligand-defined sites.
         try:
             path = Path(observation['aligned_ligand_pdb']).resolve()
             asset = assets[str(path)]
@@ -110,6 +167,7 @@ def consolidate_site_candidates(state, *, approved_ids=()):
     artifacts = {a.id: a for a in state.artifacts}
     approved_ids = set(approved_ids)
     geometries, ligands = {}, {}
+    grids = _verified_pocket_grids(state)
     for candidate in originals:
         identity = candidate['id']
         try:
@@ -145,6 +203,8 @@ def consolidate_site_candidates(state, *, approved_ids=()):
             ligand_fits(record['points'], geometries[identity])
             for record in combined.values() for identity in (a, b))
         identical_box = geometries[a] == geometries[b]
+        if not identical_box and not _pocket_regions_compatible(left, right, geometries, grids):
+            return None
         if complete_ligands or identical_box:
             return {'left': a, 'right': b, 'overlap_fractions': list(fractions),
                     'reason': 'both_boxes_contain_all_experimental_ligands' if complete_ligands else 'identical_original_geometry',
@@ -191,6 +251,22 @@ def consolidate_site_candidates(state, *, approved_ids=()):
         combined = {}
         for member in group:
             combined.update(ligands.get(member['id']) or {})
+        # Relationships may be supported by observations assigned to another
+        # site. Retain those exact verified observations when they fit the
+        # representative box, instead of hiding the reason for the grouping.
+        shared_hashes = {digest for relationship_record in receipt['relationships']
+                         for digest in relationship_record.get('ligand_sha256s', [])}
+        member_ids = {member['id'] for member in group}
+        for source in originals:
+            if source['id'] in member_ids:
+                continue
+            for key, record in (ligands.get(source['id']) or {}).items():
+                if record['sha256'] in shared_hashes and ligand_fits(record['points'], geometries[chosen['id']]):
+                    extra = dict(record)
+                    extra['observation'] = {**record['observation'],
+                        'evidence_role': 'shared_grouping_ligand_in_box',
+                        'original_evidence_site': source['id']}
+                    combined.setdefault(key, extra)
         receipt['ligands'] = [{k: copy.deepcopy(v) for k, v in record.items() if k != 'points'}
                               for record in combined.values()]
         receipt['sha256'] = hashlib.sha256(json.dumps(receipt, sort_keys=True).encode()).hexdigest()
@@ -282,11 +358,102 @@ def site_prediction_text(group):
                      f"{p['score']:.4g} ({p['source_id']})" for p in site_prediction_sources(group))
 
 
+def site_display_label(candidate):
+    """Use the pocket name while retaining original IDs in source details."""
+    from .pocket_metadata import candidate_display_label
+    return candidate_display_label(candidate)
+
+
 def project_pending_site_review(state):
     """Read-only projection, also reused inside the explicit approval write."""
     decisions = [d for d in state.pending_decisions if d.kind == 'select_pockets']
     if not decisions or state.selected_pocket_ids:
         return state
+    # Older pending reviews may already contain a persisted grouping made
+    # before pocket-space grids were checked. Restore the exact original
+    # candidates for any group that those grids disprove. Approved studies
+    # never pass this branch and their historical decisions remain intact.
+    grouping = state.workflow_data.get('pocket_site_grouping') or {}
+    originals = {c['id']: c for c in grouping.get('original_candidates') or []}
+    grids = _verified_pocket_grids(state) if originals else {}
+    if grids:
+        artifacts = {a.id: a for a in state.artifacts}
+        rejected = {}
+        for candidate in state.workflow_data.get('pocket_candidates') or []:
+            group = (candidate.get('evidence') or {}).get('site_group') or {}
+            members = [originals[i] for i in group.get('member_ids', []) if i in originals]
+            try:
+                geometries = {c['id']: _verified_geometry(artifacts[c['box_artifact_id']]) for c in members}
+                partitions = []
+                for member in members:
+                    part = next((p for p in partitions if all(
+                        _pocket_regions_compatible(member, other, geometries, grids) for other in p)), None)
+                    if part is None:
+                        partitions.append([member])
+                    else:
+                        part.append(member)
+                if len(partitions) > 1:
+                    rejected[candidate['id']] = partitions
+            except (OSError, ValueError, KeyError):
+                continue
+        if rejected:
+            from .decisions import DecisionOption
+            result = copy.copy(state)
+            result.workflow_data = dict(state.workflow_data)
+            result.decisions = copy.deepcopy(state.decisions)
+            expanded = []
+            revised_groups = []
+            for candidate in state.workflow_data['pocket_candidates']:
+                if candidate['id'] in rejected:
+                    original_group = candidate['evidence']['site_group']
+                    for part in rejected[candidate['id']]:
+                        if len(part) == 1:
+                            expanded.append(part[0])
+                            continue
+                        ids = [member['id'] for member in part]
+                        group = dict(original_group)
+                        group['representative_id'] = ids[0]
+                        group['member_ids'] = ids
+                        group['members'] = [m for m in original_group['members'] if m['id'] in ids]
+                        group['relationships'] = [r for r in original_group['relationships']
+                                                  if r['left'] in ids and r['right'] in ids]
+                        group['ligands'] = []
+                        geometry = _verified_geometry(artifacts[part[0]['box_artifact_id']])
+                        for ligand in original_group.get('ligands', []):
+                            try:
+                                if ligand_fits(ligand_coordinates(ligand['path']), geometry):
+                                    group['ligands'].append(ligand)
+                            except (OSError, ValueError, KeyError):
+                                continue
+                        group.pop('sha256', None)
+                        group['sha256'] = hashlib.sha256(json.dumps(group, sort_keys=True).encode()).hexdigest()
+                        chosen = dict(part[0])
+                        chosen['evidence'] = dict(chosen.get('evidence') or {})
+                        chosen['evidence']['site_group'] = group
+                        conformation = merged_site_conformation(group)
+                        if conformation:
+                            chosen['evidence']['conformational_site_evidence'] = conformation
+                        chosen['summary'] += '; one site from ' + ', '.join(ids)
+                        expanded.append(chosen)
+                        revised_groups.append(group)
+                else:
+                    expanded.append(candidate)
+            result.workflow_data['pocket_candidates'] = expanded
+            updated_grouping = dict(grouping)
+            updated_grouping['groups'] = [g for g in grouping.get('groups', []) if g.get('representative_id') not in rejected] + revised_groups
+            result.workflow_data['pocket_site_grouping'] = updated_grouping
+            for decision in result.pending_decisions:
+                if decision.kind != 'select_pockets':
+                    continue
+                old = {o.value: o for o in decision.options}
+                decision.options = tuple(replace(old[c['id']], consequence=c['summary']) if c['id'] in old else
+                    DecisionOption(value=c['id'], label=c.get('label') or c['id'], consequence=c.get('summary', ''),
+                                   automation_eligible=(c.get('evidence') or {}).get('automation_eligible', True))
+                    for c in expanded)
+                decision.maximum_selections = len(expanded)
+                decision.detected = f'{len(expanded)} candidate docking regions are available'
+                decision.payload['candidate_ids'] = [c['id'] for c in expanded]
+            return result
     candidates, receipt = consolidate_site_candidates(state)
     if receipt is None:
         return state

@@ -80,7 +80,10 @@ class ApplicationHostClient:
                 env=self._environment(), start_new_session=os.name != "nt",
             )
             self._start_reader()
-            ready = self._read_message()
+            # Startup reconciles interrupted jobs across retained studies. Large
+            # studies can take longer than an ordinary lightweight request.
+            startup_timeout = max(120.0, self.timeout_seconds) if self.timeout_seconds >= 5.0 else self.timeout_seconds
+            ready = self._read_message(timeout_seconds=startup_timeout)
         except BaseException:
             self.close()
             raise
@@ -123,10 +126,13 @@ class ApplicationHostClient:
             except OSError as exc:
                 self.close()
                 raise ApplicationHostError("Application host command stream closed; reconnect before continuing") from exc
-            # Indexing a large local library is asynchronous in the GUI and may
-            # legitimately exceed the ordinary short command-response timeout.
+            # Large retained studies and local libraries can take longer to
+            # verify and persist than a small status request.
             response = self._read_message(timeout_seconds=max(120.0, self.timeout_seconds)
-                                          if operation in {'inspect_ligand_library', 'inspect_protocol_bundle', 'import_protocol_bundle'} else None)
+                                          if operation in {'resolve_decision', 'inspect_ligand_library', 'inspect_protocol_bundle', 'import_protocol_bundle',
+                                                           'start_receptor_preparation', 'retry_site_exploration', 'prepare_reviewed_receptor',
+                                                           'preview_receptor_changes', 'prepare_receptor_changes',
+                                                           'start_control_validation', 'start_protocol_finalization', 'start_screening', 'start_pose_interaction', 'screening_plan', 'retry_recorded_stage', 'reopen_site_review'} or (operation == 'molecule_inspection' and (payload or {}).get('mode') == 'generated_coordinates') else None)
             if response.get("request_id") != command.request_id:
                 self.close()
                 raise ApplicationHostError("Application host returned a mismatched request ID")
@@ -264,6 +270,16 @@ class ApplicationHostClient:
         if scientific_cli.is_file() and not environment.get('DOCKING_UNIVERSAL_CLI'):
             environment["DOCKING_UNIVERSAL_CLI"] = str(scientific_cli)
         runtime_paths = executable_directories(prefix)
+        # Desktop launchers do not inherit an interactive shell's Conda
+        # initialization. Find the owning installation from the explicitly
+        # configured scientific environment instead of relying on PATH.
+        if prefix.parent.name.lower() == 'envs':
+            base = prefix.parent.parent
+            conda_name = 'conda.bat' if os.name == 'nt' else 'conda'
+            for directory in (base / 'condabin', base / ('Scripts' if os.name == 'nt' else 'bin')):
+                conda = directory / conda_name
+                if conda.is_file() and (os.name == 'nt' or os.access(conda, os.X_OK)):
+                    runtime_paths.append(directory)
         environment["PATH"] = os.pathsep.join(
             [str(path) for path in runtime_paths if path.is_dir()]
             + [environment.get("PATH", "")]

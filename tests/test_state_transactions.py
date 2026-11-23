@@ -13,6 +13,16 @@ from docking_universal.state import JsonStudyStore, RevisionConflictError, Study
 
 
 class StateTransactionTests(unittest.TestCase):
+    def test_compact_persistence_preserves_complete_state(self):
+        from docking_universal.models import CompletionStatus
+        state = self.store.load('study')
+        state.workflow_data['evidence'] = {'observations': [{'site': 'P5', 'coordinates': [1.5, 2.5, 3.5]}]}
+        state.completion_status = CompletionStatus.RUNNING
+        self.store.save(state)
+        expected = state.to_dict()
+        self.assertEqual(json.loads(self.store.path_for('study').read_text()), expected)
+        self.assertEqual(self.store.load('study').to_dict(), expected)
+
     def test_windows_reader_waits_for_writer_and_keeps_scientific_state_unchanged(self):
         ready, completed, errors = threading.Event(), threading.Event(), []
         def reader():

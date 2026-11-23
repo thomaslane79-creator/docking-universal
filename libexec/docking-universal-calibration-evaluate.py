@@ -77,7 +77,7 @@ def main():
     """Evaluate retained control poses against sampling, ranking, and seed gates."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("comparison_root", type=Path, nargs="+")
-    parser.add_argument("--engine", required=True, choices=("vina", "qvinaw"))
+    parser.add_argument("--engine", required=True, choices=("vina", "qvinaw", "adgpu"))
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--receptor", required=True, type=Path)
     parser.add_argument(
@@ -87,9 +87,10 @@ def main():
     )
     parser.add_argument("--box", required=True, type=Path)
     parser.add_argument("--threshold", type=float, default=2.0)
-    parser.add_argument("--exhaustiveness", type=int, required=True)
-    parser.add_argument("--num-modes", type=int, required=True)
-    parser.add_argument("--energy-range", type=float, required=True)
+    parser.add_argument("--exhaustiveness", type=int)
+    parser.add_argument("--num-modes", type=int)
+    parser.add_argument("--energy-range", type=float)
+    parser.add_argument('--ad4-settings')
     parser.add_argument("--seed", type=int, action="append", required=True)
     parser.add_argument("--min-seeds", type=int, default=3)
     parser.add_argument("--ph", type=float, default=7.4)
@@ -102,6 +103,20 @@ def main():
         help="do not ask about follow-up calibration options after a failed control",
     )
     args = parser.parse_args()
+
+    ad4 = None
+    if args.engine == 'adgpu':
+        if not args.ad4_settings or any(value is not None for value in
+                                        (args.exhaustiveness, args.num_modes, args.energy_range)):
+            parser.error('AD4 requires its own search settings and does not use Vina search options')
+        from docking_universal.ad4_gpu import Ad4Settings
+        try:
+            ad4 = Ad4Settings(**json.loads(args.ad4_settings)).to_dict()
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            parser.error(f'Invalid AD4 search settings: {exc}')
+    elif args.ad4_settings or any(value is None for value in
+                                   (args.exhaustiveness, args.num_modes, args.energy_range)):
+        parser.error('Vina-family controls require exhaustiveness, modes and energy range')
 
     if len(args.comparison_root) != len(args.seed):
         parser.error("provide one --seed for each comparison root")
@@ -196,6 +211,18 @@ def main():
             "engine_source": detected_engine_source,
         },
     }
+    if ad4 is not None:
+        from docking_universal.ad4_gpu import PINNED_ENGINE_SHA256, grid_geometry
+        from docking_universal_box_candidates import config_geometry
+        for key in ('exhaustiveness', 'num_modes', 'energy_range_kcal_per_mol'):
+            result['parameters'].pop(key, None)
+        result['parameters']['ad4'] = ad4
+        result['engine_implementation'] = {'sha256': PINNED_ENGINE_SHA256,
+            'profile': 'patched v1.6 Apple OpenCL 128-work-item', 'experimental': True, 'scoring_function': 'AD4'}
+        region = {'site_number': 1, 'box': str(box), 'box_sha256': sha256(box),
+                  'ad4_grid': grid_geometry(config_geometry(box))}
+        result['locked_inputs']['boxes'] = [region]
+        result['docking_regions'] = [region]
     if receptor_pdb:
         result["locked_inputs"].update({
             "receptor_pdb": str(receptor_pdb),

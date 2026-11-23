@@ -57,7 +57,17 @@ def tier_settings(args, tier_name):
     settings = dict(TIERS[tier_name])
     if args.conformers_override is not None:
         settings["conformers"] = args.conformers_override
+    # A selected control must be capable of meeting its own approval rule.
+    # Honor an explicitly stricter requirement as well as the default five.
+    settings["seeds"] = max(settings["seeds"], getattr(args, "approval_min_seeds", 5))
     return settings
+
+
+def ad4_tier_settings(args, tier_name):
+    """AD4 effort is genetic runs, never Vina exhaustiveness or modes."""
+    from docking_universal.ad4_gpu import Ad4Settings
+    multiplier = {'quick': 1, 'repeatability': 1, 'broader': 2, 'conformers': 2, 'robust': 3}[tier_name]
+    return Ad4Settings(lga_runs=args.ad4_runs * multiplier, heuristic_cap=args.ad4_heuristic_cap).to_dict()
 
 
 def run(command):
@@ -175,7 +185,9 @@ def parse_args():
     parser.add_argument("--receptor-pdbqt", required=True, type=Path, help="prepared docking receptor")
     parser.add_argument("--box", required=True, type=Path, help="Vina-format box configuration")
     parser.add_argument("--out", required=True, type=Path)
-    parser.add_argument("--engine", choices=("vina", "qvinaw"), default="vina")
+    parser.add_argument("--engine", choices=("vina", "qvinaw", "adgpu"), default="vina")
+    parser.add_argument('--ad4-runs', type=int, default=20)
+    parser.add_argument('--ad4-heuristic-cap', type=int, default=12000000)
     parser.add_argument("--tier", choices=tuple(TIERS), default="quick")
     parser.add_argument(
         "--guided-from", type=Path,
@@ -211,6 +223,10 @@ def run_tier(args, tier_name, cli, libexec, tier_root):
     """Run and evaluate one retained sampling tier before any escalation."""
     started = time.monotonic()
     settings = tier_settings(args, tier_name)
+    ad4 = None
+    if args.engine == 'adgpu':
+        ad4 = ad4_tier_settings(args, tier_name)
+        print(f"AD4 GPU: {ad4['lga_runs']} genetic runs per seed; evaluation cap {ad4['heuristic_cap']} (Vina exhaustiveness is not used).", flush=True)
     tier_root.mkdir(parents=True, exist_ok=True)
     ensemble = tier_root / "independent_ensemble.sdf"
     prep = tier_root / "ligand_preparation"
@@ -238,10 +254,13 @@ def run_tier(args, tier_name, cli, libexec, tier_root):
         command = [
             cli, "dock", "--engine", args.engine,
             "--receptor", args.receptor_pdbqt, "--ligands", prep / "pdbqt_ligands",
-            "--config", args.box, "--out", docking,
-            "--exhaustiveness", settings["exhaustiveness"], "--num-modes", settings["modes"],
-            "--energy-range", settings["energy_range"], "--seed", seed, "--skip-existing",
+            "--config", args.box, "--out", docking, "--seed", seed, "--skip-existing",
         ]
+        if ad4 is not None:
+            command += ['--ad4-settings', json.dumps(ad4, sort_keys=True)]
+        else:
+            command += ["--exhaustiveness", settings["exhaustiveness"], "--num-modes", settings["modes"],
+                        "--energy-range", settings["energy_range"]]
         if args.engine_command:
             command += ["--engine-command", args.engine_command]
         if args.engine_env:
@@ -269,13 +288,18 @@ def run_tier(args, tier_name, cli, libexec, tier_root):
         *comparisons, "--engine", args.engine, "--out", protocol,
         "--receptor", args.receptor_pdbqt, "--receptor-pdb", args.receptor_pdb,
         "--box", args.box,
-        "--threshold", args.rmsd_threshold, "--exhaustiveness", settings["exhaustiveness"],
-        "--num-modes", settings["modes"], "--energy-range", settings["energy_range"],
+        "--threshold", args.rmsd_threshold,
         "--min-seeds", args.approval_min_seeds, "--ph", args.ph,
         "--conformers", settings["conformers"], "--charge-model", args.charge_model,
-        "--macrocycle-treatment", "flexible_meeko" if args.engine == "vina" else "rigid_conformer_ensemble",
+        "--macrocycle-treatment", ("unsupported_experimental_ad4" if ad4 is not None else
+                                  "flexible_meeko" if args.engine == "vina" else "rigid_conformer_ensemble"),
         "--no-prompt",
     ]
+    if ad4 is not None:
+        evaluate += ['--ad4-settings', json.dumps(ad4, sort_keys=True)]
+    else:
+        evaluate += ['--exhaustiveness', settings['exhaustiveness'], '--num-modes', settings['modes'],
+                     '--energy-range', settings['energy_range']]
     for seed in seeds:
         evaluate += ["--seed", seed]
     run(evaluate)

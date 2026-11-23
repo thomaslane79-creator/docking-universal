@@ -55,7 +55,7 @@ class StageFeedbackTests(unittest.TestCase):
             docking.mkdir(parents=True)
             (docking / "independent_ensemble_1_vina.pdbqt").write_text("MODEL\n")
             self.assertEqual(screening_feedback(root, 2)[2:], (1, 2))
-            (docking / "independent_ensemble_2_vina.pdbqt").write_text("MODEL\n")
+            (docking / "independent_ensemble_2_adgpu.pdbqt").write_text("MODEL\n")
             self.assertEqual(screening_feedback(root, 2)[0], "analysis")
             (root / "report").mkdir()
             (root / "report" / "screen.pdf").write_text("%PDF")
@@ -76,11 +76,11 @@ class StageFeedbackTests(unittest.TestCase):
             root = parent/'control-output'; root.mkdir()
             (parent/'reviewed_control_inputs.json').write_text('{}')
             self.assertIn('Reusing the reviewed receptor', control_feedback(root)[1])
-            for seed in (1, 2):
-                batch = root/f'control/04_redocking/vina/quick/seed_{seed}/docking'
+            for seed, engine, marker in ((1, 'vina', 'batch_request.json'), (2, 'qvinaw', 'run_manifest.tsv')):
+                batch = root/f'control/04_redocking/{engine}/quick/seed_{seed}/docking'
                 batch.mkdir(parents=True)
-                (batch/'batch_request.json').write_text('{}')
-                (batch/'ligand_vina.pdbqt').write_text('MODEL\n')
+                (batch/marker).write_text('{}')
+                (batch/f'ligand_{engine}.pdbqt').write_text('MODEL\n')
                 (batch/'unfinished_vina.pdbqt').touch()
             phase, message, completed, total = control_feedback(root)
             self.assertEqual(phase, 'redocking')

@@ -6,8 +6,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
+from uuid import uuid4
 from pathlib import Path
 
 APPROVED_POLICY = "approved-poseedit-local-v1"
@@ -37,6 +39,12 @@ def main() -> int:
     if not renderer.is_file():
         raise FileNotFoundError(f"Approved local PoseEdit-style renderer is not installed: {renderer}")
     plip = cache / "plip"
+    if plip.exists():
+        # A previous failed attempt can leave PLIP output behind. Preserve it
+        # for diagnosis while giving the next attempt its own clean folder.
+        attempts = cache / 'previous_plip_attempts'
+        attempts.mkdir(parents=True, exist_ok=True)
+        plip.rename(attempts / uuid4().hex)
     subprocess.run([
         sys.executable, str(interactions), str(complex_pdb), "--out-dir", str(plip),
         "--ligand-resname", "UNL", "--ligand-chain", "Z", "--ligand-position", "1",
@@ -44,11 +52,25 @@ def main() -> int:
         "--skip-native-visuals",
     ], check=True)
     diagram = cache / "interaction_diagram.png"
-    subprocess.run([
+    renderer_command = [
         sys.executable, str(renderer), "--ligand", str(pose), "--receptor", str(receptor),
         "--plip-xml", str(plip / "report.xml"), "--output", str(diagram),
         "--scale", "3", "--renderer-policy", APPROVED_POLICY,
-    ], check=True)
+    ]
+    for spacing in (15, 20, 25, 30):
+        command = renderer_command + ([] if spacing == 15 else ['--ligand-spacing', str(spacing)])
+        result = subprocess.run(command, text=True, capture_output=True)
+        if result.stdout:
+            print(result.stdout, end='')
+        if result.returncode == 0:
+            break
+        (cache / f'render_spacing_{spacing}.log').write_text(result.stdout + '\n' + result.stderr)
+        for suffix in ('.collision-audit.json', '.packing-audit.json', '.crop-audit.json'):
+            audit = Path(str(diagram) + suffix)
+            if audit.is_file():
+                shutil.copy2(audit, Path(str(diagram) + f'.spacing-{spacing}' + suffix))
+        if 'collision-free unambiguous layout' not in result.stderr or spacing == 30:
+            raise RuntimeError('2D interaction rendering failed: ' + result.stderr.strip())
     renderer_manifest = diagram.with_suffix(".manifest.json")
     if not diagram.is_file() or not renderer_manifest.is_file():
         raise FileNotFoundError("Approved renderer omitted its diagram or provenance manifest")

@@ -18,7 +18,7 @@ SETTINGS_HELP = {
         'QuickVina-W uses a rigid-conformer ensemble for large rings. This does not make the '
         'receptor flexible. The optional experimental AutoDock-GPU uses AD4 scoring and a '
         'different genetic/local search, not GPU Vina. Its energies are not interchangeable '
-        'with Vina, and it rejects unvalidated macrocycles/metals instead of substituting '
+        'with Vina, and it rejects unsupported atom types and macrocycles instead of substituting '
         'another engine. No experimental validation is implied by selecting a program.'),
     'ph': ('Ligand preparation pH',
         'The pH used to consider ligand protonation states before docking.',
@@ -126,10 +126,11 @@ tested build/device/method scope, not across engines or all computers.</p>
 <p><b>Grid and supported scope:</b> AutoGrid creates atom-type energy maps before
 searching. The 0.375 Å map cells can expand a requested box slightly to fit whole
 even intervals; both requested and actual extents are saved in the protocol.
-This first option uses a dry, rigid receptor and rejects unvalidated macrocycles,
-metals and special atom types rather than changing their chemistry or falling
-back to Vina. Production control calibration is not yet enabled for this engine:
-an exploratory protocol does not become validated by choosing AD4.</p>
+This option uses a dry, rigid receptor and rejects unsupported atom types and
+macrocycles rather than changing their chemistry or falling back to Vina.
+Receptor metals with parameters in the verified AutoGrid table are retained;
+the standard AD4 model does not explicitly model metal coordination. A bound-ligand
+control tests pose recovery using this exact AD4 engine, receptor and settings.</p>
 <p><b>Platforms and experimental status:</b> the common workflow is intended for
 macOS, Windows and Linux. Only the pinned, locally tested Apple-Silicon OpenCL
 128-work-item build is accepted in this release. Windows/Linux GPU builds need
@@ -182,8 +183,8 @@ def settings_guide_html(values):
         'on this panel: MMFF94 vacuum ligand minimization, 0.75 Å conformer-generation pruning, '
         'tautomer enumeration and Gasteiger charges. Conformer pruning is different from the '
         'later docking-pose clustering cutoff. The receptor remains rigid.</p>',
-        '<h3>After finalization</h3><p>Generate final report and .duprotocol saves the recipe. '
-        'Open final report reads its documentation; Open bundle location shows the saved portable '
+        '<h3>After finalization</h3><p>Create reusable protocol and report saves the recipe and its documentation. '
+        'Open control report shows the completed control; after creation, Open protocol report shows the saved recipe. Open bundle location shows the saved portable '
         'protocol. Choose ligands and review the workload in the next screening step. '
         'Existing saved protocols keep their recorded settings; reading this guide changes nothing.</p>',
         '<p>Parameter references: <a href="https://autodock-vina.readthedocs.io/en/stable/faq.html">'

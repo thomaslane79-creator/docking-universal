@@ -362,6 +362,28 @@ def validate_options(options: DockOptions, region_check: Path) -> None:
         raise DockRuntimeError(f"ERROR: docking-box preflight helper is missing: {region_check}")
 
 
+def _find_conda(environment: Mapping[str, str]) -> str | None:
+    """Locate Conda belonging to the scientific Python when PATH is minimal."""
+    found = shutil.which('conda', path=environment.get('PATH'))
+    if found:
+        return found
+    configured = environment.get('CONDA_EXE')
+    if configured and Path(configured).is_file() and os.access(configured, os.X_OK):
+        return str(Path(configured).resolve())
+    from docking_universal.runtime_layout import prefix_for_python
+    python = Path(environment.get('DOCKING_UNIVERSAL_PYTHON') or sys.executable).resolve()
+    prefix = prefix_for_python(python)
+    if prefix.parent.name.lower() != 'envs':
+        return None
+    base = prefix.parent.parent
+    names = (base / 'condabin' / ('conda.bat' if os.name == 'nt' else 'conda'),
+             base / ('Scripts/conda.exe' if os.name == 'nt' else 'bin/conda'))
+    for candidate in names:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate.resolve())
+    return None
+
+
 def resolve_engine(options: DockOptions, environment: Mapping[str, str]) -> EngineInvocation:
     """Resolve an explicit, PATH, or Conda engine using the legacy precedence."""
 
@@ -411,7 +433,7 @@ def resolve_engine(options: DockOptions, environment: Mapping[str, str]) -> Engi
         raise DockRuntimeError(
             f"ERROR: {options.engine} not found in PATH; use --engine-command or --engine-env"
         )
-    conda = shutil.which("conda", path=environment.get("PATH"))
+    conda = _find_conda(environment)
     if not conda:
         raise DockRuntimeError(f"ERROR: conda is required to use --engine-env {engine_env}")
     if options.engine == 'vina' and engine_env == 'docking-universal-vina':

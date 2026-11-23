@@ -1,6 +1,11 @@
 # Validation status
 
-Docking Universal 0.7.0 is a research preview. Validation distinguishes software-path testing from scientific validation: a command completing successfully does not establish that a predicted pose, cavity, or related-structure site assignment is biologically correct.
+Docking Universal 1.0.0-rc.1 is the first 1.0 release candidate and remains a
+research preview. The [desktop acceptance plan](gui-real-workflow-validation.md)
+tracks checks for this candidate. Records explicitly labeled 0.7.0 describe the
+earlier release. Validation distinguishes software-path testing from scientific
+validation: a command completing successfully does not establish that a
+predicted pose, cavity, or related-structure site assignment is biologically correct.
 
 ## Automated option coverage
 

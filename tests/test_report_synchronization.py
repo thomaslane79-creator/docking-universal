@@ -356,6 +356,68 @@ if __name__=='__main__':unittest.main()
 
 FIGURES = load('synchronized_figures', 'libexec/docking-universal-report-figures.py')
 
+class PocketFigureReceptorTests(unittest.TestCase):
+    def test_pocket_panel_layout_uses_cropped_artwork_aspect_ratios(self):
+        from PIL import Image, ImageDraw
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            panels = [root / name for name in ("plot.png", "structure.png")]
+            for path, box, color in zip(
+                panels, ((10, 50, 209, 149), (70, 20, 149, 119)), ("red", "blue")
+            ):
+                picture = Image.new("RGB", (240, 200), "white")
+                ImageDraw.Draw(picture).rectangle(box, fill=color)
+                picture.save(path)
+            output = root / "combined.png"
+            FIGURES.combine_evidence_panels(*panels, output, [])
+            with Image.open(output) as image:
+                self.assertAlmostEqual(image.width / image.height, (5.6 * 2.8 * 1.085 + .44) / 6.68, places=2)
+                self.assertEqual(image.convert("RGB").getpixel((300, 400)), (255, 0, 0))
+                self.assertEqual(image.convert("RGB").getpixel((2920, 400)), (255, 255, 255))
+                self.assertEqual(image.convert("RGB").getpixel((3100, 400)), (0, 0, 255))
+
+    def test_structure_panel_fits_wide_and_tall_artwork_without_crop(self):
+        from PIL import Image, ImageChops
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plot, structure, output = [root / name for name in ('plot.png', 'structure.png', 'figure.png')]
+            Image.new('RGB', (200, 160), 'red').save(plot)
+            for dimensions in ((400, 50), (50, 400)):
+                with self.subTest(dimensions=dimensions):
+                    Image.new('RGB', dimensions, 'blue').save(structure)
+                    FIGURES.combine_evidence_panels(plot, structure, output, [])
+                    with Image.open(output) as figure:
+                        red, green, blue = figure.convert('RGB').split()
+                        blue_artwork = ImageChops.subtract(blue, ImageChops.lighter(red, green))
+                        bounds = blue_artwork.point(lambda value: 255 if value > 128 else 0).getbbox()
+                        self.assertIsNotNone(bounds)
+                        self.assertAlmostEqual((bounds[2] - bounds[0]) / (bounds[3] - bounds[1]),
+                                               dimensions[0] / dimensions[1], delta=.15)
+                        self.assertLess(figure.width / figure.height, 3)
+                        self.assertGreater(bounds[1], 0)
+                        self.assertLess(bounds[2], figure.width)
+                        self.assertLess(bounds[3], figure.height)
+
+    def test_split_preparation_uses_receptor_recorded_by_protocol(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cavity = root / "site-review" / "cavity"
+            cavity.mkdir(parents=True)
+            diagnostics = cavity / "pocket_selection_diagnostics.tsv"
+            diagnostics.touch()
+            receptor = root / "prepared" / "receptor" / "target.pdb"
+            receptor.parent.mkdir(parents=True)
+            receptor.touch()
+            self.assertEqual(FIGURES.cavity_receptor(diagnostics, receptor), receptor)
+            self.assertIsNone(FIGURES.cavity_receptor(diagnostics))
+
+            adjacent = cavity.parent / "receptor" / "other.pdb"
+            adjacent.parent.mkdir()
+            adjacent.touch()
+            self.assertEqual(FIGURES.cavity_receptor(diagnostics, receptor), receptor)
+            self.assertEqual(FIGURES.cavity_receptor(diagnostics), adjacent)
+
+
 class ReportMissingRMSDTests(unittest.TestCase):
     def test_all_top20_ranks_survive_unmappable_third_cluster_without_recoloring_fourth(self):
         if not all(importlib.util.find_spec(name) for name in ('rdkit', 'matplotlib')):
@@ -388,7 +450,7 @@ class ReportMissingRMSDTests(unittest.TestCase):
                 self.assertEqual(tuple(fig.axes[1].collections[0].get_facecolors()[0][:3]), to_rgba(FIGURES.TOP_COLORS[2])[:3])
                 # Rank 4 must remain gray instead of inheriting rank 3's color.
                 self.assertEqual(tuple(fig.axes[0].collections[0].get_facecolors()[2][:3]), to_rgba('#b8c0c8')[:3])
-                self.assertIn('RMSD N/A', '\n'.join(t.get_text() for t in fig.axes[0].texts))
+                self.assertEqual(fig.axes[1].get_ylabel(), 'RMSD\nunavailable')
             plt.close('all')
             with output.with_suffix('.csv').open() as handle:
                 plotted = list(csv.DictReader(handle))

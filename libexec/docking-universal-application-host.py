@@ -23,6 +23,7 @@ def main() -> int:
     preparation = None if os.name == "nt" else Path(__file__).with_name("docking-universal-prepare")
     guard = None
     capabilities = {"scientific_stages_supported": os.name != "nt",
+                    "reopen_site_review_supported": True,
                     "coordinate_site_review_supported": sys.platform == 'darwin',
                     "retry_site_exploration_supported": sys.platform == 'darwin',
                     "retry_reviewed_control_supported": sys.platform == 'darwin',

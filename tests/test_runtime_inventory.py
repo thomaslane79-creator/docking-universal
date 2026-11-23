@@ -149,6 +149,19 @@ class RuntimeInventoryTests(unittest.TestCase):
         self.assertEqual(result["status"], "unavailable")
         self.assertEqual(result["missing"], ["node", "playwright", "chrome"])
 
+    def test_desktop_discovers_node_in_scientific_environment_without_shell_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            prefix = Path(directory); node = prefix / 'bin' / 'node'
+            node.parent.mkdir(); node.write_text('node')
+            module = prefix / 'libexec' / 'docking-universal' / 'docking_universal' / 'runtime_inventory.py'
+            module.parent.mkdir(parents=True); module.write_text('')
+            with patch.object(runtime_inventory, '__file__', str(module)), patch.object(runtime_inventory.subprocess, 'run') as called:
+                called.return_value.returncode = 0
+                called.return_value.stdout = str(prefix / 'playwright.js')
+                called.return_value.stderr = ''
+                result = runtime_inventory.discover_poseedit_runtime(which=lambda _: None, environment={})
+            self.assertEqual(result['components']['node']['path'], str(node.resolve()))
+
 
 if __name__ == "__main__":
     unittest.main()

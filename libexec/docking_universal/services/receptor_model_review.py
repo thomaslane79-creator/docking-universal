@@ -75,7 +75,7 @@ def inspect_source_data(data):
 
 def preview_changes(source, choices, *, context):
     """Return a deterministic preview and in-memory derivative; write nothing."""
-    if not isinstance(choices, dict) or set(choices) - {'exclusions', 'alternate_locations', 'sidechain_candidate', 'preparation_backend'}:
+    if not isinstance(choices, dict) or set(choices) - {'exclusions', 'alternate_locations', 'sidechain_candidate', 'preparation_backend', 'repair_after_exclusions'}:
         raise ValueError('Only explicit preparation methods, exclusions, alternate locations and a reviewed side-chain candidate are supported')
     if 'preparation_backend' in choices and (not isinstance(choices['preparation_backend'], str)
                                            or choices['preparation_backend'] not in {'meeko', 'adfr'}):
@@ -85,6 +85,11 @@ def preview_changes(source, choices, *, context):
     alt_rows = choices.get('alternate_locations', [])
     if not isinstance(excluded_rows, list) or not isinstance(alt_rows, list):
         raise ValueError('Receptor changes must be lists of exact residue identities')
+    if 'repair_after_exclusions' in choices:
+        if (choices['repair_after_exclusions'] is not True or not excluded_rows
+                or choices.get('sidechain_candidate')
+                or choices.get('preparation_backend', context.get('preparation_backend', 'meeko')) != 'meeko'):
+            raise ValueError('Guarded side-chain repair requires reviewed exclusions and standard Meeko preparation')
     excluded = [identity(row) for row in excluded_rows]
     reference = context.get('bound_reference')
     if reference and identity(reference) in excluded:

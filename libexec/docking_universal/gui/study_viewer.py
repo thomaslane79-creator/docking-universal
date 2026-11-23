@@ -3,16 +3,23 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 
 from ..state import StudyState
 from ..viewer.identities import StructureIdentity
 from ..viewer.pymol_adapter import PymolAdapter, RegisteredStructure
+from ..pocket_metadata import POCKET_COLOR_NAMES, candidate_pocket_number
 
 
 # This is the permanent pocket palette used by the retained report figures.
 # Interactive selection may change edge thickness, but never candidate color.
-POCKET_COLORS = ("red", "marine", "gold", "magenta", "cyan", "orange", "violet")
+POCKET_COLORS = POCKET_COLOR_NAMES
+
+
+def candidate_pocket_color(candidate):
+    number = candidate_pocket_number(candidate)
+    return POCKET_COLORS[(number - 1) % len(POCKET_COLORS)] if number else 'du_report_unscored'
 
 
 class StudyViewerCoordinator:
@@ -93,8 +100,10 @@ class StudyViewerCoordinator:
         ))
         pockets = [item for item in state.artifacts if item.kind == "pocket_coordinates"]
         for index, artifact in enumerate(pockets):
+            match = re.search(r'pocket[_-]?(\d+)', Path(artifact.path).name, re.I)
+            number = int(match.group(1)) if match and int(match.group(1)) > 0 else index + 1
             self.adapter.show_pocket(
-                artifact.path, f"du_pocket_{index + 1}", POCKET_COLORS[index % len(POCKET_COLORS)],
+                artifact.path, f"du_pocket_{index + 1}", POCKET_COLORS[(number - 1) % len(POCKET_COLORS)],
             )
         candidates = state.workflow_data.get("pocket_candidates", [])
         if candidates:
@@ -192,13 +201,15 @@ class StudyViewerCoordinator:
         center = [geometry.get(f"center_{axis}") for axis in "xyz"]
         size = [geometry.get(f"size_{axis}") for axis in "xyz"]
         rank = int(candidate.get("rank") or (candidates.index(candidate) + 1))
-        color = POCKET_COLORS[(rank - 1) % len(POCKET_COLORS)]
+        color = candidate_pocket_color(candidate)
         evidence = candidate.get("evidence") or {}
         ligand_evidence = evidence.get("experimental_ligand_evidence") or {}
-        has_corresponding_ligand_evidence = bool(
-            ligand_evidence.get("observation_count")
-            or "direct deposited-ligand correspondence" in str(candidate.get("summary", ""))
-        )
+        from ..services.molecule_inspection import split_component_observations
+        primary = ligand_evidence.get('observations') or []
+        possible, _ = split_component_observations(primary)
+        has_corresponding_ligand_evidence = bool(possible or
+            int(ligand_evidence.get('observation_count') or 0) > len(primary) or
+            (not ligand_evidence and 'direct deposited-ligand correspondence' in str(candidate.get('summary', ''))))
         group = evidence.get('site_group') or evidence.get('site_group_presentation') or {}
         redundant = tuple('candidate_box_' + identity for identity in group.get('member_ids', [])
                           if identity != candidate_id)
@@ -213,6 +224,32 @@ class StudyViewerCoordinator:
                 if has_corresponding_ligand_evidence else ()
             ),
         )
+
+    def show_candidates(self, state: StudyState, candidate_ids: list[str]) -> None:
+        """Display each selected candidate using its own retained box and color."""
+        if not candidate_ids:
+            return
+        if len(candidate_ids) == 1:
+            self.show_candidate(state, candidate_ids[0])
+            return
+        if not hasattr(self.adapter, 'show_multiple_boxes'):
+            raise ValueError('This viewer does not support showing multiple selected boxes together')
+        candidates = state.workflow_data.get('pocket_candidates', [])
+        by_id = {str(item['id']): item for item in candidates}
+        boxes = []
+        for identity in candidate_ids:
+            candidate = by_id[identity]
+            evidence = candidate.get('evidence') or {}
+            geometry = evidence.get('geometry') or {}
+            rank = int(candidate.get('rank') or (candidates.index(candidate) + 1))
+            group = evidence.get('site_group') or evidence.get('site_group_presentation') or {}
+            boxes.append({'center': [geometry.get('center_' + a) for a in 'xyz'],
+                          'size': [geometry.get('size_' + a) for a in 'xyz'],
+                          'color': candidate_pocket_color(candidate),
+                          'source_object_name': 'candidate_box_' + identity,
+                          'redundant_object_names': tuple('candidate_box_' + member for member in group.get('member_ids', []) if member != identity)})
+        self.show_candidate(state, candidate_ids[0])
+        self.adapter.show_multiple_boxes(boxes)
 
     def show_pose(self, analysis_root: Path | str, pose_id: int) -> Path:
         if not self.connected:

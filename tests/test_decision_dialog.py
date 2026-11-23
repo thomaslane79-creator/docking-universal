@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from docking_universal.decisions import DecisionOption, DecisionRequired
 from docking_universal.gui.decision_dialog import DecisionDialog
-from docking_universal.gui.qt import QtCore, QtWidgets
+from docking_universal.gui.qt import QtCore, QtGui, QtWidgets
 
 
 class DecisionDialogTests(unittest.TestCase):
@@ -54,6 +54,20 @@ class DecisionDialogTests(unittest.TestCase):
         reopened = DecisionDialog(self.decision, settings=self.settings)
         self.assertEqual(reopened.detail_level.currentData(), "technical")
         self.assertEqual(reopened.selected_values(), ())
+
+    def test_option_descriptions_follow_light_and_dark_text_palette(self):
+        for background, foreground in (('#f8f8f8', '#161616'), ('#303030', '#f2f2f2')):
+            dialog = DecisionDialog(self.decision, settings=self.settings, allow_approval=True)
+            palette = dialog.palette()
+            palette.setColor(QtGui.QPalette.ColorRole.Window, QtGui.QColor(background))
+            palette.setColor(QtGui.QPalette.ColorRole.WindowText, QtGui.QColor(foreground))
+            dialog.setPalette(palette)
+            labels = dialog.findChildren(QtWidgets.QLabel, 'decision_option_description')
+            self.assertEqual(len(labels), 2)
+            for label in labels:
+                self.assertEqual(label.palette().color(QtGui.QPalette.ColorRole.WindowText).name(), foreground)
+                self.assertEqual(label.styleSheet(), '')
+            dialog.close()
 
     def test_selected_values_respect_the_decision_contract(self):
         dialog = DecisionDialog(

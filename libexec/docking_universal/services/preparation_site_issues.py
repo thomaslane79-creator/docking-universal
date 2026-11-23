@@ -92,8 +92,8 @@ def candidate_with_model_change_review(state, candidate, *, geometry_override=No
     history_artifact = next((a for a in state.artifacts if a.kind == 'receptor_model_history'), None)
     if history_artifact is None:
         return candidate
-    result = copy.deepcopy(candidate)
-    evidence = result.setdefault('evidence', {})
+    result = {**candidate, 'evidence': dict(candidate.get('evidence') or {})}
+    evidence = result['evidence']
     try:
         path = Path(history_artifact.path)
         if hashlib.sha256(path.read_bytes()).hexdigest() != history_artifact.sha256:
@@ -143,6 +143,14 @@ def candidate_with_model_change_review(state, candidate, *, geometry_override=No
                         raise ValueError('No verified original coordinates or matching retained box-impact review')
             else:
                 raise ValueError('Docking-box evidence is unavailable for receptor-change review')
+        # The same spatial review can cover removals, alternate locations and
+        # other edits. Preserve which residues were actually removed so the UI
+        # does not describe every reviewed change as an omission.
+        exclusions = {(row.get('resname', ''), row.get('chain', ''),
+                       row.get('number', '') + row.get('insertion_code', ''))
+                      for row in (retained.get('choices') or {}).get('exclusions', [])}
+        for row in review['residues']:
+            row['removed'] = (row['residue'], row['chain'], row['number']) in exclusions
         inside = [row for row in review['residues'] if row.get('inside_box')]
         method_changed = any(change['kind'] == 'preparation_method_change' for change in history['changes'])
         if method_changed:

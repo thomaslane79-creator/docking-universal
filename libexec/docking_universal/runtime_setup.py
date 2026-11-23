@@ -84,6 +84,36 @@ def atomic_json(path, record):
     temporary.replace(path)
 
 
+def install_gpu_only(assets, scientific_prefix):
+    """Install the pinned GPU runtime without reinstalling the GUI."""
+    manifest = verified_manifest(assets)
+    require_platform(manifest['gpu']['minimum_macos'])
+    devices = apple_gpu_devices()
+    if not (scientific_prefix / 'conda-meta').is_dir() or not (scientific_prefix / 'bin/python').is_file():
+        raise ValueError(f'Not an explicit installed Conda prefix: {scientific_prefix}')
+    target = scientific_prefix / 'share/docking-universal/adgpu'
+    target.mkdir(parents=True, exist_ok=True)
+    for key in ('gpu', 'autogrid'):
+        name = manifest[key]['executable']
+        temporary = target / (name + '.partial')
+        shutil.copyfile(assets / name, temporary)
+        temporary.chmod(0o755)
+        temporary.replace(target / name)
+    for name in manifest['files']:
+        if name.endswith('.tar.gz') or name.startswith('LICENSE-'):
+            shutil.copyfile(assets / name, target / name)
+    shutil.copyfile(assets / 'manifest.json', target / 'manifest.json')
+    record = {'schema': 'docking-universal-adgpu-runtime-v1', 'integration_accepted': True,
+        'validation_only': False, 'executable': str(target / manifest['gpu']['executable']),
+        'autogrid_executable': str(target / manifest['autogrid']['executable']),
+        'autogrid_sha256': manifest['files'][manifest['autogrid']['executable']]['sha256'],
+        'minimum_macos': manifest['gpu']['minimum_macos'], 'opencl_devices_at_install': devices,
+        'acceptance_record': 'docs/ad4-gpu-guide.md; docs/mac-runtime-packaging.md',
+        'scope': 'Pinned experimental dry rigid-receptor Apple OpenCL 128-work-item build; device check is not a target control'}
+    atomic_json(target / 'runtime.json', record)
+    return record
+
+
 def install(assets, scientific_prefix, gui_prefix, *, gpu=False):
     manifest = verified_manifest(assets)
     require_platform(manifest['pymol']['minimum_macos'])
@@ -119,28 +149,7 @@ def install(assets, scientific_prefix, gui_prefix, *, gpu=False):
                'manifest_sha256': hashlib.sha256((assets / 'manifest.json').read_bytes()).hexdigest(),
                'gpu_installed_by_this_run': gpu}
     if gpu:
-        target = shared / 'adgpu'
-        target.mkdir(parents=True, exist_ok=True)
-        for key in ('gpu', 'autogrid'):
-            name = manifest[key]['executable']
-            temporary = target / (name + '.partial')
-            shutil.copyfile(assets / name, temporary)
-            temporary.chmod(0o755)
-            temporary.replace(target / name)
-        # Preserve complete corresponding sources and notices next to binaries.
-        for name in manifest['files']:
-            if name.endswith('.tar.gz') or name.startswith('LICENSE-'):
-                shutil.copyfile(assets / name, target / name)
-        shutil.copyfile(assets / 'manifest.json', target / 'manifest.json')
-        record = {'schema': 'docking-universal-adgpu-runtime-v1', 'integration_accepted': True,
-            'validation_only': False, 'executable': str(target / manifest['gpu']['executable']),
-            'autogrid_executable': str(target / manifest['autogrid']['executable']),
-            'autogrid_sha256': manifest['files'][manifest['autogrid']['executable']]['sha256'],
-            'minimum_macos': manifest['gpu']['minimum_macos'], 'opencl_devices_at_install': devices,
-            'acceptance_record': 'docs/ad4-gpu-guide.md; docs/mac-runtime-packaging.md',
-            'scope': 'Pinned previously accepted experimental dry rigid-receptor Apple OpenCL 128-work-item build; installation device check is not a target control'}
-        atomic_json(target / 'runtime.json', record)
-        receipt['gpu'] = record
+        receipt["gpu"] = install_gpu_only(assets, scientific_prefix)
     atomic_json(shared / 'native-runtime-install.json', receipt)
     print('Embedded PyMOL installed in GUI environment.' +
           (' Optional experimental AD4 GPU and AutoGrid installed; Vina remains the default.' if gpu else ' GPU installation not requested.'))

@@ -7,8 +7,9 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..services.pose_interactions import read_pose_inventory
+from ..services.pose_interactions import read_pose_inventory, PoseInteractionPlan, validate_pose_interaction_outputs
 from ..reporting import scoring_function_label
+from ..pose_visuals import approved_interaction_diagram
 from ..state import StudyState
 
 
@@ -33,12 +34,14 @@ class ClusterInteraction:
     rank: object
     score: object
     population: object
+    pose_id: int | None = None
 
     @property
     def label(self) -> str:
         return (
             f"Energy rank {self.rank} · Cluster {self.cluster_id} · {self.site} · "
             f"{self.score} kcal/mol · {self.population} poses"
+            + (f" · pose {self.pose_id} (on demand)" if self.pose_id is not None else "")
         )
 
     @property
@@ -88,8 +91,9 @@ class ResultsReviewModel:
                         clusters += sum(1 for _row in csv.DictReader(handle))
                 except OSError:
                     pass
+            from ..services.compound_identity import retained_compound_name_for_path
             results.append(CompoundResult(
-                compound, compound.name,
+                compound, retained_compound_name_for_path(compound),
                 manifest.get("completion_status") or manifest.get("run_status") or "retained",
                 manifest.get("docking_site_count", "NA"),
                 manifest.get("docking_job_count", "NA"),
@@ -97,6 +101,27 @@ class ResultsReviewModel:
                 scoring_function_label(manifest.get("engine")),
             ))
         return tuple(results)
+
+    @staticmethod
+    def cluster_comparison(compound: Path) -> tuple[dict, ...]:
+        """Return every retained cluster, including those without diagrams."""
+        rows = []
+        for summary in sorted(Path(compound).glob('**/cluster_summary.csv')):
+            analysis = summary.parent
+            site = analysis.parent.name if analysis.parent != Path(compound) else 'primary site'
+            try:
+                with summary.open(newline='') as handle:
+                    for row in csv.DictReader(handle):
+                        rows.append({**row, 'site': site, 'analysis': str(analysis)})
+            except OSError:
+                continue
+        def ordering(row):
+            try:
+                rank = int(row.get('energy_rank') or 999999)
+            except ValueError:
+                rank = 999999
+            return (str(row['site']), rank)
+        return tuple(sorted(rows, key=ordering))
 
     @staticmethod
     def cluster_interaction(diagram: Path, compound: Path) -> ClusterInteraction:
@@ -126,12 +151,46 @@ class ResultsReviewModel:
     def cluster_interactions(
         cls, state: StudyState, compound: Path,
     ) -> tuple[ClusterInteraction, ...]:
-        values = (
+        values = list(
             cls.cluster_interaction(Path(item.path), compound)
             for item in state.artifacts
             if item.kind == "screening_interaction_diagram"
-            and Path(item.path).is_file() and compound in Path(item.path).parents
+            and compound in Path(item.path).parents and approved_interaction_diagram(item.path)
         )
+        for item in state.artifacts:
+            if item.kind != 'pose_interaction_diagram' or not approved_interaction_diagram(item.path):
+                continue
+            metadata = item.metadata or {}
+            analysis = Path(str(metadata.get('analysis_root') or ''))
+            if compound not in analysis.parents:
+                continue
+            try:
+                cluster_id, pose_id = int(metadata['cluster_id']), int(metadata['pose_id'])
+            except (KeyError, TypeError, ValueError):
+                continue
+            placeholder = analysis / f'cluster_{cluster_id:03d}' / 'interactions' / 'diagram.png'
+            cluster = cls.cluster_interaction(placeholder, compound)
+            values.append(ClusterInteraction(Path(item.path), analysis, cluster.cluster_id, cluster.site,
+                                             cluster.rank, metadata.get('score', 'NA'), cluster.population, pose_id))
+        # A worker can finish writing a valid result before the host disconnects
+        # while registering it. Recover such results directly from the cache.
+        existing = {item.diagram.resolve() for item in values}
+        for analysis, record in cls.poses(compound):
+            cache = analysis / 'pose_interactions' / f'pose_{record.pose_id:04d}'
+            diagram = cache / 'interaction_diagram.png'
+            if not approved_interaction_diagram(diagram) or diagram.resolve() in existing:
+                continue
+            plan = PoseInteractionPlan(record, cache, (), diagram, cache / 'plip' / 'report.xml',
+                                       cache / 'interaction_manifest.json', True)
+            try:
+                validate_pose_interaction_outputs(plan)
+            except (OSError, ValueError):
+                continue
+            placeholder = analysis / f'cluster_{record.cluster_id:03d}' / 'interactions' / 'diagram.png'
+            cluster = cls.cluster_interaction(placeholder, compound)
+            values.append(ClusterInteraction(diagram, analysis, cluster.cluster_id, cluster.site,
+                                             cluster.rank, str(record.energy_kcal_per_mol), cluster.population, record.pose_id))
+            existing.add(diagram.resolve())
         return tuple(sorted(values, key=lambda item: item.order_key))
 
     @staticmethod
@@ -148,8 +207,5 @@ class ResultsReviewModel:
     @staticmethod
     def cached_pose_diagram(analysis: Path, pose_id: int) -> Path | None:
         cache = analysis / "pose_interactions" / f"pose_{pose_id:04d}"
-        return next((
-            path for name in (
-                "interaction_diagram.png", "pose_plip2d.png", "representative_plip2d.png",
-            ) if (path := cache / name).is_file()
-        ), None)
+        diagram = cache / "interaction_diagram.png"
+        return diagram if approved_interaction_diagram(diagram) else None

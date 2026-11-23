@@ -604,8 +604,10 @@ def write_ligand_guided_pdf(out, protocol, figure):
     from reportlab.lib.units import inch
     from reportlab.platypus import Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
     from html import escape
-    from docking_universal.services.protein_identity import target_identity_text
-    target_display, source_species = target_identity_text(protocol.get("target_identity") or {}, protocol["target"])
+    from docking_universal.services.protein_identity import report_target_heading, target_identity_text
+    identity = protocol.get("target_identity") or {}
+    target_display = report_target_heading(identity, protocol["target"])
+    target_details, source_species = target_identity_text(identity, protocol["target"])
 
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name="TitleDU", parent=styles["Title"], fontSize=20, leading=23, alignment=TA_CENTER, spaceAfter=4))
@@ -619,7 +621,7 @@ def write_ligand_guided_pdf(out, protocol, figure):
     box = protocol["docking_box"]
     provenance = [
         ["Protocol provenance", "Recorded value"],
-        ["Target", escape(target_display)], ["Source species", escape(source_species)],
+        ["Target provenance", escape(target_details)], ["Source species", escape(source_species)],
         ["Protocol filename", protocol["bundle_file_name"]],
         ["Protocol type", protocol_type_label(protocol["protocol_type"])],
         ["Evidence basis", protocol["evidence_basis"]], ["Screening authority", "User-confirmed exploratory use"],

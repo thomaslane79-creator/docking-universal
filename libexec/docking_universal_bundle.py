@@ -152,6 +152,15 @@ def create_bundle(
         root = Path(temporary)
         packaged_control = root / ("control" if kind == CONTROL_VALIDATED else "protocol")
         assets = packaged_control / "assets"
+        reference_figures = protocol.get('report_reference_figures') or {}
+        for key, item in reference_figures.items():
+            source = Path(str(item.get('path') or '')).expanduser().resolve()
+            if not source.is_file() or not item.get('sha256') or sha256(source) != item['sha256']:
+                raise ValueError(f'Report reference figure is missing or changed: {key}')
+            if not any(source == parent or parent in source.parents for parent in search_roots):
+                raise ValueError(f'Report reference figure is outside the approved study roots: {key}')
+            dest = _copy(source, packaged_control / 'reference_figures' / (key + source.suffix.lower()))
+            item['path'] = dest.relative_to(packaged_control).as_posix()
         if preparation.get('model_change_history'):
             assets.mkdir(parents=True, exist_ok=True)
             history = assets / 'receptor_model_history.json'
@@ -166,17 +175,21 @@ def create_bundle(
             "box": f"assets/{box_copy.name}",
         })
         packaged_regions = []
-        for index, region in enumerate(protocol["locked_inputs"].get("boxes", []), 1):
+        regions = protocol["locked_inputs"].get("boxes") or protocol.get("docking_regions") or []
+        for index, region in enumerate(regions, 1):
             source = Path(region.get("box", "")).expanduser().resolve()
             if not source.is_file():
                 raise ValueError(f"selected docking region {index} is missing: {source}")
+            digest = sha256(source)
+            if region.get("box_sha256") and region["box_sha256"] != digest:
+                raise ValueError(f"selected docking region {index} changed before export: {source}")
             copied = _copy(source, assets / source.name)
             packaged = dict(region)
             packaged.update({
                 "site_number": region.get("site_number", index),
                 "box": f"assets/{copied.name}",
                 "box_name": copied.name,
-                "box_sha256": sha256(copied),
+                "box_sha256": digest,
             })
             packaged_regions.append(packaged)
         if packaged_regions:

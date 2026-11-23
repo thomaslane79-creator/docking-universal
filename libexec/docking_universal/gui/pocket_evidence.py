@@ -6,9 +6,9 @@ import json
 import html
 
 from .qt import QtCore, QtGui, QtWidgets
-from .explanations import ExplanationLabel
+from .explanations import ExplanationLabel, ExplanationWindow
 
-LIGAND_EVIDENCE_COLOR = "#009b50"
+from ..pocket_metadata import LIGAND_EVIDENCE_GREEN as LIGAND_EVIDENCE_COLOR
 OBSTRUCTION_COLOR = "#a85b00"
 OBSTRUCTION_BACKGROUND = "#fff1b8"
 
@@ -138,6 +138,7 @@ class EvidenceSelectionTable(QtWidgets.QTableWidget):
 
 class PocketEvidencePanel(QtWidgets.QScrollArea):
     ligandRequested = QtCore.pyqtSignal(str)
+    ligandCenterRequested = QtCore.pyqtSignal(str)
     ligandsRequested = QtCore.pyqtSignal(list)
     selectionChanged = QtCore.pyqtSignal(list)
     interactionsRequested = QtCore.pyqtSignal(dict)
@@ -181,7 +182,9 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
         header_layout.addWidget(self.evidence_title, 1)
         self.evidence_header.setFixedHeight(max(20, self.evidence_title.fontMetrics().lineSpacing()))
         self.evidence_header.setToolTip(
-            "The green ring in the graph marks retained input-ligand or related deposited-ligand evidence. "
+            "The green ring marks a selected input ligand or a possible ligand from a related structure; "
+            "unknown roles remain visible. A gray dashed ring marks only known supporting components. "
+            "These are display groups, not a determination of biological activity. "
             "The table distinguishes the input-structure ligand from observations in related protein structures, "
             "not newly docked poses from this run. Input coordinates alone do not establish experimental validation. "
             "This evidence does not approve a docking region."
@@ -207,9 +210,16 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
         self.preparation_issues = QtWidgets.QPlainTextEdit()
         self.preparation_issues.setObjectName('box_receptor_preparation_issues')
         self.preparation_issues.setReadOnly(True)
-        self.preparation_issues.setFixedHeight(self.fontMetrics().lineSpacing() * 5 + 16)
+        self.preparation_issues.setFixedHeight(self.fontMetrics().lineSpacing() * 3 + 16)
         self.preparation_issues.hide()
         layout.addWidget(self.preparation_issues)
+        self.preparation_details_button = QtWidgets.QPushButton('Receptor change details…')
+        self.preparation_details_button.setObjectName('receptor_change_details')
+        self.preparation_details_button.clicked.connect(self.show_preparation_details)
+        self.preparation_details_button.hide()
+        layout.addWidget(self.preparation_details_button, 0, QtCore.Qt.AlignmentFlag.AlignRight)
+        self._preparation_details_window = None
+        self._preparation_detail_text = ''
         summary_layout.setSpacing(4)
         summary_layout.addWidget(self.evidence_header)
         summary_layout.addWidget(self.heading)
@@ -273,6 +283,7 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
         self.table.setHorizontalHeaderLabels(("Class", "PDB", "Ligand", "Cα RMSD (Å)", "Identity", "Coverage"))
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.table.setToolTip('Click to show or hide a ligand. Double-click to center it without changing zoom.')
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
         # Column geometry belongs to the panel, not the selected candidate's
         # row contents. Empty evidence must not pull headings/text leftwards.
@@ -302,6 +313,20 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
         layout.addWidget(self.highlight_row)
         layout.addWidget(self.evidence_summary)
         layout.addWidget(self.table, 1)
+        self.supporting_toggle = QtWidgets.QCheckBox('Show supporting components')
+        self.supporting_toggle.setObjectName('show_supporting_evidence_components')
+        self.supporting_toggle.setToolTip('Show sugars, cofactors and common crystallization agents as supporting components, not ligand evidence.')
+        self.supporting_toggle.toggled.connect(self._refresh_supporting_components)
+        self.supporting_toggle.hide()
+        layout.addWidget(self.supporting_toggle)
+        self.additional_input_toggle = QtWidgets.QCheckBox('Show other ligands in input structure')
+        self.additional_input_toggle.setToolTip('Include other deposited ligand instances. A ligand inside a docking box does not necessarily occupy its predicted pocket.')
+        self.additional_input_toggle.toggled.connect(self._refresh_supporting_components)
+        layout.addWidget(self.additional_input_toggle)
+        self.fragment_toggle = QtWidgets.QCheckBox('Show fragment-screening ligands')
+        self.fragment_toggle.setToolTip('Show compounds identified as experimental fragments by their deposited structure and publication titles. Their presence does not establish inhibition.')
+        self.fragment_toggle.toggled.connect(self._refresh_supporting_components)
+        layout.addWidget(self.fragment_toggle)
         layout.addWidget(self.compare_button)
         layout.addWidget(self.render_2d_button)
         layout.addWidget(self.note)
@@ -325,17 +350,52 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
             self.compare_button.setText("Show selected observations in PyMOL")
 
     def set_candidate(self, candidate: dict | None) -> None:
-        fingerprint = json.dumps(candidate, sort_keys=True)
+        evidence = (candidate or {}).get('evidence') or {}
+        conformation = evidence.get('conformational_site_evidence') or {}
+        observations = conformation.get('observations') or []
+        if len(observations) > 1000:
+            # Study-state revisions supply new immutable evidence objects. Avoid
+            # serializing tens of thousands of comparisons for each repaint;
+            # small/legacy records keep the full content fingerprint below.
+            compact = dict(candidate)
+            reduced = dict(evidence)
+            reduced['conformational_site_evidence'] = {
+                'object': id(conformation), 'observations': id(observations),
+                'count': len(observations), 'status': conformation.get('status'),
+                'warning': conformation.get('box_decision_warning'),
+                'occluding_residues': conformation.get('occluding_residues'),
+            }
+            for key in ('site_group', 'site_group_presentation'):
+                if key in reduced:
+                    reduced[key] = {'object': id(reduced[key])}
+            compact['evidence'] = reduced
+            fingerprint = json.dumps(compact, sort_keys=True)
+        else:
+            fingerprint = json.dumps(candidate, sort_keys=True)
         if fingerprint == getattr(self, "_candidate_fingerprint", None):
             return
         # Replace a candidate as one paint transaction, not a sequence of
         # empty table, new text, resized columns, and filled table frames.
         self.setUpdatesEnabled(False)
         try:
+            self._display_candidate = candidate
             self._render_candidate(candidate)
             self._candidate_fingerprint = fingerprint
         finally:
             self.setUpdatesEnabled(True)
+
+    def _refresh_supporting_components(self, *_):
+        self._render_candidate(getattr(self, '_display_candidate', None))
+
+    def select_site_representative(self):
+        """Show one retained observation for an evidence-defined site on entry."""
+        if self._selected_paths():
+            return False
+        for row in range(self.table.rowCount()):
+            if self.table.item(row, 0).data(QtCore.Qt.ItemDataRole.UserRole):
+                self.table.selectRow(row)
+                return True
+        return False
 
     def set_lookup_status(self, record):
         fingerprint = json.dumps(record, sort_keys=True)
@@ -370,6 +430,17 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
         evidence = (candidate or {}).get("evidence", {})
         issues = evidence.get('receptor_model_review') or evidence.get('receptor_preparation_review') or {}
         lines = [issues['warning']] if issues.get('warning') else []
+        removed_inside = [row for row in issues.get('residues', [])
+                          if row.get('removed') and row.get('inside_box')]
+        if removed_inside:
+            names = ', '.join(f"{row['residue']} {row['chain'] or '(blank)'}:{row['number']}"
+                              for row in removed_inside)
+            lines.insert(0, f'WARNING: Removed from the receptor: {names}. '
+                'At least one atom from these components was originally inside this docking box. '
+                'Docking will not include interactions with them.')
+        self.preparation_issues.setStyleSheet(
+            'QPlainTextEdit {background:#fff1e8; color:#382014; border:1px solid #b65d2b;}'
+            if removed_inside else '')
         reference_review = evidence.get('reviewed_incomplete_reference') or {}
         if reference_review:
             lines.insert(0, reference_review['warning'])
@@ -380,23 +451,92 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
         for row in issues.get('residues', []):
             distance = row['minimum_distance_to_box_angstrom']
             location = 'inside this box' if row['inside_box'] else f'{distance:.2f} Å from this box'
-            lines.append(f"{row['residue']} {row['chain']}:{row['number']} — {location}")
+            label = f"{row['residue']} {row['chain'] or '(blank)'}:{row['number']}"
+            lines.append(f"Removed {label} — original location {location}" if row.get('removed')
+                         else f"{label} — {location}")
         if issues and not issues.get('residues'):
             lines.append('Distances to this box are not retained; the model-change warning still applies.'
                          if evidence.get('receptor_model_review') else
                          'No backend-named residue could be located in the deposited coordinates; inspect the retained preparation logs.')
-        self.preparation_issues.setPlainText('\n'.join(lines))
+        self._preparation_detail_text = '\n'.join(lines)
+        if self._preparation_details_window is not None:
+            self._preparation_details_window.set_content(self._preparation_detail_text)
+        if evidence.get('receptor_model_review') and not reference_review:
+            if removed_inside:
+                names = ', '.join(f"{r['residue']} {r['chain'] or '(blank)'}:{r['number']}" for r in removed_inside)
+                summary = f'Removed from receptor: {names} (inside this box). Docking excludes them.'
+            elif issues.get('status') == 'model_change_evidence_unverified':
+                summary = 'Receptor changes could not be verified. Review the details.'
+            elif issues.get('changes_inside_box'):
+                summary = 'Receptor changes affect this box. Review the details.'
+            else:
+                summary = 'Receptor changes were recorded. Review their locations in the details.'
+            self.preparation_issues.setPlainText(summary)
+        else:
+            self.preparation_issues.setPlainText(self._preparation_detail_text)
         self.preparation_issues.setVisible(bool(issues or reference_review))
+        self.preparation_details_button.setVisible(bool(issues or reference_review))
         experimental = evidence.get("experimental_ligand_evidence") or {}
         local = evidence.get('input_ligand_evidence') or {}
-        observations = list(local.get('observations') or []) + list(experimental.get("observations") or [])
-        label = (candidate or {}).get("label") or (candidate or {}).get("id") or "No candidate"
-        classes = experimental.get("evidence_class_counts") or {}
+        from ..services.molecule_inspection import split_component_observations
+        local_all = list(local.get('observations') or [])
+        if self.additional_input_toggle.isChecked():
+            local_all += list(local.get('additional_observations') or [])
+        related_primary = list(experimental.get('observations') or [])
+        related_all = related_primary + list((experimental.get('supporting_components') or {}).get('observations') or [])
+        local_possible, local_supporting = split_component_observations(local_all)
+        related_possible, related_supporting = split_component_observations(related_all)
+        from ..services.molecule_inspection import ligand_display_role
+        fragments = [item for item in related_possible if ligand_display_role(item) == 'fragment_screening']
+        related_possible = [item for item in related_possible if ligand_display_role(item) != 'fragment_screening']
+        self.fragment_toggle.setText(f'Show fragment-screening ligands ({len(fragments)})')
+        if self.fragment_toggle.isChecked():
+            related_possible += fragments
+        supporting = local_supporting + related_supporting
+        self.supporting_toggle.setText(f'Show supporting components ({len(supporting)})')
+        self.supporting_toggle.setVisible(bool(supporting))
+        # Source-group observations outside this exact docking box are not
+        # evidence for the box. Their provenance remains in site details.
+        observations = local_possible + related_possible + (supporting if self.supporting_toggle.isChecked() else [])
+        local_count = len(local_possible) + max(0, int(local.get('observation_count') or 0) - len(local_all))
+        related_count = len(related_possible) + max(0, int(experimental.get('observation_count') or 0) - len(related_primary))
+        from ..pocket_metadata import candidate_display_label
+        label = candidate_display_label(candidate) if candidate else "No candidate"
+        classes = {}
+        for item in related_possible:
+            key = item.get('evidence_class') or 'unclassified'
+            classes[key] = classes.get(key, 0) + 1
+        if not related_all:
+            classes = experimental.get('evidence_class_counts') or {}
         self.heading.setText(
-            f"{label}: {local.get('observation_count', 0)} input ligand · "
-            f"{experimental.get('observation_count', 0)} related observations" if local else
-            f"{label}: {experimental.get('observation_count', 0)} observations · "
-            f"{experimental.get('pdb_entry_count', 0)} PDB entries")
+            f"{label}: {local_count} input ligand · {related_count} related observations" if local else
+            f"{label}: {related_count} observations · "
+            f"{len({item.get('entry') for item in related_possible if item.get('entry')}) if related_all else experimental.get('pdb_entry_count', 0)} PDB entries")
+        if supporting:
+            noun = 'component' if len(supporting) == 1 else 'components'
+            self.heading.setText(self.heading.text() + f' · {len(supporting)} supporting {noun}')
+        supporting_only = bool(supporting and not (local_count or related_count))
+        self.evidence_title.setText('Supporting components' if supporting_only else 'Ligand evidence')
+        self.evidence_summary.setStyleSheet(
+            'QFrame#ligand_evidence_summary {background:#f1f3f5;border:1px solid #66727d;border-radius:4px;}'
+            'QFrame#ligand_evidence_summary QLabel {color:#26343d;background:transparent;border:none;}'
+            if supporting_only else
+            f'QFrame#ligand_evidence_summary {{background:#effaf4;border:1px solid {LIGAND_EVIDENCE_COLOR};border-radius:4px;}}'
+            'QFrame#ligand_evidence_summary QLabel {color:#1d3b2a;background:transparent;border:none;}'
+        )
+        ratio = self.devicePixelRatioF()
+        ring = QtGui.QPixmap(round(20 * ratio), round(20 * ratio))
+        ring.setDevicePixelRatio(ratio)
+        ring.fill(QtCore.Qt.GlobalColor.transparent)
+        painter = QtGui.QPainter(ring)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        pen = QtGui.QPen(QtGui.QColor('#66727d' if supporting_only else LIGAND_EVIDENCE_COLOR), 2.5)
+        if supporting_only:
+            pen.setStyle(QtCore.Qt.PenStyle.DashLine)
+        painter.setPen(pen)
+        painter.drawEllipse(QtCore.QRectF(3, 3, 14, 14))
+        painter.end()
+        self.evidence_symbol.setPixmap(ring)
         self.heading.setToolTip(self.heading.text() +
             f" · same protein {classes.get('same_protein', 0)} · exact {classes.get('exact_sequence_match', 0)} · homolog {classes.get('close_structural_homolog', 0)}")
         self.note.set_content(self.note.summary_text,
@@ -412,7 +552,8 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
             self.heading.setToolTip(self.heading.toolTip() + '\n' + site_group_summary(group))
             self.note.set_content(self.note.summary_text,
                                   self.note.details_text + '\n\n' + site_group_summary(group))
-        conformation = evidence.get("conformational_site_evidence") or {}
+        from ..services.molecule_inspection import possible_ligand_conformation
+        conformation = possible_ligand_conformation(evidence.get("conformational_site_evidence") or {})
         self._conformation = conformation
         self.obstruction_details_button.setEnabled(bool(conformation))
         if self._obstruction_details_window is not None:
@@ -425,12 +566,41 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
         self.table.setRowCount(len(observations))
         for row, item in enumerate(observations):
             values = (
-                str(item.get("evidence_class", "")).replace("_", " "), item.get("entry", ""),
+                'supporting component' if item in supporting else str(item.get("evidence_class", "")).replace("_", " "), item.get("entry", ""),
                 item.get("ligand", ""), self._number(item.get("ca_rmsd_angstrom"), 3),
                 self._percent(item.get("sequence_identity")), self._percent(item.get("query_coverage")),
             )
             for column, value in enumerate(values):
                 cell = QtWidgets.QTableWidgetItem(str(value))
+                role = item.get('evidence_role')
+                if role == 'input ligand inside docking box; not proof of a predicted pocket':
+                    cell.setToolTip('This ligand is present in the input structure and fits in this docking box. '
+                                    'Box containment alone does not establish that it occupies a predicted pocket.')
+                    if column == 0:
+                        cell.setText(str(value) + ' · inside selected box')
+                if role == 'related_ligand_in_box':
+                    cell.setToolTip('The aligned experimental ligand fits inside this docking box. '
+                                    'It was originally associated with ' + str(item.get('original_evidence_site') or 'another site') +
+                                    '; box containment does not prove that it occupies the selected predicted pocket.')
+                    if column == 0:
+                        cell.setText(str(value) + ' · inside selected box')
+                if role in {'shared_grouping_ligand_in_box', 'shared_grouping_ligand_outside_box'}:
+                    inside = role == 'shared_grouping_ligand_in_box'
+                    cell.setToolTip(('Inside the selected docking box. ' if inside else 'Outside the selected docking box. ')
+                                    + 'This aligned experimental ligand supported grouping of '
+                                    + ', '.join(item.get('supporting_relationships') or ['source boxes'])
+                                    + '; it was originally assigned to ' + str(item.get('original_evidence_site') or 'another site')
+                                    + '. Box containment alone does not prove it occupies each predicted pocket.')
+                    if column == 0:
+                        cell.setText(str(value) + (' · inside selected box' if inside else ' · group only, outside box'))
+                if column == 0 and item in related_possible:
+                    if ligand_display_role(item) == 'fragment_screening':
+                        cell.setText(cell.text() + ' · fragment')
+                        cell.setToolTip((cell.toolTip() + '\n' if cell.toolTip() else '') + 'Deposited structure and publication titles identify this molecule as a fragment. '
+                                        'A fragment binding observation does not by itself establish inhibition.')
+                    else:
+                        cell.setText(cell.text() + ' · role unknown')
+                        cell.setToolTip((cell.toolTip() + '\n' if cell.toolTip() else '') + 'The retained metadata does not establish this compound’s biological role.')
                 cell.setData(QtCore.Qt.ItemDataRole.UserRole, item.get("aligned_ligand_pdb"))
                 cell.setData(QtCore.Qt.ItemDataRole.UserRole + 1, item)
                 self.table.setItem(row, column, cell)
@@ -444,6 +614,13 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
     @staticmethod
     def _number(value, decimals):
         return f"{value:.{decimals}f}" if isinstance(value, (int, float)) else "—"
+
+    def show_preparation_details(self):
+        if self._preparation_details_window is None:
+            self._preparation_details_window = ExplanationWindow('Receptor changes and box distances', self.window())
+        self._preparation_details_window.set_content(self._preparation_detail_text)
+        self._preparation_details_window.show()
+        self._preparation_details_window.raise_()
 
     def _update_residue_action(self):
         available = bool(self._embedded_presentation and self._obstructing_residues)
@@ -483,7 +660,7 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
             "<h2>Review a docking region</h2><p>This guide is optional. Viewing does not approve a region.</p>"
             "<h3>1. Choose a candidate</h3><p>Use the pocket graph or table in the main window, or "
             "the Docking region selector in full PyMOL. A detector score ranks predicted pockets; "
-            "it is not binding affinity. A green ring marks deposited-ligand evidence.</p>"
+            "it is not binding affinity. Green rings mark possible ligands; gray dashed rings mark known supporting components.</p>"
             "<h3>2. Overlay ligand evidence</h3><p>Select an observation in the PDB/ligand table to "
             "show its aligned ligand in the current protein. Ctrl-click (Cmd-click on Mac) selects "
             "several; deselect a row to hide that ligand. These are experimental observations, "
@@ -580,7 +757,10 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
     def _request_ligand(self, item) -> None:
         path = item.data(QtCore.Qt.ItemDataRole.UserRole)
         if path:
-            self.ligandRequested.emit(str(path))
+            index = self.table.model().index(item.row(), 0)
+            if not self.table.selectionModel().isRowSelected(item.row()):
+                self.table.selectionModel().select(index, QtCore.QItemSelectionModel.SelectionFlag.Select | QtCore.QItemSelectionModel.SelectionFlag.Rows)
+            self.ligandCenterRequested.emit(str(path))
 
     def _selected_paths(self) -> list[str]:
         paths = []
@@ -615,10 +795,6 @@ class PocketEvidencePanel(QtWidgets.QScrollArea):
             "Rendering 2D interactions…" if getattr(self, "rendering_2d", False)
             else "Render 2D interactions"
         )
-        if (self.selected_observation() or {}).get('source') == 'input_structure':
-            self.render_2d_button.setEnabled(False)
-            self.render_2d_button.setToolTip('This input ligand can be shown in 3D. Its exact chemistry is not linked to the deposited-interaction renderer; use the molecule inspector for its 2D drawing.')
-            return
         try:
             evidence_inputs(self.selected_observation() or {})
         except (ValueError, OSError) as exc:

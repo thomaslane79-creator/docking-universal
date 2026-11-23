@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+- Restored the 3D pocket panel in protocol and screening reports when pocket
+  review and the prepared receptor live in separate directories. Pocket panels
+  use larger text and adapt to the artwork. Evidence figures show aligned
+  ligands and pockets. The selected-region figure shows the approved box.
+  Removed older pocket-figure substitutes from report generation. Related-
+  structure evidence tables show one row per candidate docking region.
+- Removed older 2D interaction renderers from report generation and Results
+  Review. The current local PoseEdit renderer supplies interaction diagrams.
+- Added compressed and high-resolution PDF export. Compressed PDFs use up to
+  300 DPI at print size, and high-resolution PDFs preserve the source figure pixels.
+
+## 1.0.0-rc.1 — Release candidate
+
+- Added a desktop study workflow for inspecting deposited ligands, reviewing
+  receptor preparation, comparing predicted pockets with ligand evidence,
+  approving docking regions, and running pose-recovery controls.
+- Added review of docked clusters and individual poses in linked 2D and 3D
+  views, with on-demand PLIP analysis and reusable interaction results.
+- Added screening in multiple runs within a study, report selection across
+  runs, and portable protocols that verify the retained receptor and boxes
+  before reuse.
+- Added side-by-side interaction figures for verified matching 2D and 3D
+  poses. Control figures show one docked representative when the
+  lowest-energy and lowest-RMSD poses belong to the same cluster.
+- Expanded automated walkthroughs, recovery checks, and native viewer
+  tests. Full release acceptance is still in progress.
+
 ## 0.7.0 — 2026-09-11
 
 **Feature release focus:** evidence-led, auditable selection of one or multiple docking regions during exploratory protocol creation.

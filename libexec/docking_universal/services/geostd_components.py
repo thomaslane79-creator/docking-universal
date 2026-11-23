@@ -121,15 +121,28 @@ def network_disclosure(component_ids) -> dict:
 
 
 def _validated_component_payload(component_id: str, payload: bytes) -> None:
+    import gemmi
+
     component = canonical_component_id(component_id)
-    text = payload.decode("utf-8", errors="replace")
-    # GeoStd restraint files contain a component-list block and the exact
-    # component block.  An ordinary CCD definition is deliberately rejected:
-    # it lacks the geometry/tree fields expected by CCTBX Reduce2.
-    if f"data_comp_{component}" not in text or "_chem_comp_tree.comp_id" not in text:
-        raise OSError(
-            f"Downloaded data is not a GeoStd restraint definition for {component}"
-        )
+    invalid = f"Downloaded data is not a GeoStd restraint definition for {component}"
+    try:
+        document = gemmi.cif.read_string(payload.decode("utf-8"))
+        listing = document.find_block("comp_list")
+        block = document.find_block(f"comp_{component}")
+        if listing is None or block is None or component not in {
+            gemmi.cif.as_string(value) for value in listing.find_values("_chem_comp.id")
+        }:
+            raise ValueError("Component list and restraint block must name the requested component")
+        atoms = {gemmi.cif.as_string(value) for value in block.find_values("_chem_comp_atom.comp_id")}
+        bonds = block.find("_chem_comp_bond.", ["comp_id", "value_dist", "value_dist_esd"])
+        if atoms != {component} or not len(bonds) or any(
+            gemmi.cif.as_string(row[0]) != component
+            or not (0 < gemmi.cif.as_number(row[1]) < float("inf") and 0 < gemmi.cif.as_number(row[2]) < float("inf"))
+            for row in bonds
+        ):
+            raise ValueError("Missing component atoms or real bond restraints")
+    except (RuntimeError, ValueError) as exc:
+        raise OSError(invalid) from exc
 
 
 def download_components(

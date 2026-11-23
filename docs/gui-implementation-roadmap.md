@@ -1,5 +1,29 @@
 # GUI implementation roadmap
 
+### End-of-project: example-driven tutorial wiki
+
+Plan and validate a comprehensive wiki with linked chapters and multiple
+reproducible examples after the final workflow and feature set stabilize. See
+the [GUI idea backlog](gui-idea-backlog.md#example-driven-tutorial-wiki-end-of-project-deliverable)
+for scope.
+
+### Results Review window (2026-11-16)
+
+Remove the detach controls at the user's request; use the resizable workspace.
+
+### Progress refresh responsiveness (2026-11-16)
+
+Use targeted status updates when only job progress changes, preserving full
+refreshes for scientific state and lifecycle changes. Large-state parsing remains
+an independent source of latency to address separately.
+
+### Selected-run reports (2026-11-16)
+
+User prioritized selecting screening runs for individual, separately sectioned,
+or alphabetical combined reports. Combined output requires exactly matching retained
+methods and identifies each source run; it does not pool or recluster poses.
+Separate sections preserve run-specific provenance without that requirement.
+
 ### ADFRsuite preparation-time provenance (2026-11-08)
 
 User prioritized the screening PDF blocker first. Fresh primary and fallback

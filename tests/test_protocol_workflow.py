@@ -109,6 +109,20 @@ class ProtocolWorkflowTests(unittest.TestCase):
         jobs = ', '.join(f'{job.stage}={job.status.value}' for job in state.jobs)
         self.fail(f'Timed out waiting for asynchronous workflow state ({state.completion_status.value}; {jobs})')
 
+    def test_stop_pdb_search_requests_partial_result_without_cancelling_other_work(self):
+        import threading
+        runner = ProtocolWorkflowRunner(self.controller, self.executable())
+        event = threading.Event()
+        runner._evidence_stops['workflow'] = event
+        dispatcher = CommandDispatcher(self.controller, 'test-session')
+        dispatcher.workflow_runner = runner
+        command = Command(study_id='workflow', session_id='test-session', request_id='stop-search',
+                          operation='stop_pdb_evidence_search', payload={})
+        response = dispatcher.dispatch(command)
+        self.assertEqual(response.status, 'applied')
+        self.assertTrue(event.is_set())
+        self.assertIsNone(self.store.load('workflow').active_job)
+
     def test_preparation_discovers_artifacts_and_pauses_for_pocket_review(self):
         dispatcher = CommandDispatcher(self.controller, "session", self.executable())
         response = dispatcher.dispatch(self.start_command(dispatcher))

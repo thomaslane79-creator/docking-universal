@@ -45,6 +45,20 @@ class CohortRepairTests(unittest.TestCase):
         root = ET.fromstring('<report>' + site('MK1', 'B', '902') + '</report>')
         self.assertEqual(retained_binding_site(root).findtext('identifiers/hetid'), 'MK1')
 
+    def test_generated_bond_contact_preserves_observed_and_assigned_links(self):
+        from docking_universal.services.repair_geometry import introduced_interresidue_bond_contacts
+
+        observed = ('A', '4', 'TYR', 'OH')
+        generated = ('A', '17', 'ARG', 'NE')
+        linked = ('B', '8', 'CYS', 'SG')
+        partner = ('B', '20', 'CYS', 'SG')
+        atoms = [(observed, (0, 0, 0), .66), (generated, (1.43, 0, 0), .71),
+                 (linked, (0, 10, 0), 1.05), (partner, (2, 10, 0), 1.05)]
+        assigned = {frozenset((linked, partner))}
+        findings = introduced_interresidue_bond_contacts({observed, linked}, atoms, assigned)
+        self.assertEqual([(row['first'], row['second']) for row in findings], [(observed, generated)])
+        self.assertEqual(introduced_interresidue_bond_contacts({observed, linked, generated}, atoms, assigned), [])
+
     def test_repair_guard_rejects_only_introduced_gross_overlaps(self):
         ca = 'ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00 20.00           C\n'
         cb = 'ATOM      2  CB  ALA A   1       0.500   0.000   0.000  1.00 20.00           C\n'

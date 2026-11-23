@@ -49,11 +49,9 @@ representative SDF, receptor/complex coordinates, and PLIP XML record through th
 same approved local PoseEdit-style renderer used by expanded GUI review. The
 resulting diagrams retain SDF bond orders and aromaticity, display interacting
 side-chain or backbone context, and summarize PLIP contacts for the three top
-energy-ranked cluster representatives. Existing report section order, captions,
-panel dimensions, and pagination are unchanged. The earlier native SDF-aware
-renderer remains an explicit compatibility path when the browser renderer is
-unavailable; the generated manifest and log identify the backend actually used.
-The external `plip_to_2D` workflow remains the final optional compatibility path.
+energy-ranked cluster representatives. Reports show these diagrams with
+verified 3D scenes of the same pose. If rendering fails, the retained PLIP
+contacts remain available and the report identifies the missing pair.
 
 The graphical screening workspace uses this as its default **cluster synopsis**: one diagram for the lowest-energy member of each selected distinct pose cluster, with clusters ordered by that representative energy. An **expanded all-pose review** is a separate view. It follows the exact pose selected from the retained pose inventory and generates its chemically typed PLIP diagram on demand, caching the result with the pose ID, cluster, score, seed, conformer, model, ligand-chemistry hash, receptor hash, and PLIP record. This prevents the top-scoring poses from one populous cluster from obscuring distinct binding modes, while still allowing every individual docking pose to be inspected.
 

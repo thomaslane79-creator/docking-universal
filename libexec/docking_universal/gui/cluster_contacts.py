@@ -56,6 +56,8 @@ class ClusterContactControls(QtWidgets.QWidget):
         self.styles = {}
         self.visible_types = {}
         self.residues = []
+        self.ligand_labels_only = False
+        self.ligand_label_handler = None
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.key = QtWidgets.QLabel('3D PLIP interaction types')
@@ -69,12 +71,26 @@ class ClusterContactControls(QtWidgets.QWidget):
         self.labels = QtWidgets.QCheckBox('Residue labels')
         self.contacts.toggled.connect(self.toggle_contacts)
         self.cartoon.toggled.connect(lambda visible: self.adapter.set_review_cartoon_visible(visible))
-        self.labels.toggled.connect(lambda visible: self.adapter.set_review_labels_visible(self.residues, visible))
+        self.labels.toggled.connect(self._toggle_labels)
         for widget in (self.contacts, self.cartoon, self.labels):
             row.addWidget(widget)
         row.addStretch()
         layout.addLayout(row)
         self.hide()
+
+    def _toggle_labels(self, visible):
+        if self.ligand_labels_only and self.ligand_label_handler is not None:
+            self.ligand_label_handler(visible)
+        else:
+            self.adapter.set_review_labels_visible(self.residues, visible)
+
+    def set_ligand_label_mode(self, enabled, handler=None):
+        if enabled and not self.ligand_labels_only:
+            self.adapter.set_review_labels_visible(self.residues, False)
+        self.ligand_labels_only = bool(enabled)
+        self.ligand_label_handler = handler if enabled else None
+        self.labels.setText('Ligand labels' if enabled else 'Residue labels')
+        self.labels.setEnabled(bool(enabled or self.residues))
 
     def set_contacts(self, styles, residues):
         self.styles, self.residues = styles, residues

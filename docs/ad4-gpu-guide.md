@@ -61,14 +61,16 @@ this discretization is not hidden as an unchanged box.
 
 ## Scientific and operational boundaries
 
-- This first option uses **dry, rigid receptors** and ordinary supported ligand
-  atom types. Unvalidated macrocycles, metals and special parameters are rejected;
-  the application does not silently alter their treatment or switch to Vina.
-- Production bound-ligand control calibration is not enabled for this engine.
-  The available protocol route is explicitly exploratory. The retained small
-  crystal-control development panel does not validate a new user target.
+- This option uses **dry, rigid receptors** and supported ligand atom types.
+  Receptor types in the verified AutoGrid parameter table, including listed
+  metals, are retained. Standard AD4 parameters do not explicitly model metal
+  coordination. Unsupported types and macrocycles are rejected; no fallback or
+  automatic chemical change is applied.
+- Bound-ligand controls use this same AD4 implementation, locked grid and genetic
+  settings. A passing control applies only to the tested receptor, site and
+  settings; the small development panel does not validate a new target.
 - A Vina protocol cannot be reused as AD4 by overriding its engine. Create an
-  explicitly AD4 exploratory protocol. Selecting an engine is not hit approval.
+  AD4 control or exploratory protocol. Selecting an engine is not hit approval.
 - Native XML, PDBQT winners, population records, build identity, map/input hashes
   and native-run-to-model mappings are retained. Reported AD4 binding energy is
   not relabeled as Vina energy or confused with the GPU’s total search energy.

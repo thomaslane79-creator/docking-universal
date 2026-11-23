@@ -6,9 +6,44 @@ from pathlib import Path
 from html import escape
 
 from docking_universal_bundle import build_receptor_modification_warning
+from docking_universal.pose_visuals import approved_interaction_diagram
 from docking_universal.reporting import (engine_display_name, scoring_function_label,
     engine_parameter_rows, protocol_summary_rows, compound_overview_rows)
-from docking_universal.pocket_metadata import region_prediction
+from docking_universal.pocket_metadata import region_prediction, region_pocket_number, POCKET_COLORS
+
+def region_display_label(region):
+    """Display a merged ligand/pocket site by its best-ranked pocket name."""
+    labels = []
+    for member in (region.get('site_group') or {}).get('members') or []:
+        label = str(member.get('label') or member.get('id') or '')
+        match = re.fullmatch(r'P(\d+)', label, re.I)
+        if match and member.get('pocket_prediction'):
+            labels.append((int(match.group(1)), label.upper()))
+    return min(labels)[1] if labels else str(region.get('box_label') or region.get('site_number') or 'unlabeled')
+
+
+def selected_box_legend(protocol):
+    """Describe colors only when retained metadata establishes their meaning."""
+    regions = protocol.get('docking_regions') or []
+    no_detector = (protocol.get('pocket_detection') or {}).get('engine') == 'none'
+    names = ('red', 'blue', 'gold', 'purple', 'cyan')
+    entries = []
+    for index, region in enumerate(regions, 1):
+        number = region_pocket_number(region)
+        if number is not None:
+            color_index = (number - 1) % len(POCKET_COLORS)
+        elif no_detector:
+            color_index = (index - 1) % len(POCKET_COLORS)
+        else:
+            # Older mixed-site figures used orange for a ligand-only box.
+            entries.append(('orange', '#f28e2b', region_display_label(region)))
+            continue
+        label = region_display_label(region)
+        recorded = str(region.get('box_label') or '')
+        if recorded and recorded != label:
+            label += f' (recorded as {recorded})'
+        entries.append((names[color_index] if color_index < len(names) else f'pocket {number or index} color', POCKET_COLORS[color_index], label))
+    return entries
 
 def first(root, patterns):
     for pattern in patterns:
@@ -22,6 +57,39 @@ def read_json(path, default=None):
         return json.loads(path.read_text()) if path else (default or {})
     except (OSError, ValueError, TypeError):
         return default or {}
+
+
+def verified_related_control_diagrams(study):
+    """Use refreshed diagrams only when every retained image verifies."""
+    from docking_universal.poseedit_renderer import LAYOUT_REVISION
+    manifest = read_json(Path(study) / 'report' / 'related_control_diagrams.json')
+    if (manifest.get('schema') != 'docking-universal-related-control-diagrams-v3'
+            or manifest.get('layout_revision') != LAYOUT_REVISION):
+        return []
+    records = manifest.get('outputs') or []
+    if len(records) != 3:
+        return []
+    paths = []
+    for record in records:
+        path = Path(str(record.get('path') or ''))
+        if not approved_interaction_diagram(path) or sha256(path) != record.get('sha256'):
+            return []
+        paths.append(path)
+    return paths
+
+
+def control_diagrams_share_cluster(clusters, measured):
+    """Group the two minima only when the global closest pose is accounted for."""
+    if not clusters or measured.get('lowest_rmsd_angstrom') is None:
+        return False
+    try:
+        top = min(clusters, key=lambda row: float(row['best_energy_kcal_per_mol']))
+        best = min(clusters, key=lambda row: float(row['rmsd_angstrom']))
+        return (abs(float(best['rmsd_angstrom']) - float(measured['lowest_rmsd_angstrom'])) < .001
+                and str(top.get('cluster_id')) == str(best.get('cluster_id')))
+    except (KeyError, TypeError, ValueError):
+        return False
+
 
 def report_target_identity(study, summary, protocol, protocol_path, receptor_source):
     """Prefer a portable snapshot; otherwise read only this target's input."""
@@ -117,6 +185,11 @@ def sha256(path):
 def control_overlay_description(panel):
     audit = read_json(Path(panel).with_suffix(".manifest.json")) if panel else {}
     if audit.get("poses"):
+        if audit.get("selection", "").startswith("one lowest-energy representative"):
+            return ("Experimental ligand (magenta) and one lowest-energy representative for each of the "
+                    "three lowest-energy clusters (red, blue, gold), in the receptor frame. "
+                    "Receptor residues within 5 A of the displayed ligands are gray. The cluster table "
+                    "identifies the closest experimental pose within each cluster.")
         return ("Experimental ligand (magenta), the three lowest-energy cluster representatives "
                 "(red, blue, gold), and the actual globally lowest-RMSD pose, superimposed "
                 "in the receptor frame. The closest pose keeps its cluster's top-three energy color, "
@@ -222,6 +295,18 @@ def display_compound_name(name, source=None):
     stem = Path(str(source or "")).stem
     descriptive = re.sub(r"(?i)_pubchem(?:_?\d+)?$", "", stem).replace("_", " ").strip()
     return descriptive.title() if descriptive and not descriptive.isdigit() else (value or "Ligand")
+
+def report_compound_name(study, compound, inventory_row):
+    cid = str(compound.get('compound_id') or '')
+    from docking_universal.services.compound_identity import retained_compound_name
+    retained = retained_compound_name(study, cid)
+    explicit = compound.get('user_display_name') or inventory_row.get('user_display_name')
+    if retained != cid:
+        return retained
+    if explicit:
+        return str(explicit).strip()
+    return display_compound_name(compound.get('compound_name') or inventory_row.get('compound_name') or cid,
+                                 inventory_row.get('source'))
 
 def compound_result_records(study, compounds, ligand_names):
     """Read the retained cluster result independently for every ligand."""
@@ -624,11 +709,30 @@ def unique_pdb_ligand_source_count(members):
     })
 
 
+def evidence_candidate_label(group, index):
+    """Use the candidate identifier shared by the figure and evidence table."""
+    pocket = (group.get('fpocket_recovery') or {}).get('best_matching_pocket')
+    if pocket:
+        return f'P{pocket}'
+    return (group.get('site_identity') or {}).get('canonical_label') or f"L{group.get('site_number', index)}"
+
+
+def evidence_by_candidate(site_groups):
+    """Combine report rows while retaining the individual source observations."""
+    candidates = {}
+    for index, group in enumerate(site_groups, 1):
+        label = evidence_candidate_label(group, index)
+        pocket = (group.get('fpocket_recovery') or {}).get('best_matching_pocket')
+        candidate = candidates.setdefault(label, {'pocket': pocket, 'members': []})
+        candidate['members'].extend(group.get('members') or [])
+    return candidates
+
+
 def multi_site_source_pairs(site_groups):
     """Find PDB/ligand pairs represented in more than one spatial site group."""
     sites_by_pair = {}
-    for index, group in enumerate(site_groups):
-        site_key = (group.get("site_identity") or {}).get("canonical_label") or index
+    for index, group in enumerate(site_groups, 1):
+        site_key = evidence_candidate_label(group, index)
         for member in group.get("members", []):
             pair = (str(member.get("entry", "")).upper(), str(member.get("ligand", "")))
             if all(pair):
@@ -1474,7 +1578,7 @@ def reproducibility_summary(provenance, cavity, has_docking):
     else:
         pocket_evidence_used = bool(first(Path(provenance["study"]), ["report/pocket_evidence_site_*_AB.png"]))
         sentences.append(
-            "No docking or interaction analysis was performed. PyMOL, Matplotlib, "
+            "No screening ligands were docked in this report-generation step. PyMOL, Matplotlib, "
             + ("RDKit, " if pocket_evidence_used else "")
             + "and ReportLab generated this report."
         )
@@ -1484,6 +1588,81 @@ def reproducibility_summary(provenance, cavity, has_docking):
     if has_docking:
         sentences.append(escape(format_runtime_context(provenance.get('execution_context', {}))))
     return " ".join(sentences)
+
+
+def report_image(path, width_points, height_points, *, quality="compressed"):
+    """Embed a lossless image at report resolution, preserving the source file."""
+    from io import BytesIO
+    from math import ceil
+    from PIL import Image as RasterImage
+    from reportlab.platypus import Image
+
+    with RasterImage.open(path) as source:
+        scale = min(1, width_points / source.width, height_points / source.height)
+        draw_width, draw_height = source.width * scale, source.height * scale
+        target = source.size
+        if quality == "compressed":
+            dpi = 300
+            target = (min(source.width, ceil(draw_width * dpi / 72)),
+                      min(source.height, ceil(draw_height * dpi / 72)))
+        if target == source.size:
+            item = Image(str(path), width=draw_width, height=draw_height)
+        else:
+            pixels = source.convert('RGBA' if 'A' in source.getbands() or 'transparency' in source.info else 'RGB')
+            if pixels.mode == 'RGBA':
+                flattened = RasterImage.new('RGB', pixels.size, 'white')
+                flattened.paste(pixels, mask=pixels.getchannel('A'))
+                pixels = flattened
+            encoded = BytesIO()
+            pixels.resize(target, RasterImage.Resampling.LANCZOS).save(encoded, format='PNG')
+            encoded.seek(0)
+            item = Image(encoded, width=draw_width, height=draw_height)
+    item.hAlign = 'CENTER'
+    return item
+
+
+def combine_paired_interaction(pair, output):
+    """Place one verified 3D scene and its matching 2D diagram together."""
+    from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageOps
+    scene, diagram = Path(pair['scene']), Path(pair['diagram'])
+    if not scene.is_file() or not diagram.is_file():
+        return False
+    panels = []
+    for source in (scene, diagram):
+        with Image.open(source) as original:
+            picture = original.convert('RGB')
+        bounds = ImageChops.difference(picture, Image.new('RGB', picture.size, 'white')).getbbox()
+        if bounds:
+            picture = picture.crop((max(0, bounds[0]-20), max(0, bounds[1]-20),
+                                    min(picture.width, bounds[2]+20), min(picture.height, bounds[3]+20)))
+        panels.append(ImageOps.contain(picture, (1125, 810), Image.Resampling.LANCZOS))
+    panel_height = max(picture.height for picture in panels)
+    legend_y = 170 + panel_height + 43
+    height = legend_y + 48
+    canvas = Image.new('RGB', (2400, height), 'white')
+    draw = ImageDraw.Draw(canvas)
+    color = pair['color']
+    draw.rounded_rectangle((15, 15, 2385, height - 15), radius=38, outline=color, width=10)
+    font_path = Path('/System/Library/Fonts/Helvetica.ttc')
+    def font(size):
+        return ImageFont.truetype(str(font_path), size) if font_path.is_file() else ImageFont.load_default()
+    rank = int(pair['energy_rank'])
+    draw.rounded_rectangle((65, 42, 125, 102), radius=9, fill=color)
+    draw.text((95, 72), 'ABC'[rank-1], fill='white', font=font(42), anchor='mm')
+    heading = pair.get('heading') or f"Energy rank {rank}  ·  Cluster {pair['cluster_id']}  ·  {pair.get('score') or 'N/A'} kcal/mol"
+    draw.text((150, 42), heading, fill='#1c2b38', font=font(52))
+    draw.text((65, 120), '3D · pose and contacting residues', fill='#334a5a', font=font(38))
+    draw.text((1250, 120), '2D · PLIP interactions', fill='#334a5a', font=font(38))
+    for picture, left in zip(panels, (55, 1220)):
+        canvas.paste(picture, (left + (1125 - picture.width)//2, 170 + (panel_height - picture.height)//2))
+    draw.text((70, legend_y), '3D residue colors:', fill='#243744', font=font(32), anchor='lm')
+    draw.rectangle((375, legend_y - 15, 405, legend_y + 15), fill='#4d4dff')
+    draw.text((415, legend_y), 'PLIP contact', fill='#243744', font=font(32), anchor='lm')
+    draw.rectangle((710, legend_y - 15, 740, legend_y + 15), fill='#0080ff')
+    draw.text((750, legend_y), 'Other displayed binding-site residue', fill='#243744', font=font(32), anchor='lm')
+    output.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(output, dpi=(220, 220))
+    return True
 
 
 def combine_horizontal_diagrams(diagrams, output):
@@ -1574,10 +1753,15 @@ def main():
     ap.add_argument("study", type=Path)
     ap.add_argument("--control", type=Path)
     ap.add_argument("--out", type=Path)
+    ap.add_argument("--report-assets-output", type=Path, help=argparse.SUPPRESS)
+    ap.add_argument("--pdf-quality", choices=("compressed", "high-resolution"), default="compressed",
+                    help="Limit embedded figures to 300 DPI or keep their original pixels")
+    ap.add_argument('--reuse-figures', action='store_true', help='reuse retained figures when regenerating text-only report metadata')
     ap.add_argument("--include-control-appendix", action="store_true", help="include detailed control interactions and protocol provenance")
     args = ap.parse_args()
 
     args.study = args.study.expanduser().resolve()
+    assets_output = args.report_assets_output or args.study / "report"
     if args.control:
         args.control = args.control.expanduser().resolve()
     else:
@@ -1606,17 +1790,20 @@ def main():
     figure_command = [sys.executable, str(figure_script), str(args.study)]
     if args.control:
         figure_command += ["--control", str(args.control)]
-    figure_result = subprocess.run(figure_command, capture_output=True, text=True)
-    if figure_result.returncode != 0:
-        detail = figure_result.stderr.strip() or figure_result.stdout.strip() or f"exit status {figure_result.returncode}"
-        raise SystemExit(f"Automatic report-figure generation failed: {detail}")
+    if not args.reuse_figures:
+        figure_result = subprocess.run(figure_command, capture_output=True, text=True)
+        if figure_result.returncode != 0:
+            detail = figure_result.stderr.strip() or figure_result.stdout.strip() or f"exit status {figure_result.returncode}"
+            raise SystemExit(f"Automatic report-figure generation failed: {detail}")
 
+    from reportlab import rl_config
+    rl_config.useA85 = 0
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_CENTER
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import inch
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle, PageBreak, KeepTogether
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, KeepTogether
 
     # A standalone control report is the run that established the protocol and
     # therefore carries the full control evidence automatically.  The same
@@ -1650,13 +1837,13 @@ def main():
     # A tighter baseline gap avoids spilling one final reference onto an almost
     # empty page. Keep the established font size and every citation unchanged.
     styles.add(ParagraphStyle(name="ReferenceDU", parent=styles["BodyText"], fontSize=6.8, leading=7.1, spaceBefore=0, spaceAfter=0))
+    styles.add(ParagraphStyle(name="FigureHeadingDU", parent=styles["BodyText"],
+                              fontName="Helvetica-Bold", fontSize=9, leading=12,
+                              textColor=colors.HexColor("#17212b"), spaceAfter=4))
     styles.add(ParagraphStyle(name="CaptionDU", parent=styles["Heading2"], alignment=TA_CENTER, fontSize=11, leading=14, spaceBefore=8, spaceAfter=5))
 
     def image(path, width=7.0, height=4.5):
-        item = Image(str(path))
-        item._restrictSize(width*inch, height*inch)
-        item.hAlign = "CENTER"
-        return item
+        return report_image(path, width * inch, height * inch, quality=args.pdf_quality)
     def table(rows, widths, compact=False):
         body = ParagraphStyle('TableBodyDU', fontName='Helvetica', fontSize=7 if compact else 8,
                               leading=8 if compact else 10)
@@ -1699,7 +1886,7 @@ def main():
     for compound in summary.get("compounds", []):
         cid = str(compound.get("compound_id", ""))
         inventory_row = inventory_by_id.get(cid, {})
-        name = display_compound_name(compound.get("compound_name") or inventory_row.get("compound_name") or cid, inventory_row.get("source"))
+        name = report_compound_name(args.study, compound, inventory_row)
         ligand_names.append(name)
 
     receptor_source = protocol.get("locked_inputs", {}).get("receptor", "") if protocol else ""
@@ -1717,9 +1904,10 @@ def main():
         prepared_receptor = first(args.study, ["preparation/*_receptor_prep/receptor/*.pdb", "**/*_receptor_prep/receptor/*.pdb"])
         receptor_source = str(prepared_receptor or "")
     target_name = Path(receptor_source).stem if receptor_source else "Unspecified target"
-    from docking_universal.services.protein_identity import target_identity_text
+    from docking_universal.services.protein_identity import report_target_heading, target_identity_text
     identity = report_target_identity(args.study, summary, protocol or {}, protocol_path, receptor_source)
-    target_display, source_species = target_identity_text(identity, target_name)
+    target_details, source_species = target_identity_text(identity, target_name)
+    target_display = report_target_heading(identity, target_name)
     if not ligand_names and summary.get("workflow") == "control" and args.control:
         control_values = read_key_value_tsv(args.control / "run_manifest.tsv")
         ligand_names = [control_values.get("ligand_id", "ligand").split(":", 1)[0]]
@@ -1782,11 +1970,14 @@ def main():
         else "Docking Universal - Pocket Selection Report" if cavity
         else "Docking Universal - Docking Study Report"
     )
+    figure_number = 1
+    deferred_control_figures = []
     story = [Paragraph(f"{report_title}<br/><font size=\"12\">Report generator version {package_version()}</font>", styles["Title"])]
     if study_descriptor:
-        story += [Paragraph(escape(study_descriptor), styles["Heading2"]),
-                  Paragraph("Source species: " + escape(source_species), styles["BodyText"]),
-                  Spacer(1,8)]
+        story.append(Paragraph(escape(study_descriptor), styles["Heading2"]))
+        if any(protein.get("fragment") for protein in identity.get("proteins") or []) or len(identity.get("proteins") or []) > 1:
+            story.append(Paragraph("Construct details: " + escape(target_details), styles["SmallDU"]))
+        story += [Paragraph("Source species: " + escape(source_species), styles["BodyText"]), Spacer(1,8)]
     coordinate_evidence = (protocol or {}).get("coordinate_source", {}).get("evidence", {})
     if coordinate_evidence:
         from xml.sax.saxutils import escape as escape_coordinate_text
@@ -1796,6 +1987,221 @@ def main():
             story.append(Paragraph(escape_coordinate_text(line), styles["BodyText"]))
     related_site_control = (protocol or {}).get("related_site_control") or summary.get("related_site_control") or {}
     control_site_scope = (protocol or {}).get("control_site_scope") or summary.get("control_site_scope") or {}
+    measured_control = related_site_control.get('result_summary') or {}
+    if has_docking and not measured_control and (protocol or {}).get('control_status') == 'approved':
+        top = protocol.get('global_top_ranked_pose') or {}
+        closest = protocol.get('global_best_sampled_pose') or {}
+        measured_control = {'ligand': (protocol.get('control_evidence') or {}).get('compound'),
+            'lowest_energy_kcal_per_mol': top.get('top_score_affinity_kcal_per_mol'),
+            'lowest_energy_pose_rmsd_angstrom': top.get('top_score_rmsd_angstrom'),
+            'lowest_rmsd_angstrom': closest.get('best_rmsd_angstrom'),
+            'acceptance': protocol.get('acceptance') or {}}
+        related_site_control = {'status': 'approved', 'tested_box_label': (control_site_scope or {}).get('tested_box_label', 'control-tested region')}
+
+    def verified_reference(key):
+        entry = ((protocol or {}).get('report_reference_figures') or {}).get(key) or {}
+        if not entry.get('path') or not entry.get('sha256'):
+            return None
+        path = Path(str(entry['path'])).expanduser()
+        if not path.is_absolute() and protocol_path:
+            path = protocol_path.parent / path
+        try:
+            return path if path.is_file() and sha256(path) == entry['sha256'] else None
+        except OSError:
+            return None
+
+    if has_docking and protocol and not review_only and not cavity:
+        box_figure = verified_reference('selected_docking_boxes')
+        if box_figure:
+            entries = selected_box_legend(protocol)
+            key = '; '.join(f'<font color="{color}">{escape(name)}</font> = {escape(label)}'
+                            for name, color, label in entries)
+            explanation = ('Selected docking boxes and associated pocket surfaces. '
+                           + ('Site colors: ' + key + '. ' if key else 'Site-color identities were not retained. ')
+                           + 'Green sticks, when shown, are ligand evidence; gray ribbons are the receptor.')
+            story += [Paragraph('Docking-region reference', styles['Heading2']),
+                      KeepTogether([image(box_figure, 6.7, 3.7),
+                          Paragraph(f'<b>Figure {figure_number}. Docking-region reference.</b> ' + explanation, styles['SmallDU'])]),
+                      Spacer(1, 8)]
+            figure_number += 1
+        else:
+            story += [Paragraph('Docking-region reference image was not retained in this protocol.', styles['SmallDU']), Spacer(1, 6)]
+    if measured_control and not review_only:
+        tested = str(related_site_control.get('tested_box_label') or 'recorded site')
+        untested = ', '.join(related_site_control.get('untested_box_labels') or [])
+        def metric(key, unit):
+            value = measured_control.get(key)
+            return f'{value} {unit}' if value is not None else 'Not recorded'
+        control_rows = [
+            ['Known-ligand control', 'Recorded result'],
+            ['Tested region', tested],
+            ['Ligand', measured_control.get('ligand') or 'Not recorded'],
+            ['Control result', 'Passed' if related_site_control.get('status') == 'approved' else str(related_site_control.get('status') or 'Not recorded')],
+            ['Lowest docking energy', metric('lowest_energy_kcal_per_mol', 'kcal/mol')],
+            ['RMSD of lowest-energy pose', metric('lowest_energy_pose_rmsd_angstrom', 'Å')],
+            ['Lowest experimental RMSD', metric('lowest_rmsd_angstrom', 'Å')],
+        ]
+        acceptance = measured_control.get('acceptance') or {}
+        if acceptance.get('threshold_angstrom') is not None:
+            control_rows.append(['Pose-recovery threshold', str(acceptance['threshold_angstrom']) + ' Å'])
+        if acceptance.get('independent_seed_count') is not None:
+            control_rows.append(['Independent control seeds', str(acceptance['independent_seed_count'])])
+        story += [Paragraph('Known-ligand control result', styles['Heading2']),
+                  Paragraph('The lowest-energy and closest-to-experiment values can describe different poses. '
+                            + (f'The control tested {tested}; {untested} remains exploratory. ' if untested else '')
+                            + 'A passing control does not establish prospective accuracy or binding affinity.', styles['BodyText']),
+                  Spacer(1, 5), table(control_rows, [2.55*inch, 4.15*inch], compact=True), Spacer(1, 8)]
+        if has_docking:
+            control_2d, control_3d = verified_reference('control_top_2d'), verified_reference('control_top_3d')
+            control_2d_metadata = verified_reference('control_top_2d_metadata')
+            if control_3d and control_2d_metadata and approved_interaction_diagram(control_2d, control_2d_metadata):
+                paired = Table([[Paragraph('<b>A. 2D interactions</b>', styles['SmallDU']),
+                                 Paragraph('<b>B. 3D interactions</b>', styles['SmallDU'])],
+                                [image(control_2d, 3.2, 2.8), image(control_3d, 3.2, 2.8)]],
+                               colWidths=[3.35*inch, 3.35*inch])
+                caption = (f'<b>Figure {figure_number}. Known-ligand control interactions.</b> '
+                           '(A) 2D interaction diagram; its key identifies the contact types. '
+                           '(B) 3D view of the same lowest-energy control pose. In 3D, gray dashes indicate '
+                           'hydrophobic contacts, yellow hydrogen bonds, green pi stacking, and magenta '
+                           'metal contacts when present; blue sticks are receptor residues. '
+                           'These are control interactions, not interactions of the newly docked compound.')
+                story += [KeepTogether([Paragraph('Control pose interaction reference', styles['Heading2']),
+                                       paired, Paragraph(caption, styles['SmallDU'])]), Spacer(1, 8)]
+                figure_number += 1
+            else:
+                story += [Paragraph('Paired 2D and 3D control interaction images were not retained in this protocol.', styles['SmallDU']), Spacer(1, 6)]
+        # The complete cluster table belongs in a protocol/control report,
+        # while a downstream docking report keeps only the concise summary.
+        clusters = measured_control.get('clusters') or []
+        if clusters and workflow_is_exploratory and not has_docking:
+            settings = measured_control.get('parameters') or {}
+            detail_rows = [['Control setting', 'Recorded value'],
+                ['Docking engine', measured_control.get('engine') or 'Not recorded'],
+                ['Starting shapes per state', settings.get('conformers_per_state', 'Not recorded')],
+                ['Search effort', settings.get('exhaustiveness', 'Not recorded')],
+                ['Independent seeds', ', '.join(str(v) for v in settings.get('seeds', [])) or 'Not recorded'],
+                ['Ligand pH', settings.get('ph', 'Not recorded')],
+                ['Charge model', settings.get('charge_model', 'Not recorded')]]
+            story += [Paragraph('Control settings', styles['Heading2']),
+                      table(detail_rows, [2.55*inch, 4.15*inch], compact=True), Spacer(1, 8)]
+            seed_results = measured_control.get('seed_results') or []
+            if seed_results:
+                seed_rows = [['Seed', 'Best score', 'Score-pose RMSD', 'Closest RMSD', 'Sampling / ranking']]
+                for item in seed_results:
+                    def formatted(key):
+                        value = item.get(key)
+                        return f'{value:.3f}' if isinstance(value, (int, float)) else 'Not recorded'
+                    def result_text(key):
+                        return 'pass' if item.get(key) is True else 'not passed' if item.get(key) is False else 'not recorded'
+                    seed_rows.append([str(item.get('seed', 'NA')), formatted('top_energy_kcal_per_mol'),
+                        formatted('top_pose_rmsd_angstrom'), formatted('best_rmsd_angstrom'),
+                        f"{result_text('sampling_pass')} / {result_text('ranking_pass')}"])
+                story += [Paragraph('Control repeat results', styles['Heading2']),
+                          table(seed_rows, [1.15*inch, 1.2*inch, 1.45*inch, 1.25*inch, 1.65*inch], compact=True), Spacer(1, 8)]
+            cluster_rows = [['Rank / cluster', 'Lowest energy', 'Energy pose', 'Lowest RMSD', 'RMSD pose']]
+            for row in clusters:
+                cluster_rows.append([f"{row.get('energy_rank', '?')} / C{row.get('cluster_id', '?')}",
+                    f"{float(row['best_energy_kcal_per_mol']):.2f} kcal/mol", f"#{row['lowest_energy_pose_id']}",
+                    f"{float(row['rmsd_angstrom']):.2f} Å", f"#{row['lowest_rmsd_pose_id']}"])
+            control_table = Table(cluster_rows, repeatRows=1, hAlign='LEFT')
+            control_table.setStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor('#e8edf1')),
+                ('GRID',(0,0),(-1,-1),.3,colors.HexColor('#b8c0c8')),('FONTSIZE',(0,0),(-1,-1),8)])
+            story += [Paragraph('Control cluster results', styles['Heading2']),
+                      Paragraph('One row per cluster; the two minima can come from different poses.', styles['SmallDU']),
+                      control_table, Spacer(1, 8)]
+            record_path = related_site_control.get('record')
+            control_dir = Path(record_path).parent / 'control' / 'control' if record_path else None
+            if control_dir:
+                for filename, title in [('control_panels_AB.png', 'Control pose-recovery landscape and 3D overlay'),
+                                        ('control_interactions_ABC.png', 'Control ligand interaction diagrams')]:
+                    figure = control_dir / 'report' / filename
+                    refreshed = []
+                    same_cluster = False
+                    if filename == 'control_interactions_ABC.png':
+                        refreshed = verified_related_control_diagrams(args.study)
+                        if refreshed:
+                            top = min(clusters, key=lambda row: float(row['best_energy_kcal_per_mol']))
+                            best = min(clusters, key=lambda row: float(row['rmsd_angstrom']))
+                            global_rmsd = measured_control.get('lowest_rmsd_angstrom')
+                            same_cluster = control_diagrams_share_cluster(clusters, measured_control)
+                            shown = refreshed[:2] if same_cluster else refreshed
+                            figure = shown[0]
+                        else:
+                            # A retained legacy composite may contain duplicate
+                            # panels or an obsolete interaction style.
+                            continue
+                    if figure.is_file():
+                        if filename == 'control_panels_AB.png':
+                            detail = (control_landscape_description(control_dir / 'report' / 'control_panel_A_cluster.png', measured_control.get('ligand') or 'control ligand')
+                                      + ' ' + control_overlay_description(control_dir / 'report' / 'control_panel_B_overlay.png'))
+                        else:
+                            detail = ('A is the experimental ligand. B is the lowest-energy control pose; '
+                                      'C is the control pose closest to the experimental structure. '
+                                      'The table records the two minima separately for each cluster.')
+                            if refreshed:
+                                top = min(clusters, key=lambda row: float(row['best_energy_kcal_per_mol']))
+                                best = min(clusters, key=lambda row: float(row['rmsd_angstrom']))
+                                metrics = [('B', top, top.get('best_energy_kcal_per_mol'), top.get('lowest_energy_pose_rmsd_angstrom'))]
+                                # The retained table can be truncated; do not label a
+                                # cluster minimum as the global minimum without a match.
+                                global_rmsd = measured_control.get('lowest_rmsd_angstrom')
+                                if global_rmsd is not None and abs(float(best['rmsd_angstrom']) - float(global_rmsd)) < .001:
+                                    metrics.append(('C', best, best.get('lowest_rmsd_pose_energy_kcal_per_mol'), best.get('rmsd_angstrom')))
+                                    if str(top.get('cluster_id')) == str(best.get('cluster_id')):
+                                        if str(top.get('lowest_energy_pose_id')) == str(best.get('lowest_rmsd_pose_id')):
+                                            detail += ' B and C show the same pose in the same cluster.'
+                                        else:
+                                            detail += ' B and C are different poses in the same cluster.'
+                                for panel_letter, cluster, energy, rmsd in metrics:
+                                    if energy is not None and rmsd is not None:
+                                        detail += (f' {panel_letter}: cluster {cluster.get("cluster_id", "?")}, '
+                                                   f'energy {float(energy):.2f} kcal/mol, '
+                                                   f'experimental RMSD {float(rmsd):.2f} Å for the displayed pose.')
+                            if not refreshed:
+                                detail = ('Retained legacy diagrams are shown; consult the original control report for their pose identities. '
+                                          'These diagrams may use different explicit-hydrogen display conventions.')
+                        if filename == 'control_interactions_ABC.png' and refreshed and same_cluster:
+                            same_pose = str(top.get('lowest_energy_pose_id')) == str(best.get('lowest_rmsd_pose_id'))
+                            detail = ('A is the experimental ligand. B is the lowest-energy pose from cluster '
+                                      f'{top.get("cluster_id", "?")} (energy {float(top["best_energy_kcal_per_mol"]):.2f} kcal/mol; '
+                                      f'experimental RMSD {float(top["lowest_energy_pose_rmsd_angstrom"]):.2f} Å). '
+                                      + ('It is also the lowest-RMSD pose.' if same_pose else
+                                         f'The lowest-RMSD pose is a different pose in the same cluster '
+                                         f'(energy {float(best["lowest_rmsd_pose_energy_kcal_per_mol"]):.2f} kcal/mol; '
+                                         f'RMSD {float(best["rmsd_angstrom"]):.2f} Å) and is not shown separately.'))
+                        if filename == 'control_interactions_ABC.png' and refreshed:
+                            detail += ' Ligand drawings share the experimental ligand’s 2D orientation; this does not alter the 3D poses.'
+                        emitted_pairs = False
+                        if filename == 'control_interactions_ABC.png' and refreshed:
+                            record = read_json(args.study / 'report' / 'related_control_3d.json')
+                            entries = record.get('outputs') or []
+                            if record.get('schema') in {'docking-universal-control-comparison-3d-v1', 'docking-universal-control-comparison-3d-v2'} and len(entries) == 3:
+                                paths = [Path(str(item.get('path') or '')) for item in entries]
+                                if all(path.is_file() and sha256(path) == item.get('sha256') for path, item in zip(paths, entries)):
+                                    shown_3d = paths[:2] if same_cluster else paths
+                                    if record.get('schema') == 'docking-universal-control-comparison-3d-v2':
+                                        from docking_universal.pose_visuals import read_pose_view
+                                        roles = ('experimental', 'energy_rank_1', 'lowest_rmsd')
+                                        labels = ('Experimental reference', 'Lowest-energy control pose', 'Lowest-RMSD control pose')
+                                        palette = {'magenta': '#b638a0', 'red': '#d62728', 'marine': '#1f77b4', 'gold': '#d9a400'}
+                                        generated = []
+                                        for index, (scene, diagram) in enumerate(zip(shown_3d, shown), 1):
+                                            view = read_pose_view(control_dir / 'report' / f'control_{roles[index-1]}_plip2d.png')
+                                            if not view:
+                                                generated = []
+                                                break
+                                            pair = {'scene': str(scene), 'diagram': str(diagram), 'energy_rank': index,
+                                                    'heading': labels[index-1], 'color': palette.get(view['ligand_color'], '#777777')}
+                                            output = assets_output / f'related_control_pair_{index}.png'
+                                            if not combine_paired_interaction(pair, output):
+                                                generated = []
+                                                break
+                                            generated.append((output, labels[index-1], detail + ' Purple-blue residues are PLIP contacts; blue residues are other displayed binding-site residues.'))
+                                        if generated:
+                                            deferred_control_figures.extend(generated)
+                                            emitted_pairs = True
+                        if not emitted_pairs and filename == 'control_panels_AB.png':
+                            deferred_control_figures.append((figure, title, detail))
     if control_site_scope.get("untested_box_labels") or control_site_scope.get("untested_receptor_states"):
         story += [Paragraph(
             "Control scope: only " + escape(str(control_site_scope.get("tested_box_label", "the tested site")))
@@ -1834,7 +2240,6 @@ def main():
                 "Each row is the best retained result for that ligand. Docking scores are "
                 "ranking estimates and are not cross-ligand binding-affinity measurements."
             )
-    figure_number = 1
     section_number = 1
 
     # Every workflow begins by recording the actual docking configuration.
@@ -1893,7 +2298,7 @@ def main():
                 if definition_origin == "same-protein-ligands"
                 else "user-approved same-protein, exact-sequence, and homolog ligand evidence"
             )
-            selected_region_text = f"Ligand-defined site {selected_region.get('site_number', 1)} ({origin_text})"
+            selected_region_text = f"{region_display_label(selected_region)} ({origin_text})"
             selected_center = ", ".join(str(selected_geometry.get(f"center_{axis}", "NA")) for axis in "xyz")
             selected_dimensions = " x ".join(str(selected_geometry.get(f"size_{axis}", "NA")) for axis in "xyz")
         else:
@@ -1955,14 +2360,36 @@ def main():
              retained_control_statement if retained_control_statement else
              "Exploratory; not evaluated by a bound-ligand pose-recovery control"],
         ]
-        configuration_rows.extend(pocket_prediction_rows(cavity, review_only=review_only,
-                                  threshold_text=threshold_text, descriptor=descriptor))
-        configuration_rows.append([
-            "Selected docking region",
-            "Not yet selected; choose one or more boxes after reviewing this report"
-            if review_only else selected_region_text,
-        ])
-        if not review_only:
+        prediction_rows = pocket_prediction_rows(cavity, review_only=review_only,
+                                  threshold_text=threshold_text, descriptor=descriptor)
+        if not review_only and len(selected_regions) > 1:
+            first_label = str(selected_region.get('box_label') or selected_region.get('site_number') or 'first region')
+            for row in prediction_rows:
+                if str(row[0]).startswith('Selected '):
+                    row[0] = f"{first_label}: " + str(row[0])[len('Selected '):]
+        configuration_rows.extend(prediction_rows)
+        if not review_only and len(selected_regions) > 1:
+            tested_label = str(related_site_control.get('tested_box_label') or '')
+            control_status = str(related_site_control.get('status') or '')
+            configuration_rows.append(['Selected docking regions', ', '.join(str(r.get('box_label') or r.get('site_number')) for r in selected_regions)])
+            for region in selected_regions:
+                label = str(region.get('box_label') or region.get('site_number'))
+                geometry = region.get('geometry') or {}
+                center = ', '.join(str(geometry.get(f'center_{axis}', 'NA')) for axis in 'xyz')
+                size = ' x '.join(str(geometry.get(f'size_{axis}', 'NA')) for axis in 'xyz')
+                scope = (('Known-ligand pose recovery passed' if control_status == 'approved' else 'Known-ligand control: ' + control_status)
+                         if label == tested_label else 'Not tested by this control; exploratory') if tested_label else 'No site-specific control recorded'
+                configuration_rows.extend([[f'{label}: control scope', scope], [f'{label}: box center (A)', center], [f'{label}: box dimensions (A)', size]])
+                grid = region.get('ad4_grid') or {}
+                if grid:
+                    configuration_rows.append([f'{label}: actual AD4 grid dimensions (A)', ' x '.join(str(v) for v in grid.get('actual_size', []))])
+        else:
+            configuration_rows.append([
+                "Selected docking region",
+                "Not yet selected; choose one or more boxes after reviewing this report"
+                if review_only else selected_region_text,
+            ])
+        if not review_only and len(selected_regions) <= 1:
             configuration_rows.extend([
                 ["Docking-box center (A)", selected_center],
                 ["Docking-box dimensions (A)", selected_dimensions],
@@ -1987,6 +2414,9 @@ def main():
         protocol_evidence = protocol.get("pdb_pocket_evidence") or {}
         if pdb_evidence.get("status") in {None, "not_requested"} and protocol_evidence.get("status") == "completed":
             pdb_evidence = protocol_evidence
+        from docking_universal.services.molecule_inspection import split_ligand_site_groups
+        ligand_groups, _ = split_ligand_site_groups(pdb_evidence.get('ligand_site_groups') or [])
+        pdb_evidence = {**pdb_evidence, 'ligand_site_groups': ligand_groups}
         evidence_summary = pdb_evidence.get("summary") or {}
         repeated_site_sources = set()
         if pdb_evidence.get("status") == "completed":
@@ -1998,67 +2428,24 @@ def main():
                 grouping_audit = pdb_evidence.get("site_grouping_audit") or {}
                 excluded_chain_ids = grouping_audit.get("ambiguous_chain_assignments_excluded") or []
                 group_rows = [["Candidate region", "What the deposited structures show"]]
-                selectable_by_label = {
-                    str(item.get("box_label")): item
-                    for item in selectable_box_inventory(summary, cavity)
-                }
-                for group in site_groups:
-                    geometry = group.get("box", {})
-                    source_pairs = format_pdb_ligand_evidence(
-                        group.get("members", []), repeated_site_sources,
-                    )
-                    recovery = group.get("fpocket_recovery", {})
-                    site_identity = group.get("site_identity") or {}
-                    matching_pocket = recovery.get("best_matching_pocket")
-                    site_label = (
-                        f"P{matching_pocket}" if matching_pocket
-                        else site_identity.get(
-                            "canonical_label", f"L{group.get('site_number', '?')}",
-                        )
-                    )
+                for site_label, candidate in evidence_by_candidate(site_groups).items():
+                    members = candidate['members']
+                    matching_pocket = candidate['pocket']
                     if matching_pocket:
-                        box_record = selectable_by_label.get(site_label) or {}
-                        recorded_dimensions = read_box_dimensions(
-                            Path(str(box_record.get("box", "")))
-                        ) if box_record.get("box") else None
-                        if recorded_dimensions:
-                            geometry = dict(zip(
-                                ("size_x", "size_y", "size_z"), recorded_dimensions,
-                            ))
-                        direct_members = [
-                            member for member in group.get("members", [])
-                            if str(member.get("matched_cavity")) == str(matching_pocket)
-                        ]
-                        other_members = [
-                            member for member in group.get("members", [])
-                            if str(member.get("matched_cavity")) != str(matching_pocket)
-                        ]
-                        recovery_text = (
-                            f"Aligned ligands located within {site_label}: "
-                            f"{format_pdb_ligand_evidence(direct_members, repeated_site_sources)}"
-                        )
-                        if other_members:
-                            recovery_text += (
-                                f". Other ligands aligned to the same site but extending beyond this box: "
-                                f"{format_pdb_ligand_evidence(other_members, repeated_site_sources)}"
-                            )
+                        direct = [member for member in members
+                                  if str(member.get('matched_cavity')) == str(matching_pocket)]
+                        other = [member for member in members
+                                 if str(member.get('matched_cavity')) != str(matching_pocket)]
+                        description = (f"Aligned ligands matched to {site_label}: "
+                                       f"{format_pdb_ligand_evidence(direct, repeated_site_sources)}.")
+                        if other:
+                            description += (" Other ligand observations assigned to this site: "
+                                            f"{format_pdb_ligand_evidence(other, repeated_site_sources)}.")
                     else:
-                        recovery_text = f"ligand-defined candidate without a corresponding {pocket_engine} pocket"
-                    members = group.get("members", [])
-                    pose_count = group.get("member_count", len(members))
-                    source_count = unique_pdb_ligand_source_count(members)
-                    group_rows.append([
-                        site_label,
-                        Paragraph(
-                            (
-                                f"{recovery_text}."
-                                if matching_pocket else
-                                f"{pose_count} aligned ligand observations from {source_count} unique PDB/ligand sources. "
-                                f"Sources: {source_pairs}."
-                            ),
-                            styles["SmallDU"],
-                        ),
-                    ])
+                        source_count = unique_pdb_ligand_source_count(members)
+                        description = (f"{len(members)} aligned ligand observations from {source_count} unique PDB/ligand sources. "
+                                       f"Sources: {format_pdb_ligand_evidence(members, repeated_site_sources)}.")
+                    group_rows.append([site_label, Paragraph(description, styles["SmallDU"])])
                 story += [
                     Paragraph("Related-structure ligand evidence", styles["Heading2"]),
                     Paragraph(
@@ -2093,44 +2480,6 @@ def main():
                                   if item.get("residue") in occluding) else ""),
                         styles["BodyText"],
                     ), Spacer(1, 6)]
-                site_colors = ["green", "cyan", "orange", "violet", "salmon", "teal", "wheat"]
-                site_overview = args.study / "report" / "ligand_site_overview.png"
-                if len(site_groups) > 1 and site_overview.is_file():
-                    panel_letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                    panel_text = ", ".join(
-                        f"({panel_letters[index]}) site {group.get('site_number', index + 1)} in "
-                        f"{site_colors[index % len(site_colors)]}, representative "
-                        f"{format_pdb_ligand_evidence([group.get('representative_ligand') or {}], repeated_site_sources)}"
-                        for index, group in enumerate(site_groups)
-                    )
-                    panels_per_page = 6
-                    overview_pages = [
-                        site_overview.with_name(f"ligand_site_overview_page_{index + 1}.png")
-                        for index in range((len(site_groups) + panels_per_page - 1) // panels_per_page)
-                    ]
-                    if not all(path.is_file() for path in overview_pages):
-                        overview_pages = [site_overview]
-                    for page_index, overview_page in enumerate(overview_pages):
-                        page_start = page_index * panels_per_page
-                        visible_groups = (
-                            site_groups[page_start:page_start + panels_per_page]
-                            if len(overview_pages) > 1 else site_groups
-                        )
-                        page_text = "; ".join(
-                            f"({panel_letters[page_start + index]}) "
-                            f"{('P' + str((group.get('fpocket_recovery') or {}).get('best_matching_pocket'))) if (group.get('fpocket_recovery') or {}).get('best_matching_pocket') else (group.get('site_identity') or {}).get('canonical_label', 'site ' + str(group.get('site_number')))}: "
-                            f"{format_pdb_ligand_evidence([group.get('representative_ligand') or {}], repeated_site_sources)}"
-                            for index, group in enumerate(visible_groups)
-                        )
-                        story += [KeepTogether([
-                            image(overview_page, 6.6, 6.0),
-                            Paragraph(
-                                f"<b>Figure {figure_number}{' (continued)' if page_index else ''}. Ligand-site evidence and predicted pockets.</b> "
-                                f"{page_text}. Each panel shows one aligned representative ligand, its proposed box, and retained {pocket_engine} surfaces. Colors match Figure 2. These are candidates for review, not validated biological sites.",
-                                styles["SmallDU"],
-                            ),
-                        ]), Spacer(1, 8)]
-                    figure_number += 1
             if evidence_decision:
                 recovery_value = str(evidence_decision.get("recovery", ""))
                 recovery_text = {
@@ -2174,25 +2523,44 @@ def main():
                 styles["BodyText"],
             ), Spacer(1, 6)]
         cavity_ab = args.study / "report" / "cavity_panels_AB.png"
-        cavity_a = args.study / "report" / "cavity_panel_A_selection.png"
-        cavity_b = args.study / "report" / "cavity_panel_B_structure.png"
-        cavity_overview = args.study / "report" / "cavity_selected_box.png"
-        if cavity_ab.is_file():
+        # A portable screen retains the protocol's verified paired figure.
+        inherited_candidate = verified_reference('candidate_site_overview') if has_docking else None
+        inherited_metadata = verified_reference('candidate_site_overview_metadata') if inherited_candidate else None
+        figure_metadata = read_json(cavity_ab.with_name('cavity_panels_AB.metadata.json'))
+        if not (cavity_ab.is_file() and figure_metadata.get('sha256') == sha256(cavity_ab)):
+            inherited_figure_metadata = read_json(inherited_metadata)
+            if inherited_candidate and inherited_figure_metadata.get('figure_style') == 'ligand_evidence_v3':
+                cavity_ab = inherited_candidate
+                figure_metadata = inherited_figure_metadata
+        inherited_box = verified_reference('selected_docking_boxes') if has_docking else None
+        cavity_overview = inherited_box or args.study / "report" / "cavity_selected_box.png"
+        if (cavity_ab.is_file() and figure_metadata.get('figure_style') == 'ligand_evidence_v3'
+                and figure_metadata.get('sha256') == sha256(cavity_ab)):
             decision_sentence = (
                 "No docking region has been selected."
-                if review_only else f"The selected docking region is {selected_region_text}."
+                if review_only else ("Selected docking regions: " + ', '.join(region_display_label(r) for r in selected_regions) + "." if len(selected_regions) > 1 else f"The selected docking region is {selected_region_text}.")
             )
-            evidence_sentence = (
-                "Markers outlined in green identify candidates supported by aligned deposited-ligand observations. "
-                if pdb_evidence.get("ligand_site_groups") else ""
-            )
+            if pocket_engine == 'none':
+                figure_description = "(A) No scored pocket predictions are available. (B) Receptor overview. "
+            else:
+                figure_description = (
+                    f"(A) Top {pocket_engine} candidates, plus selected or ligand-supported pockets, ordered by prediction rank. "
+                    + ("Green rings indicate retained ligand evidence. " if figure_metadata.get('ligand_rings') else "")
+                    + "(B) Colored pocket surfaces. "
+                )
+            if figure_metadata.get('ligand_markers'):
+                figure_description += "Green sticks show aligned ligand evidence. "
+            if pdb_evidence.get('status') == 'not_requested':
+                figure_description += "The optional search for related structures was skipped for this run. "
             story += [KeepTogether([
-                image(cavity_ab, 7.0, 3.2 if not pdb_evidence.get("ligand_site_groups") else 4.1),
+                image(cavity_ab, 7.0, 4.15),
+                Spacer(1,5),
                 Paragraph(
-                    f"<b>Figure {figure_number}. Candidate pocket evidence and docking-region selection.</b> "
-                    f"(A) {pocket_engine} candidates ordered by prediction score. Colored markers correspond to the pocket surfaces in Panel B. "
-                    f"{evidence_sentence}(B) Predicted pocket surfaces and their proposed docking boxes on the receptor. "
-                    f"{decision_sentence} {pocket_engine} scores rank pocket predictions; they do not estimate ligand-binding affinity.",
+                    f"<b>Figure {figure_number}. Candidate pockets and docking-region selection.</b> "
+                    + figure_description
+                    + ("P2Rank surfaces are drawn around whole pocket-lining residues, not the pocket's measured volume. " if pocket_engine == "P2Rank" else "")
+                    +
+                    f"{decision_sentence} " + (f"{pocket_engine} scores rank pocket predictions; they do not estimate ligand-binding affinity." if pocket_engine != 'none' else ''),
                     styles["SmallDU"],
                 ),
             ]), Spacer(1,8)]
@@ -2262,30 +2630,14 @@ def main():
                     Spacer(1, 8),
                 ]
             figure_number += 1
-        elif cavity_a.is_file():
-            story += [
-                image(cavity_a, 6.5, 3.8),
-                Paragraph(
-                    f"<b>Figure {figure_number}. Pocket prediction and docking-region selection.</b> "
-                    f"Candidates are ordered by {pocket_engine} prediction score. Colors identify prediction candidates, "
-                    f"not independent approval. "
-                    + ("No docking region has been selected. " if review_only else
-                       f"The approved docking region is {selected_region_text}. ")
-                    + ("The input ligand defines this box and receives no pocket-prediction score. " if input_ligand_defined else "")
-                    + f"{pocket_engine} scores rank pocket predictions; they do not estimate ligand-binding affinity.",
-                    styles["SmallDU"],
-                ), Spacer(1,8),
-            ]
-            figure_number += 1
-        if cavity_b.is_file() and not cavity_ab.is_file():
-            story += [image(cavity_b, 6.5, 3.8), Paragraph(f"<b>Figure {figure_number}. Selected cavity and docking box structural review.</b>", styles["SmallDU"]), Spacer(1,8)]
-            figure_number += 1
+        else:
+            story += [Paragraph("The paired pocket overview is unavailable for this report.", styles["SmallDU"]), Spacer(1, 6)]
         if cavity_overview.is_file():
             selected_region_count = len(summary.get("selected_docking_regions") or [])
             region_word = "region" if selected_region_count == 1 else "regions"
             box_word = "box" if selected_region_count == 1 else "boxes"
             selected_labels = {
-                str(region.get("box_label", ""))
+                region_display_label(region)
                 for region in summary.get("selected_docking_regions") or []
             }
             direct_evidence = []
@@ -2302,17 +2654,27 @@ def main():
                 if direct_evidence else ""
             )
             story += [KeepTogether([
-                # This is a verification view subordinate to the primary A/B
-                # pocket-analysis panel, so keep it visibly smaller.
+                Paragraph(f"Selected docking {region_word}", styles["FigureHeadingDU"]),
                 image(cavity_overview, 4.4, 2.4 if not pdb_evidence.get("ligand_site_groups") else 3.35),
+                Spacer(1,5),
                 Paragraph(
-                    f"<b>Figure {figure_number}. Selected docking {region_word} and {box_word}.</b> All regions selected for docking are shown together on the receptor. Each pocket surface and its corresponding box use the same color assigned in the preceding A/B pocket-analysis figure and the related ligand-evidence figures.{evidence_sentence} This records the regions chosen to proceed; it does not establish that the pockets are biologically correct.",
+                    f"<b>Figure {figure_number}. Selected docking {region_word} and {box_word}.</b> All regions selected for docking are shown together on the receptor. Each predicted-pocket surface and its box use the same color as the preceding pocket-analysis figure."
+                    + (" Ligand-defined boxes with merged predictions use the color of their first displayed source pocket; sites without a matched pocket use a separate box color." if any(r.get('site_source') == 'input_bound_ligand' for r in selected_regions) else "")
+                    + f"{evidence_sentence} This records the regions chosen to proceed; it does not establish that the pockets are biologically correct.",
                     styles["SmallDU"],
                 ),
             ]), Spacer(1,8)]
             figure_number += 1
         story.append(Spacer(1,10))
         section_number += 1
+
+    # The pocket overview and selected boxes lead the protocol report. Control
+    # figures follow them so their figure numbers match the order on the page.
+    for figure, title, detail in deferred_control_figures:
+        story += [KeepTogether([Paragraph(title, styles['Heading2']), image(figure, 6.8, 3.4),
+                                Paragraph(f'<b>Figure {figure_number}. {escape(title)}.</b> ' + detail, styles['SmallDU'])]),
+                  Spacer(1, 6)]
+        figure_number += 1
 
     if cavity and not has_any_docking:
         provenance = retain_used_report_methods(
@@ -2321,7 +2683,7 @@ def main():
         require_complete_used_versions(provenance)
         software = provenance["software"]
         references = provenance["references"]
-        (args.study / "report" / "software_versions_and_references.json").write_text(json.dumps(provenance, indent=2) + "\n")
+        (assets_output / "software_versions_and_references.json").write_text(json.dumps(provenance, indent=2) + "\n")
         provenance_rows = [["Result element", "Software", "Version used"]]
         for item in software:
             provenance_rows.append([Paragraph(item["role"], styles["SmallDU"]), Paragraph(item["software"], styles["SmallDU"]), Paragraph(str(item["version"]), styles["SmallDU"])])
@@ -2402,37 +2764,66 @@ def main():
                 if best_sampled_control:
                     story += [image(best_sampled_control, 6.5, 3.8), Paragraph(f"<b>Figure {figure_number}. Best-sampled retained control pose.</b> This is the globally lowest-RMSD redocked control pose retained by the approved protocol.", styles["SmallDU"]), Spacer(1,8)]
                     figure_number += 1
-        control_diagrams = [
-            (first(args.control,["report/control_experimental_plip2d.png", "**/control_experimental_plip2d.png", "**/experimental_interactions.png"]), f"Experimental {experimental_label} pose used as the control reference."),
-            (first(args.control,["report/control_top_ranked_plip2d.png", "**/control_top_ranked_plip2d.png", "**/top_ranked_interactions.png"]), f"Globally lowest-energy redocked pose (docking score {g.get('top_score_affinity_kcal_per_mol','NA')} kcal/mol; RMSD {g.get('top_score_rmsd_angstrom',g.get('best_rmsd_angstrom','NA'))} A)."),
-            (first(args.control,["report/control_lowest_rmsd_plip2d.png", "**/control_lowest_rmsd_plip2d.png", "**/best_sampled_interactions.png"]), f"Globally lowest-RMSD redocked pose (RMSD {b.get('best_rmsd_angstrom','NA')} A)."),
-        ] if args.control and args.include_control_appendix else []
+        cluster_csv = args.control / "report" / "control_panel_A_cluster.csv" if args.control else None
+        cluster_rows = []
+        # The complete per-cluster table belongs to the standalone control
+        # report, even when a later docking report includes a control appendix.
+        if cluster_csv and cluster_csv.is_file() and summary.get("workflow") == "control":
+            with cluster_csv.open(newline="") as handle:
+                cluster_rows = list(csv.DictReader(handle))
+        if cluster_rows:
+            table_rows = [["Rank / cluster", "Lowest energy", "Energy pose", "Lowest RMSD", "RMSD pose"]]
+            for row in cluster_rows:
+                table_rows.append([f"{row['energy_rank']} / C{row['cluster_id']}",
+                    f"{float(row['best_energy_kcal_per_mol']):.2f} kcal/mol", f"#{row['lowest_energy_pose_id']}",
+                    f"{float(row['rmsd_angstrom']):.2f} Å", f"#{row['lowest_rmsd_pose_id']}"])
+            cluster_table = Table(table_rows, repeatRows=1, hAlign="LEFT")
+            cluster_table.setStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#e8edf1')),
+                            ('GRID', (0,0), (-1,-1), .3, colors.HexColor('#b8c0c8')),
+                            ('FONTSIZE', (0,0), (-1,-1), 8), ('VALIGN', (0,0), (-1,-1), 'TOP')])
+            story += [Paragraph("Control cluster results", styles["Heading2"]),
+                      Paragraph("One row per cluster. The lowest-energy and closest experimental poses may be different members of the same cluster. Pose numbers identify the retained poses.", styles["SmallDU"]), cluster_table, Spacer(1,8)]
+        control_diagrams = []
+        if args.control and args.include_control_appendix:
+            control_diagrams = [(first(args.control,["report/control_experimental_plip2d.png"]), "Experimental reference"),
+                                (args.control / "report" / "control_energy_rank_1_plip2d.png", "Lowest-energy control pose")]
+            global_best = (protocol.get('global_best_sampled_pose') or {}).get('best_rmsd_angstrom')
+            same_cluster = control_diagrams_share_cluster(cluster_rows, {'lowest_rmsd_angstrom': global_best})
+            if not same_cluster:
+                control_diagrams.append((args.control / "report" / "control_lowest_rmsd_plip2d.png", "Lowest-RMSD control pose"))
+            # Never relabel a later image as A or B when a required image is
+            # missing, or silently mix an older fallback rendering into the figure.
+            if not all(approved_interaction_diagram(path) for path, _ in control_diagrams[:2]):
+                control_diagrams = []
+            else:
+                control_diagrams = control_diagrams[:2] + [(path, text) for path, text in control_diagrams[2:] if approved_interaction_diagram(path)]
         control_diagrams = [(path, description) for path, description in control_diagrams if path]
+        control_pairs = []
         if control_diagrams:
-            # The approved control presentation is one compact A/B/C panel,
-            # matching the new-docking interaction panel.  Individual PLIP
-            # images remain available as retained artifacts, but are not
-            # expanded into three inconsistent report figures.
-            composite = args.control / "report" / "control_interactions_ABC.png"
-            if combine_horizontal_diagrams([(None, path) for path, _ in control_diagrams], composite):
-                story += [Paragraph("Control interaction diagrams",styles["Heading2"]),
-                    image(composite,6.8,2.45),
-                    Paragraph(f"<b>Figure {figure_number}. SDF-aware PLIP interaction diagrams for control ligand {experimental_label}.</b> A is the experimental reference pose, B is the globally lowest-energy redocked pose, and C is the lowest-RMSD redocked pose. Ligand chemistry comes from the retained SDF files; interaction calls come from the retained PLIP XML.",styles["SmallDU"]), Spacer(1,6)]
+            receipt = read_json(args.control / 'report' / 'control_paired_interactions.json')
+            records = {item.get('role'): item for item in receipt.get('pairs', [])} if receipt.get('schema') == 'docking-universal-paired-control-v1' else {}
+            required = ['experimental', 'energy_rank_1'] + ([] if same_cluster or len(control_diagrams) < 3 else ['lowest_rmsd'])
+            for role in required:
+                pair = records.get(role) or {}
+                scene, diagram = Path(str(pair.get('scene') or '')), Path(str(pair.get('diagram') or ''))
+                if (not scene.is_file() or not approved_interaction_diagram(diagram)
+                        or sha256(scene) != pair.get('scene_sha256') or sha256(diagram) != pair.get('diagram_sha256')):
+                    control_pairs = []
+                    break
+                output = assets_output / f'control_paired_{role}_figure.png'
+                if not combine_paired_interaction(pair, output):
+                    control_pairs = []
+                    break
+                control_pairs.append((pair, output))
+        if control_pairs:
+            for pair, output in control_pairs:
+                story += [KeepTogether([Paragraph('Paired control interactions', styles['Heading2']),
+                    image(output, 6.8, 4.1),
+                    Paragraph(f"<b>Figure {figure_number}. {escape(pair['heading'])}.</b> The 3D and 2D views use the same verified ligand coordinates. Purple-blue residues are PLIP contacts; blue residues are other displayed binding-site residues. The 2D legend identifies interaction types.", styles['SmallDU'])]), Spacer(1, 6)]
                 figure_number += 1
-            additional_control_diagrams = [
-                args.control / "report" / f"control_energy_rank_{rank}_plip2d.png"
-                for rank in (2, 3)
-            ]
-            additional_control_diagrams = [path for path in additional_control_diagrams if path.is_file()]
-            if additional_control_diagrams:
-                additional = args.control / "report" / "control_additional_rank_interactions.png"
-                if combine_horizontal_diagrams([(None, path) for path in additional_control_diagrams], additional):
-                    ranks = ", ".join(path.name.split('_')[3] for path in additional_control_diagrams)
-                    story += [Paragraph("Additional energy-ranked control interactions", styles["Heading2"]),
-                              image(additional, 6.8, 2.45),
-                              Paragraph(f"<b>Figure {figure_number}.</b> Exact lowest-energy representatives of energy-ranked control clusters {ranks}, in that order. "
-                                        "Their linked 3D ligands use blue for rank 2 and gold for rank 3. The actual globally closest pose remains separately identified in the preceding control panels.", styles["SmallDU"]), Spacer(1,6)]
-                    figure_number += 1
+            story.append(PageBreak())
+        elif control_diagrams:
+            story += [Paragraph("Paired control interaction figures are unavailable.", styles["SmallDU"]), Spacer(1, 6)]
             story.append(PageBreak())
         elif args.include_control_appendix:
             story.append(PageBreak())
@@ -2461,7 +2852,7 @@ def main():
             reproducibility_record(protocol, args.study, args.control), cavity, has_any_docking
         )
         require_complete_used_versions(provenance)
-        (args.study / "report" / "software_versions_and_references.json").write_text(
+        (assets_output / "software_versions_and_references.json").write_text(
             json.dumps(provenance, indent=2) + "\n"
         )
         version_check = provenance.get("control_to_new_run_version_check")
@@ -2560,14 +2951,18 @@ def main():
                              "_analysis_root": sites[0]["analysis"]})
             report_items.append(item)
     for compound_index, compound in enumerate(report_items):
-        cid=str(compound.get("compound_id", "")); inventory_row=inventory_by_id.get(cid, {}); name=display_compound_name(compound.get("compound_name") or inventory_row.get("compound_name") or cid, inventory_row.get("source"))
+        cid=str(compound.get("compound_id", "")); inventory_row=inventory_by_id.get(cid, {}); name=report_compound_name(args.study, compound, inventory_row)
         display_names[cid] = name
         asset_id = compound.get("_asset_id", cid)
         site_number = compound.get("_site_number")
         site_suffix = f" | Docking site {site_number}" if site_number else ""
         caption_subject = f"{name}, docking site {site_number}" if site_number else name
         summary_protocol_type = summary.get("protocol_type")
-        if protocol:
+        if related_site_control:
+            scope_text = ('Docking used the selected exploratory protocol. The known-ligand control covers only '
+                          + str(related_site_control.get('tested_box_label') or 'its tested region')
+                          + '; other selected sites or changed settings are not validated by that control.')
+        elif protocol:
             scope_text = (
                 "Docking used the target-matched protocol established and approved by the control reported above."
                 if args.include_control_appendix
@@ -2582,7 +2977,7 @@ def main():
             )
         else:
             scope_text = "Docking used the configured protocol shown above. No target-specific bound-ligand control was supplied, so pose-recovery performance for this target was not evaluated."
-        result_subject = (f"Target: {target_display} | Ligand: {name}" if protocol else f"Ligand: {name}") + site_suffix
+        result_subject = f"Ligand: {name}{site_suffix}"
         story += [Paragraph(escape(result_subject),styles["Heading2"]),Paragraph(scope_text + " More favorable docking scores are more negative; RMSD and cluster population are separate measures.",styles["BodyText"]),Spacer(1,6)]
         site_result = compound.get("_site_result")
         if site_number or (len(report_compounds) > 1 and cid in compound_results_by_id):
@@ -2625,7 +3020,7 @@ def main():
                     caption += (f" {len(unavailable)} representatives have no evaluable RMSD and appear "
                                 "in the separate N/A strip, retaining their global energy ranks and colors. "
                                 "N/A is not zero RMSD; different chemical states may lack a compatible atom mapping.")
-            story += [KeepTogether([image(panel,6.0,3.75),Paragraph(caption,styles["SmallDU"])]),Spacer(1,4)]
+            story += [KeepTogether([image(panel,7.0,4.15),Spacer(1,5),Paragraph(caption,styles["SmallDU"])]),Spacer(1,4)]
             figure_number += 1
         # This table is deliberately read from Panel A's exported data, not
         # re-derived from a different summary.  It therefore lists the same
@@ -2652,96 +3047,30 @@ def main():
                 story.append(docking_detail_section_break())
             story += [Paragraph("Clusters represented in the docking plot",styles["Heading2"]),table(rows,[.6*inch,1.65*inch,1.45*inch,1.45*inch,1.35*inch],compact=True),Spacer(1,8)]
         cluster_path = analysis_root / "cluster_summary.csv"
-        snapshot_panel = first(args.study, [f"report/{asset_id}_top3_3d_snapshots.png"])
-        selected_representative_count = 3
-        if snapshot_panel:
-            snapshot_manifest = read_json(snapshot_panel.with_suffix(".manifest.json"))
-            snapshot_count = snapshot_manifest.get("snapshot_count", 3)
-            selected_representative_count = max(1, int(snapshot_count or 1))
-            representative_label = "representative" if snapshot_count == 1 else "representatives"
-            panel_labels = ["A", "B", "C"][:selected_representative_count]
-            if len(panel_labels) == 1:
-                panel_description = "Panel A shows energy rank 1."
-            elif len(panel_labels) == 2:
-                panel_description = "Panels A and B show energy ranks 1 and 2, respectively."
-            else:
-                panel_description = "Panels A, B, and C show energy ranks 1, 2, and 3, respectively."
-            if selected_representative_count == 1:
-                color_description = "Red matches the highlighted cluster"
-            elif selected_representative_count == 2:
-                color_description = "Red and blue match the highlighted clusters"
-            else:
-                color_description = "Red, blue, and gold match the highlighted clusters"
-            cluster_reference = (
-                f"Figure {cluster_figure_number}"
-                if cluster_figure_number is not None
-                else "the corresponding docking pose-cluster analysis"
-            )
-            story += [KeepTogether([
-                Paragraph(f"Energy-ranked 3D cluster {representative_label}", styles["Heading2"]),
-                image(snapshot_panel, 6.5, 4.4),
-                Paragraph(
-                    f"<b>Figure {figure_number}. Three-dimensional interaction snapshots for {caption_subject}.</b> "
-                    f"Shown are {snapshot_count} energy-ranked distinct cluster {representative_label}, ordered by docking score. "
-                    f"{panel_description} {color_description} in {cluster_reference}. These views support structural inspection; docking score rank does not establish pose correctness.",
-                    styles["SmallDU"],
-                ), Spacer(1,6),
-            ])]
-            figure_number += 1
-        interaction_diagrams=[]
-        if cluster_path.is_file():
-            diagram_rows=list(csv.DictReader(cluster_path.open(newline="")))
-            diagram_rows.sort(key=lambda r: int(r.get("energy_rank",999999)))
-            for diagram_row in diagram_rows[:selected_representative_count]:
-                cluster_id=str(diagram_row.get("cluster_id",""))
-                diagram=analysis_root / f"cluster_{int(cluster_id):03d}" / "interactions" / "representative_plip2d.png" if cluster_id.isdigit() else None
-                if diagram and diagram.is_file():
-                    interaction_diagrams.append((diagram_row,diagram))
-        if interaction_diagrams:
-            composite = args.study / "report" / f"{asset_id}_selected_interactions_ABC.png"
-            if combine_horizontal_diagrams(interaction_diagrams, composite):
-                interaction_count = len(interaction_diagrams)
-                panel_colors = ("red", "blue", "gold")
-                panel_scores = []
-                for panel_index, (diagram_row, _) in enumerate(interaction_diagrams):
-                    score = str(diagram_row.get("best_energy_kcal_per_mol", "")).strip()
-                    score_text = f"{score} kcal/mol" if score else "score unavailable"
-                    panel_scores.append(
-                        f"{'ABC'[panel_index]} ({panel_colors[panel_index]}, {score_text})"
-                    )
-                if interaction_count == 1:
-                    interaction_panel_description = f"Panel {panel_scores[0]} is the energy-ranked cluster representative shown above."
-                    interaction_rank_description = "highest-ranked distinct pose cluster"
-                elif interaction_count == 2:
-                    interaction_panel_description = f"Panels {panel_scores[0]} and {panel_scores[1]} are the energy-ranked cluster representatives shown above."
-                    interaction_rank_description = "two highest-ranked distinct pose clusters"
-                else:
-                    interaction_panel_description = f"Panels {panel_scores[0]}, {panel_scores[1]}, and {panel_scores[2]} are the energy-ranked cluster representatives shown above."
-                    interaction_rank_description = "three highest-ranked distinct pose clusters"
+        paired_manifest = read_json(args.study / 'report' / f'{asset_id}_paired_interactions.json')
+        pairs = paired_manifest.get('pairs', []) if paired_manifest.get('schema') == 'docking-universal-paired-interactions-v1' else []
+        paired_images = []
+        for pair in pairs:
+            output = assets_output / f"{asset_id}_paired_{int(pair['energy_rank']):03d}.png"
+            diagram = Path(str(pair.get('diagram') or ''))
+            if approved_interaction_diagram(diagram) and combine_paired_interaction(pair, output):
+                paired_images.append((pair, output))
+        paired_complete = bool(pairs) and len(paired_images) == len(pairs)
+        if paired_complete:
+            for pair, paired_image in paired_images:
                 story += [KeepTogether([
-                    Paragraph("Selected 2D pose interaction diagrams",styles["Heading2"]),
-                    image(composite,6.8,2.45),
-                    Paragraph(
-                        f"<b>Figure {figure_number}. Predicted protein-ligand interactions for the {interaction_rank_description} of {caption_subject}.</b> "
-                        f"{interaction_panel_description} Interaction types are identified in the diagram legend. Docking rank and predicted contacts support pose comparison but do not establish binding-mode correctness.",
-                        styles["SmallDU"],
-                    ), Spacer(1,6),
-                ])]
+                    Paragraph('Paired 3D and 2D interactions', styles['Heading2']),
+                    image(paired_image, 6.8, 4.1),
+                    Paragraph(f"<b>Figure {figure_number}. Cluster {pair['cluster_id']} representative for {caption_subject}.</b> "
+                              'The 3D and 2D views use the same retained representative. The ligand carbon color and border match the cluster; purple-blue residues are PLIP contacts and blue residues are other displayed binding-site residues. Lines show contacts; the 2D legend identifies interaction types.', styles['SmallDU']),
+                    Spacer(1, 6)])]
                 figure_number += 1
-        if not panel and cluster_path.is_file():
-            cluster_records=list(csv.DictReader(cluster_path.open(newline="")))
-            cluster_records.sort(key=lambda r: int(r.get("energy_rank",999999)))
-            fallback_images=[]
-            for cluster_row in cluster_records[:selected_representative_count]:
-                cluster_id=str(cluster_row.get("cluster_id",""))
-                interaction_png=analysis_root / f"cluster_{int(cluster_id):03d}" / "interactions" / "complex_plip_all_in_one.png" if cluster_id.isdigit() else None
-                if interaction_png and interaction_png.is_file():
-                    fallback_images.append((cluster_row, interaction_png))
-            if fallback_images:
-                visual_label = "view" if len(fallback_images) == 1 else "views"
-                story += [Paragraph(f"Selected cluster structural {visual_label}",styles["CaptionDU"])]
-                for cluster_row, interaction_png in fallback_images:
-                    story += [Paragraph(f"Cluster {cluster_row.get('cluster_id','NA')} - docking score {cluster_row.get('best_energy_kcal_per_mol','NA')} kcal/mol", styles["SmallDU"]), image(interaction_png,6.8,3.2), Spacer(1,4)]
+            if paired_manifest.get('missing_clusters'):
+                missing = ', '.join(str(value) for value in paired_manifest['missing_clusters'])
+                story += [Paragraph('A verified 3D/2D pair was unavailable for cluster(s) ' + escape(missing) + '.', styles['SmallDU']), Spacer(1, 6)]
+        if not paired_complete:
+            story += [Paragraph("Paired interaction figures are unavailable for one or more representatives.",
+                                styles["SmallDU"]), Spacer(1, 6)]
         story += [Paragraph("<b>Interpretation and limitations</b><br/>Docking scores are ranking estimates, not measured binding free energies. Rigid-receptor docking does not model induced fit. Cluster population and seed support describe computational convergence, not biological correctness. Protonation, tautomer, receptor preparation, and box choices can affect results. Experimental validation remains necessary.",styles["SmallDU"])]
         if compound_index < len(report_items)-1:
             story.append(PageBreak())
@@ -2750,7 +3079,7 @@ def main():
         reproducibility_record(protocol, args.study, args.control), cavity, has_docking
     )
     require_complete_used_versions(provenance)
-    (args.study / "report" / "software_versions_and_references.json").write_text(
+    (assets_output / "software_versions_and_references.json").write_text(
         json.dumps(provenance, indent=2) + "\n"
     )
     version_check = provenance.get("control_to_new_run_version_check")

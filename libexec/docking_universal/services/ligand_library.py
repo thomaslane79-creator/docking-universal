@@ -159,8 +159,8 @@ def inspect_ligand_library(source, column_mapping=None, sheet=None):
 
 
 def selected_library_records(source, selection):
-    if (not isinstance(selection, dict) or set(selection) not in
-            ({"fingerprint", "record_ids"}, {"fingerprint", "record_ids", "column_mapping"})):
+    if (not isinstance(selection, dict) or not {"fingerprint", "record_ids"} <= set(selection)
+            or set(selection) - {"fingerprint", "record_ids", "column_mapping", "name_overrides"}):
         raise ValueError("Ligand selection requires a library fingerprint and explicit record IDs")
     identifiers = selection["record_ids"]
     if (not isinstance(identifiers, list) or not identifiers
@@ -171,8 +171,16 @@ def selected_library_records(source, selection):
                                 column_mapping=selection.get('column_mapping'))
     if any(identifier not in snapshot['molecules'] for identifier in identifiers):
         raise ValueError("Selection contains an unknown or invalid compound record")
+    overrides = selection.get('name_overrides', {})
+    if (not isinstance(overrides, dict) or set(overrides) - set(identifiers)
+            or any(not isinstance(name, str) or not name.strip() or len(name) > 200
+                   or any(ord(c) < 32 for c in name) for name in overrides.values())):
+        raise ValueError('Compound names must be nonempty text of at most 200 characters for selected records')
     from rdkit import Chem
     library = deepcopy(snapshot['library'])
+    for row in library['records']:
+        if row['record_id'] in overrides:
+            row['display_name_override'] = overrides[row['record_id']].strip()
     chosen = set(identifiers)
     return library, [(row, Chem.Mol(snapshot['molecules'][row['record_id']])) for row in library["records"]
                      if row["record_id"] in chosen]

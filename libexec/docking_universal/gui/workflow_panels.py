@@ -131,13 +131,18 @@ class StudySetupPanel(QtWidgets.QWidget):
         self.control_engine = QtWidgets.QComboBox()
         self.control_engine.addItem("AutoDock Vina", "vina")
         self.control_engine.addItem(_quickvina_label(), "qvinaw")
+        from ..ad4_gpu import available, ENGINE_LABEL
+        if available():
+            self.control_engine.addItem(ENGINE_LABEL, 'adgpu')
         self.control_tier = QtWidgets.QComboBox()
         for label, value in (
-            ("Quick diagnostic", "quick"), ("Repeatability", "repeatability"),
+            ("Standard control (5 seeds)", "quick"), ("Repeatability (5 seeds)", "repeatability"),
             ("Broader search", "broader"), ("More conformers", "conformers"),
             ("Robust sampling", "robust"),
         ):
             self.control_tier.addItem(label, value)
+        self.control_engine.setToolTip('A control validates the exact engine and settings used. AutoDock-GPU uses AD4 scoring, which is distinct from Vina.')
+        self.control_tier.setToolTip('Each control runs at least five independent seeds so it can meet the approval requirement. AutoDock-GPU uses 20 genetic runs per seed for standard and repeatability, 40 for broader and more-conformers, and 60 for robust sampling. Vina exhaustiveness does not apply to AD4.')
         self.pdb_evidence = QtWidgets.QCheckBox(
             "Search related public PDB structures (recommended; internet required)"
         )
@@ -147,6 +152,10 @@ class StudySetupPanel(QtWidgets.QWidget):
             "Recommended for finding other experimentally observed ligand sites. "
             "Uncheck for local-only evidence review. This controls evidence lookup only; structure and chemistry downloads are separate."
         )
+        self.pdb_search_scope = QtWidgets.QComboBox()
+        self.pdb_search_scope.addItem('All matching structures', 'related-structures')
+        self.pdb_search_scope.addItem('First 50 matching structures · faster, incomplete', 'limited-structures')
+        self.pdb_search_scope.setToolTip('A limited search may miss relevant ligand evidence.')
         self.pdb_evidence_note = ExplanationLabel('', 'Public PDB evidence and privacy', self.pdb_evidence.toolTip())
         self.pdb_evidence_note.setToolTip(self.pdb_evidence.toolTip())
         self.pdb_evidence.toggled.connect(self._update_evidence_note)
@@ -218,8 +227,8 @@ class StudySetupPanel(QtWidgets.QWidget):
         )
         self.lock_notice.hide()
         form.addRow(self.lock_notice)
-        form.addRow("Study output directory", output_row)
         form.addRow("Receptor structure", input_row)
+        form.addRow("Study output directory", output_row)
         form.addRow(self.preview_options)
         self.molecule_preview_slot = QtWidgets.QWidget()
         slot_layout = QtWidgets.QVBoxLayout(self.molecule_preview_slot)
@@ -238,6 +247,7 @@ class StudySetupPanel(QtWidgets.QWidget):
         form.addRow("Pocket detector", self.pocket_engine)
         form.addRow("Additional site discovery", self.predict_with_ligand)
         form.addRow("Experimental evidence", self.pdb_evidence)
+        form.addRow("Search scope", self.pdb_search_scope)
         form.addRow(self.pdb_evidence_note)
         form.addRow("Bound ligand", ligand_row)
         form.addRow("Control docking engine", self.control_engine)
@@ -248,7 +258,10 @@ class StudySetupPanel(QtWidgets.QWidget):
         self.reproducibility_notice.setWordWrap(True)
         form.addRow(self.reproducibility_notice)
         form.addRow(buttons)
-        QtWidgets.QWidget.setTabOrder(self.output_directory, self.input_pdb)
+        QtWidgets.QWidget.setTabOrder(self.input_pdb, input_button)
+        QtWidgets.QWidget.setTabOrder(input_button, self.fetch_button)
+        QtWidgets.QWidget.setTabOrder(self.fetch_button, self.output_directory)
+        QtWidgets.QWidget.setTabOrder(self.output_directory, output_button)
         input_button.clicked.connect(self.chooseInputRequested)
         self.fetch_button.clicked.connect(self.fetchInputRequested)
         self.detect_ligands_button.clicked.connect(self.detectLigandsRequested)
@@ -271,7 +284,7 @@ class StudySetupPanel(QtWidgets.QWidget):
         self.fetch_button.setEnabled(ready)
         self.fetch_button.setToolTip(
             "Download the structure into this study’s inputs folder."
-            if ready else "Choose a study output directory above before downloading."
+            if ready else "Enter a PDB ID to suggest an output folder."
         )
 
     def _source_changed(self):
@@ -286,6 +299,7 @@ class StudySetupPanel(QtWidgets.QWidget):
             self.pathway.setCurrentIndex(self.pathway.findData(pathway))
 
     def _update_evidence_note(self):
+        self.pdb_search_scope.setEnabled(self.pdb_evidence.isChecked() and not getattr(self, '_locked', False))
         self.pdb_evidence_note.setText(
             "Sends the receptor protein sequence to RCSB PDB. Uncheck for local-only evidence."
             if self.pdb_evidence.isChecked() else
@@ -406,7 +420,7 @@ class StudySetupPanel(QtWidgets.QWidget):
         self._form.setRowVisible(self.predict_with_ligand, ligand_site)
         prediction = not ligand_site or self.predict_with_ligand.isChecked()
         self._form.setRowVisible(self.pocket_engine, not reuse and prediction)
-        for widget in (self.pdb_evidence, self.pdb_evidence_note):
+        for widget in (self.pdb_evidence, self.pdb_search_scope, self.pdb_evidence_note):
             self._form.setRowVisible(widget, not reuse)
         for widget in (self.control_engine, self.control_tier):
             self._form.setRowVisible(widget, control)
@@ -415,6 +429,7 @@ class StudySetupPanel(QtWidgets.QWidget):
         # field for existing draft/control serialization, without a second menu.
         self._form.setRowVisible(self.ligand_resname.parentWidget(), False)
         self.site_mode.setEnabled(not control and not self._locked)
+        self.pdb_search_scope.setEnabled(not reuse and self.pdb_evidence.isChecked() and not self._locked)
         self.pocket_engine.setEnabled(not reuse and prediction and not self._locked)
         self.predict_with_ligand.setEnabled(ligand_site and not self._locked and self._native_ligand_prediction_supported)
         self.pdb_evidence.setEnabled(not reuse and not self._locked)
@@ -446,7 +461,7 @@ class StudySetupPanel(QtWidgets.QWidget):
             self.site_mode.currentData(), self.ligand_value(),
             self.ligand_identity(),
             self.pocket_engine.currentData(),
-            "related-structures" if self.pdb_evidence.isChecked() else "off",
+            self.pdb_search_scope.currentData() if self.pdb_evidence.isChecked() else "off",
             self.pathway.currentData(),
             self.predict_with_ligand.isChecked() and (self.pathway.currentData() == "control" or self.site_mode.currentData() == "ligand"),
         )
@@ -612,8 +627,13 @@ class ProtocolFinalizationPanel(QtWidgets.QWidget):
         form = QtWidgets.QFormLayout(self)
         self._settings_guide = None
         self._control_mode = False
+        self._awaiting_preparation = False
         self.introduction = QtWidgets.QLabel('Save a reusable protocol; this does not dock ligands now.')
         self.introduction.setWordWrap(True)
+        self.change_sites_button = QtWidgets.QPushButton('Change approved docking sites')
+        self.change_sites_button.setObjectName('change_approved_sites_button')
+        self.change_sites_button.setToolTip('Return to site review. The previous approval remains in the study history.')
+        self.change_sites_button.hide()
         self.guide_button = QtWidgets.QPushButton('Settings guide…')
         self.guide_button.setObjectName('protocol_settings_guide')
         self.guide_button.clicked.connect(lambda: self.show_settings_guide())
@@ -621,7 +641,8 @@ class ProtocolFinalizationPanel(QtWidgets.QWidget):
         introduction_row.addWidget(self.introduction, 1)
         introduction_row.addWidget(self.guide_button, 0, QtCore.Qt.AlignmentFlag.AlignTop)
         form.addRow(introduction_row)
-        self.prepare_reviewed_button = QtWidgets.QPushButton('Prepare receptor for the reviewed docking boxes')
+        form.addRow(self.change_sites_button)
+        self.prepare_reviewed_button = QtWidgets.QPushButton('Prepare receptor')
         self.prepare_reviewed_button.setObjectName('prepare_reviewed_receptor_button')
         self.prepare_reviewed_button.setToolTip(
             'Pocket discovery uses coordinates, not force-field parameters. This next step attempts strict '
@@ -653,8 +674,8 @@ class ProtocolFinalizationPanel(QtWidgets.QWidget):
         self.ad4_heuristic_cap = QtWidgets.QSpinBox(); self.ad4_heuristic_cap.setRange(1000,100_000_000); self.ad4_heuristic_cap.setValue(12_000_000)
         self.approval = QtWidgets.QCheckBox("Approve exploratory use (no pose-recovery control)")
         self.approval.setObjectName("exploratory_protocol_approval")
-        self.finalize_button = QtWidgets.QPushButton("Generate final report and .duprotocol"); self.finalize_button.setObjectName("start_protocol_finalization_button")
-        self.open_report_button = QtWidgets.QPushButton("Open final report")
+        self.finalize_button = QtWidgets.QPushButton("Create reusable protocol and report"); self.finalize_button.setObjectName("start_protocol_finalization_button")
+        self.open_report_button = QtWidgets.QPushButton("Open protocol report")
         self.open_bundle_button = QtWidgets.QPushButton("Open bundle location")
         actions = QtWidgets.QHBoxLayout(); actions.addWidget(self.open_report_button); actions.addWidget(self.open_bundle_button)
         self.status = QtWidgets.QLabel("Approve docking regions before finalizing the reusable protocol."); self.status.setWordWrap(True)
@@ -726,23 +747,28 @@ class ProtocolFinalizationPanel(QtWidgets.QWidget):
             if key.startswith('ad4_') or key in ('exhaustiveness','modes','energy_range'):
                 visible=is_ad4 if key.startswith('ad4_') else not is_ad4
                 for widget in widgets:widget.setVisible(visible)
-        if self._control_mode:
+        if self._control_mode or self._awaiting_preparation:
             for widgets in self._field_rows.values():
                 for widget in widgets: widget.hide()
         self._update_workload_hint()
 
-    def set_control_mode(self, active, description=""):
+    def set_control_mode(self, active, description="", *, awaiting_preparation=False):
         """Show the explicit control launch in stage four, after site approval."""
         self._control_mode = bool(active)
+        self._awaiting_preparation = awaiting_preparation
+        show_settings = not (active or awaiting_preparation)
         for widgets in self._field_rows.values():
-            for widget in widgets: widget.setVisible(not active)
+            for widget in widgets: widget.setVisible(show_settings)
         for widget in (self.approval, self.help_buttons['approval'],
                        self.inline_explanations['approval'], self.guide_button, self.workload_hint):
-            widget.setVisible(not active)
-        self.introduction.setText(description if active else
+            widget.setVisible(show_settings)
+        self.finalize_button.setVisible(not awaiting_preparation)
+        self.introduction.setText(
+            "Prepare the receptor using the reviewed docking regions. Protocol settings become available after preparation."
+            if awaiting_preparation else description if active else
             'Save a reusable protocol; this does not dock ligands now.')
-        self.finalize_button.setText("Run reviewed known-ligand control" if active else "Generate final report and .duprotocol")
-        if not active:
+        self.finalize_button.setText("Run reviewed known-ligand control" if active else "Create reusable protocol and report")
+        if show_settings:
             self._update_engine_fields()
 
     def _help_button(self, key):
@@ -836,7 +862,7 @@ class ScreeningSetupPanel(QtWidgets.QWidget):
         cpu_layout.addWidget(self.cpu)
         cpu_layout.addWidget(self.cpu_count)
         self.stop_on_error = QtWidgets.QCheckBox("Stop the library after the first failed compound")
-        self.approval = QtWidgets.QCheckBox("I authorize screening with this exploratory protocol without pose-recovery control"); self.approval.setObjectName("exploratory_screening_approval")
+        self.approval = QtWidgets.QCheckBox("I authorize screening with this exploratory protocol"); self.approval.setObjectName("exploratory_screening_approval")
         self.preview_button = QtWidgets.QPushButton("Preview workload")
         self.preview_button.setToolTip('Estimate jobs before launch. Full chemistry validation occurs when screening starts.')
         self.run_button = QtWidgets.QPushButton("Run locked-protocol screening"); self.run_button.setObjectName("start_locked_screening_button")
@@ -848,6 +874,15 @@ class ScreeningSetupPanel(QtWidgets.QWidget):
                                              QtCore.Qt.TextInteractionFlag.TextSelectableByKeyboard)
         self.elapsed.hide()
         form.addRow(self.elapsed)
+        self.another_run_button = QtWidgets.QPushButton('Start another docking run…')
+        self.another_run_button.setToolTip('Use the same compounds again or choose different compounds. Earlier runs are preserved.')
+        self.another_run_button.hide()
+        form.addRow(self.another_run_button)
+        self.another_run_notice = QtWidgets.QLabel()
+        self.another_run_notice.setWordWrap(True)
+        self.another_run_notice.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.another_run_notice.hide()
+        form.addRow(self.another_run_notice)
         form.addRow("Compound library", ligand_row)
         from .ligand_library_panel import LigandLibraryPanel
         self.library_panel = LigandLibraryPanel()
@@ -901,7 +936,7 @@ class ScreeningSetupPanel(QtWidgets.QWidget):
                 ('stop_on_error', self.stop_on_error,
                  'Unchecked: continue other compounds and keep successful results; failures are still reported.'),
                 ('approval', self.approval,
-                 'Exploratory means this protocol has no experimental pose-recovery control. Authorization is not validation of hits or binding affinity.')):
+                 'A control may cover only some selected sites. Untested regions and receptor states remain exploratory. Authorization does not validate hits or binding affinity.')):
             form.addRow(widget)
             note = ExplanationLabel(brief[key], widget.text(), explanation)
             note.setObjectName('screening_explain_' + key)
@@ -910,6 +945,10 @@ class ScreeningSetupPanel(QtWidgets.QWidget):
             self.inline_explanations[key] = note
             widget.setToolTip(explanation)
             widget.setAccessibleDescription(explanation)
+        # Authorization is shown only after the workload identifies an
+        # exploratory protocol; the initial state is not a warning.
+        self.approval.hide()
+        self.inline_explanations['approval'].hide()
         self._cpu_default_help = self.cpu.toolTip()
         self._cpu_default_summary = brief['cpu']
         self.reproducibility_notice = ExplanationLabel(REPRODUCIBILITY_SUMMARY,

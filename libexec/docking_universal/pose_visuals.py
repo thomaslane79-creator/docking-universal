@@ -8,6 +8,21 @@ RANK_COLORS = ("red", "marine", "gold")
 LIGAND_COLORS = (*RANK_COLORS, "gray70", "green", "magenta")
 
 
+def approved_interaction_diagram(diagram, manifest=None):
+    """Recognize output from the supported local PLIP diagram renderer."""
+    if not diagram:
+        return False
+    path = Path(diagram)
+    if not path.is_file():
+        return False
+    try:
+        metadata = json.loads(Path(manifest or path.with_suffix('.manifest.json')).read_text())
+        return (metadata.get('schema_name') == 'docking-universal-poseedit-render'
+                and metadata.get('renderer_policy') == 'approved-poseedit-local-v1')
+    except (OSError, ValueError, AttributeError, TypeError):
+        return False
+
+
 def cluster_color(analysis, cluster_id, *, closest=False):
     """Rank belongs to a cluster, never inferred from a pose's own energy."""
     try:

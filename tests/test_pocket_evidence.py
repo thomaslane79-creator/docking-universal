@@ -44,6 +44,42 @@ class FakeResponse(io.BytesIO):
 
 
 class PocketEvidenceTests(unittest.TestCase):
+    def test_fast_alignment_preserves_original_tie_breaks(self):
+        from types import SimpleNamespace
+        import random
+        import numpy as np
+        def old(a, b):
+            rows, cols = len(a) + 1, len(b) + 1
+            scores = np.zeros((rows, cols), dtype=int)
+            trace = np.zeros((rows, cols), dtype=int)
+            scores[:, 0] = -2 * np.arange(rows)
+            scores[0, :] = -2 * np.arange(cols)
+            trace[1:, 0] = 1
+            trace[0, 1:] = 2
+            for i in range(1, rows):
+                for j in range(1, cols):
+                    choices = (scores[i-1, j-1] + (2 if a[i-1] == b[j-1] else -1),
+                               scores[i-1, j] - 2, scores[i, j-1] - 2)
+                    trace[i, j] = int(np.argmax(choices))
+                    scores[i, j] = choices[trace[i, j]]
+            pairs, i, j = [], len(a), len(b)
+            while i or j:
+                direction = trace[i, j]
+                if direction == 0:
+                    pairs.append((i-1, j-1)); i -= 1; j -= 1
+                elif direction == 1:
+                    i -= 1
+                else:
+                    j -= 1
+            return list(reversed(pairs))
+        randomizer = random.Random(27)
+        for _ in range(60):
+            a = ''.join(randomizer.choices('ACDEFG', k=randomizer.randrange(1, 25)))
+            b = ''.join(randomizer.choices('ACDEFG', k=randomizer.randrange(1, 25)))
+            first = [SimpleNamespace(one_letter=c) for c in a]
+            second = [SimpleNamespace(one_letter=c) for c in b]
+            self.assertEqual(EVIDENCE._alignment_pairs(first, second), old(a, b))
+
     def test_sequence_search_accepts_no_content_response(self):
         class EmptyResponse(FakeResponse):
             status = 204
@@ -56,16 +92,47 @@ class PocketEvidenceTests(unittest.TestCase):
             receptor = root / "target.pdb"
             receptor.write_text(protein())
             requested = []
+            progress = []
             hits = [{"identifier": f"A{index:03d}_1"} for index in range(25)]
             def opener(request, timeout=30):
                 requested.append(json.loads(request.data))
                 return FakeResponse(json.dumps({"result_set": hits}).encode())
             with patch.object(EVIDENCE, "download_entry", side_effect=RuntimeError("unavailable")):
-                result = EVIDENCE.collect_pocket_evidence(receptor, [], root / "evidence", opener=opener)
+                result = EVIDENCE.collect_pocket_evidence(receptor, [], root / "evidence", opener=opener,
+                    progress_callback=lambda *values: progress.append(values))
+            self.assertEqual(progress[0], ('searching', 0, None, None))
+            self.assertEqual(progress[1], ('checking', 0, 25, None))
+            self.assertEqual(progress[-1], ('finalizing', 25, 25, None))
             self.assertTrue(requested[0]["request_options"]["return_all_hits"])
             self.assertEqual(len(result["candidate_entries"]), 25)
             self.assertEqual(len(result["skipped"]), 25)
             self.assertIsNone(result["query"]["maximum_entries"])
+
+    def test_limited_and_stopped_searches_are_marked_incomplete(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            receptor = root / 'target.pdb'
+            receptor.write_text(protein())
+            hits = [{'identifier': f'A{index:03d}_1'} for index in range(12)]
+            opener = lambda request, timeout=30: FakeResponse(json.dumps({'result_set': hits}).encode())
+            with patch.object(EVIDENCE, 'download_entry', side_effect=RuntimeError('offline fixture')):
+                limited = EVIDENCE.collect_pocket_evidence(receptor, [], root / 'limited', max_entries=5, opener=opener)
+            self.assertEqual(limited['status'], 'partial')
+            self.assertEqual(limited['search_scope'], 'limited')
+            self.assertEqual(len(limited['candidate_entries']), 5)
+            checked = []
+            def download(entry, opener):
+                checked.append(entry)
+                raise RuntimeError('offline fixture')
+            with patch.object(EVIDENCE, 'download_entry', side_effect=download):
+                stopped = EVIDENCE.collect_pocket_evidence(receptor, [], root / 'stopped', opener=opener,
+                    stop_requested=lambda: len(checked) >= 3)
+            self.assertEqual(stopped['status'], 'partial')
+            self.assertEqual(stopped['search_scope'], 'stopped_early')
+            self.assertEqual(len(stopped['candidate_entries']), 3)
+            self.assertEqual(stopped['unsearched_candidate_count'], 9)
+            from docking_universal.services.pdb_lookup_status import lookup_notice
+            self.assertIn('incomplete', lookup_notice({'status': 'partial', 'coverage': {}})[0])
 
     def test_evidence_class_separates_same_protein_exact_sequence_and_homolog(self):
         self.assertEqual(EVIDENCE.evidence_class({"UNP:P1"}, 0.92, 1.0), "same_protein")

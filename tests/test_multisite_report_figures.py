@@ -15,6 +15,102 @@ SPEC.loader.exec_module(FIGURES)
 
 
 class MultiSiteReportFigureTests(unittest.TestCase):
+    def test_sparse_high_rank_pockets_keep_shared_unique_colors(self):
+        from docking_universal.pocket_metadata import POCKET_COLORS, POCKET_COLOR_RGB, POCKET_COLOR_NAMES
+        rows = [{'pocket_file': f'pocket{i}_atm.pdb', 'decision': 'selected', 'rank_order': str(i)}
+                for i in (1, 21, 35, 41)]
+        colors = FIGURES._displayed_pocket_colors(rows)
+        self.assertEqual(len(set(colors.values())), 4)
+        for rank in (1, 21, 35, 41):
+            color = colors[f'pocket{rank}_atm.pdb']
+            self.assertEqual(color, POCKET_COLORS[rank - 1])
+            self.assertEqual(POCKET_COLOR_RGB[POCKET_COLOR_NAMES[rank - 1]], tuple(int(color[i:i+2], 16) / 255 for i in (1, 3, 5)))
+        self.assertEqual(len(set(POCKET_COLORS)), len(POCKET_COLORS))
+        self.assertNotIn(FIGURES.EVIDENCE_GREEN, POCKET_COLORS)
+
+    def test_lower_ranked_supported_and_selected_pockets_remain_visible(self):
+        rows = [{'pocket_file': f'pocket{i}_atm.pdb', 'decision': 'selected', 'rank_order': str(i)}
+                for i in range(1, 16)]
+        sites = [{'label': 'P12', 'observations': [], 'member_numbers': [12]}]
+        self.assertEqual(FIGURES.overview_visible_indices(rows, sites, [{'box_label': 'P14'}]),
+                         list(range(1, 11)) + [12, 14])
+        colors = FIGURES._displayed_pocket_colors(rows)
+        self.assertNotEqual(colors['pocket12_atm.pdb'], colors['pocket1_atm.pdb'])
+        self.assertNotEqual(colors['pocket12_atm.pdb'], FIGURES.EVIDENCE_GREEN)
+
+    def test_ligand_evidence_uses_pocket_name_or_unscored_b_name(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cavity = Path(temporary)
+            diagnostics = cavity / 'pockets.tsv'
+            ligand = cavity / 'ligand.pdb'
+            ligand.write_text('END\n')
+            retained = [{'pocket_file': 'pocket1_atm.pdb', 'score': '3'},
+                        {'pocket_file': 'pocket2_atm.pdb', 'score': '2'}]
+            selected = [{'site_source': 'input_bound_ligand', 'site_group': {
+                'members': [{'label': 'P2', 'pocket_prediction': {'pocket_file': 'pocket2_atm.pdb'}},
+                            {'label': 'B1'}],
+                'ligands': [{'path': str(ligand), 'observation': {'ligand': 'ID8'}}]}}]
+            groups = [{'site_identity': {'canonical_label': 'L1'}, 'pocket_recovery': {},
+                       'representative_ligand': {'ligand': 'ABC', 'entry': '1ABC'}}]
+            sites = FIGURES.overview_evidence(diagnostics, retained, groups, selected)
+            self.assertEqual([site['label'] for site in sites], ['P2', 'B1'])
+            self.assertEqual(sites[0]['member_numbers'], [2])
+            self.assertTrue(FIGURES.plot_evidence_overview(diagnostics, retained, sites, cavity / 'plot.png'))
+
+    def test_ligand_only_plot_does_not_invent_a_zero_score(self):
+        import matplotlib.pyplot as plt
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(plt, 'close'):
+            cavity = Path(temporary)
+            sites = [{'label': 'B1', 'observations': [], 'member_numbers': []}]
+            self.assertTrue(FIGURES.plot_evidence_overview(cavity / 'empty.tsv', [], sites, cavity / 'plot.png'))
+            axis = plt.gcf().axes[0]
+            self.assertEqual(len(axis.collections), 0)
+            self.assertEqual([tick.get_text() for tick in axis.get_xticklabels()], [])
+            self.assertIn('Unscored ligand-only sites are shown in panel B',
+                          [text.get_text() for text in axis.texts])
+        plt.close('all')
+
+    def test_ligand_defined_region_preserves_merged_prediction_labels(self):
+        note = FIGURES.approved_region_plot_note([{'box_label': 'B1',
+            'site_source': 'input_bound_ligand', 'site_group': {'members': [
+                {'label': 'P2', 'pocket_prediction': {'score': 35.82}},
+                {'label': 'P11', 'pocket_prediction': {'score': 1.7}},
+                {'label': 'B1'}]}}])
+        self.assertEqual(note, 'Approved box B1 = input ligand; merged with P2, P11')
+
+    def test_overview_legend_identifies_only_rendered_gray_pockets(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cavity = Path(temporary)
+            diagnostics = cavity / 'pockets.tsv'
+            frozen = cavity / 'frozen_pockets'
+            frozen.mkdir()
+            rows = [{'pocket_file': f'pocket{i}.pdb', 'rank_order': str(i)}
+                    for i in range(1, 12)]
+            for i in (1, 4, 11):
+                (frozen / f'pocket{i}.pdb').touch()
+            colors = {'pocket1.pdb': '#d62728', 'pocket11.pdb': '#1f77b4'}
+            legend = FIGURES.pocket_surface_legend(diagnostics, rows, colors)
+            self.assertEqual(legend, [('Cavity P1', '#d62728', 'surface'),
+                                      ('Other pockets', '#999999', 'surface')])
+            (frozen / 'pocket4.pdb').unlink()
+            self.assertEqual(FIGURES.pocket_surface_legend(diagnostics, rows, colors),
+                             [('Cavity P1', '#d62728', 'surface')])
+
+    def test_control_experimental_renderer_uses_recorded_ligand_identity(self):
+        import json
+        with tempfile.TemporaryDirectory() as temporary:
+            control = Path(temporary)
+            interactions = control / '02_experimental_pose' / 'interactions'
+            interactions.mkdir(parents=True)
+            (interactions / 'run_manifest.json').write_text(json.dumps({
+                'ligand_filter': {'resname': 'ID8', 'chain': 'B', 'position': '602'}
+            }))
+            inputs = control / '00_inputs'
+            inputs.mkdir()
+            (inputs / 'ID8_experimental.sdf').touch()
+            sources = FIGURES.ensure_control_interactions(control, {}, control / 'protocol.json', None)
+            self.assertEqual(sources[0][3], 'ID8:B:602')
+
     def test_ligand_box_approval_is_separate_from_p2rank_score(self):
         import matplotlib.pyplot as plt
         with tempfile.TemporaryDirectory() as temporary:
@@ -156,6 +252,7 @@ class MultiSiteReportFigureTests(unittest.TestCase):
                 output.write_bytes(b"not-a-real-png")
                 return mock.Mock(returncode=0, stderr="")
 
+            (pocket.parent / 'pocket2_atm.pdb').write_text(pocket.read_text())
             with mock.patch.object(FIGURES.subprocess, "run", side_effect=fake_pymol), \
                     mock.patch.object(FIGURES, "trim_white_png"):
                 self.assertTrue(FIGURES.render_all_cavity_candidates(
@@ -171,78 +268,26 @@ class MultiSiteReportFigureTests(unittest.TestCase):
             self.assertIn('label pocket_label_1, "Pocket 1"', pml)
             self.assertIn("set label_color, red, pocket_label_1", pml)
             self.assertIn("png " + str(output.resolve()) + ", 3600, 2400", pml)
-
-    def test_multisite_overview_requires_at_least_two_sites(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            diagnostics = Path(temporary) / "preparation/target/cavity/pocket_selection.tsv"
-            diagnostics.parent.mkdir(parents=True)
-            diagnostics.write_text("decision\trank_order\tpocket_file\n")
-            self.assertFalse(FIGURES.build_ligand_site_overview(
-                diagnostics, [{"members": [{}], "box": {}}],
-                Path(temporary) / "overview.png", "pymol",
-            ))
-
-    def test_multisite_overview_renders_retained_fpockets_as_transparent_surfaces(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            study = Path(temporary)
-            diagnostics = study / "preparation/target/cavity/pocket_selection.tsv"
-            diagnostics.parent.mkdir(parents=True)
-            diagnostics.write_text(
-                "decision\trank_order\tpocket_file\nselected\t1\tpocket1_atm.pdb\n"
-            )
-            receptor = study / "preparation/target/receptor/receptor.pdb"
-            receptor.parent.mkdir(parents=True)
-            receptor.write_text("END\n")
-            pocket = diagnostics.parent / "frozen_pockets/pocket1_atm.pdb"
-            pocket.parent.mkdir()
-            pocket.write_text(
-                "HETATM    1  C   POC A   1       1.000   2.000   3.000  1.00  0.00           C\nEND\n"
-            )
-            ligand_dir = diagnostics.parent / "pdb_site_evidence/aligned_ligands"
-            ligand_dir.mkdir(parents=True)
-            entries = ("1AAA", "2BBB", "3CCC", "4DDD", "5EEE", "6FFF", "7GGG")
-            for entry in entries:
-                (ligand_dir / f"{entry}_LIG_A_1.pdb").write_text(
-                    "HETATM    1  C1  LIG A   1       0.000   0.000   0.000  1.00  0.00           C\nEND\n"
-                )
-            geometry = {"center_x": 0, "center_y": 0, "center_z": 0,
-                        "size_x": 26, "size_y": 26, "size_z": 26}
-            groups = [
-                {"site_number": index, "members": [{"entry": entry, "ligand": "LIG",
-                 "ligand_chain": "A", "ligand_residue": "1", "evidence_class": "same_protein",
-                 "aligned_ligand_pdb": f"aligned_ligands/{entry}_LIG_A_1.pdb"}], "box": geometry}
-                for index, entry in enumerate(entries, start=1)
-            ]
-            output = study / "report/ligand_site_overview.png"
-            output.parent.mkdir()
-
-            def fake_pymol(command, **_kwargs):
-                Path(command[-1]).with_suffix(".png").write_bytes(b"not-a-real-png")
-                return mock.Mock(returncode=0, stderr="")
-
-            combined_page_sizes = []
-
-            def fake_combine(_panels, combined_output, _start_index=0):
-                combined_page_sizes.append((len(_panels), _start_index))
-                combined_output.write_bytes(b"combined")
-                return True
-
             with mock.patch.object(FIGURES.subprocess, "run", side_effect=fake_pymol), \
                     mock.patch.object(FIGURES, "trim_white_png"), \
-                    mock.patch.object(FIGURES, "combine_ligand_site_panels", side_effect=fake_combine):
-                self.assertTrue(FIGURES.build_ligand_site_overview(
-                    diagnostics, groups, output, "pymol"
+                    mock.patch.object(FIGURES, "_displayed_pocket_colors", return_value={"pocket1_atm.pdb": "#d62728", "pocket2_atm.pdb": "#1f77b4"}):
+                self.assertTrue(FIGURES.render_all_cavity_candidates(
+                    diagnostics, "target_pocket1.conf", output, output.with_suffix(".pse"), "pymol",
+                    ["target_pocket1.conf"], selected_only=True,
+                    additional_selected_regions=[{"box_label": "B1", "geometry": {
+                        "center_x": 40, "center_y": 38, "center_z": 86,
+                        "size_x": 26, "size_y": 26, "size_z": 26},
+                        "site_group": {"members": [{"pocket_prediction": {"pocket_file": "pocket2_atm.pdb"}}],
+                                       "ligands": [{"path": str(ligand), "observation": {}}]}}],
                 ))
-            pml = output.with_name("ligand_site_overview_site_1.pml").read_text()
-            self.assertIn("show surface, fpocket_1", pml)
-            self.assertIn("set transparency, 0.88, fpocket_1", pml)
-            self.assertNotIn('label pocket_label_1, "Pocket 1"', pml)
-            self.assertIn("color forest, site_ligand", pml)
-            self.assertIn("show cartoon, receptor", pml)
-            self.assertIn("zoom all, 16", pml)
-            self.assertIn("set ray_clip_near, 0", pml)
-            self.assertIn("clip slab, 200", pml)
-            self.assertEqual(combined_page_sizes, [(6, 0), (1, 6), (7, 0)])
+            pml = output.with_suffix(".pml").read_text()
+            self.assertIn("show sticks, selected_box_1", pml)
+            self.assertIn("show sticks, additional_selected_box_1", pml)
+            self.assertIn("color marine, additional_selected_box_1", pml)
+            self.assertIn("show surface, additional_pocket_1_1", pml)
+            self.assertIn("color marine, additional_pocket_1_1", pml)
+            self.assertIn("show sticks, additional_ligand_1_1", pml)
+            self.assertIn("color green, additional_ligand_1_1", pml)
 
     def test_remote_singleton_without_fpocket_match_stays_table_only(self):
         self.assertFalse(FIGURES.ligand_site_group_deserves_figure({
@@ -320,6 +365,12 @@ class MultiSiteReportFigureTests(unittest.TestCase):
             {"ligand": "INCIDENTAL", "pocket_relationships": [{
                 "pocket_number": 1, "cavity_match": False, "all_heavy_atoms_inside": True,
             }]},
+            {"ligand": "COH", "pocket_relationships": [{
+                "pocket_number": 1, "cavity_match": True, "all_heavy_atoms_inside": True,
+            }]},
+            {"ligand": "NAG", "pocket_relationships": [{
+                "pocket_number": 1, "cavity_match": True, "all_heavy_atoms_inside": True,
+            }]},
         ]}
         self.assertEqual(
             [row["ligand"] for row in FIGURES.supporting_ligand_rows(record, 1)],
@@ -377,8 +428,8 @@ class MultiSiteReportFigureTests(unittest.TestCase):
                     mock.patch.object(FIGURES, "render_overlay", side_effect=overlay), \
                     mock.patch.object(FIGURES, "combine_panels", side_effect=combine), \
                     mock.patch.object(FIGURES, "combine_cluster_snapshots", return_value=False), \
-                    mock.patch.object(FIGURES, "render_plip2d", return_value=False):
-                outputs = FIGURES.build_compound_figures(study, "pymol", None)
+                    mock.patch.object(FIGURES, "render_poseedit_plip2d", return_value=False):
+                outputs = FIGURES.build_compound_figures(study, "pymol")
 
             expected = [
                 study / "report/ligand_a_site_1_panels_AB.png",

@@ -395,6 +395,32 @@ class RecoveryGuidanceTests(unittest.TestCase):
         self.assertIn('Resolve the unavailable', result['next_step'])
         self.assertIn('Bad CPU type', result['details'])
 
+    def test_legacy_retry_uses_its_own_job_log_to_find_diagnostics(self):
+        self.cobalt()
+        self.state.jobs[-1].id = 'new-job'
+        attempt = self.root / '.docking-universal-preparation-attempts' / 'attempt-1'
+        receptor = attempt / 'Target_receptor_prep' / 'receptor'
+        receptor.mkdir(parents=True)
+        (receptor / 'adfr_output_audit.json').write_text(json.dumps({'backend': 'adfr',
+            'missing_charge_parameters': ['Sorry, there are no Gasteiger parameters available for atom Target:B:NAG607:O6']}))
+        log = attempt / '.docking-universal-application-logs' / 'stdout.log'
+        self.state.artifacts = [SimpleNamespace(kind='job_stdout_log', path=str(log), metadata={'job_id': 'new-job'})]
+        result = self.guidance()
+        self.assertEqual(result['diagnosis_code'], 'unsupported_charge_assignment')
+        self.assertIn('NAG607', result['summary'])
+        self.assertNotIn('rejected element Co', result['details'])
+
+    def test_reported_residues_match_the_retained_coordinates(self):
+        self.source.write_text(atom(1, 'CO', 'COH', 'A', 602, 1)[:-3] + 'CO\n' +
+                               atom(2, 'O6', 'NAG', 'B', 607, 2) +
+                               atom(3, 'O6', 'NAG', 'C', 607, 3))
+        self.cobalt()
+        self.write_record('adfr_output_audit.json', {'missing_charge_parameters': [
+            'Sorry, there are no Gasteiger parameters available for atom Target:B:NAG607:O6']})
+        self.assertEqual(self.guidance()['affected_residues'], [
+            dict(resname='COH', chain='A', number='602', insertion_code='', reason='Unsupported element Co'),
+            dict(resname='NAG', chain='B', number='607', insertion_code='', reason='Missing charge assignment')])
+
     def test_latest_attempt_does_not_reuse_the_original_cobalt_diagnosis(self):
         self.cobalt()
         latest = self.root / 'latest'
@@ -502,6 +528,42 @@ class RecoveryGuidanceTests(unittest.TestCase):
         self.assertIsNone(result['recommended_backend'])
         self.assertIn('protonation',result['actions'][0]['instructions'])
         self.assertTrue(any('pdb2pqr_audit.json' in row['path'] for row in result['diagnostic_files']))
+
+    def test_repair_contacts_offer_only_residues_with_generated_endpoints(self):
+        self.source.write_text(
+            'ATOM      1  OH  TYR A   1       0.000   0.000   0.000  1.00 20.00           O\n'
+            'ATOM      2  CB  ARG A   9       3.000   0.000   0.000  1.00 20.00           C\nEND\n')
+        self.write_record('pdbfixer_audit.json', {'status': 'rejected_generated_geometry',
+            'missing_atom_inventory': [
+                {'chain': 'A', 'number': '9', 'residue': 'ARG', 'missing_atom_names': ['NE']},
+            ],
+            'introduced_unassigned_interresidue_bond_contacts': [
+                {'first': ['A', '1', 'TYR', 'OH'], 'second': ['A', '9', 'ARG', 'NE']},
+            ]})
+        result = self.guidance()
+        self.assertEqual([(row['resname'], row['number']) for row in result['affected_residues']],
+                         [('ARG', '9')])
+        self.assertIn('omissions', [action['id'] for action in result['actions']])
+
+    def test_later_round_retains_earlier_failed_repair_suggestions(self):
+        self.source.write_text(
+            'ATOM      1  OH  TYR A   1       0.000   0.000   0.000  1.00 20.00           O\n'
+            'ATOM      2  CB  ARG A   9       3.000   0.000   0.000  1.00 20.00           C\nEND\n')
+        prior = self.root / 'prior' / 'receptor'
+        prior.mkdir(parents=True)
+        (prior / 'pdbfixer_audit.json').write_text(json.dumps({'missing_atom_inventory': [
+            {'chain': 'A', 'number': '9', 'residue': 'ARG', 'missing_atom_names': ['NE']},
+        ]}))
+        (prior / 'receptor_after_pdbfixer.log').write_text(
+            'Expected 2 paddings for (A:1, A:9) with bonds [(1, 2)], but got 0\n')
+        self.state.jobs.insert(0, SimpleNamespace(request_id='earlier', status=SimpleNamespace(value='failed')))
+        self.state.workflow_data['receptor_preparation_attempts'] = [
+            {'request_id': 'earlier', 'root': str(prior.parent), 'status': 'failed'},
+        ]
+        result = self.guidance()
+        self.assertEqual(len(result['affected_residues']), 1)
+        self.assertEqual(result['affected_residues'][0]['number'], '9')
+        self.assertIn('earlier attempt', result['affected_residues'][0]['reason'])
 
     def test_rejected_output_or_repair_is_recognized_from_audit_without_intervention_text(self):
         self.write_record('pdbfixer_audit.json',{'status':'rejected_generated_geometry'})

@@ -29,7 +29,7 @@ Options:
   --override-reason TEXT    Required audit note with --force-ligand
   --ligand-sdf SDF          Deprecated alias for --ligand-template
   --ligand-resname NAME     Deprecated; allowed only when the instance is unique
-  --engine NAME             vina or qvinaw (QuickVina-W)
+  --engine NAME             vina, qvinaw, or experimental adgpu
   --control-tier NAME       quick, repeatability, broader, conformers, or robust
                             (default: quick, followed by an interactive retry menu)
   --approval-min-seeds N    Independent seeds required for approval (default: 5)
@@ -87,6 +87,8 @@ charge_model="gasteiger"
 non_interactive=0
 engine_command=""
 engine_env=""
+ad4_runs="20"
+ad4_heuristic_cap="12000000"
 exhaustiveness="8"
 num_modes="9"
 rmsd_threshold="2.0"
@@ -121,6 +123,8 @@ while [ "$#" -gt 0 ]; do
     --non-interactive) non_interactive=1; shift ;;
     --engine-command) engine_command="$2"; shift 2 ;;
     --engine-env) engine_env="$2"; shift 2 ;;
+    --ad4-runs) ad4_runs="$2"; shift 2 ;;
+    --ad4-heuristic-cap) ad4_heuristic_cap="$2"; shift 2 ;;
     --exhaustiveness) exhaustiveness="$2"; shift 2 ;;
     --num-modes) num_modes="$2"; shift 2 ;;
     --rmsd-threshold) rmsd_threshold="$2"; shift 2 ;;
@@ -156,9 +160,10 @@ case "$engine" in
   quickvina-w|qvina-w) engine="qvinaw" ;;
 esac
 case "$engine" in
-  vina|qvinaw) ;;
-  *) echo "ERROR: --engine must be vina or qvinaw (QuickVina-W)" >&2; exit 2 ;;
+  vina|qvinaw|adgpu) ;;
+  *) echo "ERROR: --engine must be vina, qvinaw, or experimental adgpu" >&2; exit 2 ;;
 esac
+[ "$engine" != adgpu ] || [ "$legacy_single_conformer" -eq 0 ] || { echo "ERROR: AD4 GPU requires ensemble control" >&2; exit 2; }
 case "$control_tier" in quick|repeatability|broader|conformers|robust) ;; *) echo "ERROR: invalid --control-tier" >&2; exit 2 ;; esac
 case "$forcefield" in mmff94|mmff94s|uff) ;; *) echo "ERROR: --forcefield must be mmff94, mmff94s, or uff" >&2; exit 2 ;; esac
 [ -z "$conformers_override" ] || [[ "$conformers_override" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: --conformers-override must be a positive integer" >&2; exit 2; }
@@ -328,8 +333,14 @@ cp "$complex" "$complex_copy"
   printf 'override_reason\t%s\n' "${override_reason:-NA}"
   printf 'chemistry_identity\t%s\n' "$([ "$infer_ligand_chemistry" -eq 1 ] && printf PDB_bond_perception || printf '%s' "${ligand_template:-RCSB_CCD_SMILES}")"
   printf 'engine\t%s\n' "$engine"
-  printf 'exhaustiveness\t%s\n' "$exhaustiveness"
-  printf 'num_modes_requested_per_engine\t%s\n' "$num_modes"
+  if [ "$engine" = adgpu ]; then
+    printf 'scoring_function\tAD4\n'
+    printf 'ad4_base_genetic_runs\t%s\n' "$ad4_runs"
+    printf 'ad4_heuristic_cap\t%s\n' "$ad4_heuristic_cap"
+  else
+    printf 'exhaustiveness\t%s\n' "$exhaustiveness"
+    printf 'num_modes_requested_per_engine\t%s\n' "$num_modes"
+  fi
   printf 'rmsd_threshold_angstrom\t%s\n' "$rmsd_threshold"
 } > "$out_dir/run_manifest.tsv"
 
@@ -539,6 +550,8 @@ if [ "$legacy_single_conformer" -eq 0 ]; then
       --rmsd-prune "$rmsd_prune"
       --charge-model "$charge_model"
       --mk-export "$mk_export_command"
+      --ad4-runs "$ad4_runs"
+      --ad4-heuristic-cap "$ad4_heuristic_cap"
     )
     [ -z "$conformers_override" ] || calibration_args+=(--conformers-override "$conformers_override")
     [ "$skip_tautomers" -eq 0 ] || calibration_args+=(--skip-tautomers)

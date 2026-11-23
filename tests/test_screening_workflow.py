@@ -270,10 +270,19 @@ class ScreeningWorkflowTests(unittest.TestCase):
             "1,3,no,101,state_1,2,-7.4,retained.pdbqt\n"
         )
         revision = self.store.load("screen").revision
-        response = self.dispatcher.dispatch(Command(
-            "screen", "session", "pose-1", "start_pose_interaction",
-            {"analysis_root": str(analysis), "pose_id": 1}, revision,
-        ))
+        original_save = self.store.save
+        delayed = []
+        def slow_save(state, **kwargs):
+            if not delayed and any(job.stage == 'pose_interaction' for job in state.jobs):
+                delayed.append(True)
+                time.sleep(2.5)
+            return original_save(state, **kwargs)
+        with patch.object(self.store, 'save', side_effect=slow_save):
+            response = self.dispatcher.dispatch(Command(
+                "screen", "session", "pose-1", "start_pose_interaction",
+                {"analysis_root": str(analysis), "pose_id": 1}, revision,
+            ))
+        self.assertTrue(delayed)
         self.assertEqual(response.status, "applied")
         state = self.wait_for(lambda item: any(
             artifact.kind == "pose_interaction_diagram" for artifact in item.artifacts

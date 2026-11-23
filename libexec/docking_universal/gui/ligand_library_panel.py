@@ -87,6 +87,7 @@ class LigandLibraryPanel(QtWidgets.QWidget):
         self.read_error = None
         self._pixmap = None
         self._selected_ids = set()
+        self._name_overrides = {}
         self._page = 0
         self._valid_ids = set()
         layout = QtWidgets.QVBoxLayout(self)
@@ -137,7 +138,7 @@ class LigandLibraryPanel(QtWidgets.QWidget):
         self.none_button.setToolTip("Clear the docking selection across ALL pages")
         controls.addWidget(self.all_button)
         controls.addWidget(self.none_button)
-        controls.addWidget(QtWidgets.QLabel("Check Dock to include; click a row to inspect."), 1)
+        controls.addWidget(QtWidgets.QLabel("Check Dock to include; click to inspect; double-click a name to edit."), 1)
         review_layout.addLayout(controls)
         pages = QtWidgets.QHBoxLayout()
         self.previous_button = QtWidgets.QPushButton("Previous")
@@ -166,7 +167,9 @@ class LigandLibraryPanel(QtWidgets.QWidget):
         self.splitter = QtWidgets.QSplitter()
         self.table = NavigationTable(0, 6)
         self.table.setHorizontalHeaderLabels(("Dock", "Compound", "Source / record", "Formula", "Charge", "Status"))
-        self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.DoubleClicked |
+                                   QtWidgets.QAbstractItemView.EditTrigger.EditKeyPressed)
+        self.table.setToolTip('Double-click a compound name to edit it for this docking run.')
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
         self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Interactive)
@@ -199,6 +202,7 @@ class LigandLibraryPanel(QtWidgets.QWidget):
     def clear(self):
         self.library = None
         self._selected_ids.clear()
+        self._name_overrides.clear()
         self._valid_ids.clear()
         self._page = 0
         self.loading = False
@@ -211,9 +215,21 @@ class LigandLibraryPanel(QtWidgets.QWidget):
         self.summary.setText("All source compounds are used unless you read the library and choose a subset.")
         self.selectionChanged.emit()
 
-    def set_library(self, library):
+    def set_library(self, library, *, restore_selection=None):
         self.library = library
         self._selected_ids.clear()
+        self._name_overrides.clear()
+        saved = QtCore.QSettings('DockingUniversal', 'Desktop').value(
+            'ligand_name_overrides/' + str(library.get('fingerprint', '')), '{}')
+        try:
+            import json
+            saved = json.loads(saved) if isinstance(saved, str) else saved
+            if isinstance(saved, dict):
+                valid_ids = {row['record_id'] for row in library.get('records', [])}
+                self._name_overrides.update({key: value for key, value in saved.items()
+                                             if key in valid_ids and isinstance(value, str) and value.strip()})
+        except (ValueError, TypeError):
+            pass
         if 'table' in library:
             table = library['table']
             blockers = [QtCore.QSignalBlocker(combo) for combo in (self.sheet_combo, self.smiles_column, self.name_column)]
@@ -240,6 +256,13 @@ class LigandLibraryPanel(QtWidgets.QWidget):
         else:
             self.mapping_box.hide()
         self._valid_ids = {record['record_id'] for record in library['records'] if record['valid']}
+        if (isinstance(restore_selection, dict) and
+                restore_selection.get('fingerprint') == library.get('fingerprint')):
+            self._selected_ids = set(restore_selection.get('record_ids') or []) & self._valid_ids
+            overrides = restore_selection.get('name_overrides') or {}
+            if isinstance(overrides, dict):
+                self._name_overrides.update({key: value for key, value in overrides.items()
+                                             if key in self._valid_ids and isinstance(value, str) and value.strip()})
         self._page = 0
         self._render_page()
         self.review.setVisible(library.get('mapping_approved', True))
@@ -259,6 +282,7 @@ class LigandLibraryPanel(QtWidgets.QWidget):
         self.library['records'] = []
         self.library.pop('column_mapping', None)
         self._selected_ids.clear()
+        self._name_overrides.clear()
         self._valid_ids.clear()
         self.table.setRowCount(0)
         self.preview.clear()
@@ -306,12 +330,17 @@ class LigandLibraryPanel(QtWidgets.QWidget):
             self.table.setItem(index, 0, check)
             location = (f"{record.get('source_sheet') or Path(record['source']).name} / row {record['source_row']}"
                         if 'source_row' in record else f"{Path(record['source']).name} / {record['source_record']}")
-            values = (record["name"], location,
+            values = (self._name_overrides.get(record['record_id'], record["name"]), location,
                       record["formula"], str(record["formal_charge"]),
                       "Ready" if record["valid"] else record["error"])
             for col, value in enumerate(values, 1):
                 item = QtWidgets.QTableWidgetItem(value)
-                item.setToolTip(value)
+                if col != 1 or not record['valid']:
+                    item.setFlags(item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
+                else:
+                    item.setToolTip('Double-click to edit the name; source and molecular identity remain unchanged.')
+                if col != 1:
+                    item.setToolTip(value)
                 self.table.setItem(index, col, item)
         del blocker
         page_blocker = QtCore.QSignalBlocker(self.page_number)
@@ -342,6 +371,9 @@ class LigandLibraryPanel(QtWidgets.QWidget):
         result = {"fingerprint": self.library["fingerprint"], "record_ids": chosen}
         if self.library.get('mapping_approved'):
             result['column_mapping'] = self.library['column_mapping']
+        names = {identifier: name for identifier, name in self._name_overrides.items() if identifier in self._selected_ids}
+        if names:
+            result['name_overrides'] = names
         return result
 
     def set_all(self, checked):
@@ -355,6 +387,24 @@ class LigandLibraryPanel(QtWidgets.QWidget):
         self._changed()
 
     def _changed(self, item=None):
+        if item is not None and item.column() == 1 and self.library is not None:
+            check = self.table.item(item.row(), 0)
+            identifier = check.data(QtCore.Qt.ItemDataRole.UserRole)
+            record = next((r for r in self.library['records'] if r['record_id'] == identifier), None)
+            if record:
+                name = item.text().strip()
+                if not name or name == record['name']:
+                    self._name_overrides.pop(identifier, None)
+                    name = record['name']
+                else:
+                    self._name_overrides[identifier] = name
+                import json
+                QtCore.QSettings('DockingUniversal', 'Desktop').setValue(
+                    'ligand_name_overrides/' + str(self.library['fingerprint']),
+                    json.dumps(self._name_overrides, ensure_ascii=False))
+                blocker = QtCore.QSignalBlocker(self.table)
+                item.setText(name)
+                del blocker
         if item is not None and item.column() == 0:
             identifier = item.data(QtCore.Qt.ItemDataRole.UserRole)
             if identifier in self._valid_ids and item.checkState() == QtCore.Qt.CheckState.Checked:

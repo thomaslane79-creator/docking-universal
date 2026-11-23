@@ -995,9 +995,11 @@ def split_compounds(source, destination, selection=None):
         for index, molecule in enumerate(molecules, start=1):
             raw_name = molecule.GetProp("_Name").strip() if molecule.HasProp("_Name") else ""
             from docking_universal.services.compound_identity import compound_display_name
-            compound_name = compound_display_name(molecule, path, len(compounds) + 1)
+            source_name = compound_display_name(molecule, path, len(compounds) + 1)
+            compound_name = (source_rows[index - 1][0].get('display_name_override', source_name)
+                             if source_rows is not None else source_name)
             base = safe_id(
-                raw_name or compound_name
+                raw_name or source_name
                 or (path.stem if len(molecules) == 1 else f"{path.stem}_{index}")
             )
             identifier = base
@@ -1027,6 +1029,8 @@ def split_compounds(source, destination, selection=None):
                 row = source_rows[index - 1][0]
                 compounds[-1].update(source_record=row["source_record"],
                                      source_sha256=row["source_sha256"], record_id=row["record_id"])
+                if row.get('display_name_override'):
+                    compounds[-1]['user_display_name'] = row['display_name_override']
                 for key in ('source_row', 'source_sheet', 'source_smiles'):
                     if key in row:
                         compounds[-1][key] = row[key]
@@ -1272,6 +1276,10 @@ def write_reports(study, manifest, compounds):
     }.get(selected_protocol_type, "Exploratory study; pose-recovery performance was not evaluated")
     rows = []
     protocol = read_json(Path(str(manifest.get('approved_protocol',''))).expanduser()) or {}
+    related_control = protocol.get('related_site_control') or manifest.get('related_site_control') or {}
+    if related_control:
+        exploratory_protocol_label = ('Exploratory protocol; the separate known-ligand control covers only '
+                                      + str(related_control.get('tested_box_label') or 'its tested site'))
     engine = protocol.get('engine') or manifest.get('configured_engine')
     for compound in compounds:
         compound_dir = study / "compounds" / compound["compound_id"]
@@ -1295,6 +1303,7 @@ def write_reports(study, manifest, compounds):
         warning = "" if manifest["study_status"] == "CONTROL_APPROVED" else exploratory_protocol_label
         rows.append({
             "compound_id": compound["compound_id"], "compound_name": compound["compound_name"],
+            "user_display_name": compound.get('user_display_name', ''),
             "status": status, "cluster_count": len(clusters), "selected_representatives": len(selected),
             "docking_site_count": retained_screen_manifest.get("docking_site_count", 1),
             "best_cluster_energy_kcal_per_mol": best.get("best_energy_kcal_per_mol", ""),
@@ -1332,6 +1341,14 @@ def write_reports(study, manifest, compounds):
     ]
     if removal_warning:
         lines += [f"> **Receptor-model warning:** {removal_warning}", ""]
+    measured_control = related_control.get('result_summary') or {}
+    if measured_control:
+        lines += ['## Known-ligand control', '',
+                  f"Tested site: {related_control.get('tested_box_label', 'not recorded')}. "
+                  f"Lowest energy: {measured_control.get('lowest_energy_kcal_per_mol', 'not recorded')} kcal/mol; "
+                  f"RMSD of that pose: {measured_control.get('lowest_energy_pose_rmsd_angstrom', 'not recorded')} Å; "
+                  f"closest RMSD: {measured_control.get('lowest_rmsd_angstrom', 'not recorded')} Å. "
+                  + ("Other selected sites or receptor states remain exploratory." if related_control.get('untested_box_labels') or related_control.get('untested_receptor_states') else ""), '']
     lines += ['## Reproducibility across systems', '', DOCKING_REPRODUCIBILITY_NOTICE, '',
               format_runtime_context(execution_context), '']
     from docking_universal.services.receptor_model_history import normalize_preparation
@@ -1369,18 +1386,27 @@ def write_reports(study, manifest, compounds):
         + '</tbody></table>') if settings_rows else ''
     warning_html = (
         f"<p><strong>{html.escape(protocol_type_label(selected_protocol_type))}:</strong> "
-        "the recorded site and docking results remain exploratory because target-specific pose-recovery performance was not evaluated.</p>"
+        + ("the separate control covers only " + html.escape(str(related_control.get('tested_box_label') or 'its tested site')) + "; other selected sites remain exploratory.</p>" if related_control else
+           "the recorded site and docking results remain exploratory because target-specific pose-recovery performance was not evaluated.</p>")
         if manifest["study_status"] == "EXPLORATORY_NO_CONTROL" else ""
     )
     if removal_warning:
         warning_html = f"<strong>Receptor-model warning:</strong> {html.escape(removal_warning)}"
+    control_html = ''
+    if measured_control:
+        control_html = ('<h2>Known-ligand control</h2><p>Tested site: '
+            + html.escape(str(related_control.get('tested_box_label') or 'not recorded'))
+            + '. Lowest energy: ' + html.escape(str(measured_control.get('lowest_energy_kcal_per_mol', 'not recorded')))
+            + ' kcal/mol; RMSD of that pose: ' + html.escape(str(measured_control.get('lowest_energy_pose_rmsd_angstrom', 'not recorded')))
+            + ' Å; closest RMSD: ' + html.escape(str(measured_control.get('lowest_rmsd_angstrom', 'not recorded')))
+            + ' Å.' + (' Other selected sites or receptor states remain exploratory.' if related_control.get('untested_box_labels') or related_control.get('untested_receptor_states') else '') + '</p>')
     document = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>{html.escape(manifest['study_name'])}</title><style>body{{font:16px system-ui;max-width:1100px;margin:3rem auto;padding:0 1rem;color:#18202a}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #ccd3da;padding:.55rem;text-align:left}}th{{background:#eef3f6}}code{{background:#eef3f6;padding:.15rem .3rem}}.note{{border-left:4px solid #b87900;padding:.8rem;background:#fff6df}}</style></head>
 <body><h1>{html.escape(manifest['study_name'])}</h1><p>Scientific status: <code>{manifest['study_status']}</code><br>Completion status: <code>{manifest.get('completion_status','UNKNOWN')}</code></p>
 <div class="note">{warning_html or 'Target-specific protocol gate passed. This remains computational evidence, not experimental validation.'}</div>
 <h2>Receptor preparation</h2><p>{html.escape(preparation_summary)}. PDBFixer is used only after strict Meeko rejects the filtered receptor.</p>
 <h2>Reproducibility across systems</h2><p>{html.escape(DOCKING_REPRODUCIBILITY_NOTICE)}</p><p>{html.escape(format_runtime_context(execution_context))}</p>
-{configured_html}<h2>Compound summary</h2><table><thead><tr>{''.join(f'<th>{html.escape(field)}</th>' for field in overview[0])}</tr></thead><tbody>{html_rows}</tbody></table>
+{configured_html}{control_html}<h2>Compound summary</h2><table><thead><tr>{''.join(f'<th>{html.escape(field)}</th>' for field in overview[0])}</tr></thead><tbody>{html_rows}</tbody></table>
 <h2>Scientific limits</h2><p>Scores are ranking outputs. Pose clustering and seed support describe search convergence and require structural and experimental interpretation.</p></body></html>"""
     (report_dir / "index.html").write_text(document)
     write_run_details(study, manifest, compounds, report_dir)
@@ -1573,8 +1599,6 @@ def main():
     elif args.engine is None:
         args.engine = "vina"
     if args.engine == 'adgpu':
-        if mode == 'control':
-            raise SystemExit('The experimental AD4 option is not enabled for the production control-calibration workflow; use an explicitly exploratory AD4 protocol. No Vina fallback was run.')
         from docking_universal.ad4_gpu import runtime_descriptor
         runtime_descriptor(allow_validation=os.environ.get('DOCKING_UNIVERSAL_ADGPU_VALIDATION') == '1')
     study_name = args.name or f"docking_universal_{mode}"
@@ -1654,6 +1678,8 @@ def main():
             "--ph", args.ph, "--base-seed", args.base_seed, "--forcefield", args.forcefield,
             "--rmsd-prune", args.rmsd_prune, "--charge-model", args.charge_model,
         ]
+        if args.engine == 'adgpu':
+            command += ['--ad4-runs', args.ad4_runs, '--ad4-heuristic-cap', args.ad4_heuristic_cap]
         if args.control_ligand_id:
             command += ["--ligand-id", args.control_ligand_id]
         reviewed_control = None
@@ -1701,7 +1727,14 @@ def main():
                               if region["box_label"] == reviewed_control["tested_box_label"]]
             for path in (study / "control").glob("**/protocol.json"):
                 scoped = read_json(path) or {}
-                scoped["docking_regions"] = tested_regions
+                scoped_regions = [dict(region) for region in tested_regions]
+                if scoped.get('engine') == 'adgpu':
+                    from docking_universal.ad4_gpu import grid_geometry
+                    from docking_universal_box_candidates import config_geometry
+                    for region in scoped_regions:
+                        region['ad4_grid'] = grid_geometry(config_geometry(Path(region['box'])))
+                    scoped['locked_inputs']['boxes'] = scoped_regions
+                scoped["docking_regions"] = scoped_regions
                 scoped["control_site_scope"] = {
                     "tested_box_label": reviewed_control["tested_box_label"],
                     "untested_box_labels": reviewed_control["untested_box_labels"],

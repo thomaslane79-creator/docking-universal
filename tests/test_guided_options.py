@@ -43,6 +43,14 @@ def write_protocol(path):
 
 
 class StudyPathwayTests(unittest.TestCase):
+    def test_each_control_tier_can_meet_its_seed_requirement(self):
+        from types import SimpleNamespace
+        for minimum in (5, 7):
+            args = SimpleNamespace(conformers_override=None, approval_min_seeds=minimum)
+            for tier in CALIBRATE.TIERS:
+                with self.subTest(minimum=minimum, tier=tier):
+                    self.assertGreaterEqual(CALIBRATE.tier_settings(args, tier)['seeds'], minimum)
+
     def test_all_three_study_choices(self):
         for choice, expected in (("1", "control"), ("2", "screen"), ("3", "exploratory")):
             with self.subTest(choice=choice), patch("builtins.input", return_value=choice):
@@ -122,6 +130,12 @@ class StudyPathwayTests(unittest.TestCase):
 
 
 class CalibrationChoiceTests(unittest.TestCase):
+    def test_ad4_tiers_use_genetic_runs_instead_of_vina_effort(self):
+        args = argparse.Namespace(ad4_runs=20, ad4_heuristic_cap=12000000)
+        self.assertEqual(CALIBRATE.ad4_tier_settings(args, 'quick')['lga_runs'], 20)
+        self.assertEqual(CALIBRATE.ad4_tier_settings(args, 'broader')['lga_runs'], 40)
+        self.assertEqual(CALIBRATE.ad4_tier_settings(args, 'robust')['lga_runs'], 60)
+        self.assertNotIn('exhaustiveness', CALIBRATE.ad4_tier_settings(args, 'quick'))
     def test_all_six_calibration_choices(self):
         expected = {
             "1": ("quick", False), "2": ("quick", True),

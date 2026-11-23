@@ -69,7 +69,10 @@ if QtCore is not None:
             super().__init__(parent)
             self.store = store
             self.study_id = study_id
+            before = self._state_file_signature()
             self.state: StudyState = site_review_presentation(store.load(study_id))
+            after = self._state_file_signature()
+            self._loaded_file_signature = after if before == after else None
             self.selection = StudySelection()
             self.viewer = ViewerState()
             self.detail_level = "guided"
@@ -96,9 +99,22 @@ if QtCore is not None:
                 return OperationState()
             return OperationState(job.id, job.stage, job.status.value)
 
+        def _state_file_signature(self):
+            """Detect atomic state replacement without parsing unchanged large studies."""
+            try:
+                stat = self.store.path_for(self.study_id).stat()
+                return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+            except (OSError, AttributeError):
+                return None
+
         def refresh(self) -> bool:
             """Load a newer authoritative revision and notify every observer."""
+            before = self._state_file_signature()
+            if before is not None and before == self._loaded_file_signature:
+                return False
             latest = site_review_presentation(self.store.load(self.study_id))
+            after = self._state_file_signature()
+            self._loaded_file_signature = after if before == after else None
             if latest.revision == self.state.revision:
                 return False
             old_artifacts = self._artifact_signature

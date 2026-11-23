@@ -56,7 +56,11 @@ class HostClientTests(unittest.TestCase):
         self.client.process = SimpleNamespace(poll=lambda: None, stdin=StringIO())
         self.client.session_id = 'timeout-test'
         try:
-            for operation, timeout in (('inspect_ligand_library', 120.0), ('snapshot', None)):
+            for operation, timeout in (('resolve_decision', 120.0), ('inspect_ligand_library', 120.0), ('start_control_validation', 120.0),
+                                       ('start_receptor_preparation', 120.0), ('retry_site_exploration', 120.0),
+                                       ('prepare_reviewed_receptor', 120.0), ('preview_receptor_changes', 120.0),
+                                       ('prepare_receptor_changes', 120.0),
+                                       ('reopen_site_review', 120.0), ('snapshot', None)):
                 with patch.object(self.client, '_read_message', return_value={
                     'status': 'applied', 'request_id': 'timeout-probe', 'result': {},
                 }) as read:
@@ -83,6 +87,22 @@ class HostClientTests(unittest.TestCase):
         self.assertEqual(
             client._environment()["DOCKING_UNIVERSAL_PYTHON"], str(Path(sys.executable).resolve())
         )
+
+    @unittest.skipIf(os.name == 'nt', 'Unix Conda layout fixture')
+    def test_desktop_finds_own_conda_without_shell_initialization(self):
+        base = self.root / 'miniforge'
+        python = base / 'envs' / 'docking-universal' / 'bin' / 'python'
+        python.parent.mkdir(parents=True)
+        python.touch()
+        conda = base / 'condabin' / 'conda'
+        conda.parent.mkdir(parents=True)
+        conda.write_text('#!/bin/sh\nexit 0\n')
+        conda.chmod(0o755)
+        client = ApplicationHostClient(self.root / 'other-runs', self.client.host_script, python_executable=python)
+        with patch.dict(os.environ, {'PATH': '/usr/bin:/bin'}, clear=True):
+            env = client._environment()
+        self.assertIn(str(conda.parent.resolve()), env['PATH'].split(os.pathsep))
+        self.assertEqual(env['DOCKING_UNIVERSAL_PYTHON'], str(python.resolve()))
 
     def test_source_validation_cli_is_not_silently_replaced_by_installed_cli(self):
         with patch.dict(os.environ, {'DOCKING_UNIVERSAL_CLI':'/validated/source/bin/docking-universal'}):

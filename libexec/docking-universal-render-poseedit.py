@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -18,7 +19,10 @@ POLICY = "approved-poseedit-local-v1"
 
 
 def command(*values, env=None):
-    subprocess.run(tuple(map(str, values)), check=True, env=env)
+    try:
+        subprocess.run(tuple(map(str, values)), check=True, env=env, timeout=120)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f'Interaction diagram rendering timed out after {exc.timeout} seconds') from exc
 
 
 def main() -> int:
@@ -30,6 +34,7 @@ def main() -> int:
     parser.add_argument("--scale", type=int, choices=(1, 2, 3, 4), default=3)
     parser.add_argument("--ligand-spacing", type=int, choices=(15, 20, 25, 30), default=15,
                         help="2D layout spacing; retained 3D coordinates remain unchanged")
+    parser.add_argument("--alignment-reference", type=Path, help="Experimental ligand SDF used only to align the 2D drawing")
     parser.add_argument("--renderer-policy", default=POLICY)
     parser.add_argument("--ligand-id", default="UNL")
     parser.add_argument("--node", default=os.environ.get("DOCKING_UNIVERSAL_NODE", "node"))
@@ -51,11 +56,14 @@ def main() -> int:
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="du-poseedit-") as temporary:
         work = Path(temporary)
-        command(sys.executable, root / "ligand_scene.py", args.ligand, "--output", work / "actual-pose-base.json",
-                "--spacing", args.ligand_spacing)
+        base_args = [sys.executable, root / "ligand_scene.py", args.ligand, "--output", work / "actual-pose-base.json",
+                     "--spacing", args.ligand_spacing]
+        if args.alignment_reference:
+            base_args += ["--alignment-reference", args.alignment_reference]
+        command(*base_args)
         command(sys.executable, root / "plip_scene.py", "--report", args.plip_xml,
                 "--ligand", args.ligand, "--receptor", args.receptor,
-                "--output-root", work, "--ligand-id", args.ligand_id.split(":", 1)[0])
+                "--output-root", work, "--ligand-id", args.ligand_id)
         command(sys.executable, root / "boundary_scene.py", "--output-root", work)
         command(node, root / "build_page.mjs", work, root / "assets")
         environment = os.environ.copy()
@@ -76,6 +84,8 @@ def main() -> int:
         "renderer_policy": POLICY, "network_used": False, "scale": args.scale,
         "layout_revision": LAYOUT_REVISION,
         "ligand_spacing": args.ligand_spacing,
+        "alignment_reference": str(args.alignment_reference.resolve()) if args.alignment_reference else None,
+        "alignment_reference_sha256": hashlib.sha256(args.alignment_reference.read_bytes()).hexdigest() if args.alignment_reference else None,
         "ligand": str(args.ligand.resolve()), "receptor": str(args.receptor.resolve()),
         "plip_xml": str(args.plip_xml.resolve()), "collision_count": 0,
         "layout_failure_count": 0, "crop": crop,

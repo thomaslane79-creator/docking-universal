@@ -22,13 +22,17 @@ class FakeCommand:
     def get_view(self):
         return self.view
 
-    def set_view(self, view):
+    def set_view(self, view, animate=0):
+        self.last_view_animation = animate
         self.restored_view = tuple(view)
         self.view = tuple(view)
 
     def get_setting_int(self, name):
         assert name == "auto_zoom"
         return self.auto_zoom
+
+    def get_setting_float(self, name):
+        return 30.0
 
     def set(self, name, value, *_args):
         if name == "auto_zoom":
@@ -98,6 +102,137 @@ class FakeWidget:
 
 
 class EmbeddedEvidenceCameraTests(unittest.TestCase):
+    def test_pocket_labels_name_only_selected_surfaces(self):
+        from unittest.mock import Mock
+        widget = FakeWidget()
+        widget.cmd.objects.extend(['du_pocket_space_1', 'du_pocket_space_35'])
+        widget.cmd.label = Mock()
+        adapter = EmbeddedPymolAdapter(widget)
+        adapter.label_pockets([35], True)
+        widget.cmd.label.assert_called_once_with('first (du_pocket_space_35)', repr('P35'))
+        adapter.label_pockets([35], False)
+        self.assertEqual(widget.cmd.label.call_args.args, ('first (du_pocket_space_35)', '""'))
+
+    def test_site_label_style_uses_readable_opaque_background(self):
+        from unittest.mock import Mock
+        widget = FakeWidget()
+        widget.cmd.set = Mock()
+        adapter = EmbeddedPymolAdapter(widget)
+        adapter._style_site_label('example')
+        widget.cmd.set.assert_any_call('label_size', 25, 'example')
+        widget.cmd.set.assert_any_call('label_font_id', 7, 'example')
+        widget.cmd.set.assert_any_call('label_bg_color', 'white', 'example')
+        widget.cmd.set.assert_any_call('label_bg_transparency', 0.15, 'example')
+        widget.cmd.set.assert_any_call('label_connector', 0, 'example')
+
+    def test_center_displayed_pose_uses_selected_overlay(self):
+        from unittest.mock import Mock
+        widget = FakeWidget()
+        widget.cmd.objects.extend(['du_review_pose', 'du_multi_pose_1', 'du_multi_pose_2'])
+        widget.cmd.count_atoms = Mock(return_value=5)
+        adapter = EmbeddedPymolAdapter(widget)
+        adapter.center_displayed_pose(1)
+        self.assertEqual(widget.cmd.centers[-1][0], 'du_multi_pose_2')
+
+    def test_center_pocket_uses_pocket_surface_and_preserves_zoom(self):
+        from unittest.mock import Mock
+        widget = FakeWidget()
+        widget.cmd.objects.append('du_pocket_space_35')
+        widget.cmd.count_atoms = Mock(return_value=10)
+        adapter = EmbeddedPymolAdapter(widget)
+        before = widget.cmd.view
+        adapter.center_pocket(35)
+        self.assertEqual(widget.cmd.centers[-1][0], 'du_pocket_space_35')
+        self.assertEqual(before[:9], widget.cmd.view[:9])
+        self.assertEqual(before[11], widget.cmd.view[11])
+        self.assertEqual(before[15:], widget.cmd.view[15:])
+
+    def test_center_evidence_ligand_preserves_zoom_and_rotation(self):
+        import hashlib
+        from unittest.mock import Mock
+        widget = FakeWidget()
+        path = Path('/tmp/example-ligand.pdb').resolve()
+        name = 'du_evidence_' + hashlib.sha256(str(path).encode()).hexdigest()[:12]
+        widget.cmd.objects.append(name)
+        widget.cmd.count_atoms = Mock(return_value=3)
+        adapter = EmbeddedPymolAdapter(widget)
+        before = widget.cmd.view
+        adapter.center_evidence_ligand(path)
+        after = widget.cmd.view
+        self.assertEqual(widget.cmd.centers[-1][0], name)
+        self.assertEqual(before[:9], after[:9])
+        self.assertEqual(before[11], after[11])
+        self.assertEqual(before[15:], after[15:])
+
+    def test_ligand_labels_use_selected_compound_names(self):
+        import hashlib
+        from unittest.mock import Mock
+        widget = FakeWidget()
+        path = Path('/tmp/example-ligand.pdb').resolve()
+        name = 'du_evidence_' + hashlib.sha256(str(path).encode()).hexdigest()[:12]
+        widget.cmd.objects.append(name)
+        widget.cmd.label = Mock()
+        adapter = EmbeddedPymolAdapter(widget)
+        adapter.label_evidence_ligands([(path, 'Example compound')], True)
+        widget.cmd.label.assert_called_once_with(f'first ({name})', repr('Example compound'))
+        adapter.label_evidence_ligands([(path, 'Example compound')], False)
+        self.assertEqual(widget.cmd.label.call_args.args, (f'first ({name})', '""'))
+
+    def test_multiple_poses_use_exact_retained_records(self):
+        from unittest.mock import Mock
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'receptor.pdb').write_text('ATOM receptor\n')
+            (root / 'all_poses.sdf').write_text('first\nM  END\n$$$$\nsecond\nM  END\n$$$$\n')
+            widget = FakeWidget()
+            widget.cmd.read_molstr = Mock()
+            adapter = EmbeddedPymolAdapter(widget)
+            adapter.expand_scene_clipping = Mock()
+            adapter.show_multiple_review_poses([(root, 2), (root, 1)])
+            calls = widget.cmd.read_molstr.call_args_list
+            self.assertEqual(calls[0].args[0], 'second\nM  END\n')
+            self.assertEqual(calls[1].args[0], 'first\nM  END\n')
+            self.assertEqual(widget.cmd.auto_zoom, 1)
+
+    def test_animated_site_center_keeps_orientation_and_zoom(self):
+        from docking_universal.gui.qt import QtWidgets
+        from PyQt6.QtTest import QTest
+        app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+        widget = QtWidgets.QWidget()
+        widget.cmd = FakeCommand()
+        adapter = EmbeddedPymolAdapter(widget)
+        before = widget.cmd.get_view()
+        adapter._center_review_selection('site', animate=True)
+        QTest.qWait(700)
+        after = widget.cmd.get_view()
+        self.assertNotEqual(after[12:15], before[12:15])
+        self.assertEqual(after[:9], before[:9])
+        self.assertEqual(after[11], before[11])
+        self.assertFalse(widget._du_fast_animation)
+        widget.close()
+
+    def test_loading_saved_scene_restores_embedded_click_behavior(self):
+        from unittest.mock import Mock, patch
+        with TemporaryDirectory() as directory:
+            scene = Path(directory) / 'saved.pse'
+            scene.touch()
+            widget = FakeWidget()
+            widget.cmd.load = Mock()
+            widget.cmd.button = Mock()
+            widget.cmd.deselect = Mock()
+            adapter = EmbeddedPymolAdapter(widget)
+            adapter._protein_signature = Mock(return_value=None)
+            adapter._frame_whole_protein = Mock()
+            adapter.expand_scene_clipping = Mock()
+            with patch('docking_universal.viewer.scene_style.apply_native_display_scale'):
+                adapter.load_report_session(scene)
+            widget.cmd.button.assert_called_with('single_left', 'none', 'cent')
+            widget.cmd.deselect.assert_called_once()
+            widget._du_interaction_review = True
+            with patch('docking_universal.viewer.scene_style.apply_native_display_scale'):
+                adapter.load_report_session(scene)
+            widget.cmd.button.assert_called_with('single_left', 'none', 'pk1')
+
     def test_component_inspection_uses_exact_chain_residue_and_segment(self):
         from types import SimpleNamespace
         from unittest.mock import Mock
@@ -119,6 +254,7 @@ class EmbeddedEvidenceCameraTests(unittest.TestCase):
                                          'resname': 'ID8', 'segment': 'E'})
             command.show.assert_any_call('sticks', name + ' and index 1+2')
             command.show.assert_any_call('cartoon', name + ' and polymer')
+            command.zoom.assert_called_with(name + ' and index 1+2', buffer=2, complete=0, animate=0)
             command.show.assert_any_call('sticks', name + ' and not polymer and not solvent')
             self.assertIn(('cyan', f'({name} and index 1+2) and elem C'), command.colors)
             command.show.reset_mock()
@@ -171,6 +307,7 @@ class EmbeddedEvidenceCameraTests(unittest.TestCase):
         previous_wizard = object()
         command.get_wizard_stack = Mock(return_value=[previous_wizard])
         command.set_wizard, command.set_wizard_stack, command.unpick = Mock(), Mock(), Mock()
+        command.button = Mock()
         adapter = EmbeddedPymolAdapter(widget)
         with TemporaryDirectory() as temporary, patch.dict(sys.modules, {'pymol.wizard': SimpleNamespace(Wizard=Wizard)}):
             source = Path(temporary) / 'input.cif'
@@ -179,6 +316,7 @@ class EmbeddedEvidenceCameraTests(unittest.TestCase):
             adapter.enable_input_preview_picking()
             adapter.enable_input_preview_picking()
             self.assertEqual(command.set_wizard.call_count, 1)
+            command.button.assert_called_with('single_left', 'none', 'pk1')
             wizard = command.set_wizard.call_args.args[0]
             self.assertTrue(widget._du_interaction_review)
             self.assertEqual(wizard.get_event_mask(), Wizard.event_mask_pick)
@@ -198,6 +336,7 @@ class EmbeddedEvidenceCameraTests(unittest.TestCase):
             adapter.end_input_preview()
             command.set_wizard_stack.assert_called_once_with([previous_wizard])
             self.assertFalse(widget._du_interaction_review)
+            command.button.assert_called_with('single_left', 'none', 'cent')
             command.index.return_value = [(name, 7)]
             wizard.do_pick(0)
             widget.inputMoleculePicked.emit.assert_not_called()
@@ -435,6 +574,18 @@ class EmbeddedEvidenceCameraTests(unittest.TestCase):
         adapter.show_pocket_space(manifest, [1], 'red')
         self.assertEqual(cmd.rebuild.call_count, 2)
 
+    def test_receptor_fit_does_not_reference_an_object_missing_from_the_scene(self):
+        from unittest.mock import Mock
+
+        widget = FakeWidget()
+        widget.cmd.objects = ['du_linked_receptor', 'du_review_pose']
+        widget.cmd.count_atoms = Mock(return_value=0)
+        widget.cmd.zoom = Mock()
+        adapter = EmbeddedPymolAdapter(widget)
+        self.assertFalse(adapter.frame_receptor_overview())
+        widget.cmd.count_atoms.assert_called_once_with('polymer and enabled')
+        widget.cmd.zoom.assert_not_called()
+
     def test_initial_interaction_focus_frames_only_pose_and_contact_sticks(self):
         from unittest.mock import Mock
         widget = FakeWidget()
@@ -445,7 +596,7 @@ class EmbeddedEvidenceCameraTests(unittest.TestCase):
         adapter.focus_interaction_review()
         widget.cmd.zoom.assert_called_once_with(
             'du_review_pose or (du_linked_receptor and rep sticks)',
-            buffer=4, complete=1, animate=0)
+            buffer=2, complete=0, animate=0)
         adapter.center_review_ligand.assert_called_once_with()
         widget.cmd.count_atoms.return_value = 0
         with self.assertRaises(ValueError):
@@ -645,6 +796,20 @@ class EmbeddedEvidenceCameraTests(unittest.TestCase):
         self.assertEqual(widget.cmd.disabled, ["candidate_box_P1", "ligand_site_box"])
         self.assertEqual(result["replaces"], "candidate_box_P1")
         self.assertEqual(result["hides_redundant"], ["ligand_site_box"])
+
+    def test_switching_ligand_sites_keeps_unselected_source_boxes_hidden(self):
+        from unittest.mock import patch
+
+        widget = FakeWidget()
+        boxes = ["candidate_box_P1", "candidate_box_L1", "candidate_box_L2", "ligand_site_box"]
+        widget.cmd.objects.extend(boxes)
+        adapter = EmbeddedPymolAdapter(widget)
+        fake_cgo = type("CGO", (), {"CYLINDER": 7})
+        with patch.dict("sys.modules", {"pymol": type("P", (), {"cgo": fake_cgo})}):
+            adapter.show_box([0, 0, 0], [10, 10, 10], source_object_name="candidate_box_L1")
+            adapter.show_box([20, 0, 0], [10, 10, 10], source_object_name="candidate_box_L2")
+        self.assertTrue(all(widget.cmd.disabled.count(name) >= 2 for name in boxes))
+        self.assertFalse(any(name in widget.cmd.enabled for name in boxes))
 
     def test_associated_ligand_visibility_follows_candidate_selection(self):
         from unittest.mock import patch

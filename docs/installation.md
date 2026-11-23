@@ -267,7 +267,6 @@ PLIP is used for interaction calculation, not as the sole visual-output layer. T
 
 The final PDF includes SDF-aware PLIP interaction diagrams for the three top energy-ranked cluster representatives. Docking Universal draws bond orders, aromaticity, formal charges, and stereochemistry from each retained representative SDF, then maps PLIP XML contact coordinates onto those atoms. This prevents the loss of ligand chemistry that occurs when a PDB complex is treated as the molecular-graph source. Each diagram receives a provenance manifest containing the chemistry source, interaction source, and maximum coordinate-mapping distance.
 
-The separately licensed customized `plip_to_2D` runner remains an optional fallback. Docking Universal can detect `DOCKING_UNIVERSAL_PLIP2D_RUNNER`, a script on `PATH`, or `~/tools/plip_to_2D/plip_2D_direct_unl.py`, but it is no longer the preferred report renderer. In every path, retained PLIP `report.xml` and `report.txt` files remain the authoritative interaction records.
 
 ## Preparation backends
 

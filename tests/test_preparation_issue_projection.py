@@ -73,6 +73,7 @@ class LaterBoxProjectionTests(unittest.TestCase):
         self.assertTrue(shown['changes_inside_box'])
         self.assertEqual(shown['severity'], 'high')
         self.assertEqual(shown['residues'][0]['number'], '200A')
+        self.assertTrue(shown['residues'][0]['removed'])
         self.assertIn('NAG B:200A', shown['warning'])
         self.assertIn('inside this box', shown['warning'])
         self.assertNotIn('receptor_model_review', self.candidate['evidence'])

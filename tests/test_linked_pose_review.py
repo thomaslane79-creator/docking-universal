@@ -21,6 +21,8 @@ class LinkedIdentityTests(unittest.TestCase):
                 path.write_text(path.name)
             self.assertIsNone(pose_view(diagram))
             write_pose_view(diagram, ligand, receptor, xml, 'Global lowest experimental-RMSD pose', 'red', pose_id=38)
+            self.assertIsNone(pose_view(diagram))
+            diagram.with_suffix('.manifest.json').write_text('{"schema_name": "docking-universal-poseedit-render", "renderer_policy": "approved-poseedit-local-v1"}')
             view = pose_view(diagram)
             self.assertEqual(view.ligand, ligand.resolve())
             self.assertEqual(view.ligand_color, 'red')
@@ -63,6 +65,27 @@ class LinkedIdentityTests(unittest.TestCase):
         label.hit_regions = []
         self.assertEqual(label.residue_boxes(), [])
         label.close()
+
+    def test_full_review_cluster_selector_mirrors_workspace_selection(self):
+        from docking_universal.gui.qt import QtWidgets
+        from docking_universal.gui.linked_pose_review import LinkedPosePanel, PoseView
+        from docking_universal.gui.interaction_review_window import InteractionReviewWindow
+        from unittest.mock import Mock
+        app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+        with TemporaryDirectory() as directory:
+            xml = Path(directory) / 'report.xml'
+            xml.write_text('<report><bindingsite><interactions/></bindingsite></report>')
+            view = PoseView(xml, xml, xml, xml, 'Cluster 1')
+            adapter = Mock()
+            adapter.show_review_contacts.return_value = {}
+            window = InteractionReviewWindow(view, LinkedPosePanel(), QtWidgets.QWidget(), adapter)
+            chosen = Mock()
+            window.set_cluster_choices([('Cluster 1', str(xml)), ('Cluster 2', 'other.png')], xml, chosen)
+            self.assertEqual(window.cluster_selector.currentIndex(), 0)
+            window.cluster_selector.activated.emit(1)
+            chosen.assert_called_once_with('other.png')
+            window.dispose()
+            window.close()
 
     def test_experimental_coordinates_are_not_described_as_docked(self):
         from docking_universal.gui.qt import QtWidgets
@@ -270,10 +293,8 @@ class LinkedIdentityTests(unittest.TestCase):
             app.processEvents()
             before = panel.query_image.pixmap().size()
             self.assertIn('PYR', panel.heading.text())
-            self.assertIn('Center ligand', panel.heading.text())
-            panel.heading.click()
-            adapter.center_review_ligand.assert_called_once_with()
-            # Exercise the drawn diagram's actual mouse route, not only its heading.
+            self.assertIn('2D interactions', panel.heading.text())
+            # Exercise the drawn diagram's actual mouse route.
             from docking_universal.gui.qt import QtCore
             from PyQt6.QtTest import QTest
             adapter.center_review_ligand.reset_mock()
@@ -318,12 +339,14 @@ class LinkedIdentityTests(unittest.TestCase):
             (cluster / "interactions").mkdir(parents=True)
             image = cluster / "interactions" / "representative_plip2d.png"
             image.write_bytes(b"image")
+            image.with_suffix(".manifest.json").write_text('{"schema_name": "docking-universal-poseedit-render", "renderer_policy": "approved-poseedit-local-v1"}')
             (cluster / "representative.sdf").write_text("representative")
             self.assertEqual(pose_view(image).ligand, (cluster / "representative.sdf").resolve())
             cache = root / "pose_interactions" / "pose_0099"
             cache.mkdir(parents=True)
             exact = cache / "interaction_diagram.png"
             exact.write_bytes(b"image")
+            exact.with_suffix(".manifest.json").write_text('{"schema_name": "docking-universal-poseedit-render", "renderer_policy": "approved-poseedit-local-v1"}')
             self.assertIsNone(pose_view(exact))
             (cache / "pose.sdf").write_text("different exact pose")
             self.assertEqual(pose_view(exact).ligand, (cache / "pose.sdf").resolve())

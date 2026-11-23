@@ -38,6 +38,67 @@ coordinates or docking results. C4 may use a newly generated bundle from the
 same acceptance session. C5 deliberately uses mmCIF rather than replacing the
 PDB-based C1 route.
 
+### Automated walkthroughs for the wiki
+
+Before publishing or refreshing a wiki example, verify the walkthrough against
+the current Docking Universal version. Record the version and source revision
+used to verify it. Capture screenshots and regenerate reports and figures with
+that version so the wiki reflects the current interface, workflow, and report
+layout. Reuse original input files and retained run data when compatible. Rerun
+from the original inputs when a workflow or scientific change affects the steps
+or results shown.
+
+Start with an unused output directory, the original receptor, and the bundled
+compound SDF. Readers do not need to source their own screening compounds or
+start with a prepared receptor or saved study. The offscreen runner uses the
+real scientific tools. Run it from the repository root with the scientific
+environment on PATH and the GUI environment's Python:
+
+```sh
+PYTHONPATH="$PWD/libexec" "$GUI_PYTHON" validation/real_gui_journey.py \
+  --root /path/to/new-output --case-id 2r8n-exploratory \
+  --receptor examples/tutorials/02_ligand_free_cavity/inputs/2R8N.pdb \
+  --ligand examples/tutorials/02_ligand_free_cavity/inputs/indinavir_pubchem_5362440.sdf \
+  --scientific-python "$SCIENTIFIC_PYTHON" \
+  --host-script "$PWD/libexec/docking-universal-application-host.py" \
+  --offline-evidence --smoke --snapshots
+```
+
+The smoke settings use one starting shape, one seed and exhaustiveness 4 to
+check the software path. Omit `--smoke` to test the default exploratory settings.
+`--offline-evidence` skips optional related-structure evidence; it does not
+supply missing chemical definitions. For C2 use the bundled 1HVR PDB and
+nevirapine SDF, with `--control-ligand XK2:A:263 --selected-pocket B1`. Select
+the engine with `--engine` and use a fresh output directory
+for each available engine. 1HVR may
+require public CSO definitions and review of the modified residue before
+preparation. The bundled GeoStd core plus the individual requested restraint
+file is enough for that preparation; the full GeoStd library is unnecessary.
+For the isolated 1HVR test, `--approve-test-component CSO` allows only the
+listed public definition downloads and the validated CSO template. Without it
+the runner stops at the review. Production studies retain the usual approval
+prompts. Offscreen results do not replace the visible GUI checks above.
+The numbered PNGs in `snapshots/` capture setup, region review, protocol
+settings, the workload preview, and results. The run record lists the image
+paths in order. Capture interactive PyMOL scenes separately in the visible app.
+
+For control and screening interaction figures, check the 2D renderer manifest
+and pose identity before using an image in the wiki. An image without the
+current approved PoseEdit manifest is not a valid substitute for a missing
+panel. Pocket, box, score, and cluster plots remain separate figures.
+Review the exported figures at their intended display size. Trim unused
+outer margins and gaps between paired panels, while leaving room for panel
+letters, residue labels, and the complete legend.
+
+For an optional wiki comparison, use one bound-ligand example and run each
+supported control engine independently. Start with Vina and QuickVina-W; add
+AutoDock-GPU where its control backend is available. Hold the deposited
+reference, reviewed receptor model, intended docking region, RMSD cutoff, and
+machine fixed. Record each engine's actual grid and settings, processing time
+by stage, RMSD of the top-ranked pose, lowest sampled RMSD, and repeatability
+across seeds. Keep the protocols and scoring scales separate. Record any
+engine capability or chemistry exclusions instead of substituting a run.
+
 ## High-impact boundary suite
 
 These cases are less frequent but protect scientific correctness. They may use

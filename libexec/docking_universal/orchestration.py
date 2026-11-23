@@ -26,9 +26,11 @@ from docking_universal_bundle import CONTROL_VALIDATED, protocol_type
 from .services.pose_interactions import build_pose_interaction_plan, validate_pose_interaction_outputs
 from .services.pocket_review import PocketReviewInputs, PocketReviewService, ordered_pocket_boxes
 from .services.preparation import (
+    PreparationStartup,
     ReceptorPreparationOptions,
     ReceptorPreparationService,
     build_receptor_preparation_plan,
+    _canonical_name,
 )
 from .services.preparation_interventions import (
     neutral_sensitivity_assignments,
@@ -48,6 +50,7 @@ class ProtocolWorkflowRunner:
         self.preparation_executable = Path(preparation_executable).resolve()
         self._guard = threading.Lock()
         self._cancellations: dict[str, threading.Event] = {}
+        self._evidence_stops: dict[str, threading.Event] = {}
         self._threads: dict[str, threading.Thread] = {}
 
     @staticmethod
@@ -155,10 +158,13 @@ class ProtocolWorkflowRunner:
             raise ValueError(f"Selected control ligand is not present in the supplied structure: {ligand_id}")
         engine = str(payload.get("engine") or "vina")
         tier = str(payload.get("control_tier") or "quick")
-        if engine not in {"vina", "qvinaw"} or tier not in {
+        if engine not in {"vina", "qvinaw", "adgpu"} or tier not in {
             "quick", "repeatability", "broader", "conformers", "robust",
         }:
             raise ValueError("Unsupported control engine or calibration tier")
+        if engine == 'adgpu':
+            from .ad4_gpu import runtime_descriptor
+            runtime_descriptor()
         script = self.preparation_executable.with_name("docking-universal-run.py")
         if not script.is_file():
             raise FileNotFoundError(f"Control workflow is missing: {script}")
@@ -188,10 +194,13 @@ class ProtocolWorkflowRunner:
             raise ValueError("Reviewed control uses the retained setup; no replacement inputs/settings are accepted")
         retry = payload == {'retry': True}
         latest = state.jobs[-1] if state.jobs else None
-        if retry and (not latest or latest.stage != 'control_validation'
-                      or latest.status.value not in {'failed', 'cancelled', 'interrupted'}
-                      or state.workflow_data.get('latest_control_status') not in {'failed', 'cancelled', 'interrupted'}):
-            raise ValueError('Only an unfinished reviewed control can be restarted')
+        previous_status = state.workflow_data.get('latest_control_status')
+        restartable = bool(latest and latest.stage == 'control_validation' and (
+            (latest.status.value in {'failed', 'cancelled', 'interrupted'}
+             and previous_status in {'failed', 'cancelled', 'interrupted'})
+            or (latest.status.value == 'completed' and previous_status == 'not_approved')))
+        if retry and not restartable:
+            raise ValueError('Only an unfinished or unapproved reviewed control can be restarted')
         if state.workflow_data.get("latest_control_status") and not retry:
             raise ActiveStageError("This control already has a retained result; review it before starting another study")
         reviewed = reviewed_control_inputs(state)
@@ -204,7 +213,15 @@ class ProtocolWorkflowRunner:
         script = self.preparation_executable.with_name("docking-universal-run.py")
         record_path = output.parent / "reviewed_control_inputs.json"
         record_path.parent.mkdir(parents=True, exist_ok=True)
-        record_path.write_text(json.dumps(reviewed, indent=2) + "\n")
+        if record_path.exists():
+            try:
+                same_record = json.loads(record_path.read_text()) == reviewed
+            except (OSError, ValueError):
+                same_record = False
+            if not same_record:
+                record_path = output.parent / f'reviewed_control_inputs.{uuid4().hex}.json'
+        if not record_path.exists():
+            record_path.write_text(json.dumps(reviewed, indent=2) + "\n")
         def register(current):
             if retry and current.workflow_data.get('control_site_review'):
                 current.workflow_data.setdefault('control_site_review_history', []).append(
@@ -238,6 +255,13 @@ class ProtocolWorkflowRunner:
             log_name="known-ligand-control", check=False,
         )
         cancellation = threading.Event()
+        persisted = threading.Event()
+        start_result = {}
+
+        def job_persisted(job):
+            start_result['job_id'] = job.id
+            start_result['stage'] = job.stage
+            persisted.set()
 
         def work() -> None:
             try:
@@ -245,11 +269,14 @@ class ProtocolWorkflowRunner:
                     study_id, "control_validation", process, cancel_event=cancellation,
                     progress_probe=lambda: control_feedback(output),
                     request_id=request_id, expected_revision=retained.revision,
+                    on_job_persisted=job_persisted,
                 )
                 self._register_control_outputs(study_id, output, result.status.value)
             except Exception as exc:
+                start_result['error'] = str(exc)
                 self._record_orchestration_failure(study_id, exc)
             finally:
+                persisted.set()
                 with self._guard:
                     self._cancellations.pop(study_id, None)
                     self._threads.pop(study_id, None)
@@ -261,16 +288,11 @@ class ProtocolWorkflowRunner:
             self._cancellations[study_id] = cancellation
             self._threads[study_id] = thread
             thread.start()
-        deadline = time.monotonic() + 2.0
-        while time.monotonic() < deadline:
-            latest = self.controller.get_study(study_id)
-            job = next((item for item in latest.jobs if item.request_id == request_id), None)
-            if job:
-                return {"job_id": job.id, "stage": job.stage, "output": str(output)}
-            if not thread.is_alive():
-                break
-            time.sleep(0.01)
-        raise RuntimeError("Control worker did not persist its job start")
+        if not persisted.wait(45):
+            raise RuntimeError('Control startup is taking longer than expected. Check the study status before retrying; startup may still complete.')
+        if 'job_id' not in start_result:
+            raise RuntimeError(start_result.get('error') or 'Control could not persist its job start')
+        return {'job_id': start_result['job_id'], 'stage': start_result['stage'], 'output': str(output)}
 
     def _register_control_outputs(self, study_id: str, output: Path, status: str) -> None:
         bundles = []
@@ -451,10 +473,19 @@ class ProtocolWorkflowRunner:
         if values.get("meeko_template_file"):
             values["meeko_template_file"] = Path(values["meeko_template_file"])
         evidence_mode = values.pop("pdb_pocket_evidence", "related-structures")
-        if evidence_mode not in {"related-structures", "off"}:
-            raise ValueError("PDB pocket evidence must be related-structures or off")
+        if evidence_mode not in {"related-structures", "limited-structures", "off"}:
+            raise ValueError("PDB pocket evidence must be all, limited, or off")
         options = ReceptorPreparationOptions(**values)
         is_retry = retry_site_exploration or retry_legacy_preparation
+        if not is_retry:
+            working = options.working_directory.resolve()
+            receptor_name = _canonical_name(options.input_pdb.expanduser().resolve())
+            preparation = working / f"{receptor_name}_receptor_prep"
+            site_review = preparation.with_name(preparation.name + '-site-review')
+            if preparation.exists() or site_review.exists():
+                # Existing outputs can belong to another or removed study.
+                working = working / 'study-runs' / f'{study_id}-{uuid4().hex}'
+                options = replace(options, working_directory=working)
         if is_retry:
             # Normalize into the new attempt from the outset. Normalization
             # writes files; running it in the old study directory would
@@ -543,6 +574,7 @@ class ProtocolWorkflowRunner:
         )
         preparation_revision = retained_state.revision
         cancellation = threading.Event()
+        startup = PreparationStartup()
 
         def work() -> None:
             try:
@@ -550,21 +582,25 @@ class ProtocolWorkflowRunner:
                     from .services.site_exploration import SiteExplorationService, exploration_root
                     result = SiteExplorationService(self.controller).run(
                         study_id, plan, options, cancel_event=cancellation,
-                        request_id=request_id, expected_revision=preparation_revision)
+                        request_id=request_id, expected_revision=preparation_revision,
+                        on_job_persisted=startup.acknowledge)
                     review_root = exploration_root(plan)
                 else:
                     result = ReceptorPreparationService(self.controller).run(
                         study_id, plan, cancel_event=cancellation,
                         request_id=request_id, expected_revision=preparation_revision,
+                        on_job_persisted=startup.acknowledge,
                     )
                     review_root = plan.output_root
                 if result.status.value == "completed":
-                    if evidence_mode == "related-structures":
+                    if evidence_mode in {"related-structures", "limited-structures"}:
                         self._collect_pdb_pocket_evidence(study_id, replace(plan, output_root=review_root))
                     self._start_review(study_id, review_root)
             except Exception as exc:
+                startup.error = str(exc)
                 self._record_orchestration_failure(study_id, exc)
             finally:
+                startup.ready.set()
                 with self._guard:
                     self._cancellations.pop(study_id, None)
                     self._threads.pop(study_id, None)
@@ -576,17 +612,7 @@ class ProtocolWorkflowRunner:
             self._cancellations[study_id] = cancellation
             self._threads[study_id] = thread
             thread.start()
-        deadline = time.monotonic() + 2.0
-        while time.monotonic() < deadline:
-            latest = self.controller.get_study(study_id)
-            job = next((item for item in latest.jobs if item.request_id == request_id), None)
-            if job:
-                return {"job_id": job.id, "stage": job.stage,
-                        "output_root": str(exploration_root(plan) if explore_first else plan.output_root)}
-            if not thread.is_alive():
-                break
-            time.sleep(0.01)
-        raise RuntimeError("Preparation worker did not persist its job start")
+        return startup.result(exploration_root(plan) if explore_first else plan.output_root)
 
     def preview_receptor_changes(self, study_id, choices, *, expected_revision):
         """Inspect exact proposed changes without starting work or approving science."""
@@ -769,14 +795,15 @@ class ProtocolWorkflowRunner:
             model, model_record = write_model(model_root, plan.receptor_pdb.name, preview, derivative,
                 actor=model_changes['actor'], rationale=model_changes['rationale'])
             model_record['reviewed_receptor_input'] = retain_reviewed_receptor_input(model_root, preview, derivative)
+            repair_mode = 'auto' if preview['choices'].get('repair_after_exclusions') else 'off'
             model_record['execution_policy'] = dict(preparation_backend=preview['preparation_backend'],
-                pdbfixer='off', reduce2='off', protonation='off', reviewed_model_only=True,
+                pdbfixer=repair_mode, reduce2='off', protonation='off', reviewed_model_only=True,
                 parameterization_only=True)
             (model_root / 'reviewed_model.json').write_text(json.dumps(model_record, indent=2) + '\n')
             model_record_sha256 = sha256(model_root / 'reviewed_model.json')
             original_structure_input = plan.structure_input
             values.update(input_pdb=model, working_directory=model_root / 'preparation',
-                          pdbfixer='off', reduce2='off', protonation='off',
+                          pdbfixer=repair_mode, reduce2='off', protonation='off',
                           preparation_backend=preview['preparation_backend'])
             plan = parameterization_plan(build_receptor_preparation_plan(
                 self.preparation_executable, ReceptorPreparationOptions(**values)))
@@ -818,6 +845,7 @@ class ProtocolWorkflowRunner:
                         kind, str(path), sha256(path), 'Explicit exploratory receptor change; not a validated control'))
         retained, _ = self.controller.store.update(study_id, mark, expected_revision=expected_revision)
         cancellation = threading.Event()
+        startup = PreparationStartup()
         def validate_before_finish():
             read_exploration(root)
             if any(not (root / name).is_file() or sha256(root / name) != digest for name, digest in pins.items()):
@@ -837,7 +865,8 @@ class ProtocolWorkflowRunner:
                 result = ReceptorPreparationService(self.controller).run(
                     study_id, plan, cancel_event=cancellation, request_id=request_id,
                     expected_revision=retained.revision, allow_template_decision=False,
-                    stage='receptor_parameterization', before_finish=validate_before_finish)
+                    stage='receptor_parameterization', before_finish=validate_before_finish,
+                    on_job_persisted=startup.acknowledge)
                 if result.status.value == 'completed':
                     validate_before_finish()
                     read_exploration(root)
@@ -903,10 +932,12 @@ class ProtocolWorkflowRunner:
                                 candidate['evidence']['receptor_preparation_review'] = for_box(issues, geometry)
                 self.controller.store.update(study_id, finish)
             except Exception as exc:
+                startup.error = str(exc)
                 self.controller.store.update(study_id, lambda latest:
                     latest.workflow_data.update(receptor_parameterization_status='failed'))
                 self._record_orchestration_failure(study_id, exc)
             finally:
+                startup.ready.set()
                 with self._guard:
                     self._cancellations.pop(study_id, None)
                     self._threads.pop(study_id, None)
@@ -917,16 +948,7 @@ class ProtocolWorkflowRunner:
             self._threads[study_id] = thread
             self._cancellations[study_id] = cancellation
             thread.start()
-        deadline = time.monotonic() + 2
-        while time.monotonic() < deadline:
-            latest = self.controller.get_study(study_id)
-            job = next((j for j in latest.jobs if j.request_id == request_id), None)
-            if job:
-                return {'job_id': job.id, 'stage': job.stage, 'output_root': str(plan.output_root)}
-            if not thread.is_alive():
-                break
-            time.sleep(.01)
-        raise RuntimeError('Parameterization worker did not persist its job start')
+        return startup.result(plan.output_root)
 
     def resume_after_decision(self, study_id: str, decision, approval) -> dict[str, Any] | None:
         """Resume a supported preparation checkpoint using the recorded response."""
@@ -1026,7 +1048,7 @@ class ProtocolWorkflowRunner:
                     study_id, plan, resume_job_id=job.id, cancel_event=cancellation,
                 )
                 if result.status.value == "completed":
-                    if evidence_mode == "related-structures":
+                    if evidence_mode in {"related-structures", "limited-structures"}:
                         self._collect_pdb_pocket_evidence(study_id, plan)
                     self._start_review(study_id, plan.output_root)
             except Exception as exc:
@@ -1217,7 +1239,7 @@ class ProtocolWorkflowRunner:
                                     known.add(artifact_id)
 
                     self.controller.store.update(study_id, retain_variants)
-                if evidence_mode == "related-structures":
+                if evidence_mode in {"related-structures", "limited-structures"}:
                     self._collect_pdb_pocket_evidence(study_id, plans["HIE"])
                 self._start_review(study_id, plans["HIE"].output_root)
                 final_status = "completed"
@@ -1259,6 +1281,20 @@ class ProtocolWorkflowRunner:
             "comparison_stage": "pending_box_selection",
         }
 
+    def stop_pdb_evidence_search(self, study_id: str) -> bool:
+        """Request a partial result without cancelling receptor preparation."""
+        with self._guard:
+            event = self._evidence_stops.get(study_id)
+            if event is None:
+                return False
+            event.set()
+        def mark_stopping(state):
+            progress = state.workflow_data.get('pdb_pocket_evidence_progress')
+            if progress:
+                progress['phase'] = 'stopping'
+        self.controller.store.update(study_id, mark_stopping)
+        return True
+
     def _collect_pdb_pocket_evidence(self, study_id: str, plan) -> None:
         """Run the public-PDB evidence stage omitted by the low-level bash preparer."""
         from docking_universal_pocket_evidence import collect_pocket_evidence
@@ -1280,9 +1316,22 @@ class ProtocolWorkflowRunner:
                 status = "unavailable"
                 detail = "Retained PDB evidence record could not be read"
         else:
+            stop_event = threading.Event()
+            with self._guard:
+                self._evidence_stops[study_id] = stop_event
             try:
+                setup = self.controller.get_study(study_id).workflow_data.get('study_setup') or {}
+                max_entries = 50 if setup.get('pdb_pocket_evidence') == 'limited-structures' else None
+                def progress(phase, completed, total, entry):
+                    def retain(state):
+                        state.workflow_data['pdb_pocket_evidence_progress'] = {
+                            'phase': phase, 'completed': completed, 'total': total, 'entry': entry,
+                        }
+                    self.controller.store.update(study_id, retain)
                 collected = collect_pocket_evidence(
                     Path(plan.request.command[1]), tuple(ordered_pocket_boxes(cavity)), evidence_root,
+                    progress_callback=progress, stop_requested=stop_event.is_set,
+                    max_entries=max_entries,
                 )
                 status = collected.get("status", "completed")
                 coverage = lookup_coverage(collected)
@@ -1297,10 +1346,14 @@ class ProtocolWorkflowRunner:
                     "error": detail,
                     "selection_policy": "evidence_only_user_decides",
                 }, indent=2) + "\n")
+            finally:
+                with self._guard:
+                    self._evidence_stops.pop(study_id, None)
 
         def register(state) -> None:
+            state.workflow_data.pop('pdb_pocket_evidence_progress', None)
             state.workflow_data["pdb_pocket_evidence"] = {
-                "mode": "related-structures", "status": status,
+                "mode": (state.workflow_data.get('study_setup') or {}).get('pdb_pocket_evidence', 'related-structures'), "status": status,
                 "record": str(record.resolve()), "detail": detail,
                 "coverage": coverage,
             }
@@ -1399,6 +1452,12 @@ class ProtocolWorkflowRunner:
         expected_revision = self._retain_restart_request(
             study_id, 'final_report', payload, request_id, expected_revision)
         cancellation = threading.Event()
+        persisted = threading.Event()
+        start_result = {}
+
+        def job_persisted(job):
+            start_result.update(job_id=job.id, stage=job.stage)
+            persisted.set()
 
         def work() -> None:
             try:
@@ -1409,12 +1468,15 @@ class ProtocolWorkflowRunner:
                         paths.protocol, paths.report, paths.bundle,
                     ),
                     request_id=request_id, expected_revision=expected_revision,
+                    on_job_persisted=job_persisted,
                 )
                 if result.status.value == "completed":
                     self._register_final_outputs(study_id, paths)
             except Exception as exc:
+                start_result['error'] = str(exc)
                 self._record_orchestration_failure(study_id, exc)
             finally:
+                persisted.set()
                 with self._guard:
                     self._cancellations.pop(study_id, None)
                     self._threads.pop(study_id, None)
@@ -1427,20 +1489,11 @@ class ProtocolWorkflowRunner:
             self._cancellations[study_id] = cancellation
             self._threads[study_id] = thread
             thread.start()
-        deadline = time.monotonic() + 2.0
-        while time.monotonic() < deadline:
-            latest = self.controller.get_study(study_id)
-            job = next((item for item in latest.jobs if item.request_id == request_id), None)
-            if job:
-                return {
-                    "job_id": job.id, "stage": job.stage,
-                    "protocol": str(paths.protocol), "report": str(paths.report),
-                    "bundle": str(paths.bundle),
-                }
-            if not thread.is_alive():
-                break
-            time.sleep(0.01)
-        raise RuntimeError("Finalization worker did not persist its job start")
+        if not persisted.wait(45):
+            raise RuntimeError("Protocol startup is taking longer than expected. Check the study status before retrying; startup may still complete.")
+        if 'job_id' not in start_result:
+            raise RuntimeError(start_result.get('error') or 'Protocol creation could not persist its job start')
+        return {**start_result, "protocol": str(paths.protocol), "report": str(paths.report), "bundle": str(paths.bundle)}
 
     def screening_plan(self, study_id: str, ligand_source: Path | str, *, ligand_selection=None) -> dict[str, Any]:
         state = self.controller.get_study(study_id)
@@ -1536,6 +1589,12 @@ class ProtocolWorkflowRunner:
         expected_revision = self._retain_restart_request(
             study_id, 'screening', payload, request_id, expected_revision)
         cancellation = threading.Event()
+        persisted = threading.Event()
+        start_result = {}
+
+        def job_persisted(job):
+            start_result.update(job_id=job.id, stage=job.stage)
+            persisted.set()
 
         def work() -> None:
             try:
@@ -1545,11 +1604,14 @@ class ProtocolWorkflowRunner:
                         output, int(plan["total_docking_jobs"]),
                     ),
                     request_id=request_id, expected_revision=expected_revision,
+                    on_job_persisted=job_persisted,
                 )
                 self._register_screening_outputs(study_id, output, result.status.value)
             except Exception as exc:
+                start_result['error'] = str(exc)
                 self._record_orchestration_failure(study_id, exc)
             finally:
+                persisted.set()
                 with self._guard:
                     self._cancellations.pop(study_id, None)
                     self._threads.pop(study_id, None)
@@ -1562,16 +1624,11 @@ class ProtocolWorkflowRunner:
             self._cancellations[study_id] = cancellation
             self._threads[study_id] = thread
             thread.start()
-        deadline = time.monotonic() + 2.0
-        while time.monotonic() < deadline:
-            latest = self.controller.get_study(study_id)
-            job = next((item for item in latest.jobs if item.request_id == request_id), None)
-            if job:
-                return {"job_id": job.id, "stage": job.stage, "plan": plan, "output": str(output)}
-            if not thread.is_alive():
-                break
-            time.sleep(0.01)
-        raise RuntimeError("Screening worker did not persist its job start")
+        if not persisted.wait(45):
+            raise RuntimeError('Screening startup is taking longer than expected. Check the study status before retrying; startup may still complete.')
+        if 'job_id' not in start_result:
+            raise RuntimeError(start_result.get('error') or 'Screening could not persist its job start')
+        return {**start_result, 'plan': plan, 'output': str(output)}
 
     def start_pose_interaction(
         self, study_id: str, payload: dict[str, Any], *, request_id: str, expected_revision: int,
@@ -1600,6 +1657,13 @@ class ProtocolWorkflowRunner:
             return {"cached": True, "diagram": str(plan.diagram), "pose_id": plan.record.pose_id}
         self._assert_no_active_stage()
         cancellation = threading.Event()
+        start_error = {}
+        persisted = threading.Event()
+        start_result = {}
+
+        def job_persisted(job):
+            start_result['job_id'] = job.id
+            persisted.set()
 
         def work() -> None:
             try:
@@ -1610,11 +1674,14 @@ class ProtocolWorkflowRunner:
                     ), cancel_event=cancellation,
                     required_outputs=(plan.diagram, plan.evidence, plan.manifest),
                     request_id=request_id, expected_revision=expected_revision,
+                    on_job_persisted=job_persisted,
                 )
                 if result.status.value == "completed":
                     validate_pose_interaction_outputs(plan)
                     self._register_pose_interaction(study_id, plan)
             except Exception as exc:
+                start_error['message'] = str(exc)
+                persisted.set()
                 self._record_orchestration_failure(study_id, exc)
             finally:
                 with self._guard:
@@ -1628,16 +1695,12 @@ class ProtocolWorkflowRunner:
             self._cancellations[study_id] = cancellation
             self._threads[study_id] = thread
             thread.start()
-        deadline = time.monotonic() + 2.0
-        while time.monotonic() < deadline:
-            latest = self.controller.get_study(study_id)
-            job = next((item for item in latest.jobs if item.request_id == request_id), None)
-            if job:
-                return {"cached": False, "job_id": job.id, "pose_id": plan.record.pose_id}
-            if not thread.is_alive():
-                break
-            time.sleep(0.01)
-        raise RuntimeError("Pose-interaction worker did not persist its job start")
+        if not persisted.wait(45):
+            return {"cached": False, "starting": True, "request_id": request_id,
+                    "pose_id": plan.record.pose_id}
+        if 'job_id' in start_result:
+            return {"cached": False, "job_id": start_result['job_id'], "pose_id": plan.record.pose_id}
+        raise RuntimeError(start_error.get('message') or "Pose-interaction worker did not persist its job start; check Logs for details")
 
     def has_live_worker(self, study_id: str) -> bool:
         with self._guard:
@@ -1767,7 +1830,9 @@ class ProtocolWorkflowRunner:
 
         def mutation(state) -> None:
             known = {artifact.id for artifact in state.artifacts}
-            state.artifacts.extend(artifact for artifact in artifacts if artifact.id not in known)
+            known_paths = {(artifact.kind, str(Path(artifact.path).resolve())) for artifact in state.artifacts}
+            state.artifacts.extend(artifact for artifact in artifacts
+                                   if artifact.id not in known and (artifact.kind, str(Path(artifact.path).resolve())) not in known_paths)
             state.workflow_data["latest_screening_output"] = str(output)
             state.workflow_data["latest_screening_status"] = status
             StudyController._event(

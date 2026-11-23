@@ -7,7 +7,8 @@ import os
 import tempfile
 import threading
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Iterator, TypeVar
 
@@ -22,6 +23,17 @@ SCHEMA_NAME = "docking-universal-application-state"
 SCHEMA_VERSION = 3
 WINDOWS = os.name == "nt"
 T = TypeVar("T")
+
+
+def _state_json_default(value: Any) -> Any:
+    """Serialize records without recursively copying the retained evidence."""
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, Path):
+        return str(value)
+    if is_dataclass(value) and not isinstance(value, type):
+        return {item.name: getattr(value, item.name) for item in fields(value)}
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
 class RevisionConflictError(RuntimeError):
@@ -244,7 +256,10 @@ class JsonStudyStore:
         temporary = Path(temporary_name)
         try:
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                json.dump(state.to_dict(), handle, indent=2, sort_keys=True)
+                # Avoid asdict's deep copy and a second normalization pass over
+                # potentially hundreds of megabytes of retained evidence.
+                document = {"schema_name": SCHEMA_NAME, "schema_version": SCHEMA_VERSION, **vars(state)}
+                handle.write(json.dumps(document, default=_state_json_default, separators=(",", ":")))
                 handle.write("\n")
                 handle.flush()
                 os.fsync(handle.fileno())

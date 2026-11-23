@@ -12,6 +12,15 @@ SPEC.loader.exec_module(REPORT)
 
 
 class CavityReportTests(unittest.TestCase):
+    def test_explicit_compound_display_name_is_used_in_report(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            study = Path(temporary)
+            (study / 'report').mkdir()
+            (study / 'report' / 'compound_display_names.json').write_text(json.dumps({'names': {'107771': 'pyronaridine'}}))
+            compound = {'compound_id': '107771', 'compound_name': '107771'}
+            self.assertEqual(REPORT.report_compound_name(study, compound, {}), 'pyronaridine')
+            self.assertEqual(REPORT.report_compound_name(study, {'compound_id': '2', 'user_display_name': '123'}, {}), '123')
+
     def test_exploratory_protocol_discovery_rejects_study_manifest(self):
         with tempfile.TemporaryDirectory() as temporary:
             study = Path(temporary)
@@ -65,6 +74,23 @@ class CavityReportTests(unittest.TestCase):
             {"entry": "2r5q", "ligand": "1UN", "ligand_chain": "B"},
         ]
         self.assertEqual(REPORT.unique_pdb_ligand_source_count(members), 2)
+
+    def test_evidence_table_merges_spatial_groups_that_match_the_same_candidate(self):
+        a = {"entry": "2R5P", "ligand": "MK1", "matched_cavity": 1,
+             "evidence_class": "exact_sequence_match"}
+        b = {"entry": "4U7Q", "ligand": "3EM", "matched_cavity": 1,
+             "evidence_class": "close_structural_homolog"}
+        groups = [
+            {"fpocket_recovery": {"best_matching_pocket": 1}, "members": [a, b]},
+            {"fpocket_recovery": {"best_matching_pocket": 1}, "members": [b]},
+            {"site_identity": {"canonical_label": "L1"}, "members": []},
+        ]
+        rows = REPORT.evidence_by_candidate(groups)
+        self.assertEqual(list(rows), ["P1", "L1"])
+        self.assertEqual(rows["P1"]["members"], [a, b, b])
+        self.assertEqual(REPORT.multi_site_source_pairs(groups), set())
+        text = REPORT.format_pdb_ligand_evidence(rows["P1"]["members"])
+        self.assertEqual(text.count("4U7Q/3EM"), 1)
 
     def test_repeated_source_in_different_sites_is_position_disambiguated(self):
         groups = [

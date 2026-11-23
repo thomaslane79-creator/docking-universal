@@ -45,9 +45,16 @@ class InteractionReviewWindow(QtWidgets.QDialog):
         close.clicked.connect(self.close)
         bar.addWidget(close)
         layout.addLayout(bar)
+        self.cluster_selector = QtWidgets.QComboBox()
+        self.cluster_selector.setObjectName('paired_cluster_selector')
+        self.cluster_selector.setToolTip('Choose another retained cluster or control interaction view')
+        self.cluster_selector.hide()
+        layout.addWidget(self.cluster_selector)
         self.basis = ExplanationLabel(
             'Experimental structure, not a docked pose. Both views use the same coordinates.'
             if view.experimental else
+            'Loaded structure: both views use the same coordinates. Contacts do not establish affinity.'
+            if view.coordinate_kind == 'input_structure' else
             'Docked pose: both views use the same retained coordinates. Contacts do not establish affinity.'
             if view.coordinate_kind == 'docked' else
             'Coordinate source kind unrecorded. Both views use the same coordinates; contacts do not establish affinity.',
@@ -58,6 +65,8 @@ class InteractionReviewWindow(QtWidgets.QDialog):
             if view.experimental else
             "Docked pose — both views use this exact retained docking pose and receptor. Contacts do not establish affinity."
             if view.coordinate_kind == "docked" else
+            "Both views use the same loaded receptor and ligand coordinates. The input structure may not be experimental; contacts do not establish affinity."
+            if view.coordinate_kind == 'input_structure' else
             "Both views use the same retained receptor and ligand coordinates. The source kind is not recorded; contacts do not establish affinity.")
         self.basis.setWordWrap(True)
         layout.addWidget(self.basis)
@@ -162,9 +171,22 @@ class InteractionReviewWindow(QtWidgets.QDialog):
         diagram_panel.query_image.residueActivated.connect(self.clicked_residue)
         diagram_panel.query_image.activated.connect(self.clicked_ligand)
         diagram_panel.status.setText(
-            "Click a boxed residue name or ligand heading to center in 3D; click a 3D residue to label/unlabel. 2D zoom stays unchanged."
+            "Click a boxed residue name or ligand in the diagram to center in 3D; click a 3D residue to label/unlabel. 2D zoom stays unchanged."
             if getattr(diagram_panel.query_image, 'hit_regions', []) else
-            "Retained diagram has no verified residue links. Click the ligand heading to center; click a 3D residue to label/unlabel.")
+            "Retained diagram has no verified residue links. Click the ligand in the diagram to center; click a 3D residue to label/unlabel.")
+
+    def set_cluster_choices(self, choices, current_diagram, on_choice):
+        """Mirror the workspace's retained cluster/control choices in this review."""
+        self.cluster_selector.blockSignals(True)
+        self.cluster_selector.clear()
+        for label, diagram in choices:
+            self.cluster_selector.addItem(label, str(diagram))
+        index = self.cluster_selector.findData(str(current_diagram))
+        self.cluster_selector.setCurrentIndex(index)
+        self.cluster_selector.blockSignals(False)
+        self.cluster_selector.setVisible(bool(choices))
+        self.cluster_selector.activated.connect(
+            lambda index: on_choice(self.cluster_selector.itemData(index)))
 
     @staticmethod
     def key(residue):

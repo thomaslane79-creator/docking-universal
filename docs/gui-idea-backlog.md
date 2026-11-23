@@ -2,6 +2,53 @@
 
 Status: active scope-control record, established 2026-09-24.
 
+### Example-driven tutorial wiki (end-of-project deliverable)
+
+The user wants a comprehensive, multi-chapter, example-driven tutorial covering all available
+Docking Universal features after the workflow and interface are stable. Plan it
+deliberately rather than treating an early draft as complete. Map the final
+features and alternatives to reproducible example studies; cover setup,
+scientific decisions, controls and protocol reuse, screening and additional runs,
+2D/3D and PLIP review, reports, recovery, and interpretation. Include paths for
+optional features and explain scientific limitations. Validate every demonstrated
+step against the released interface and retained example inputs before delivery.
+Use a wiki-style structure with a Start Here page, an example index, and linked
+chapter pages for workflow stages. Give each reproducible example its own path
+through the wiki, with inputs, decision points, and expected outputs. Use
+different examples to demonstrate workflows, decisions, and edge cases. Keep
+shared feature explanations, terminology, and troubleshooting on reference
+pages that examples can link to directly.
+
+### Compound lookup from the molecule inspector (future)
+
+Let users look up the selected deposited component by its identifier to see
+its name, structure, and source annotations. Keep deposited annotations,
+external database descriptions, and inferred biological roles distinct. Make
+any external lookup explicit and retain the exact chain and residue in the
+inspector. Lookup should not change the chosen docking reference.
+
+### Results Review window (2026-11-16)
+
+User requested removing the separate detach option; Results Review remains in
+the resizable workspace with its existing review controls.
+
+### Progress refresh responsiveness (2026-11-16)
+
+User prioritized reducing stutter during long runs. Progress-only updates refresh
+status without rebuilding scientific tables; changes to decisions, artifacts,
+job lifecycle or other study data still receive a full update. Large retained
+state files still require loading, a separate performance limitation.
+
+### Selected-run reports (2026-11-16)
+
+User explicitly prioritized reporting across additional screening runs in one project.
+Keep each retained run and its provenance independent. Offer individual reports,
+one document with separate run sections, and an alphabetical combined report only
+when the retained methods match exactly. Annotate each result with its source run;
+poses and clusters remain separate rather than being pooled. Validate reopened runs, incompatible methods,
+duplicate compound identifiers, source preservation and report selection. This
+displaces optional GUI additions, not the scientific decision workflow.
+
 ### Site evidence and duplicate suggestions before charge surfaces (2026-11-07)
 
 Current continuation: the user requests the other issues be fixed now. Finish

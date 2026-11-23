@@ -20,6 +20,7 @@ from ..gui.qt import QtCore, QtWidgets
 from .pymol_adapter import RegisteredStructure
 from .selections import Selection
 from .scene_style import SELECTED_BOX_RADIUS, expand_scene_clipping
+from ..pocket_metadata import POCKET_COLOR_RGB
 
 
 POCKET_RGB = {
@@ -28,7 +29,15 @@ POCKET_RGB = {
     "cyan": (0.0, 1.0, 1.0), "orange": (1.0, 0.5, 0.0),
     "violet": (0.56, 0.37, 0.6), "yellow": (1.0, 1.0, 0.0),
     "green": (0.0, 1.0, 0.0),
+    "du_report_unscored": (0.4, 0.447, 0.49),
+    **POCKET_COLOR_RGB,
 }
+
+
+def _set_pocket_color(cmd, color, selection):
+    if color in POCKET_COLOR_RGB or color == 'du_report_unscored':
+        cmd.set_color(color, POCKET_RGB[color])
+    cmd.color(color, selection)
 
 # Display-only rolling probe: rounds the bead-union envelope without changing
 # grid coordinates/radii. This is not a molecular solvent/cavity measurement.
@@ -78,7 +87,7 @@ def create_embedded_pymol_widget(parent=None):
     options.quiet = 1
     options.no_quit = 1
     options.read_stdin = 0
-    options.deferred = ["_do_button single_left, none, pk1"]
+    options.deferred = ["_do_button single_left, none, cent"]
 
     class EmbeddedPymolWidget(PyMOLGLWidget):
         residuePicked = QtCore.pyqtSignal(dict)
@@ -114,8 +123,16 @@ def create_embedded_pymol_widget(parent=None):
                 super().updateFbScale(context)
 
         def _pymolProcess(self):
-            if not self._du_stopped:
-                super()._pymolProcess()
+            if self._du_stopped:
+                return
+            if not getattr(self, '_du_fast_animation', False):
+                return super()._pymolProcess()
+            # The upstream widget checks at 20 ms intervals. During a camera
+            # pan, poll sooner so redraws can follow the display refresh rate.
+            idle = self.pymol.idle()
+            if idle or self.pymol.getRedisplay():
+                self.update()
+            self._timer.start(8)
 
         def event(self, event):
             if getattr(self, "_du_full_interface", False):
@@ -145,7 +162,7 @@ def create_embedded_pymol_widget(parent=None):
         def mousePressEvent(self, event, state=0):
             if self._du_full_interface:
                 return super().mousePressEvent(event, state)
-            if (self._du_interaction_review and event.modifiers() &
+            if (event.modifiers() &
                     (QtCore.Qt.KeyboardModifier.ShiftModifier | QtCore.Qt.KeyboardModifier.ControlModifier)):
                 self._du_blocked_gesture = True
                 event.accept()
@@ -182,7 +199,9 @@ def create_embedded_pymol_widget(parent=None):
 
         def mouseReleaseEvent(self, event):
             if self._du_full_interface:
-                return super().mouseReleaseEvent(event)
+                super().mouseReleaseEvent(event)
+                self._du_expand_clipping()
+                return
             if self._du_blocked_gesture:
                 self._du_blocked_gesture = False
                 event.accept()
@@ -195,9 +214,19 @@ def create_embedded_pymol_widget(parent=None):
                     )
                 self._du_right_press_pos = None
                 self._du_right_dragging = False
+                self._du_expand_clipping()
                 event.accept()
                 return
             super().mouseReleaseEvent(event)
+            self._du_expand_clipping()
+
+        def wheelEvent(self, event):
+            super().wheelEvent(event)
+            self._du_expand_clipping()
+
+        def _du_expand_clipping(self):
+            if not self._du_stopped:
+                expand_scene_clipping(self.cmd, getattr(self, '_du_box_bounds', None))
 
         def paintGL(self):
             if not self._du_stopped:
@@ -271,9 +300,9 @@ class EmbeddedPymolAdapter:
 
     def begin_compound_preview(self, mol_block: str) -> dict[str, Any]:
         """Display supplied compound coordinates; never generate a conformer."""
-        return self._begin_local_preview(lambda name: self.cmd.read_molstr(mol_block, name, zoom=0))
+        return self._begin_local_preview(lambda name: self.cmd.read_molstr(mol_block, name, zoom=0), ligand_only=True)
 
-    def _begin_local_preview(self, load) -> dict[str, Any]:
+    def _begin_local_preview(self, load, *, ligand_only=False) -> dict[str, Any]:
         if self._input_preview is not None:
             raise RuntimeError('An input-structure preview is already open.')
         name = 'du_input_preview_' + uuid4().hex
@@ -299,7 +328,7 @@ class EmbeddedPymolAdapter:
             if not self.cmd.count_atoms(visible):
                 raise ValueError('No non-water atoms are available to preview.')
             self.cmd.orient(visible, animate=0)
-            self.cmd.zoom(visible, buffer=6, complete=1, animate=0)
+            self.cmd.zoom(visible, buffer=2 if ligand_only else 6, complete=int(not ligand_only), animate=0)
             self.widget.update()
             return {'object_name': name}
         except Exception:
@@ -354,11 +383,10 @@ class EmbeddedPymolAdapter:
                     self.cmd.show('sticks', shown_components)
                     self.cmd.show('nonbonded', shown_components)
             self.cmd.color('cyan', f'({selection}) and elem C')
-            if show_receptor:
-                selection = f'({name} and polymer) or ({shown_components if show_all_components else selection})'
         if not preserve_view:
             self.cmd.orient(selection, animate=0)
-            self.cmd.zoom(selection, buffer=4, complete=1, animate=0)
+            component = entry['kind'] == 'component'
+            self.cmd.zoom(selection, buffer=2 if component else 4, complete=int(not component), animate=0)
         self.widget.update()
 
     def enable_input_preview_picking(self) -> None:
@@ -386,6 +414,8 @@ class EmbeddedPymolAdapter:
                         return
                     atoms = self.cmd.get_model('pk1', state=1).atom
                     if len(atoms) == 1:
+                        self.cmd.center('pk1', animate=0)
+                        adapter.expand_scene_clipping()
                         atom = atoms[0]
                         adapter.widget.inputMoleculePicked.emit(dict(
                             object=preview['name'], name=atom.resn, chain=atom.chain,
@@ -394,6 +424,7 @@ class EmbeddedPymolAdapter:
                     self.cmd.unpick()
 
         self.cmd.set_wizard(InputMoleculeWizard(_self=self.cmd))
+        self.cmd.button('single_left', 'none', 'pk1')
         self.widget._du_interaction_review = True
 
     def end_input_preview(self) -> None:
@@ -405,6 +436,7 @@ class EmbeddedPymolAdapter:
             if 'wizard_stack' in preview:
                 self.cmd.set_wizard_stack(preview['wizard_stack'])
                 self.widget._du_interaction_review = preview['interaction_input']
+                self.cmd.button('single_left', 'none', 'pk1' if preview['interaction_input'] else 'cent')
                 self.widget._du_blocked_gesture = False
             self.cmd.delete(preview['name'])
         finally:
@@ -472,8 +504,8 @@ class EmbeddedPymolAdapter:
             self.cmd.set_view(view)
         self.cmd.hide("everything", object_name)
         self.cmd.show("surface", object_name)
-        self.cmd.set("transparency", 0.35, object_name)
-        self.cmd.color(color, object_name)
+        self.cmd.set("transparency", 0.32, object_name)
+        _set_pocket_color(self.cmd, color, object_name)
         self.pockets[object_name] = retained
         self.expand_scene_clipping()
         self.widget.update()
@@ -496,10 +528,18 @@ class EmbeddedPymolAdapter:
         auto_zoom = self.cmd.get_setting_int("auto_zoom")
         try:
             self.cmd.set("auto_zoom", 0)
-            if self._hidden_source_box and self._hidden_source_box in self.cmd.get_names("objects"):
-                self.cmd.enable(self._hidden_source_box)
+            self._multi_source_boxes = []
             self._hidden_source_box = None
             object_names = self.cmd.get_names("objects")
+            # Retained scene boxes are source geometry, not the current selection.
+            # Keep every one hidden; du_box is rebuilt from the selected regions.
+            source_boxes = {name for name in object_names
+                            if name.startswith('candidate_box_') or name == 'ligand_site_box'}
+            source_boxes.update(name for name in (source_object_name, *redundant_object_names)
+                                if name and name in object_names)
+            for name in object_names:
+                if name in source_boxes:
+                    self.cmd.disable(name)
             associated_objects = [
                 name for name in object_names
                 if name == "ligand_site_representative"
@@ -512,11 +552,10 @@ class EmbeddedPymolAdapter:
                 else:
                     self.cmd.disable(object_name)
             if source_object_name and source_object_name in self.cmd.get_names("objects"):
-                self.cmd.disable(source_object_name)
                 self._hidden_source_box = source_object_name
+            self._hidden_redundant_boxes = []
             for object_name in redundant_object_names:
                 if object_name in self.cmd.get_names("objects"):
-                    self.cmd.disable(object_name)
                     if object_name not in self._hidden_redundant_boxes:
                         self._hidden_redundant_boxes.append(object_name)
             self.cmd.delete("du_box")
@@ -543,6 +582,40 @@ class EmbeddedPymolAdapter:
             "camera": "preserved",
             "edge_representation": "cylinders", "edge_radius_angstrom": SELECTED_BOX_RADIUS,
         }
+
+    def show_multiple_boxes(self, boxes):
+        """Replace the active overlay with all selected boxes, preserving the camera."""
+        from pymol import cgo
+        rendered, lows, highs = [], [], []
+        for box in boxes:
+            values = [float(v) for v in [*box['center'], *box['size']]]
+            color = box['color']
+            if len(values) != 6 or not all(math.isfinite(v) for v in values) or any(v <= 0 for v in values[3:]) or color not in POCKET_RGB:
+                raise ValueError('Invalid selected docking box')
+            rendered.extend(_box_cgo(cgo, values[:3], values[3:], POCKET_RGB[color], cylinder_radius=SELECTED_BOX_RADIUS))
+            lows.append([values[i] - values[i + 3] / 2 for i in range(3)])
+            highs.append([values[i] + values[i + 3] / 2 for i in range(3)])
+        if not rendered:
+            raise ValueError('No selected docking boxes')
+        view = self.cmd.get_view()
+        auto_zoom = self.cmd.get_setting_int('auto_zoom')
+        try:
+            self.cmd.set('auto_zoom', 0)
+            for box in boxes[1:]:
+                for name in (box['source_object_name'], *box.get('redundant_object_names', ())):
+                    if name in self.cmd.get_names('objects'):
+                        self.cmd.disable(name)
+                        self._multi_source_boxes.append(name)
+            self.cmd.delete('du_box')
+            self.cmd.load_cgo(rendered, 'du_box', zoom=0)
+        finally:
+            self.cmd.set('auto_zoom', auto_zoom)
+            self.cmd.set_view(view)
+        self.widget._du_box_bounds = [[min(v[i] for v in lows) for i in range(3)],
+                                     [max(v[i] for v in highs) for i in range(3)]]
+        self.expand_scene_clipping()
+        self.widget.update()
+        return {'count': len(boxes), 'camera': 'preserved'}
 
     def apply_selection(self, selection: Selection) -> Selection:
         self.cmd.select(selection.name, "none")
@@ -650,6 +723,11 @@ class EmbeddedPymolAdapter:
         if self._obstruction_highlight:
             self.clear_obstruction_highlight()
         self.cmd.load(str(session), partial=0)
+        # A saved PyMOL session can restore its own mouse bindings, including
+        # atom selection. Reapply the embedded viewer's deliberate picking mode.
+        self.cmd.button('single_left', 'none',
+                        'pk1' if getattr(self.widget, '_du_interaction_review', False) else 'cent')
+        self.cmd.deselect()
         from .scene_style import apply_native_display_scale
         apply_native_display_scale(self.widget)
         self.widget._du_box_bounds = None
@@ -705,6 +783,7 @@ class EmbeddedPymolAdapter:
         try:
             self.cmd.set("auto_zoom", 0)
             self.clear_linked_contacts()
+            self.cmd.delete("du_multi_pose_*")
             self.cmd.delete("du_review_pose")
             self.cmd.load(str(pose), "du_review_pose", zoom=0)
             self.cmd.show("sticks", "du_review_pose")
@@ -715,6 +794,72 @@ class EmbeddedPymolAdapter:
         self.review_pose = pose
         self.widget.update()
         return {"path": str(pose), "object_name": "du_review_pose"}
+
+    def show_multiple_review_poses(self, selections):
+        """Overlay exact retained SDF records sharing one receptor coordinate frame."""
+        groups = {}
+        receptors = []
+        for root, pose_id in selections:
+            root = Path(root).resolve()
+            if int(pose_id) < 1:
+                raise ValueError('Pose IDs must be positive.')
+            groups.setdefault(root, set()).add(int(pose_id))
+            receptor = root / 'receptor.pdb'
+            if not receptor.is_file():
+                raise FileNotFoundError(f'Receptor is missing: {receptor}')
+            receptors.append(receptor)
+        if not groups or len({hashlib.sha256(path.read_bytes()).hexdigest() for path in receptors}) != 1:
+            raise ValueError('Selected poses must share the same retained receptor.')
+        blocks = {}
+        for root, wanted in groups.items():
+            with (root / 'all_poses.sdf').open(encoding='utf-8', errors='strict') as source:
+                record, number = [], 1
+                for line in source:
+                    if line.strip() == '$$$$':
+                        if number in wanted:
+                            block = ''.join(record)
+                            if 'M  END' not in block:
+                                raise ValueError(f'Pose {number} has an invalid SDF record.')
+                            blocks[(root, number)] = block.split('M  END', 1)[0] + 'M  END\n'
+                            if all((root, pose) in blocks for pose in wanted):
+                                break
+                        record, number = [], number + 1
+                    else:
+                        record.append(line)
+            if not all((root, pose) in blocks for pose in wanted):
+                raise ValueError('One or more selected poses are absent from the retained SDF.')
+        self.clear_linked_contacts()
+        previous_view = self.cmd.get_view()
+        previous_auto_zoom = self.cmd.get_setting_int('auto_zoom')
+        receptor_hash = hashlib.sha256(receptors[0].read_bytes()).hexdigest()
+        reuse_receptor = (getattr(self, '_linked_receptor_hash', None) == receptor_hash
+                          and 'du_linked_receptor' in self.cmd.get_names('objects'))
+        try:
+            self.cmd.set('auto_zoom', 0)
+            for name in self.cmd.get_names('objects'):
+                self.cmd.disable(name)
+            self.cmd.delete('du_multi_pose_*')
+            if reuse_receptor:
+                self.cmd.enable('du_linked_receptor')
+            else:
+                self.cmd.delete('du_linked_receptor')
+                self.cmd.load(str(receptors[0]), 'du_linked_receptor', zoom=0)
+                self.cmd.hide('everything', 'du_linked_receptor')
+                self.cmd.show('cartoon', 'du_linked_receptor')
+                self.cmd.color('gray70', 'du_linked_receptor and elem C')
+            colors = ('red', 'marine', 'orange', 'magenta', 'cyan', 'yellow', 'salmon', 'violet')
+            for index, (root, pose_id) in enumerate(selections):
+                name = f'du_multi_pose_{index + 1}'
+                self.cmd.read_molstr(blocks[(Path(root).resolve(), int(pose_id))], name)
+                self.cmd.show('sticks', name)
+                self.cmd.color(colors[index % len(colors)], name + ' and elem C')
+            self.cmd.set('scene_buttons', 0)
+            self._linked_receptor_hash = receptor_hash
+        finally:
+            self.cmd.set('auto_zoom', previous_auto_zoom)
+            self.cmd.set_view(previous_view)
+        self.expand_scene_clipping()
+        self.widget.update()
 
     def show_linked_pose(self, ligand, receptor, *, highlight=False, frame_receptor=True, ligand_color="gray70"):
         """Review exact coordinates in one engine, preserving the same-receptor camera."""
@@ -735,10 +880,14 @@ class EmbeddedPymolAdapter:
             # A new ligand must never inherit the previous pose's contact sticks,
             # labels or CGO state, even when its receptor is reused.
             self.clear_linked_contacts()
+            self.cmd.delete('du_multi_pose_*')
             if not reuse and self._obstruction_highlight:
                 self.clear_obstruction_highlight()
             for name in objects:
                 self.cmd.disable(name)
+            # Saved representative sessions carry PyMOL scene buttons; those
+            # belong to the old session, not the selected result being shown.
+            self.cmd.set('scene_buttons', 0)
             if not reuse:
                 self.cmd.delete("du_linked_receptor")
                 self.cmd.load(str(receptor), "du_linked_receptor", zoom=0)
@@ -781,7 +930,29 @@ class EmbeddedPymolAdapter:
         self._plip_types_visible = {}
         self.widget.update()
 
-    def show_linked_interactions(self, view):
+    def clear_site_review_overlays(self):
+        self.clear_linked_contacts()
+        for name in self.cmd.get_names("objects"):
+            if name == "du_review_pose" or name.startswith(("du_multi_pose_", "du_evidence_")):
+                self.cmd.disable(name)
+        self.widget.update()
+
+    def set_site_review_visibility(self, *, has_selection, show_boxes):
+        names = self.cmd.get_names("objects")
+        if "du_box" in names:
+            (self.cmd.enable if has_selection and show_boxes else self.cmd.disable)("du_box")
+        for name in names:
+            if not has_selection or not show_boxes:
+                if name.startswith("candidate_box_") or name == "ligand_site_box":
+                    self.cmd.disable(name)
+            if not has_selection:
+                if name.startswith("du_pocket_space_") and name != "du_pocket_space_src":
+                    self.cmd.hide("surface", name)
+                if name.startswith(("du_evidence_", "ligand_site_representative")):
+                    self.cmd.disable(name)
+        self.widget.update()
+
+    def show_linked_interactions(self, view, *, focus_on_new_receptor=True):
         """Browse a retained representative with its own PLIP contacts, no rerun."""
         self.clear_linked_contacts()
         self.cmd.disable('du_review_pose')
@@ -803,7 +974,7 @@ class EmbeddedPymolAdapter:
         for residue in residues:
             self.set_contact_residue_visible(residue, True)
         styles = self.show_review_contacts(view.interactions)
-        if not reuse:
+        if not reuse and focus_on_new_receptor:
             self.focus_interaction_review()
         else:
             self.expand_scene_clipping()
@@ -850,13 +1021,14 @@ class EmbeddedPymolAdapter:
         if not self.cmd.count_atoms("du_review_pose"):
             raise ValueError("The matching review ligand is unavailable")
         self.cmd.zoom("du_review_pose or (du_linked_receptor and rep sticks)",
-                      buffer=4, complete=1, animate=0)
+                      buffer=2, complete=0, animate=0)
         self.center_review_ligand()
         self.expand_scene_clipping()
 
     def show_pocket_space(self, manifest, ranks, color):
         """Display only verified alpha grid volume; never infer a void from residues."""
-        if color not in POCKET_RGB:
+        colors = color if isinstance(color, dict) else {rank: color for rank in ranks}
+        if any(value not in POCKET_RGB for value in colors.values()):
             raise ValueError('Pocket color is not supported')
         camera = self.cmd.get_view()
         clipped_camera = camera
@@ -899,9 +1071,9 @@ class EmbeddedPymolAdapter:
                     if not hasattr(self, '_pocket_surface_styles'):
                         self._pocket_surface_styles = {}
                     self._pocket_surface_styles[name] = POCKET_SURFACE_STYLE
-                self.cmd.color(color, name)
+                _set_pocket_color(self.cmd, colors[int(rank)], name)
                 self.cmd.show('surface', name)
-                self.cmd.set('transparency', 0.45, name)
+                self.cmd.set('transparency', 0.32, name)
                 self.cmd.set('two_sided_lighting', 1)
                 self.cmd.enable(name)
                 rendered.append(name)
@@ -939,6 +1111,8 @@ class EmbeddedPymolAdapter:
         for name, value in snapshot.get('contacts', {}).items():
             setattr(self, name, value)
         self.widget._du_interaction_review = snapshot.get('interaction_input', False)
+        if hasattr(self.cmd, 'button'):
+            self.cmd.button('single_left', 'none', 'pk1' if self.widget._du_interaction_review else 'cent')
         self.widget._du_blocked_gesture = False
         self.widget.update()
 
@@ -956,7 +1130,7 @@ class EmbeddedPymolAdapter:
             raise ValueError(f"{residue['name']} {residue['chain']}:{resi} is missing or ambiguous in the source receptor")
         return matched
 
-    def _center_review_selection(self, selection):
+    def _center_review_selection(self, selection, *, animate=False):
         camera = tuple(self.cmd.get_view())
         try:
             self.cmd.center(selection, animate=0)
@@ -966,7 +1140,44 @@ class EmbeddedPymolAdapter:
             centered[:9] = camera[:9]
             centered[11] = camera[11]
             centered[15:18] = camera[15:18]
-            self.cmd.set_view(centered)
+            previous = getattr(self, '_site_pan_timer', None)
+            if previous is not None:
+                previous.stop()
+                previous.deleteLater()
+                self._site_pan_timer = None
+            if animate:
+                # Native PyMOL view interpolation advances at ~30 positions/s
+                # even when the viewport renders faster. Advance using elapsed
+                # time on Qt's precise timer so dropped frames do not slow the pan.
+                self.cmd.set_view(camera)
+                self.widget._du_fast_animation = True
+                timer = QtCore.QTimer(self.widget)
+                timer.setTimerType(QtCore.Qt.TimerType.PreciseTimer)
+                timer.setInterval(16)
+                elapsed = QtCore.QElapsedTimer()
+                elapsed.start()
+                def advance():
+                    if getattr(self.widget, '_du_stopped', False):
+                        timer.stop()
+                        return
+                    amount = min(1.0, elapsed.elapsed() / 450.0)
+                    eased = amount * amount * (3.0 - 2.0 * amount)
+                    frame = list(camera)
+                    for index in (9, 10, 12, 13, 14):
+                        frame[index] = camera[index] + (centered[index] - camera[index]) * eased
+                    self.cmd.set_view(frame)
+                    self.widget.update()
+                    if amount >= 1.0:
+                        timer.stop()
+                        self.widget._du_fast_animation = False
+                        self._site_pan_timer = None
+                        timer.deleteLater()
+                timer.timeout.connect(advance)
+                self._site_pan_timer = timer
+                timer.start()
+            else:
+                self.widget._du_fast_animation = False
+                self.cmd.set_view(centered)
         except Exception:
             self.cmd.set_view(camera)
             raise
@@ -982,10 +1193,41 @@ class EmbeddedPymolAdapter:
         finally:
             self.cmd.delete(temporary)
 
-    def center_review_ligand(self):
+    def center_review_point(self, center, *, animate=False):
+        """Center a recorded box without changing the camera's zoom or rotation."""
+        name = 'du_temporary_box_center'
+        try:
+            self.cmd.pseudoatom(name, pos=[float(value) for value in center])
+            self._center_review_selection(name, animate=animate)
+        finally:
+            self.cmd.delete(name)
+        if not animate:
+            self.expand_scene_clipping()
+
+    def center_pocket(self, number, *, animate=False):
+        name = f'du_pocket_space_{int(number)}'
+        if name not in self.cmd.get_names('objects') or not self.cmd.count_atoms(name):
+            raise ValueError('The selected pocket surface is not available')
+        self._center_review_selection(name, animate=animate)
+
+    def center_evidence_ligand(self, path, *, animate=False):
+        name = f"du_evidence_{hashlib.sha256(str(Path(path).resolve()).encode()).hexdigest()[:12]}"
+        if name not in self.cmd.get_names('objects') or not self.cmd.count_atoms(name):
+            raise ValueError('The selected evidence ligand is not loaded')
+        self._center_review_selection(name, animate=animate)
+
+    def center_review_ligand(self, *, animate=False):
         if "du_review_pose" not in self.cmd.get_names("objects") or not self.cmd.count_atoms("du_review_pose"):
             raise ValueError("The matching review ligand is no longer loaded")
-        self._center_review_selection("du_review_pose")
+        self._center_review_selection("du_review_pose", animate=animate)
+
+    def center_displayed_pose(self, index=0, *, animate=False):
+        names = self.cmd.get_names('objects')
+        overlay = f'du_multi_pose_{int(index) + 1}'
+        name = overlay if overlay in names else ('du_review_pose' if int(index) == 0 else overlay)
+        if name not in names or not self.cmd.count_atoms(name):
+            raise ValueError('The selected pose is not loaded')
+        self._center_review_selection(name, animate=animate)
 
     def set_contact_residue_visible(self, residue, visible):
         """Independent sticks toggles on the exact paired receptor; no markers/pan."""
@@ -1038,6 +1280,8 @@ class EmbeddedPymolAdapter:
                     if len(indices) == 1:
                         model = self.cmd.get_model('pk1').atom
                         if model:
+                            self.cmd.center('pk1', animate=0)
+                            adapter.expand_scene_clipping()
                             atom = model[0]
                             adapter.widget.residuePicked.emit(dict(
                                 object=indices[0][0], name=atom.resn, chain=atom.chain,
@@ -1161,8 +1405,64 @@ class EmbeddedPymolAdapter:
         if not ligands or any(not path.is_file() or path.suffix.lower() != ".pdb" for path in ligands):
             raise FileNotFoundError("Evidence comparison requires existing retained PDB ligands")
         self.sync_evidence_ligands(ligands)
+        self.frame_evidence_ligands(ligands)
         self.evidence_ligand = ligands[-1]
         return {"paths": [str(path) for path in ligands]}
+
+    def frame_evidence_ligands(self, paths):
+        names = [f"du_evidence_{hashlib.sha256(str(Path(path).resolve()).encode()).hexdigest()[:12]}"
+                 for path in paths]
+        if names:
+            selection = ' or '.join(names)
+            if self.cmd.count_atoms(selection):
+                self.cmd.zoom(selection, buffer=2, complete=0, animate=0)
+                self.expand_scene_clipping()
+                self.widget.update()
+
+    def label_evidence_ligands(self, records, visible):
+        """Label the selected retained ligand objects with their compound names."""
+        objects = set(self.cmd.get_names('objects'))
+        for path, label in records:
+            name = f"du_evidence_{hashlib.sha256(str(Path(path).resolve()).encode()).hexdigest()[:12]}"
+            if name not in objects:
+                continue
+            selection = f'first ({name})'
+            self.cmd.label(selection, repr(str(label)) if visible else '""')
+            (self.cmd.show if visible else self.cmd.hide)('labels', selection)
+            if visible:
+                self._style_site_label(name)
+        self.widget.update()
+
+    def label_pockets(self, numbers, visible):
+        """Label displayed pocket surfaces without altering their colors."""
+        objects = set(self.cmd.get_names('objects'))
+        for number in numbers:
+            name = f'du_pocket_space_{int(number)}'
+            if name not in objects:
+                continue
+            selection = f'first ({name})'
+            self.cmd.label(selection, repr(f'P{int(number)}') if visible else '""')
+            (self.cmd.show if visible else self.cmd.hide)('labels', selection)
+            if visible:
+                self._style_site_label(name)
+        self.widget.update()
+
+    def _style_site_label(self, name):
+        # Distribute labels around their anchors instead of assigning every
+        # label the same offset. This reduces collisions in crowded views.
+        offsets = ((3.0, 2.5), (-3.0, 2.5), (3.0, -2.5), (-3.0, -2.5),
+                   (0.0, 3.5), (0.0, -3.5), (4.0, 0.5), (-4.0, 0.5))
+        offset = offsets[int(hashlib.sha256(name.encode()).hexdigest()[:8], 16) % len(offsets)]
+        self.cmd.set('label_color', 'black', name)
+        self.cmd.set('label_font_id', 7, name)
+        self.cmd.set('label_size', 25, name)
+        self.cmd.set('label_bg_color', 'white', name)
+        self.cmd.set('label_bg_transparency', 0.15, name)
+        self.cmd.set('label_padding', [0.16, 0.12, 0], name)
+        self.cmd.set('label_outline_color', 'white', name)
+        self.cmd.set('label_position', [offset[0], offset[1], 2.0], name)
+        self.cmd.set('label_connector', 0, name)
+        self.cmd.set('float_labels', 1)
 
     def sync_evidence_ligands(self, paths: list[Path | str]):
         ligands = [Path(path).resolve() for path in paths]
@@ -1248,6 +1548,36 @@ class EmbeddedPymolAdapter:
         if "receptor" in self.cmd.get_names("objects"):
             return "receptor"
         return "all"
+
+    def frame_receptor_overview(self) -> bool:
+        selection = 'polymer and enabled'
+        if 'du_receptor' in self.cmd.get_names('objects', enabled_only=1):
+            selection = 'du_receptor and polymer'
+        if not self.cmd.count_atoms(selection):
+            return False
+        self.cmd.zoom(selection, buffer=3, complete=0, animate=0)
+        width, height = self.cmd.get_viewport()
+        if width > 0 and height > 0 and self.cmd.get_setting_int('orthoscopic'):
+            # PyMOL's orthographic zoom uses depth and vertical field of view.
+            # Fit the receptor's camera-space rectangle instead of its sphere.
+            view = list(self.cmd.get_view())
+            rotation = (view[0:3], view[3:6], view[6:9])
+            projected = (self.cmd.get_coords(selection) - view[12:15]) @ rotation
+            low = projected.min(axis=0)
+            high = projected.max(axis=0)
+            required_height = max(high[1] - low[1] + 4, (high[0] - low[0] + 4) * height / width)
+            half_angle = math.radians(self.cmd.get_setting_float('field_of_view') / 2)
+            distance = required_height / (2 * 0.95 * math.tan(half_angle))
+            old_distance = -view[11]
+            view[9] = -float(low[0] + high[0]) / 2
+            view[10] = -float(low[1] + high[1]) / 2
+            view[11] = -distance
+            view[15] = max(1.0, view[15] + distance - old_distance)
+            view[16] = max(view[15] + 1.0, view[16] + distance - old_distance)
+            self.cmd.set_view(view)
+        self.expand_scene_clipping()
+        self.widget.update()
+        return True
 
     def _frame_whole_protein(self) -> None:
         selection = self._protein_selection()

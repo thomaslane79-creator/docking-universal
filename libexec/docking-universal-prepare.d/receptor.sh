@@ -174,9 +174,9 @@ write_receptor_failure_diagnosis() {
     category="Incomplete deposited backbone requires review"
     why="An observed partial residue lacks backbone atoms. The conservative repair refused to construct them and did not create an accepted repaired model."
     next="Review the exact missing-atom inventory and original coordinates. Backbone construction or a deliberately edited input requires a separate explicit scientific decision."
-  elif grep -qs 'PDBFixer generated sub-Angstrom heavy-atom overlaps' "${failure_logs[@]}"; then
+  elif grep -qs 'PDBFixer generated sub-Angstrom heavy-atom overlaps\|PDBFixer generated unsafe heavy-atom contacts' "${failure_logs[@]}"; then
     category="Rejected generated repair geometry"
-    why="The generated repair introduced gross heavy-atom overlaps and was not accepted for parameterization. This is not proof that the deposited model itself has those overlaps."
+    why="The generated repair introduced heavy-atom overlaps or unassigned contacts close enough to be interpreted as inter-residue bonds. This is not proof that the deposited model itself has those overlaps."
     next="Review the retained repair audit and original coordinates; no alternative repair or residue removal has been chosen automatically."
   elif grep -qs 'Expected .* paddings.*but got' "${failure_logs[@]}"; then
     category="Preparation backend connectivity-construction error"
@@ -216,7 +216,7 @@ write_receptor_failure_diagnosis() {
     next="Review each named residue and choose a documented standard-residue mapping, validated custom template, or deliberate exclusion."
   elif grep -qs "heavy_miss=\|Template matching failed" "${failure_logs[@]}"; then
     category="Incomplete or template-mismatched residue"
-    why="Observed atoms or bonds do not match the expected residue template, even after conservative PDBFixer repair."
+    why="The coordinates evaluated by Meeko contain atoms or bonds that do not match an expected residue template."
     next="Inspect missing atoms, connectivity, residue identity, and alternate locations near the intended docking site."
   fi
 
@@ -770,7 +770,7 @@ run_safe_receptor_preparation_attempts() {
       record_adfr_fallback_status primary_backend "ADFRsuite was selected as the primary backend; no Meeko fallback was requested."
     fi
     log "Initial receptor preparation succeeded; PDBFixer was not needed"
-  elif [ "${DOCKING_UNIVERSAL_REVIEWED_MODEL_ONLY:-0}" = 1 ]; then
+  elif [ "${DOCKING_UNIVERSAL_REVIEWED_MODEL_ONLY:-0}" = 1 ] && [ "$PDBFIXER_MODE" = off ]; then
     record_adfr_fallback_status reviewed_model_stop "The explicitly reviewed model permits one strict preparation attempt only."
     log "The explicitly reviewed receptor failed strict preparation; no additional repair, alternate-location choice, residue exclusion or legacy fallback was attempted."
     return 0
@@ -778,8 +778,12 @@ run_safe_receptor_preparation_attempts() {
     log "Initial Meeko preparation failed; preserving its diagnostics before attempting quick repairs"
     if [ "$PDBFIXER_MODE" != "off" ] && [ "$PDBFIXER_AVAILABLE" = "1" ]; then
       log "Repairing receptor with PDBFixer; audit -> $PDBFIXER_AUDIT"
+      local repair_flags=()
+      if [ "${DOCKING_UNIVERSAL_REVIEWED_MODEL_ONLY:-0}" = 1 ]; then
+        repair_flags+=(--sidechains-only)
+      fi
       if run_logged_preparation_command "$PDBFIXER_LOG" "$PYTHON_COMMAND" "$PDBFIXER_HELPER" \
-        "${NATIVE_RECEPTOR_INPUT:-$RECEPTOR_FILTERED_PDB}" "$PDBFIXER_PDB" "$PDBFIXER_AUDIT"; then
+        "${NATIVE_RECEPTOR_INPUT:-$RECEPTOR_FILTERED_PDB}" "$PDBFIXER_PDB" "$PDBFIXER_AUDIT" "${repair_flags[@]}"; then
         PDBFIXER_USED=1
         cp "$PDBFIXER_PDB" "$RECEPTOR_PDB"
         build_meeko_receptor_command "$PREP_RECEPTOR_BIN" "$RECEPTOR_PDB" \
@@ -796,6 +800,11 @@ run_safe_receptor_preparation_attempts() {
       else
         log "PDBFixer could not repair this receptor; continuing to applicable targeted retries"
       fi
+    fi
+
+    if [ "${DOCKING_UNIVERSAL_REVIEWED_MODEL_ONLY:-0}" = 1 ]; then
+      record_adfr_fallback_status reviewed_model_stop "Reviewed retry limited to strict Meeko and authorized guarded side-chain repair."
+      return 0
     fi
 
     if [ "$PREP_SUCCESS" = "0" ] && [ -n "$DISULFIDE_TEMPLATE_ASSIGNMENTS" ]; then

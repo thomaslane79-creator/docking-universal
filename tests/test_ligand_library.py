@@ -35,6 +35,20 @@ class LigandLibraryTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
+    def test_reviewed_name_changes_display_but_not_source_or_stable_id(self):
+        identifier = self.selection['record_ids'][0]
+        renamed = {**self.selection, 'name_overrides': {identifier: 'My test compound'}}
+        before = self.source.read_bytes()
+        compounds = RUN.split_compounds(self.source, self.root / 'inputs/compounds', renamed)
+        self.assertEqual(compounds[0]['compound_name'], 'My test compound')
+        self.assertEqual(compounds[0]['compound_id'], 'Amine')
+        self.assertEqual(self.source.read_bytes(), before)
+        record = json.loads((self.root / 'inputs/ligand_library_review.json').read_text())['records'][1]
+        self.assertEqual(record['name'], 'Amine')
+        self.assertEqual(record['display_name_override'], 'My test compound')
+        with self.assertRaises(ValueError):
+            selected_library_records(self.source, {**self.selection, 'name_overrides': {'other': 'wrong'}})
+
     def test_subset_materialization_keeps_source_record_hash_and_only_selected_chemistry(self):
         before = self.source.read_bytes()
         compounds = RUN.split_compounds(self.source, self.root / 'inputs/compounds', self.selection)

@@ -16,6 +16,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import xml.etree.ElementTree as ET
 
 
@@ -64,7 +65,39 @@ def read_settings(parameters):
     return settings
 
 
-def atom_inventory(path, *, receptor=False):
+def receptor_parameter_types(configured):
+    """Read normal receptor types from the verified AutoGrid source receipt.
+
+    AutoGrid still validates every type during map generation. Special
+    covalent/ring-closure map types are not ordinary receptor atoms.
+    """
+    try:
+        folder = Path(configured['autogrid_executable']).resolve().parent
+        manifest = json.loads((folder / 'manifest.json').read_text())
+        archive = folder / 'autogrid-source.tar.gz'
+        if digest(archive) != manifest['files']['autogrid-source.tar.gz']['sha256']:
+            raise ValueError('AutoGrid parameter source differs from its install receipt')
+        with tarfile.open(archive, 'r:gz') as package:
+            members = [m for m in package.getmembers() if m.name.endswith('/ad4_shared/AD4_parameters.dat')]
+            if len(members) != 1:
+                raise ValueError('AutoGrid parameter source does not have one default table')
+            data = package.extractfile(members[0]).read().decode('ascii')
+        types = set()
+        for line in data.splitlines():
+            fields = line.split('#', 1)[0].split()
+            comment = line.partition('#')[2].lower()
+            if (len(fields) >= 2 and fields[0] == 'atom_par'
+                    and not any(term in comment for term in ('ring closure', 'covalent map'))):
+                types.add(fields[1])
+        if not {'H', 'C', 'N', 'OA', 'HD'}.issubset(types):
+            raise ValueError('AutoGrid default table lacks required receptor parameters')
+        return frozenset(types)
+    except (OSError, KeyError, TypeError, ValueError, tarfile.TarError):
+        # Older/custom installations retain the previously validated subset.
+        return RECEPTOR_TYPES
+
+
+def atom_inventory(path, *, receptor=False, receptor_types=None):
     atoms=[]
     for line in Path(path).read_text().splitlines():
         if line.startswith(("ATOM  ","HETATM")):
@@ -72,8 +105,8 @@ def atom_inventory(path, *, receptor=False):
             if not all(math.isfinite(v) for v in (*xyz,charge)):raise ValueError("Nonfinite AD4 coordinates/charge")
             atoms.append((line[:30],xyz,charge,kind))
     if not atoms:raise ValueError("Empty AD4 atom inventory")
-    unsupported=sorted({a[3] for a in atoms}-(RECEPTOR_TYPES if receptor else LIGAND_TYPES))
-    if unsupported:raise ValueError("Unsupported experimental AD4 atom types: "+", ".join(unsupported)+". Macrocycle pseudoatoms, metals and special parameters are not validated; no fallback was run.")
+    unsupported=sorted({a[3] for a in atoms}-((receptor_types or RECEPTOR_TYPES) if receptor else LIGAND_TYPES))
+    if unsupported:raise ValueError("Unsupported experimental AD4 atom types: "+", ".join(unsupported)+". The installed parameter set does not establish support for these types; no fallback was run.")
     return atoms
 
 
@@ -225,7 +258,7 @@ def run_prepared_batch(options, invocation, environment, stdout, stderr):
     seed=int(options.seed) if options.seed is not None else 20260808
     ligands=sorted(options.ligand_dir.glob('*.pdbqt'))
     if not ligands:raise DockRuntimeError('No prepared AD4 ligand inputs')
-    receptor_atoms=atom_inventory(options.receptor,receptor=True)
+    receptor_atoms=atom_inventory(options.receptor,receptor=True, receptor_types=receptor_parameter_types(configured))
     ligand_types=set()
     # Validate the complete batch before map generation or any search.
     for ligand in ligands:

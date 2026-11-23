@@ -163,8 +163,9 @@ def build_screening_plan(
     variants = sensitivity.get("variants") or {}
     affected_labels = set(map(str, sensitivity.get("affected_boxes") or ()))
     affected_regions = sum(
-        1 for region in regions
-        if str((region or {}).get("box_label") or "") in affected_labels
+        1 for index, region in enumerate(regions, 1)
+        if str((region.get("box_label") if isinstance(region, dict) else None)
+               or f"site-{index}") in affected_labels
     )
     variant_count = len(variants) if affected_regions else 1
     receptor_region_tasks = build_receptor_region_matrix(protocol)
@@ -219,7 +220,10 @@ def discover_screening_artifacts(output_root: Path | str) -> list[ArtifactRecord
                 continue
             seen.add(resolved)
             relative = str(resolved.relative_to(root))
-            identity = hashlib.sha256(relative.encode()).hexdigest()[:16]
+            # Relative paths repeat across screening runs in the same project.
+            # Include the retained run root so new results cannot be dropped
+            # as duplicates of an earlier run's artifacts.
+            identity = hashlib.sha256((str(root) + '\n' + relative).encode()).hexdigest()[:16]
             description = (
                 "Chemically typed PLIP 2D interactions for the lowest-energy member "
                 "of one selected pose cluster"

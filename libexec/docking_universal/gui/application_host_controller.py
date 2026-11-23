@@ -36,6 +36,9 @@ class ApplicationHostController:
     def resolve_pockets(self, decision_id, selections, rationale, revision):
         return self.resolve_decision(decision_id, selections, rationale, revision)
 
+    def reopen_site_review(self, revision):
+        return self._request('reopen_site_review', {}, revision)
+
     def start_preparation(self, payload, revision):
         return self._request("start_receptor_preparation", payload, revision)
 
@@ -74,6 +77,9 @@ class ApplicationHostController:
 
     def start_control_validation(self, payload, revision):
         return self._request("start_control_validation", payload, revision)
+
+    def stop_pdb_evidence_search(self):
+        return self._request('stop_pdb_evidence_search', {})
 
     def cancel_active_job(self, revision, job_id=None):
         return self._request("cancel_active_job", {"job_id": job_id} if job_id else {}, revision)

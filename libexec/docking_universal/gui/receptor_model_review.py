@@ -47,10 +47,56 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
             next_step = guidance['next_step']
             if guidance.get('method_candidates') and not self._suggested_backend:
                 next_step = 'No untried alternative method is available on this host. Use the guided review or corrected-input actions below.'
+            if guidance.get('diagnosis_code') == 'unsupported_charge_assignment':
+                next_step += (' Standard Vina scoring does not use the supplied partial charges; '
+                    'AutoDock-GPU uses AD4 scoring, which does. Continuing with the retained '
+                    'receptor for Vina is not yet enabled.')
             introduction.set_content(guidance['summary'] + '\n' + next_step,
                 guidance['details'] + '\n\n' + introduction.details_text)
         self.recovery_guidance = introduction
         layout.addWidget(introduction)
+        self.reported_exclusions = []
+        inventory = {tuple(row.get(k, '') for k in ('resname', 'chain', 'number', 'insertion_code')): row
+                     for row in initial_preview['residue_inventory']}
+        reported = guidance.get('affected_residues') or []
+        matching = []
+        for identity in reported:
+            key = tuple(identity.get(k, '') for k in ('resname', 'chain', 'number', 'insertion_code'))
+            if key in inventory and key not in [item[0] for item in matching]:
+                matching.append((key, inventory[key]))
+        if matching:
+            introduction.set_content('Preparation flagged these residues in this or an earlier attempt. Select any you want to remove.',
+                guidance.get('details', ''))
+            if guidance.get('diagnosis_code') == 'unsupported_charge_assignment':
+                introduction.set_content('Some components could not be prepared. Select any you want to remove.\n'
+                    'Vina ignores supplied partial charges; AD4 uses them. Continuing with all components '
+                    'using Vina is not yet available.', guidance.get('details', ''))
+            group = QtWidgets.QGroupBox('Select components to remove')
+            group.setObjectName('reported_component_exclusions')
+            group_layout = QtWidgets.QVBoxLayout(group)
+            note = QtWidgets.QLabel('Leave a box unchecked to keep that component. Removed components are flagged during docking-box review. Removing one may not resolve every issue.')
+            note.setWordWrap(True)
+            group_layout.addWidget(note)
+            selection_actions = QtWidgets.QHBoxLayout()
+            select_all = QtWidgets.QPushButton('Select all')
+            select_all.setObjectName('select_all_reported_exclusions')
+            select_all.clicked.connect(lambda: self._set_reported_exclusions(True))
+            clear_all = QtWidgets.QPushButton('Clear selection')
+            clear_all.setObjectName('clear_reported_exclusions')
+            clear_all.clicked.connect(lambda: self._set_reported_exclusions(False))
+            selection_actions.addWidget(select_all)
+            selection_actions.addWidget(clear_all)
+            selection_actions.addStretch()
+            group_layout.addLayout(selection_actions)
+            for key, row in matching:
+                problem = next((item.get('reason', '') for item in reported
+                    if tuple(item.get(k, '') for k in ('resname', 'chain', 'number', 'insertion_code')) == key), '')
+                checkbox = QtWidgets.QCheckBox(row['label'] + (' — ' + problem if problem else ''))
+                checkbox.setObjectName('remove_reported_component')
+                checkbox.toggled.connect(self._reported_exclusion_changed)
+                group_layout.addWidget(checkbox)
+                self.reported_exclusions.append((key, checkbox))
+            layout.addWidget(group)
         self.recovery_actions = QtWidgets.QComboBox()
         self.recovery_actions.setObjectName('preparation_recovery_actions')
         for action in guidance.get('actions', []):
@@ -96,7 +142,7 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
             self.preparation_backend.addItem(label if available else label + ' — unavailable', value)
             self.preparation_backend.model().item(self.preparation_backend.count() - 1).setEnabled(available)
         self.preparation_backend.setCurrentIndex(self.preparation_backend.findData(self._initial_backend))
-        if self._suggested_backend in self._available_backends:
+        if self._suggested_backend in self._available_backends and not matching:
             # This is a draft suggestion only. choices() includes the change,
             # and the host binds it to a fresh preview and explicit approval.
             self.preparation_backend.setCurrentIndex(self.preparation_backend.findData(self._suggested_backend))
@@ -110,9 +156,13 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
         layout.addWidget(self.backend_controls)
         roles = guidance.get('tool_roles') or {}
         if roles:
-            self.tool_guide = ExplanationLabel('What each preparation tool does',
-                'Preparation tools and recorded attempts',
-                '\n\n'.join(roles.values()) + '\n\n' +
+            self.tool_guide = ExplanationLabel('Cleanup pipeline and tool results',
+                'Cleanup pipeline and recorded attempts',
+                '1. Normalize and filter the input using the reviewed component and conformer choices.\n'
+                '2. Use Reduce2 for hydrogen placement. Use PDB2PQR/PROPKA for protonation when selected by the runtime and settings.\n'
+                '3. In the standard path, run strict Meeko atom typing and charge assignment. If eligible repair is needed, use PDBFixer, validate the new coordinates, then rerun strict Meeko.\n'
+                '4. Validate the prepared output and flag reviewed removals using their original positions in every docking box.\n\n'
+                + '\n\n'.join(roles.values()) + '\n\n' +
                 '\n'.join(name + ': ' + str(status).replace('_', ' ')
                           for name, status in guidance.get('stage_statuses', {}).items()))
             self.tool_guide.setWordWrap(True)
@@ -159,13 +209,30 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
                             'This is not a complete chemistry check.')
         self.partial_note.setWordWrap(True)
         layout.addWidget(self.partial_note)
-        layout.addWidget(QtWidgets.QLabel('Optional omissions change the receptor — leave blank to keep all components'))
+        manual_exclusions = QtWidgets.QWidget()
+        manual_layout = QtWidgets.QVBoxLayout(manual_exclusions)
+        manual_layout.setContentsMargins(0, 0, 0, 0)
+        manual_layout.addWidget(QtWidgets.QLabel('Other exact omissions — leave blank to keep all components'))
         self.exclusions = QtWidgets.QPlainTextEdit()
         self.exclusions.setObjectName('receptor_exact_exclusions')
         self.exclusions.setPlaceholderText('One exact identity per line: NAG A 1\nOptional fourth field: insertion code. Use . for a blank chain.')
         self.exclusions.setFixedHeight(78)
         self.exclusions.textChanged.connect(self.invalidate_preview)
-        layout.addWidget(self.exclusions)
+        manual_layout.addWidget(self.exclusions)
+        self.manual_exclusion_toggle = None
+        if matching:
+            self.manual_exclusion_toggle = QtWidgets.QToolButton()
+            self.manual_exclusion_toggle.setText('Remove other residues…')
+            self.manual_exclusion_toggle.setCheckable(True)
+            self.manual_exclusion_toggle.toggled.connect(manual_exclusions.setVisible)
+            layout.addWidget(self.manual_exclusion_toggle)
+            manual_exclusions.hide()
+        layout.addWidget(manual_exclusions)
+        self.repair_after_exclusions = QtWidgets.QCheckBox('Allow guarded side-chain repair after removals')
+        self.repair_after_exclusions.setChecked(bool(guidance.get('prefer_guarded_sidechain_repair')))
+        self.repair_after_exclusions.setToolTip('If strict Meeko requires it, repair missing side-chain atoms while preserving the retained heavy atoms.')
+        self.repair_after_exclusions.toggled.connect(self.invalidate_preview)
+        layout.addWidget(self.repair_after_exclusions)
         candidate_group = QtWidgets.QGroupBox('Local side-chain candidate — optional, explicit review required')
         candidate_layout = QtWidgets.QVBoxLayout(candidate_group)
         candidate_note = ExplanationLabel(
@@ -224,6 +291,44 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
         buttons.rejected.connect(self.reject)
         self.prepare_button.clicked.connect(self.accept)
         outer.addWidget(buttons)
+        if matching:
+            self.details.setMaximumHeight(150)
+            self.details.setPlainText('Select components above. The preview updates automatically.')
+            self.acknowledge.setText('I reviewed the selected removals and understand they will be flagged in docking-box review.')
+            # Keep the required confirmation next to the action, even when
+            # the component list or advanced options need scrolling.
+            layout.removeWidget(self.acknowledge)
+            outer.insertWidget(outer.count() - 1, self.acknowledge)
+            # Keep less common controls available without burying the direct
+            # component choices in diagnostic and alternate-model options.
+            advanced = QtWidgets.QWidget()
+            advanced_layout = QtWidgets.QVBoxLayout(advanced)
+            advanced_layout.setContentsMargins(0, 0, 0, 0)
+            start = layout.indexOf(group) + 1
+            while layout.indexOf(self.preview_button) > start:
+                item = layout.takeAt(start)
+                # addItem alone does not reparent widgets in Qt. They would
+                # remain visible over the collapsed panel at stale positions.
+                if item.widget() is not None:
+                    advanced_layout.addWidget(item.widget())
+                elif item.layout() is not None:
+                    advanced_layout.addLayout(item.layout())
+                else:
+                    advanced_layout.addItem(item)
+            layout.removeWidget(self.rationale)
+            advanced_layout.addWidget(self.rationale)
+            layout.removeWidget(self.preview_button)
+            advanced_layout.addWidget(self.preview_button)
+            toggle = QtWidgets.QToolButton()
+            toggle.setText('More options and details…')
+            toggle.setCheckable(True)
+            toggle.toggled.connect(advanced.setVisible)
+            options_position = layout.indexOf(self.details) + 1
+            layout.insertWidget(options_position, toggle)
+            layout.insertWidget(options_position + 1, advanced)
+            advanced.hide()
+            layout.addStretch(1)
+            self.preview_button.setText('Update preview')
         self.update_recovery_action()
 
     def update_recovery_action(self, *_):
@@ -262,6 +367,8 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
             self._scroll_area.ensureWidgetVisible(self.alternates)
             self._alternatives[0][1].setFocus()
         elif target == 'exclusions':
+            if self.manual_exclusion_toggle is not None:
+                self.manual_exclusion_toggle.setChecked(True)
             self._scroll_area.ensureWidgetVisible(self.exclusions)
             self.exclusions.setFocus()
         elif target == 'candidate':
@@ -285,7 +392,8 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
         self.method_summary.setText(text)
 
     def choices(self):
-        excluded = []
+        excluded = [dict(zip(('resname', 'chain', 'number', 'insertion_code'), key))
+                    for key, checkbox in self.reported_exclusions if checkbox.isChecked()]
         for text in self.exclusions.toPlainText().splitlines():
             if not text.strip():
                 continue
@@ -302,9 +410,23 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
             raise ValueError('The selected preparation backend is unavailable on this host.')
         if backend != self._initial_backend:
             choices['preparation_backend'] = backend
-        if self.sidechain_candidate.text().strip():
-            choices['sidechain_candidate'] = self.sidechain_candidate.text().strip()
+        candidate = self.sidechain_candidate.text().strip()
+        if candidate:
+            choices['sidechain_candidate'] = candidate
+        elif excluded and backend == 'meeko' and self.repair_after_exclusions.isChecked():
+            choices['repair_after_exclusions'] = True
         return choices
+
+    def _set_reported_exclusions(self, checked):
+        for _, checkbox in self.reported_exclusions:
+            with QtCore.QSignalBlocker(checkbox):
+                checkbox.setChecked(checked)
+        self._reported_exclusion_changed()
+
+    def _reported_exclusion_changed(self, *_):
+        self.invalidate_preview()
+        if any(checkbox.isChecked() for _, checkbox in self.reported_exclusions):
+            self.preview()
 
     def browse_candidate(self):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(self, 'Review local side-chain candidate receipt', '',
@@ -331,8 +453,11 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
                     f"Excluded atom records: {record['removed_atom_count']}. New modeled atoms in the candidate: "
                     f"{record.get('new_atoms_generated', 0)}. Retained coordinates are unchanged."]
             text.append('Preparation method: ' + self._method_labels[self.preparation_backend.currentData()] + '.')
+            if record.get('choices', {}).get('repair_after_exclusions'):
+                text.append('Guarded PDBFixer side-chain repair may run before a second strict Meeko attempt.')
             method_only = all(change.get('kind') == 'preparation_method_change' for change in record['changes'])
-            self.prepare_button.setText('Keep structure and try this method' if method_only else 'Use reviewed model and prepare')
+            self.prepare_button.setText('Keep structure and try this method' if method_only else
+                'Remove selected and retry' if self.reported_exclusions else 'Use reviewed model and prepare')
             if record.get('box_review_pending'):
                 text.append('Docking box not available yet; exclusions will be flagged when the box is generated.')
             for change in record['changes']:
@@ -358,11 +483,16 @@ class ReceptorModelReviewDialog(QtWidgets.QDialog):
         self.update_accept()
 
     def update_accept(self, *_):
-        self.prepare_button.setEnabled(bool(self._reviewed and self.rationale.text().strip()
+        only_reported = (any(checkbox.isChecked() for _, checkbox in self.reported_exclusions)
+            and not self.exclusions.toPlainText().strip() and not self.sidechain_candidate.text().strip()
+            and not any(choice.currentData() for _, choice in self._alternatives)
+            and self.preparation_backend.currentData() == self._initial_backend)
+        self.prepare_button.setEnabled(bool(self._reviewed and (self.rationale.text().strip() or only_reported)
             and self.acknowledge.isChecked()
             and (self._reviewed['severity'] != 'high' or self.protein_acknowledge.isChecked())))
 
     def approved_change(self):
         if not self.prepare_button.isEnabled() or self._reviewed['choices'] != self.choices():
             raise ValueError('A current preview and explicit approval are required')
-        return self.choices(), self._reviewed['preview_sha256'], self.rationale.text().strip()
+        rationale = self.rationale.text().strip() or 'Selected reported components for removal after review.'
+        return self.choices(), self._reviewed['preview_sha256'], rationale

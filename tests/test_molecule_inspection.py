@@ -35,16 +35,68 @@ def component_fixture(root, smiles='CCO'):
     for index, atom in enumerate(molecule.GetAtoms()):
         atoms.add_row(['LIG', 'A' + str(index), atom.GetSymbol(), str(atom.GetFormalCharge()),
                        atom.GetProp('_CIPCode') if atom.HasProp('_CIPCode') else 'N'])
-    bonds = block.init_loop('_chem_comp_bond.', ['comp_id', 'atom_id_1', 'atom_id_2', 'value_order'])
+    bonds = block.init_loop('_chem_comp_bond.', ['comp_id', 'atom_id_1', 'atom_id_2', 'value_order', 'pdbx_stereo_config'])
     orders = {1.0: 'sing', 2.0: 'doub', 3.0: 'trip', 1.5: 'arom'}
     for bond in molecule.GetBonds():
-        bonds.add_row(['LIG', 'A' + str(bond.GetBeginAtomIdx()), 'A' + str(bond.GetEndAtomIdx()), orders[bond.GetBondTypeAsDouble()]])
+        bonds.add_row(['LIG', 'A' + str(bond.GetBeginAtomIdx()), 'A' + str(bond.GetEndAtomIdx()), orders[bond.GetBondTypeAsDouble()], {'STEREOE': 'E', 'STEREOZ': 'Z'}.get(str(bond.GetStereo()), 'N')])
     path = Path(root) / 'input.cif'
     path.write_text(block.as_string())
     return path, molecule
 
 
 class MoleculeInspectionTests(unittest.TestCase):
+    def test_generated_preview_is_minimized_and_preserves_chemistry(self):
+        from rdkit import Chem
+        from docking_universal.services.molecule_inspection import inspection_preview
+        entry = {'origin': 'smiles', 'smiles': 'C[C@H](O)F'}
+        protocol = {'parameters': {'ph': 7.4, 'conformers_per_state': 1, 'seeds': [20260808], 'tautomers_enumerated': False}}
+        result = inspection_preview(entry, 'generated_coordinates', protocol)
+        molecule = Chem.MolFromMolBlock(result['mol_block'], removeHs=False)
+        self.assertTrue(molecule.GetConformer().Is3D())
+        for atom in molecule.GetAtoms():
+            atom.SetAtomMapNum(0)
+        self.assertEqual(Chem.MolToSmiles(Chem.RemoveHs(molecule), isomericSmiles=True), 'C[C@H](O)F')
+        self.assertIn('minimized', result['basis'])
+        self.assertIn('selected docking protocol', result['basis'])
+    def test_fragment_role_requires_matching_compound_and_fragment_context(self):
+        from docking_universal.services.molecule_inspection import ligand_display_role
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            aligned = root / 'aligned_ligands'
+            aligned.mkdir()
+            source = root / 'structural_ensemble' / 'source_structures' / '1ABC.pdb'
+            source.parent.mkdir(parents=True)
+            source.write_text('TITLE     PROTEIN WITH BOUND FRAGMENT TEST COMPOUND\n'
+                              'HETNAM     FRG TEST COMPOUND\n'
+                              'HETNAM     DRG DIFFERENT COMPOUND\nEND\n')
+            def row(code):
+                return {'source_ligand_id': f'1ABC/{code}/A/1',
+                        'aligned_ligand_pdb': str(aligned / (code + '.pdb'))}
+            self.assertEqual(ligand_display_role(row('FRG')), 'fragment_screening')
+            self.assertEqual(ligand_display_role(row('DRG')), 'unknown')
+            source.write_text('TITLE     PROTEIN WITH TEST COMPOUND\n'
+                              'HETNAM     FRG TEST COMPOUND\nEND\n')
+            self.assertEqual(ligand_display_role(row('FRG')), 'unknown')
+    def test_modified_polymer_is_visible_only_with_other_components(self):
+        import gemmi
+        source = Path(__file__).parent / "inputs/protein_ligand_complex/1HVR.pdb"
+        with TemporaryDirectory() as root:
+            cif = Path(root) / "reference.cif"
+            gemmi.read_structure(str(source)).make_mmcif_document().write_file(str(cif))
+            for path in (source, cif):
+                with self.subTest(path=path):
+                    components = input_molecules(path)[1:]
+                    self.assertEqual(
+                        [(item["resname"], item["chain"], item["resi"])
+                         for item in components if not item["supporting_component"]],
+                        [("XK2", "A", "263")],
+                    )
+                    self.assertEqual(
+                        {(item["resname"], item["chain"], item["resi"])
+                         for item in components if item["modified_polymer"]},
+                        {("CSO", "A", "67"), ("CSO", "B", "67")},
+                    )
+
     def test_supporting_display_filter_preserves_unknowns_and_exact_depositor_interest(self):
         import gemmi
         with TemporaryDirectory() as root:
@@ -53,11 +105,14 @@ class MoleculeInspectionTests(unittest.TestCase):
             for chain in structure[0]:
                 chain[0].name = 'BOG'
             block = structure.make_mmcif_document().sole_block()
+            block.set_mmcif_category('_pdbx_entity_nonpoly.',
+                                     {'entity_id': ['1'], 'comp_id': ['BOG'], 'name': ['Deposited reagent']})
             features = block.init_loop('_pdbx_entity_instance_feature.',
                                        ['ordinal', 'comp_id', 'auth_asym_id', 'auth_seq_num', 'feature_type'])
             features.add_row(['1', 'BOG', 'B', '102', "'SUBJECT OF INVESTIGATION'"])
             source.write_text(block.as_string())
             entries = input_molecules(source)[1:]
+            self.assertTrue(all(entry['compound_name'] == 'Deposited reagent' for entry in entries))
             self.assertTrue(entries[0]['supporting_component'])
             self.assertIn('additive or detergent', entries[0]['display_reason'])
             self.assertFalse(entries[1]['supporting_component'])
@@ -106,6 +161,16 @@ class MoleculeInspectionTests(unittest.TestCase):
             source, expected = component_fixture(root, 'C[C@H](O)C(=O)O')
             molecule = molecule_for_entry(input_molecules(source)[1])
             self.assertEqual(Chem.MolToSmiles(Chem.RemoveHs(molecule)), Chem.MolToSmiles(Chem.RemoveHs(expected)))
+
+    def test_declared_double_bond_stereochemistry_is_preserved(self):
+        from rdkit import Chem
+        for smiles in ('C/C=C/C', 'C/C=C\\C', 'F/C(Cl)=C(Br)/I', 'F/C(Cl)=C(Br)\\I'):
+            with self.subTest(smiles=smiles), TemporaryDirectory() as root:
+                source, expected = component_fixture(root, smiles)
+                molecule = molecule_for_entry(input_molecules(source)[1])
+                self.assertEqual(Chem.MolToSmiles(Chem.RemoveHs(molecule)),
+                                 Chem.MolToSmiles(Chem.RemoveHs(expected)))
+                self.assertTrue(drawing_for_entry(input_molecules(source)[1])[0].startswith(b'\x89PNG'))
 
     def test_missing_definition_and_whole_receptor_do_not_get_guessed_drawings(self):
         import gemmi

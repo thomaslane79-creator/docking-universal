@@ -58,6 +58,18 @@ def main():
             check('embedded native engine alive', adapter.is_alive())
             check('fragment loaded', cmd.count_atoms('example') > 10)
             check('surface and CGO box loaded', 'du_box' in cmd.get_names('objects'))
+            cmd.create('du_review_pose', 'example')
+            cmd.create('du_multi_pose_1', 'example')
+            cmd.create('du_evidence_previous', 'example')
+            adapter.clear_site_review_overlays()
+            visible = set(cmd.get_names('objects', enabled_only=1))
+            check('region review hides prior pose and evidence overlays',
+                  'example' in visible and not visible.intersection(
+                      {'du_review_pose', 'du_multi_pose_1', 'du_evidence_previous'}))
+            adapter.set_site_review_visibility(has_selection=True, show_boxes=False)
+            check('region review can hide the search box', 'du_box' not in cmd.get_names('objects', enabled_only=1))
+            adapter.set_site_review_visibility(has_selection=True, show_boxes=True)
+            check('region review can show the selected search box', 'du_box' in cmd.get_names('objects', enabled_only=1))
             frame = widget.grabFramebuffer()
             check('real OpenGL framebuffer', not frame.isNull() and frame.width() > 100)
             pixels = {frame.pixelColor(x, y).rgba() for x in range(0, frame.width(), 7)

@@ -1,11 +1,56 @@
 """Engine-neutral residue callouts for saved PLIP report figures."""
 
 
+def round_contact_label_backgrounds(rendered, unlabeled, callouts):
+    """Replace ray-traced rectangular callouts with foreground rounded badges.
+
+    The second image restores the same molecular pixels behind each label;
+    outside that small area PyMOL's original connector lines are retained.
+    """
+    from pathlib import Path
+    from PIL import Image, ImageDraw, ImageFont
+
+    original = Image.open(rendered)
+    mode, dpi = original.mode, original.info.get('dpi')
+    picture = original.convert('RGBA')
+    base = Image.open(unlabeled).convert('RGBA')
+    if picture.size != base.size:
+        raise ValueError('Label-free render does not match the labeled image')
+    width, height = picture.size
+    font_size = 40
+    fonts = ['/System/Library/Fonts/Supplemental/Arial Bold.ttf', 'arialbd.ttf', 'DejaVuSans-Bold.ttf']
+    for candidate in fonts:
+        try:
+            font = ImageFont.truetype(candidate, font_size)
+            break
+        except OSError:
+            continue
+    else:
+        font = ImageFont.load_default()
+    draw = ImageDraw.Draw(picture)
+    for row in callouts:
+        x, y = row['screen_point'][:2]
+        cx, cy = (x + 1) * width / 2, (1 - y) * height / 2
+        label = row['label']
+        text_box = draw.textbbox((0, 0), label, font=font)
+        text_width, text_height = text_box[2] - text_box[0], text_box[3] - text_box[1]
+        half_w, half_h = text_width / 2 + 11, text_height / 2 + 9
+        rect = (int(cx-half_w), int(cy-half_h), int(cx+half_w), int(cy+half_h))
+        # Include the old rectangular background, whose padding is slightly
+        # larger than the rounded outline, before painting the new badge.
+        restore = (max(0, rect[0]-24), max(0, rect[1]-24), min(width, rect[2]+24), min(height, rect[3]+24))
+        picture.paste(base.crop(restore), restore)
+        draw.rounded_rectangle(rect, radius=10, fill='white', outline='#333333', width=2)
+        draw.text((cx-text_width/2-text_box[0], cy-text_height/2-text_box[1]), label, font=font, fill='black')
+    picture.convert('RGBA' if mode == 'RGBA' else 'RGB').save(Path(rendered), **({'dpi': dpi} if dpi else {}))
+
+
 def label_contact_residues(cmd, *, size=40):
     """Label one anchor per retained PLIP-contacting residue, without moving atoms.
 
-    Screen-relative front-plane placement is intentional: float_labels alone
-    has no effect in PyMOL ray tracing. Custom scene exports opt into this style.
+    Screen-relative placement is intentional: float_labels alone has no effect
+    in PyMOL ray tracing. The negative depth keeps callouts in front in the
+    ray-traced report views; custom scene exports opt into this style.
     """
     import numpy as np
     selections=[n for n in cmd.get_names('selections') if n.startswith('plip_contact_residues_chain_')]
@@ -28,7 +73,7 @@ def label_contact_residues(cmd, *, size=40):
     for side,group in ((-1,projected[:split]),(1,projected[split:])):
         for i,(_,_,key) in enumerate(sorted(group,key=lambda r:r[1])):
             y=-.58+i*1.16/(len(group)-1) if len(group)>1 else 0.
-            placements[key]=[side*.68,y,1.]
+            placements[key]=[side*.68,y,-1.]
     cmd.hide('labels','all')
     for name,value in {'label_color':'black','label_outline_color':'white','label_font_id':7,
         'label_size':size,'float_labels':1,'label_shadow_mode':0,'label_connector':1,

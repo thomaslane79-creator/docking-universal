@@ -174,6 +174,8 @@ def paired_export(view, viewer, legend, *, ray=False):
     metrics = QtGui.QFontMetrics(font)
     basis = ('Experimental structure — PLIP contacts from deposited coordinates; not a docked pose.'
              if view.experimental else
+             'Loaded structure — PLIP contacts from the input coordinates.'
+             if view.coordinate_kind == 'input_structure' else
              'Docked pose — PLIP contacts from this exact retained docking pose.'
              if view.coordinate_kind == 'docked' else 'Retained coordinates — source kind unspecified.')
     caption = view.label + '\n' + basis

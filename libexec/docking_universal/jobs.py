@@ -40,13 +40,14 @@ class JobService:
         required_outputs: tuple[Path | str, ...] = (),
         request_id: str | None = None,
         expected_revision: int | None = None,
+        on_job_persisted: Callable[[Job], None] | None = None,
     ) -> ProcessResult:
         with _ScientificJobLease(self.controller.store):
             return self._run_owned(
                 study_id, stage, request, cancel_event=cancel_event,
                 on_output=on_output, progress_probe=progress_probe, required_outputs=required_outputs,
                 intervention_probe=intervention_probe, before_finish=before_finish, request_id=request_id,
-                expected_revision=expected_revision, existing_job_id=None,
+                expected_revision=expected_revision, existing_job_id=None, on_job_persisted=on_job_persisted,
             )
 
     def resume(
@@ -69,7 +70,7 @@ class JobService:
                 study_id, "", request, cancel_event=cancel_event,
                 on_output=on_output, progress_probe=progress_probe,
                 intervention_probe=intervention_probe, before_finish=before_finish, required_outputs=required_outputs,
-                request_id=None, expected_revision=None, existing_job_id=job_id,
+                request_id=None, expected_revision=None, existing_job_id=job_id, on_job_persisted=None,
             )
 
     def _run_owned(
@@ -87,6 +88,7 @@ class JobService:
         request_id: str | None,
         expected_revision: int | None,
         existing_job_id: str | None,
+        on_job_persisted: Callable[[Job], None] | None,
     ) -> ProcessResult:
         state = self.controller.get_study(study_id)
         if request_id and existing_job_id is None:
@@ -151,6 +153,8 @@ class JobService:
             },
         )
         self.controller.store.save(state, expected_revision=expected_revision)
+        if on_job_persisted is not None:
+            on_job_persisted(job)
 
         def record_process_id(process_id: int) -> None:
             def mutation(latest):

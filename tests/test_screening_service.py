@@ -20,6 +20,14 @@ from docking_universal.services.residue_context import read_receptor_atoms, reso
 
 
 class ScreeningServiceTests(unittest.TestCase):
+    def test_separate_screening_runs_have_distinct_artifact_ids(self):
+        outputs = [self.root / 'screen1', self.root / 'screen2']
+        for output in outputs:
+            (output / 'compounds' / 'same').mkdir(parents=True)
+            (output / 'compounds' / 'same' / 'screen_manifest.json').write_text('{}')
+        first, second = (discover_screening_artifacts(output)[0] for output in outputs)
+        self.assertNotEqual(first.id, second.id)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
@@ -50,6 +58,17 @@ class ScreeningServiceTests(unittest.TestCase):
         self.assertEqual(plan.jobs_per_compound, 12)
         self.assertEqual(plan.total_docking_jobs, 24)
         self.assertTrue(plan.exploratory_authorization_required)
+
+    def test_single_box_path_produces_a_workload(self):
+        record = json.loads(self.protocol.read_text())
+        record['locked_inputs'].pop('boxes')
+        record['locked_inputs']['box'] = 'one.conf'
+        self.protocol.write_text(json.dumps(record))
+        ligands = self.root / 'ligands.sdf'
+        ligands.write_text('first\n$$$$\n')
+        plan = build_screening_plan(self.protocol, ligands)
+        self.assertEqual(plan.docking_site_count, 1)
+        self.assertEqual(plan.total_docking_jobs, 6)
 
     def test_affected_box_adds_matched_jobs_for_the_second_receptor_state(self):
         record = json.loads(self.protocol.read_text())

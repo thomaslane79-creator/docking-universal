@@ -25,6 +25,7 @@ def main():
     parser.add_argument("--session-out", type=Path, help="Also save a self-contained PyMOL .pse session")
     parser.add_argument("--scene", help="Recall this exact retained scene before rendering")
     parser.add_argument("--contact-residue-labels", action="store_true", help="Add spaced residue-name/number/chain callouts to a retained PLIP figure")
+    parser.add_argument("--ligand-color", help="Color the retained typed ligand's carbon atoms for this figure")
     args = parser.parse_args()
 
     source = args.input.expanduser().resolve()
@@ -66,6 +67,13 @@ def main():
         ])
     if args.scene:
         commands.append(f"cmd.scene({args.scene!r}, 'recall', animate=0)")
+    if args.ligand_color:
+        color = args.ligand_color
+        if color.startswith('#') and len(color) == 7:
+            rgb = [int(color[i:i+2], 16) / 255 for i in (1, 3, 5)]
+            commands.append(f"cmd.set_color('du_report_ligand', {rgb!r})")
+            color = 'du_report_ligand'
+        commands.append(f"cmd.color({color!r}, 'typed_ligand and elem C')")
     if args.contact_residue_labels:
         commands.extend([
             "import sys, json",
@@ -82,13 +90,22 @@ def main():
         f"cmd.viewport({args.width}, {args.height})",
         f"cmd.png({str(output)!r}, width={args.width}, height={args.height}, dpi={args.dpi}, ray=1)",
         *([f"cmd.save({str(session_output)!r})"] if session_output else []),
-        "cmd.quit()",
     ])
 
     with tempfile.TemporaryDirectory(prefix="docking-universal-pymol-") as tmp:
+        base_image = Path(tmp) / 'without_labels.png'
+        if args.contact_residue_labels:
+            commands.extend(['cmd.hide("labels", "all")',
+                f"cmd.png({str(base_image)!r}, width={args.width}, height={args.height}, dpi={args.dpi}, ray=1)"])
+        commands.append('cmd.quit()')
         driver = Path(tmp) / "render.py"
         driver.write_text("from pymol import cmd\n" + "\n".join(commands) + "\n")
         result = subprocess.run([str(executable), "-cq", "-r", str(driver)], text=True, capture_output=True)
+        if result.returncode == 0 and args.contact_residue_labels and base_image.is_file():
+            import json
+            from docking_universal.viewer.figure_labels import round_contact_label_backgrounds
+            callouts = json.loads(output.with_suffix('.residue-labels.json').read_text())
+            round_contact_label_backgrounds(output, base_image, callouts)
     if result.returncode != 0 or not output.is_file() or output.stat().st_size == 0:
         detail = result.stderr.strip() or result.stdout.strip() or "PyMOL did not create the PNG"
         raise SystemExit(f"Render failed: {detail}")

@@ -227,6 +227,7 @@ class GuiFullJourneyTests(unittest.TestCase):
         self.window.candidates.selectRow(0)
         self.window.rationale.setText('Reviewed site and related ligand evidence before redocking')
         self.window.approve_button.click()
+        self.wait_for(lambda state: bool(state.selected_pocket_ids) and not self.window._pocket_approval_pending)
         self.assertTrue(self.window.protocol_finalization_panel._control_mode)
         self.assertTrue(self.window.finalize_button.isEnabled())
         self.assertIn('reused', self.window.protocol_finalization_panel.introduction.text())
@@ -243,7 +244,7 @@ class GuiFullJourneyTests(unittest.TestCase):
         self.window.screen_ligands.setText(str(ligands))
         self.window.screen_output.setText(str(self.root / "validated-screen"))
         self.window.preview_screening()
-        self.assertIn("1 sequential docking jobs", self.window.screening_status.text())
+        self.assertIn("1 sequential docking searches", self.window.screening_status.text())
         self.assertTrue(self.window.start_screening_button.isEnabled())
         self.window.start_screening()
         self.wait_for(lambda latest: latest.workflow_data.get("latest_screening_status") == "completed")
@@ -280,6 +281,7 @@ class GuiFullJourneyTests(unittest.TestCase):
         self.window.candidates.selectRow(0)
         self.window.rationale.setText("Selected after reviewing retained pocket evidence")
         self.window.approve_button.click()
+        self.wait_for(lambda state: bool(state.selected_pocket_ids) and not self.window._pocket_approval_pending)
         self.assertEqual(self.store.load("journey").selected_pocket_ids, ["P1"])
 
         final = self.root / "final"
@@ -355,6 +357,7 @@ class GuiFullJourneyTests(unittest.TestCase):
         self.window.candidates.selectRow(index)
         self.assertTrue(self.window.approve_button.isEnabled())
         self.window.approve_button.click()
+        self.wait_for(lambda state: bool(state.selected_pocket_ids) and not self.window._pocket_approval_pending)
         state = self.store.load('journey')
         self.assertEqual(state.selected_pocket_ids, ['L1'])
         self.assertFalse(any(job.stage == 'control_validation' for job in state.jobs))
@@ -369,7 +372,8 @@ class GuiFullJourneyTests(unittest.TestCase):
         self._prepare_control_with_other_ligand_site()
         self.window.candidates.selectAll()
         self.window.approve_button.click()
-        self.assertEqual(set(self.store.load('journey').selected_pocket_ids), {'P1','L1'})
+        self.wait_for(lambda state: bool(state.selected_pocket_ids) and not self.window._pocket_approval_pending)
+        self.assertEqual(set(self.store.load('journey').selected_pocket_ids), {'B1', 'L1'})
         self.assertIn('L1', self.window.protocol_finalization_panel.introduction.text())
         self.window.finalize_button.click()
         self.wait_for(lambda state: state.workflow_data.get('latest_control_status') == 'approved')
@@ -399,8 +403,8 @@ class GuiFullJourneyTests(unittest.TestCase):
         with patch.object(QtWidgets.QFileDialog, "getOpenFileName", return_value=(str(source), "")):
             self.window.choose_input_pdb()
         self.assertEqual(self.window.input_pdb.text(), str(source))
-        self.assertIn("monomeric", self.window.study_setup_panel.deposited_evidence.text())
-        self.assertIn("LIG", self.window.study_setup_panel.deposited_evidence.text())
+        self.assertIn("1 assembly annotation", self.window.study_setup_panel.deposited_evidence.text())
+        self.assertIn("1 annotated ligand/additive", self.window.study_setup_panel.deposited_evidence.text())
         self.assertTrue(self.window.study_setup_panel.deposited_evidence_details.isEnabled())
         self.window.site_mode.setCurrentIndex(1)
         labels = self.window.detect_bound_ligands()
@@ -423,7 +427,7 @@ class GuiFullJourneyTests(unittest.TestCase):
         self.reopen()
         self.assertEqual(self.window.input_pdb.text(), setup["input_structure"])
         self.assertIn("read-only", self.window.study_setup_panel.lock_notice.text())
-        self.assertIn("LIG", self.window.study_setup_panel.deposited_evidence.text())
+        self.assertIn("1 annotated ligand/additive", self.window.study_setup_panel.deposited_evidence.text())
 
 
 if __name__ == "__main__":

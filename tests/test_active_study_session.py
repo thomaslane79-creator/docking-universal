@@ -53,6 +53,16 @@ class ActiveStudySessionTests(unittest.TestCase):
             StudySelection(compound=str(compound.resolve())),
         )
 
+    def test_unchanged_study_refresh_does_not_reload_large_state(self):
+        from unittest.mock import patch
+        with patch.object(self.store, 'load', wraps=self.store.load) as load:
+            self.assertFalse(self.session.refresh())
+            load.assert_not_called()
+            state = self.store._load_unlocked('study')
+            self.store.save(state)
+            self.assertTrue(self.session.refresh())
+            load.assert_called_once_with('study')
+
     def test_new_revision_emits_state_artifact_and_operation_changes(self):
         states, artifacts, operations = [], [], []
         self.session.studyChanged.connect(states.append)
@@ -144,6 +154,7 @@ class ActiveStudySessionTests(unittest.TestCase):
             image = QtGui.QImage(40, 30, QtGui.QImage.Format_RGB32)
             image.fill(QtGui.QColor("white"))
             self.assertTrue(image.save(str(diagram)))
+            diagram.with_suffix('.manifest.json').write_text('{"schema_name": "docking-universal-poseedit-render", "renderer_policy": "approved-poseedit-local-v1"}')
         state = self.store.load("study")
         state.artifacts.extend((
             ArtifactRecord("manifest", "screening_compound_manifest", str(manifest)),

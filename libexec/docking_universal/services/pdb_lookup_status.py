@@ -28,6 +28,9 @@ def lookup_notice(record):
     if mode == 'off':
         return ('Local-only evidence · PDB databank search is off. Local information and any retained '
                 'evidence remain usable; additional public evidence has not been sought.', False)
+    if status == 'partial':
+        return ('PDB search incomplete · Showing evidence from structures checked so far. '
+                'Other relevant structures may exist; an incomplete search does not establish absence of evidence.', True)
     if status in {'unavailable', 'failed'}:
         return ('PDB search failed · Supporting evidence could not be checked. '
                 'This does not mean no supporting evidence exists. A connection problem or PDB service error '

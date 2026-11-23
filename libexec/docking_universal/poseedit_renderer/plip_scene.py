@@ -46,7 +46,13 @@ def ligand_atom(point):
 
 
 root = ET.parse(REPORT).getroot()
-site = select_binding_site(root, ligand_id=args.ligand_id)
+identity = args.ligand_id.split(':')
+if len(identity) == 3:
+    site = select_binding_site(root, ligand_id=identity[0], chain=identity[1], position=identity[2])
+elif len(identity) == 1:
+    site = select_binding_site(root, ligand_id=identity[0])
+else:
+    raise ValueError('Ligand identity must be a residue name or residue:chain:position')
 receptor_atoms = read_receptor_atoms(RECEPTOR)
 hbonds = []
 for call in site.findall('./interactions/hydrogen_bonds/hydrogen_bond'):

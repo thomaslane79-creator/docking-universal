@@ -18,6 +18,26 @@ In general, a **ligand** is a molecule or ion associated with a macromolecule. P
 
 ## Included inputs
 
+The [RCSB Protein Data Bank](https://www.rcsb.org/) is a public resource for
+three-dimensional structures of proteins and other biological molecules. Its
+entry pages show the deposited structure, its experimental details, and any
+reported ligands. Open the [1HVR entry](https://www.rcsb.org/structure/1HVR)
+or [download 1HVR.pdb](https://files.rcsb.org/download/1HVR.pdb) in your browser.
+Choose that local file in Docking Universal instead of fetching the structure
+from inside the app. The bundled copy is the input used in the walkthrough.
+The control may still need separate chemical definitions if they aren't
+already available locally.
+
+In the desktop app, load the receptor and open **Inspect molecules in 2D…**
+or **Inspect molecules in 3D…** in Study setup. Match the component code,
+chain, and residue to the molecule you want to study. For this example,
+choose **XK2, chain A, residue 263**. Turn on **All components** to see the
+other deposited non-water components, including the modified CSO residues
+that belong to the receptor. If a ligand has multiple copies, compare their
+positions in 3D before choosing an instance. Use **Use as bound reference
+ligand** to apply the choice, then enable **Redock experimental ligand** to run
+the pose recovery control. Browsing alone does not select a reference.
+
 - `inputs/1HVR.pdb`: original RCSB experimental complex.
 - `inputs/rilpivirine_pubchem.sdf`: a public 2D chemical definition of rilpivirine, used only after calibration as a held-out, flexible known-inhibitor screen.
 - `inputs/nevirapine_pubchem_4463.sdf`: an optional smaller known-inhibitor input for comparison.

@@ -132,6 +132,16 @@ class PymolAdapter:
         self.snapshot["box"] = result
         return result
 
+    def center_review_point(self, center, *, animate=False):
+        self._client().request("center_review_point", {
+            "center": list(center), "animate": animate,
+        })
+
+    def set_site_review_visibility(self, *, has_selection, show_boxes):
+        self._client().request("set_site_review_visibility", {
+            "has_selection": has_selection, "show_boxes": show_boxes,
+        })
+
     def load_report_session(self, path: Path | str) -> dict[str, Any]:
         """Load the retained PyMOL session used to render a report figure."""
         session = Path(path).resolve()

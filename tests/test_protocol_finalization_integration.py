@@ -29,7 +29,7 @@ from docking_universal.protocol_finalization import (
     selected_region_records,
 )
 from docking_universal_bundle import create_bundle, extract_bundle, sha256
-from docking_universal.services.finalization import finalize_site_guided_protocol
+from docking_universal.services.finalization import finalize_site_guided_protocol, _all_candidate_regions
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,6 +49,40 @@ REPORT = load_script("docking_universal_pdf_report_integration", REPORT_SCRIPT)
 
 
 class ProtocolFinalizationIntegrationTests(unittest.TestCase):
+    def test_control_diagram_grouping_requires_same_verified_cluster(self):
+        clusters = [dict(cluster_id=3, best_energy_kcal_per_mol=-9, rmsd_angstrom=.5),
+                    dict(cluster_id=4, best_energy_kcal_per_mol=-8, rmsd_angstrom=1.2)]
+        self.assertTrue(REPORT.control_diagrams_share_cluster(clusters, {'lowest_rmsd_angstrom': .5}))
+        clusters[1]['rmsd_angstrom'] = .2
+        self.assertFalse(REPORT.control_diagrams_share_cluster(clusters, {'lowest_rmsd_angstrom': .2}))
+        self.assertFalse(REPORT.control_diagrams_share_cluster(clusters, {'lowest_rmsd_angstrom': .1}))
+
+    def test_control_diagrams_reject_legacy_style(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            diagram = Path(temporary) / 'control.png'
+            diagram.write_bytes(b'image')
+            manifest = diagram.with_suffix('.manifest.json')
+            manifest.write_text(json.dumps({'schema_name': 'docking-universal-sdf-plip2d'}))
+            self.assertFalse(REPORT.approved_interaction_diagram(diagram))
+            manifest.write_text(json.dumps({'schema_name': 'docking-universal-poseedit-render',
+                                            'renderer_policy': 'approved-poseedit-local-v1'}))
+            self.assertTrue(REPORT.approved_interaction_diagram(diagram))
+
+    def test_unselected_ligand_site_evidence_is_retained_for_report(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as temporary:
+            box = Path(temporary) / 'candidate.conf'
+            box.write_text('center_x = 0\ncenter_y = 0\ncenter_z = 0\nsize_x = 20\nsize_y = 20\nsize_z = 20\n')
+            group = {'members': [{'label': 'P2', 'pocket_prediction': {'score': 8}}],
+                     'ligands': [{'observation': {'ligand': 'ID8'}}]}
+            candidate = {'label': 'B1', 'box_artifact_id': 'box1',
+                         'evidence': {'source': 'input_bound_ligand', 'site_group': group}}
+            state = SimpleNamespace(artifacts=[SimpleNamespace(id='box1', path=str(box))],
+                                    workflow_data={'pocket_candidates': [candidate]})
+            records = _all_candidate_regions(state)
+            self.assertEqual(records[0]['site_group'], group)
+            self.assertIsNot(records[0]['site_group'], group)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
@@ -389,6 +423,81 @@ _entity_src_gen.pdbx_host_org_scientific_name 'Escherichia coli'
             names = set(archive.namelist())
         self.assertIn("bundle_manifest.json", names)
         self.assertTrue(any(name.endswith("protocol.json") for name in names))
+
+    def test_report_reference_figures_survive_bundle_round_trip(self):
+        import hashlib
+        figures = self.study / 'reference_figures_source'
+        figures.mkdir()
+        references = {}
+        for key in ('docking_box_overview', 'selected_docking_boxes', 'candidate_site_overview',
+                    'candidate_site_overview_metadata', 'control_top_2d', 'control_top_3d'):
+            path = figures / (key + '.png')
+            path.write_bytes(('fixture-' + key).encode())
+            references[key] = {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
+        record = dict(self.protocol, report_reference_figures=references)
+        source = self.study / 'with_references.json'
+        source.write_text(json.dumps(record))
+        bundle = create_bundle(source, self.study, self.study / 'with_references.duprotocol')
+        extracted = extract_bundle(bundle)
+        packaged = json.loads(extracted.read_text())['report_reference_figures']
+        for key in references:
+            image = extracted.parent / packaged[key]['path']
+            self.assertEqual(hashlib.sha256(image.read_bytes()).hexdigest(), packaged[key]['sha256'])
+
+    def test_screen_report_includes_control_reference_without_cluster_table(self):
+        import hashlib
+        import reportlab.platypus
+        from PIL import Image
+        refs = {}
+        for key in ('docking_box_overview', 'selected_docking_boxes', 'control_top_2d', 'control_top_3d'):
+            path = self.study / (key + '.png')
+            Image.new('RGB', (40, 40), 'white').save(path)
+            refs[key] = {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
+        metadata = self.study / "control_top_2d_metadata.json"
+        metadata.write_text(json.dumps({"schema_name": "docking-universal-poseedit-render",
+                                        "renderer_policy": "approved-poseedit-local-v1"}))
+        refs["control_top_2d_metadata"] = {"path": str(metadata), "sha256": hashlib.sha256(metadata.read_bytes()).hexdigest()}
+        protocol = dict(self.protocol, report_reference_figures=refs, related_site_control={
+            'tested_box_label': 'B1', 'untested_box_labels': ['P1'], 'status': 'approved',
+            'result_summary': {'ligand': 'ID8', 'lowest_energy_kcal_per_mol': -8.749,
+                'lowest_energy_pose_rmsd_angstrom': .6068, 'lowest_rmsd_angstrom': .5199,
+                'clusters': [{'cluster_id': '1'}]}})
+        path = self.study / 'reused_protocol.json'
+        path.write_text(json.dumps(protocol))
+        (self.report_dir / 'study_summary.json').write_text(json.dumps({
+            'workflow': 'screen', 'study_status': 'EXPLORATORY_NO_CONTROL',
+            'protocol_type': 'site-guided-exploratory', 'approved_protocol': str(path),
+            'compounds': [], 'compound_count': 0}))
+        story = []
+        with patch.object(sys, 'argv', ['pdf-report', str(self.study)]), \
+             patch.object(REPORT.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '', '')), \
+             patch.object(REPORT, 'has_retained_docking_results', return_value=True), \
+             patch.object(REPORT, 'require_complete_used_versions'), \
+             patch.object(reportlab.platypus.SimpleDocTemplate, 'build', side_effect=lambda items: story.extend(items)):
+            REPORT.main()
+        def paragraphs(items):
+            for item in items:
+                if hasattr(item, 'getPlainText'):
+                    yield item.getPlainText()
+                if hasattr(item, '_content'):
+                    yield from paragraphs(item._content)
+        text = '\n'.join(paragraphs(story))
+        self.assertIn('Docking-region reference', text)
+        self.assertIn('Control pose interaction reference', text)
+        self.assertIn('Figure 1. Docking-region reference.', text)
+        self.assertIn('Figure 2. Known-ligand control interactions.', text)
+        self.assertIn('gray dashes indicate hydrophobic contacts', text)
+        self.assertNotIn('Control cluster results', text)
+
+    def test_selected_box_legend_uses_merged_pocket_identity(self):
+        protocol = {'docking_regions': [
+            {'box_label': 'P1'},
+            {'box_label': 'B1', 'site_source': 'input_bound_ligand',
+             'site_group': {'members': [{'label': 'P2', 'pocket_prediction': {'score': 35.82}},
+                                        {'label': 'P11', 'pocket_prediction': {'score': 1.7}}]}}]}
+        legend = REPORT.selected_box_legend(protocol)
+        self.assertEqual(legend[0][0::2], ('red', 'P1'))
+        self.assertEqual(legend[1][0::2], ('blue', 'P2 (recorded as B1)'))
 
     def test_bundle_retains_both_receptor_state_sensitivity_variants(self):
         hie = self.receptor_dir / "target-HIE.pdbqt"

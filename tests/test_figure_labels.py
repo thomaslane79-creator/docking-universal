@@ -1,6 +1,8 @@
 """Saved report callouts stay readable without changing molecular geometry."""
 import unittest
-from docking_universal.viewer.figure_labels import label_contact_residues
+import tempfile
+from pathlib import Path
+from docking_universal.viewer.figure_labels import label_contact_residues, round_contact_label_backgrounds
 
 
 class FakeCommand:
@@ -26,6 +28,17 @@ class FakeCommand:
 
 
 class FigureLabelTests(unittest.TestCase):
+    def test_rounded_callout_restores_scene_at_corners(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as temporary:
+            base, result = Path(temporary)/'base.png', Path(temporary)/'result.png'
+            Image.new('RGB', (400, 300), 'blue').save(base)
+            Image.new('RGB', (400, 300), 'blue').save(result)
+            round_contact_label_backgrounds(result, base, [{'label': 'A1', 'screen_point': [0, 0, -1]}])
+            with Image.open(result) as picture:
+                self.assertEqual(picture.getpixel((20, 20)), (0, 0, 255))
+                self.assertEqual(picture.getpixel((200, 137)), (255, 255, 255))
+
     def test_bold_font_keeps_size_compact_placement_and_one_label_per_residue(self):
         cmd = FakeCommand()
         before = cmd.get_view()
@@ -36,6 +49,7 @@ class FigureLabelTests(unittest.TestCase):
         self.assertEqual([r['label'] for r in rows],['Asp30A','Ile47A'])
         self.assertEqual([r['index'] for r in rows],[2,3])
         self.assertTrue(all(abs(r['screen_point'][0])==.68 for r in rows))
+        self.assertTrue(all(r['screen_point'][2] == -1. for r in rows))
         self.assertEqual(cmd.get_view(),before)
 
 

@@ -42,7 +42,8 @@ class DecisionDialog(QtWidgets.QDialog):
         layout.addWidget(title)
         layout.addWidget(detected)
 
-        option_group = QtWidgets.QGroupBox("Available choices")
+        layout.addWidget(QtWidgets.QLabel('Available choices'))
+        option_group = QtWidgets.QWidget()
         option_layout = QtWidgets.QVBoxLayout(option_group)
         selected = set(selected)
         for option in decision.options:
@@ -52,8 +53,8 @@ class DecisionDialog(QtWidgets.QDialog):
             check.setChecked(option.value in selected)
             check.setEnabled(allow_approval)
             consequence = QtWidgets.QLabel(option.consequence)
+            consequence.setObjectName('decision_option_description')
             consequence.setWordWrap(True)
-            consequence.setStyleSheet("color: palette(mid);")
             consequence.setContentsMargins(24, 0, 8, 6)
             option_layout.addWidget(check)
             option_layout.addWidget(consequence)

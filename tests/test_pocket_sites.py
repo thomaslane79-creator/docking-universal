@@ -16,6 +16,26 @@ from docking_universal.state import JsonStudyStore
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 class PocketSiteTests(unittest.TestCase):
+    def test_pending_group_separates_a_pocket_wholly_outside_its_box(self):
+        from unittest.mock import patch
+        state = self.pending([('P1', (0., 0., 0.), 26), ('P2', (8., 0., 0.), 26),
+                              ('P3', (18., 0., 0.), 26)], ligand=(8.,))
+        with patch('docking_universal.pocket_sites._verified_pocket_grids', return_value={}), \
+             patch('docking_universal.pocket_sites._pocket_regions_compatible', return_value=True):
+            grouped = project_pending_site_review(state)
+        self.assertEqual(grouped.workflow_data['pocket_candidates'][0]['evidence']['site_group']['member_ids'],
+                         ['P1', 'P2', 'P3'])
+        before = copy.deepcopy(grouped.to_dict())
+        grids = {'P1': [(8., 0., 0.)], 'P2': [(8., 0., 0.), (14., 0., 0.)],
+                 'P3': [(24., 0., 0.)]}
+        with patch('docking_universal.pocket_sites._verified_pocket_grids', return_value=grids):
+            result = project_pending_site_review(grouped)
+        self.assertEqual([c['id'] for c in result.workflow_data['pocket_candidates']], ['P1', 'P3'])
+        self.assertEqual(result.workflow_data['pocket_candidates'][0]['evidence']['site_group']['member_ids'],
+                         ['P1', 'P2'])
+        self.assertEqual([o.value for o in result.pending_decisions[0].options], ['P1', 'P3'])
+        self.assertEqual(grouped.to_dict(), before)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
@@ -71,6 +91,19 @@ class PocketSiteTests(unittest.TestCase):
         self.assertIn('p2rank score 11.8', site_group_summary(group))
         self.assertEqual(state.to_dict(), original)
         self.assertEqual(self.store.load('sites').to_dict(), original)
+
+    def test_shared_sugar_does_not_by_itself_merge_two_different_boxes(self):
+        state = self.pending([('P1', (0., 0., 0.), 26), ('P2', (1., 0., 0.), 26)])
+        sugar = self.root / 'sugar.pdb'
+        sugar.write_text('HETATM    1  C1  NAG A 200       0.000   0.000   0.000  1.00 20.00           C\n')
+        state.artifacts.append(ArtifactRecord('sugar', 'aligned_ligand', str(sugar),
+                                             hashlib.sha256(sugar.read_bytes()).hexdigest()))
+        for candidate in state.workflow_data['pocket_candidates']:
+            candidate['evidence']['experimental_ligand_evidence'] = {'observation_count': 1,
+                'observations': [{'ligand': 'NAG', 'source_ligand_id': '1ABC/NAG/A/200',
+                                  'aligned_ligand_pdb': str(sugar)}]}
+        projected = project_pending_site_review(state)
+        self.assertEqual([c['id'] for c in projected.workflow_data['pocket_candidates']], ['P1', 'P2'])
 
     def test_complete_input_ligand_rule_does_not_require_near_identical_boxes(self):
         state = self.pending([('P1', (5., 0., 0.), 26), ('B1', (0., 0., 0.), 26)], ligand=(-1., 1.))
@@ -239,6 +272,45 @@ class PocketSiteTests(unittest.TestCase):
         self.assertEqual(len(evidence['site_group']['ligands']), 3)
         self.assertEqual(state.to_dict(), before)
 
+    def test_legacy_shared_grouping_evidence_is_shown_with_box_containment(self):
+        from docking_universal.services.pocket_review import candidate_with_input_ligand_evidence
+        state = self.pending([('P1', (0., 0., 0.), 26), ('P2', (10., 0., 0.), 26),
+                              ('P3', (30., 0., 0.), 26), ('P4', (40., 0., 0.), 26)])
+        inside = self.related_ligand(state, 'P3', (3., 4.))
+        outside = self.related_ligand(state, 'P4', (20., 21.))
+        originals = copy.deepcopy(state.workflow_data['pocket_candidates'])
+        hashes = [hashlib.sha256(p.read_bytes()).hexdigest() for p in (inside, outside)]
+        candidate = state.workflow_data['pocket_candidates'][0]
+        candidate['evidence']['site_group'] = {'member_ids': ['P1', 'P2'],
+            'relationships': [{'left': 'P1', 'right': 'P2', 'ligand_sha256s': hashes}]}
+        state.workflow_data['pocket_site_grouping'] = {'original_candidates': originals}
+        before = copy.deepcopy(candidate)
+        projected = candidate_with_input_ligand_evidence(state, candidate)
+        in_box = projected['evidence']['experimental_ligand_evidence']['observations']
+        outside_box = projected['evidence']['grouping_ligand_evidence']['observations']
+        self.assertEqual([item['source_ligand_id'] for item in in_box], ['P3/LIG/B/601'])
+        self.assertEqual([item['source_ligand_id'] for item in outside_box], ['P4/LIG/B/601'])
+        self.assertEqual(outside_box[0]['supporting_relationships'], ['P1/P2'])
+        self.assertEqual(candidate, before)
+        outside.write_text('changed')
+        projected = candidate_with_input_ligand_evidence(state, candidate)
+        self.assertEqual(projected['evidence']['grouping_ligand_evidence']['observations'], [])
+
+    def test_evidence_includes_verified_ligand_from_any_site_that_fits_the_box(self):
+        from docking_universal.services.pocket_review import candidate_with_input_ligand_evidence
+        state = self.pending([('P1', (0., 0., 0.), 26), ('P2', (40., 0., 0.), 26),
+                              ('P3', (60., 0., 0.), 26)])
+        inside = self.related_ligand(state, 'P2', (2., 4.))
+        self.related_ligand(state, 'P3', (20., 21.))
+        candidate = state.workflow_data['pocket_candidates'][0]
+        projected = candidate_with_input_ligand_evidence(state, candidate)
+        observations = projected['evidence']['experimental_ligand_evidence']['observations']
+        self.assertEqual([o['source_ligand_id'] for o in observations], ['P2/LIG/B/601'])
+        self.assertEqual(observations[0]['evidence_role'], 'related_ligand_in_box')
+        inside.write_text('changed')
+        projected = candidate_with_input_ligand_evidence(state, candidate)
+        self.assertFalse((projected['evidence'].get('experimental_ligand_evidence') or {}).get('observations'))
+
     def test_group_preserves_source_conformation_comparisons_and_obstruction_warning(self):
         from docking_universal.services.pocket_review import candidate_with_input_ligand_evidence
         state = self.pending([('P1', (0., 0., .5156), 26), ('B1', (0., 0., 0.), 26)], ligand=(-1., 1.))
@@ -340,6 +412,14 @@ class PocketSiteTests(unittest.TestCase):
         state.selected_pocket_ids = ['P1', 'B1']
         self.assertIs(site_review_presentation(state), state)
 
+    def test_grouped_label_shows_source_pockets_without_changing_box_id(self):
+        from docking_universal.pocket_sites import site_display_label
+        candidate = {'id': 'B1', 'label': 'B1', 'evidence': {'site_group': {
+            'member_ids': ['P2', 'P11', 'B1']}}}
+        self.assertEqual(site_display_label(candidate), 'P2')
+        self.assertEqual(candidate['id'], 'B1')
+        self.assertEqual(site_display_label({'id': 'B2', 'evidence': {}}), 'B2')
+
     def test_tampered_group_source_is_rejected_before_approval(self):
         state = self.pending([('P1', (0., 0., .5156), 26), ('B1', (0., 0., 0.), 26)], ligand=(-1., 1.))
         grouped = project_pending_site_review(state)
@@ -428,7 +508,7 @@ class PocketSiteGuiTests(unittest.TestCase):
         summary, _ = StudyWindow._candidate_evidence_digest({'id': 'B1'}, {
             'experimental_ligand_evidence': {'observation_count': 7, 'pdb_entry_count': 7,
                 'evidence_class_counts': {'same_protein': 7}}})
-        self.assertIn('7 same protein', summary)
+        self.assertIn('7 possible ligand observations; details incomplete', summary)
 
     def test_completed_existing_run_table_plot_and_detached_selector_group_without_reapproval(self):
         from unittest.mock import patch

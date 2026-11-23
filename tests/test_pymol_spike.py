@@ -34,6 +34,7 @@ class FakeCmd:
         self.deleted = []
         self.wizard = None
         self.colors = []
+        self.custom_colors = {}
         self.view = tuple(float(i) for i in range(18))
         self.auto_zoom = 1
 
@@ -71,6 +72,9 @@ class FakeCmd:
     def color(self, _color, _name):
         self.colors.append((_color, _name))
         return None
+
+    def set_color(self, name, rgb):
+        self.custom_colors[name] = tuple(rgb)
 
     def hide(self, _representation, _name):
         return None
@@ -176,6 +180,8 @@ class PymolSpikeTests(unittest.TestCase):
                         "path": str(pocket), "object_name": "du_pocket_1", "color": color,
                     })
                     self.assertEqual(result["color"], color)
+            from docking_universal.pocket_metadata import POCKET_COLOR_RGB
+            self.assertEqual(core.cmd.custom_colors, POCKET_COLOR_RGB)
             with self.assertRaisesRegex(ValueError, "color"):
                 core.dispatch("load_pocket", {"path": str(pocket), "object_name": "du_pocket_2", "color": "user_expression"})
 

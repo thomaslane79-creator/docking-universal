@@ -57,6 +57,53 @@ class ReceptorModelReviewGuiTests(unittest.TestCase):
         self.assertIn('exploratory', why)
         self.assertIn('13.44 Å', self.dialog.details.toPlainText())
 
+    def test_reported_components_use_unchecked_boxes_and_exact_preview(self):
+        callback = self.dialog._preview_callback
+        self.dialog.close()
+        affected = {k: self.initial['residue_inventory'][0][k]
+                    for k in ('resname', 'chain', 'number', 'insertion_code')}
+        self.initial['recovery_guidance'] = {'summary': 'A component was reported.',
+            'next_step': 'Review the reported component.', 'details': 'Test diagnosis.',
+            'affected_residues': [affected], 'prefer_guarded_sidechain_repair': True}
+        self.dialog = ReceptorModelReviewDialog(self.initial, callback)
+        self.dialog.show()
+        self.app.processEvents()
+        key, checkbox = self.dialog.reported_exclusions[0]
+        self.assertIn('Select any you want to remove', self.dialog.recovery_guidance.text())
+        self.assertFalse(self.dialog.recovery_actions.isVisibleTo(self.dialog))
+        self.assertFalse(self.dialog.partial_note.isVisibleTo(self.dialog))
+        self.assertFalse(self.dialog.method_summary.isVisibleTo(self.dialog))
+        self.assertIs(self.dialog.acknowledge.parentWidget(), self.dialog)
+        self.assertTrue(self.dialog.acknowledge.isVisibleTo(self.dialog))
+        toggle = next(button for button in self.dialog.findChildren(QtWidgets.QToolButton)
+                      if button.text() == 'More options and details…')
+        toggle.setChecked(True)
+        self.app.processEvents()
+        self.assertTrue(self.dialog.partial_note.isVisibleTo(self.dialog))
+        self.assertTrue(self.dialog.method_summary.isVisibleTo(self.dialog))
+        self.assertTrue(self.dialog.acknowledge.isVisibleTo(self.dialog))
+        toggle.setChecked(False)
+        self.app.processEvents()
+        self.assertFalse(self.dialog.partial_note.isVisibleTo(self.dialog))
+        self.assertFalse(checkbox.isChecked())
+        self.assertEqual(self.dialog.choices()['exclusions'], [])
+        self.dialog.findChild(QtWidgets.QPushButton, 'select_all_reported_exclusions').click()
+        self.assertTrue(checkbox.isChecked())
+        self.assertTrue(self.dialog.choices()['repair_after_exclusions'])
+        self.assertFalse(self.dialog.prepare_button.isEnabled())
+        self.dialog.findChild(QtWidgets.QPushButton, 'clear_reported_exclusions').click()
+        self.assertFalse(checkbox.isChecked())
+        checkbox.setChecked(True)
+        self.assertEqual(self.calls[-1]['exclusions'], [affected])
+        self.assertFalse(self.dialog.prepare_button.isEnabled())
+        self.dialog.acknowledge.setChecked(True)
+        choices, _, reason = self.dialog.approved_change()
+        self.assertEqual(choices['exclusions'], [affected])
+        self.assertIn('reported components', reason)
+        checkbox.setChecked(False)
+        self.assertEqual(self.dialog.choices()['exclusions'], [])
+        self.assertFalse(self.dialog.prepare_button.isEnabled())
+
     def test_guidance_suggests_an_available_method_and_keeps_tool_names_under_advanced(self):
         self.dialog.close()
         self.initial.update(preparation_backend='meeko', available_preparation_backends=['meeko', 'adfr'],
@@ -326,7 +373,66 @@ class FailedPreparationReviewExposureTests(unittest.TestCase):
         self.assertEqual(self.window.study_pathway.currentData(), 'control')
         self.assertTrue(self.window.protocol_finalization_panel.review_model_button.isHidden())
         self.assertEqual(self.store.path_for('failed-control').read_bytes(), original)
-        self.host.request.assert_not_called()
+        # Opening the retained input may request its read-only molecule preview.
+        # It must not start a preparation or apply model changes.
+        self.assertTrue(all(call.args[1] == 'molecule_inspection'
+                            for call in self.host.request.call_args_list))
+
+    def test_failure_offer_explains_charge_scoring_and_opens_review_only_when_chosen(self):
+        from unittest.mock import MagicMock, patch
+        guidance = {'diagnosis_code': 'unsupported_charge_assignment',
+                    'summary': 'NAG B:607 has an unassigned charge.',
+                    'details': 'NAG B:607 O6 is affected.'}
+        box = MagicMock()
+        review_button = object()
+        box.addButton.side_effect = [review_button, object()]
+        box.clickedButton.return_value = review_button
+        with patch.object(self.window.host_controller, 'preview_receptor_changes',
+                          return_value={'recovery_guidance': guidance}), \
+             patch('docking_universal.gui.desktop.QtWidgets.QMessageBox', return_value=box), \
+             patch.object(self.window, 'review_receptor_changes') as review:
+            self.window._offer_failed_preparation_review('failed-prep')
+        self.assertIn('NAG B:607', box.setText.call_args.args[0])
+        message = box.setInformativeText.call_args.args[0]
+        self.assertIn('Standard Vina scoring', message)
+        self.assertIn('AutoDock-GPU uses AD4', message)
+        self.assertIn('not yet been enabled', message)
+        review.assert_called_once_with()
+
+    def test_failure_offer_does_not_suggest_removal_for_runtime_errors(self):
+        from unittest.mock import patch
+        with patch.object(self.window.host_controller, 'preview_receptor_changes', return_value={
+                'recovery_guidance': {'diagnosis_code': 'pocket_runtime'}}), \
+             patch('docking_universal.gui.desktop.QtWidgets.QMessageBox') as box:
+            self.window._offer_failed_preparation_review('failed-prep')
+        box.assert_not_called()
+
+    def test_identified_failure_goes_straight_to_checkbox_review(self):
+        from unittest.mock import patch
+        preview = {'recovery_guidance': {'diagnosis_code': 'unsupported_element',
+            'affected_residues': [dict(resname='COH', chain='A', number='602', insertion_code='')]}}
+        with patch.object(self.window.host_controller, 'preview_receptor_changes', return_value=preview), \
+             patch.object(self.window, 'review_receptor_changes') as review, \
+             patch('docking_universal.gui.desktop.QtWidgets.QMessageBox') as box:
+            self.window._offer_failed_preparation_review('failed-prep')
+        review.assert_called_once_with(preview)
+        box.assert_not_called()
+
+    def test_newly_failed_preparation_schedules_one_offer(self):
+        from docking_universal.models import JobStatus
+        state = self.store.load('failed-control')
+        state.jobs[-1].status = JobStatus.RUNNING
+        self.store.save(state)
+        self.window.refresh()
+        state = self.store.load('failed-control')
+        state.jobs[-1].status = JobStatus.FAILED
+        self.store.save(state)
+        with patch('docking_universal.gui.desktop.QtCore.QTimer.singleShot') as timer:
+            self.window.refresh()
+            self.window.refresh()
+        offers = [call for call in timer.call_args_list
+                  if getattr(call.args[1], '__defaults__', None) == ('failed-prep',)]
+        self.assertEqual(len(offers), 1)
 
     def test_running_pending_completed_or_protocol_locked_study_cannot_use_recovery(self):
         from docking_universal.decisions import DecisionOption, DecisionRequired

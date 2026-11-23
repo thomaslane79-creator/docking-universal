@@ -20,6 +20,81 @@ from docking_universal.services.finalization import build_site_guided_protocol
 
 
 class ControlSiteReviewTests(unittest.TestCase):
+    def test_reviewed_control_waits_for_slow_persisted_job_without_polling_state(self):
+        self.prepare()
+        approved = self.approve(['B1'])
+        original_save = self.store.save
+        delayed = []
+        def slow_job_save(state, **kwargs):
+            if not delayed and any(job.stage == 'control_validation' and job.request_id == 'slow-control' for job in state.jobs):
+                delayed.append(True)
+                time.sleep(2.5)
+            return original_save(state, **kwargs)
+        with patch.object(self.store, 'save', side_effect=slow_job_save):
+            result = self.runner.start_control_validation('workflow', {}, request_id='slow-control', expected_revision=approved.revision)
+            self.assertTrue(delayed)
+            self.assertEqual(result['stage'], 'control_validation')
+            self.assertTrue(result['job_id'])
+            state = self.wait(lambda value: bool(value.workflow_data.get('latest_control_status')))
+            self.assertTrue(any(job.id == result['job_id'] for job in state.jobs))
+
+    def test_host_reopens_site_review_with_current_revision(self):
+        from docking_universal.host import CommandDispatcher
+        from docking_universal.viewer.messages import Command
+        self.prepare()
+        approved = self.approve(['B1'])
+        dispatcher = CommandDispatcher(self.controller, 'test-session')
+        command = Command(study_id='workflow', session_id='test-session', request_id='reopen-host',
+                          operation='reopen_site_review', payload={}, expected_revision=approved.revision)
+        response = dispatcher.dispatch(command)
+        self.assertEqual(response.status, 'applied', response.error)
+        self.assertEqual(response.result['decision']['kind'], 'select_pockets')
+        self.assertEqual(self.store.load('workflow').selected_pocket_ids, [])
+        self.assertEqual(dispatcher.dispatch(command).status, 'replayed')
+
+    def test_reopen_site_review_preserves_history_and_requires_new_approval(self):
+        from docking_universal.protocol_finalization import approved_regions_from_study
+        self.prepare()
+        approved = self.approve(['B1'])
+        original = approved.approvals[-1]
+        source = Path(approved.workflow_data['preparation_root']) / 'receptor/receptor.log'
+        before = source.read_bytes() if source.is_file() else None
+        decision = self.controller.reopen_site_review('workflow', expected_revision=approved.revision, request_id='reopen-1')
+        reopened = self.store.load('workflow')
+        self.assertEqual(reopened.selected_pocket_ids, [])
+        self.assertEqual(reopened.approvals[-1], original)
+        self.assertEqual(reopened.pending_decisions[0].id, decision.id)
+        self.assertEqual(reopened.active_job.stage, 'pocket_review')
+        self.assertFalse(decision.automation_eligible)
+        with self.assertRaisesRegex(ValueError, 'approved'):
+            approved_regions_from_study(reopened)
+        replay = self.controller.reopen_site_review('workflow', expected_revision=approved.revision, request_id='reopen-1')
+        self.assertEqual(replay.id, decision.id)
+        self.controller.resolve_decision('workflow', decision.id, ('L1',), actor='test-user',
+                                         expected_revision=reopened.revision)
+        changed = self.store.load('workflow')
+        self.assertEqual(changed.selected_pocket_ids, ['L1'])
+        self.assertEqual(len(changed.approvals), len(approved.approvals) + 1)
+        self.assertEqual(changed.approvals[-2], original)
+        self.assertEqual(approved_regions_from_study(changed)[0][0]['box_label'], 'L1')
+        if before is not None:
+            self.assertEqual(source.read_bytes(), before)
+
+    def test_reopen_site_review_refuses_after_downstream_work_or_stale_revision(self):
+        from docking_universal.models import Job, JobStatus
+        from docking_universal.state import RevisionConflictError
+        self.prepare()
+        approved = self.approve(['B1'])
+        with self.assertRaises(RevisionConflictError):
+            self.controller.reopen_site_review('workflow', expected_revision=approved.revision - 1)
+        approved.jobs.append(Job(id='old-control', stage='control_validation', status=JobStatus.FAILED))
+        self.store.save(approved)
+        state = self.store.load('workflow')
+        before = self.store.path_for('workflow').read_bytes()
+        with self.assertRaisesRegex(ValueError, 'downstream'):
+            self.controller.reopen_site_review('workflow', expected_revision=state.revision)
+        self.assertEqual(self.store.path_for('workflow').read_bytes(), before)
+
     def setUp(self):
         from tests.test_protocol_workflow import ProtocolWorkflowTests
         self.fixture = ProtocolWorkflowTests()
@@ -58,7 +133,7 @@ class ControlSiteReviewTests(unittest.TestCase):
             time.sleep(.02)
         self.fail(str(self.store.load("workflow").workflow_data))
 
-    def fake_lookup(self, source, boxes, output):
+    def fake_lookup(self, source, boxes, output, **_kwargs):
         from docking_universal_pocket_evidence import group_ligand_sites
         output = Path(output)
         output.mkdir(parents=True, exist_ok=True)
@@ -224,6 +299,24 @@ class ControlSiteReviewTests(unittest.TestCase):
         self.assertIn('.docking-universal-control-attempts', done.workflow_data['latest_control_output'])
         self.assertEqual(done.selected_pocket_ids, state.selected_pocket_ids)
         self.assertTrue(any(item.kind == 'protocol_bundle' for item in done.artifacts))
+
+    def test_unapproved_completed_control_can_be_retried_without_overwriting(self):
+        self.prepare()
+        state = self.approve(['B1'])
+        script = self.executable.parent / 'docking-universal-run.py'
+        successful_script = script.read_text()
+        script.write_text('import sys\nfrom pathlib import Path\n'
+                          'a=sys.argv; out=Path(a[a.index("--out")+1]); out.mkdir(parents=True)\n'
+                          '(out / "prior-result.txt").write_text("retained")\n')
+        self.runner.start_control_validation('workflow', {}, request_id='first-control', expected_revision=state.revision)
+        first = self.wait(lambda s: s.workflow_data.get('latest_control_status') == 'not_approved' and not s.active_job)
+        old_output = Path(first.workflow_data['latest_control_output'])
+        script.write_text(successful_script)
+        self.runner.start_control_validation('workflow', {'retry': True}, request_id='retry-control', expected_revision=first.revision)
+        done = self.wait(lambda s: s.workflow_data.get('latest_control_status') == 'approved')
+        self.assertEqual((old_output / 'prior-result.txt').read_text(), 'retained')
+        self.assertIn('.docking-universal-control-attempts', done.workflow_data['latest_control_output'])
+        self.assertEqual(done.selected_pocket_ids, state.selected_pocket_ids)
 
     def test_remote_site_only_cannot_test_the_other_experimental_ligand(self):
         self.prepare()

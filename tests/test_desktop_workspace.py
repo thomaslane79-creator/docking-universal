@@ -9,13 +9,584 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from docking_universal.application import StudyController
 from docking_universal.decisions import DecisionOption, DecisionRequired
-from docking_universal.gui.desktop import QT_IMPORT_ERROR, StudyWindow
+from docking_universal.gui.desktop import QT_IMPORT_ERROR, StudyWindow, _failure_summary
 from docking_universal.models import ArtifactRecord, Job, JobStatus, PocketCandidate
 from docking_universal.state import JsonStudyStore
 
 
 @unittest.skipIf(QT_IMPORT_ERROR is not None, "selected Qt 6 binding is unavailable")
 class DesktopWorkspaceTests(unittest.TestCase):
+    def test_cluster_plip_batch_reuses_saved_representatives(self):
+        from types import SimpleNamespace
+        from docking_universal.gui.qt import QtWidgets
+        from unittest.mock import Mock
+        button, status, progress = QtWidgets.QPushButton(), QtWidgets.QLabel(), QtWidgets.QProgressBar()
+        root = self.root / 'analysis'
+        poses = [(root, SimpleNamespace(cluster_id=1, pose_id=2, energy_kcal_per_mol=-2.0)),
+                 (root, SimpleNamespace(cluster_id=1, pose_id=3, energy_kcal_per_mol=-3.0)),
+                 (root, SimpleNamespace(cluster_id=2, pose_id=4, energy_kcal_per_mol=-1.0))]
+        saved_path = self.root / 'saved.png'
+        saved_path.write_bytes(b'saved')
+        saved = [SimpleNamespace(analysis_root=root, cluster_id=1, pose_id=3, diagram=saved_path),
+                 SimpleNamespace(analysis_root=root, cluster_id=2, pose_id=4, diagram=saved_path)]
+        with patch.object(self.window, 'batch_plip_main', button, create=True), \
+             patch.object(self.window, 'batch_plip_status', status, create=True), \
+             patch.object(self.window, 'batch_plip_progress', progress, create=True), \
+             patch.object(self.window, '_selected_screening_compound', return_value=self.root), \
+             patch.object(self.window, 'host_controller', SimpleNamespace(available=True)), \
+             patch.object(self.window.results_model, 'poses', return_value=poses), \
+             patch.object(self.window.results_model, 'cluster_interactions', return_value=saved):
+            self.window._toggle_cluster_plip_batch()
+        self.assertIn('2 of 2 processed', status.text())
+        self.assertIn('0 remaining', status.text())
+        self.assertEqual(progress.value(), 2)
+        self.assertIn('finished', status.text())
+
+    def test_cluster_plip_batch_reports_disconnect_without_claiming_completion(self):
+        from types import SimpleNamespace
+        from docking_universal.gui.qt import QtWidgets
+        button, status, progress = QtWidgets.QPushButton(), QtWidgets.QLabel(), QtWidgets.QProgressBar()
+        batch = {'queue': [], 'total': 3, 'done': 1, 'failed': 0, 'job': 'active',
+                 'current': (self.root, 5, 2), 'starting': False, 'stopped': True}
+        with patch.object(self.window, 'batch_plip_main', button, create=True), \
+             patch.object(self.window, 'batch_plip_status', status, create=True), \
+             patch.object(self.window, 'batch_plip_progress', progress, create=True), \
+             patch.object(self.window, 'host_controller', SimpleNamespace(available=False)), \
+             patch.object(self.window, '_cluster_plip_batch', batch, create=True):
+            self.window._advance_cluster_plip_batch()
+            self.assertIsNone(self.window._cluster_plip_batch)
+        self.assertIn('2 remaining', status.text())
+        self.assertIn('current calculation status unknown', status.text())
+
+    def test_screening_report_follows_selected_compound_run(self):
+        first, second = self.root / 'run1', self.root / 'run2'
+        for root in (first, second):
+            (root / 'report').mkdir(parents=True)
+            (root / 'report' / 'result.pdf').write_bytes(b'pdf')
+            self.window.state.artifacts.append(ArtifactRecord(root.name, 'screening_report', str(root / 'report' / 'result.pdf')))
+        compound = second / 'compounds' / 'ligand'
+        actions = self.window.open_screen_report_button.menu().actions()
+        with patch.object(self.window, '_selected_screening_compound', return_value=compound), \
+             patch.object(self.window, '_open_path') as opened:
+            actions[0].trigger()
+        opened.assert_called_once_with(second / 'report' / 'result.pdf')
+        with patch.object(self.window, '_selected_screening_compound', return_value=compound), \
+             patch.object(self.window, '_open_or_export_report') as export:
+            actions[2].trigger()
+        export.assert_called_once_with(second / 'report' / 'result.pdf', 'high-resolution')
+
+    def test_dock_more_opens_screening_with_unused_output_folder(self):
+        existing = self.root / 'screen'
+        existing.mkdir()
+        (self.root / 'screen_2').mkdir()
+        self.window.screen_output.setText(str(existing))
+        self.window.screening_setup_panel.another_run_button.setEnabled(True)
+        self.window.screening_setup_panel.another_run_button.click()
+        self.assertEqual(self.window.screen_output.text(), str(self.root / 'screen_3'))
+        self.assertIn('New run ready', self.window.screening_setup_panel.another_run_notice.text())
+        self.assertIn(str(self.root / 'screen_3'), self.window.screening_setup_panel.another_run_notice.text())
+        self.assertEqual(self.window._workflow_target, 'locked_protocol_screening_dock')
+        self.assertTrue(existing.is_dir())
+
+    def test_hidden_2d_displays_pose_without_starting_plip(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from docking_universal.gui.qt import QtWidgets
+        toggle = QtWidgets.QCheckBox()
+        toggle.setChecked(False)
+        adapter = SimpleNamespace(show_multiple_review_poses=Mock())
+        analysis = self.root / 'analysis'
+        host = SimpleNamespace(available=True, start_pose_interaction=Mock())
+        with patch.object(self.window, 'show_2d_interactions', toggle, create=True), \
+             patch.object(self.window, 'viewer_coordinator', SimpleNamespace(adapter=adapter, connected=True)), \
+             patch.object(self.window, 'host_controller', host), \
+             patch.object(self.window.results_model, 'cached_pose_diagram', return_value=None):
+            self.window._request_pose_interaction(analysis, 42, 1, '-8', False)
+        adapter.show_multiple_review_poses.assert_called_once_with([(analysis, 42)])
+        host.start_pose_interaction.assert_not_called()
+        toggle.close()
+
+    def test_reopening_2d_requests_the_current_single_pose(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        panel = SimpleNamespace(show=Mock(), hide=Mock())
+        with patch.object(self.window, 'viewer_widget', object()), \
+             patch.object(self.window, 'linked_pose_panel', panel, create=True), \
+             patch.object(self.window, '_cluster_comparison_selected') as select:
+            self.window.pose_review_mode.setCurrentIndex(self.window.pose_review_mode.findData('clusters'))
+            self.window._toggle_2d_interactions(False)
+            panel.hide.assert_called_once()
+            self.window._toggle_2d_interactions(True)
+            select.assert_called_once()
+            panel.show.assert_called_once()
+
+    def test_reopen_restores_previously_reviewed_library(self):
+        import json
+        from types import SimpleNamespace
+        source = self.root / 'library.sdf'
+        source.write_text('retained')
+        selection = {'fingerprint': 'verified', 'record_ids': ['record-1'], 'name_overrides': {'record-1': 'pyronaridine'}}
+        self.window.screen_ligands.setText(str(source))
+        key = self.window._form_settings_group() + '/screen/library_selection'
+        self.window.settings.setValue(key, json.dumps({'source': str(source), 'selection': selection}))
+        self.window._library_restore_attempted = False
+        with patch.object(self.window, 'host_controller', SimpleNamespace(available=True)), \
+             patch.object(self.window, 'read_screening_library') as read:
+            self.window._restore_screening_library_if_needed()
+            read.assert_called_once_with(column_mapping=None, restore_selection=selection)
+            self.window._restore_screening_library_if_needed()
+            read.assert_called_once()
+
+    def test_older_screening_restores_only_verified_records_and_display_name(self):
+        import json
+        from types import SimpleNamespace
+        source = self.root / 'old-library.sdf'
+        source.write_text('source')
+        study = self.root / 'old-screen'
+        (study / 'inputs').mkdir(parents=True)
+        (study / 'report').mkdir()
+        manifest = study / 'compounds' / '107771' / 'screen_manifest.json'
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text('{}')
+        (study / 'inputs' / 'compound_library_inventory.json').write_text(json.dumps({'compounds': [{
+            'compound_id': '107771', 'record_id': 'record1', 'source': str(source),
+            'source_sha256': 'verified-hash', 'compound_name': '107771'}]}))
+        (study / 'report' / 'compound_display_names.json').write_text(json.dumps({'names': {'107771': 'pyronaridine'}}))
+        self.window.state.artifacts.append(ArtifactRecord('old-screen', 'screening_compound_manifest', str(manifest)))
+        self.window.screen_ligands.setText(str(source))
+        self.window.settings.remove(self.window._form_settings_group() + '/screen/library_selection')
+        self.window._library_restore_attempted = False
+        library = {'fingerprint': 'current', 'records': [{'record_id': 'record1', 'source': str(source),
+            'source_sha256': 'verified-hash', 'name': '107771', 'source_record': 1,
+            'formula': 'C', 'formal_charge': 0, 'valid': True, 'error': ''}]}
+        with patch.object(self.window, 'host_controller', SimpleNamespace(available=True)), \
+             patch.object(self.window, '_read_library_async', side_effect=lambda operation, callback: callback(library, None)), \
+             patch.object(self.window, '_update_screening_controls'):
+            self.assertIsNotNone(self.window._retained_screening_library(str(source)))
+            self.window._restore_screening_library_if_needed()
+        panel = self.window.screening_setup_panel.library_panel
+        self.assertEqual(panel.selection()['record_ids'], ['record1'])
+        self.assertEqual(panel.selection()['name_overrides']['record1'], 'pyronaridine')
+
+        self.window.settings.remove(self.window._form_settings_group() + '/screen/library_selection')
+        self.window._library_restore_attempted = False
+        changed = {**library, 'fingerprint': 'changed', 'records': [{**library['records'][0], 'source_sha256': 'different'}]}
+        with patch.object(self.window, 'host_controller', SimpleNamespace(available=True)), \
+             patch.object(self.window, '_read_library_async', side_effect=lambda operation, callback: callback(changed, None)), \
+             patch.object(self.window, '_update_screening_controls'):
+            self.window._restore_screening_library_if_needed()
+        self.assertEqual(panel.selection()['record_ids'], [])
+        self.assertIn('changed since', self.window.screening_status.text())
+
+    def test_screening_report_opens_corrected_display_copy(self):
+        import json
+        from unittest.mock import patch
+        folder = self.root / 'screen-report'
+        folder.mkdir()
+        original = folder / 'original.pdf'
+        corrected = folder / 'corrected.pdf'
+        original.write_bytes(b'original')
+        corrected.write_bytes(b'corrected')
+        (folder / 'compound_display_names.json').write_text(json.dumps({'corrected_report': corrected.name}))
+        self.window.state.artifacts.append(ArtifactRecord('screen-report', 'screening_report', str(original)))
+        with patch.object(self.window, '_open_path') as opened:
+            self.window.open_screening_report()
+            opened.assert_called_once_with(corrected)
+
+    def test_default_study_folder_timestamps_only_collisions(self):
+        from datetime import datetime
+        from docking_universal.gui.desktop import _available_study_folder
+
+        now = datetime(2026, 11, 22, 15, 46, 52)
+        folder = _available_study_folder(self.root, '6E2P', now)
+        self.assertEqual(folder, self.root / '6E2P_2026-11-22')
+        folder.mkdir()
+        timestamped = _available_study_folder(self.root, '6E2P', now)
+        self.assertEqual(timestamped, self.root / '6E2P_2026-11-22_154652')
+        timestamped.mkdir()
+        self.assertEqual(_available_study_folder(self.root, '6E2P', now).name,
+                         '6E2P_2026-11-22_154652_2')
+
+    def test_structure_id_suggests_folder_and_respects_manual_selection(self):
+        from docking_universal.gui.qt import QtCore
+
+        with patch.object(QtCore.QStandardPaths, 'writableLocation', return_value=str(self.root)):
+            self.window.output_directory.clear()
+            self.window.input_pdb.setText('6E2P')
+            suggested = Path(self.window.output_directory.text())
+            self.assertEqual(suggested.parent, self.root)
+            self.assertTrue(suggested.name.startswith('6E2P_'))
+            self.window.output_directory.setText(str(self.root / 'chosen'))
+            self.window.input_pdb.setText('2R8N')
+            self.assertEqual(self.window.output_directory.text(), str(self.root / 'chosen'))
+
+    def test_report_button_identifies_control_and_protocol_reports(self):
+        state = self.store.load('desktop')
+        control = self.root / 'control.pdf'
+        control.write_bytes(b'control')
+        state.artifacts.append(ArtifactRecord('control', 'control_report', str(control)))
+        self.store.save(state)
+        self.window.refresh()
+        self.assertEqual(self.window.open_final_report_button.text(), 'Open control report')
+        protocol = self.root / 'protocol.pdf'
+        protocol.write_bytes(b'protocol')
+        state = self.store.load('desktop')
+        state.artifacts.append(ArtifactRecord('protocol', 'final_report', str(protocol)))
+        self.store.save(state)
+        self.window.refresh()
+        self.assertEqual(self.window.open_final_report_button.text(), 'Open protocol report')
+
+    def test_control_start_keeps_interface_responsive_and_blocks_duplicate_start(self):
+        import threading
+        from unittest.mock import Mock
+        from PyQt6.QtTest import QTest
+        gate = threading.Event()
+        host = Mock(available=True)
+        host.start_control_validation.side_effect = lambda *args: gate.wait(3)
+        self.window.protocol_finalization_panel._control_mode = True
+        with patch.object(self.window, 'host_controller', host), patch.object(self.window, 'refresh'):
+            try:
+                self.window.start_protocol_finalization()
+                self.assertTrue(self.window._starting_control)
+                self.assertIn('Starting known-ligand control', self.window.feedback_heading.text())
+                self.assertFalse(self.window.finalize_button.isEnabled())
+                self.window.start_protocol_finalization()
+                QTest.qWait(50)
+                host.start_control_validation.assert_called_once()
+                gate.set()
+                for _ in range(40):
+                    if not self.window._starting_control:
+                        break
+                    QTest.qWait(50)
+                self.assertFalse(self.window._starting_control)
+            finally:
+                gate.set()
+
+    def test_control_retry_uses_responsive_start_and_retains_retry_flag(self):
+        import threading
+        from unittest.mock import Mock
+        from PyQt6.QtTest import QTest
+        gate = threading.Event()
+        host = Mock(available=True)
+        host.start_control_validation.side_effect = lambda *args: gate.wait(3)
+        self.window.state.jobs[-1].stage = 'control_validation'
+        with patch.object(self.window, 'host_controller', host), patch.object(self.window, 'refresh'):
+            try:
+                self.window.retry_site_detection()
+                self.assertTrue(self.window._starting_control)
+                self.assertIn('Restarting known-ligand control', self.window.feedback_heading.text())
+                QTest.qWait(50)
+                host.start_control_validation.assert_called_once_with({'retry': True}, self.window.state.revision)
+                gate.set()
+                for _ in range(40):
+                    if not self.window._starting_control:
+                        break
+                    QTest.qWait(50)
+                self.assertFalse(self.window._starting_control)
+            finally:
+                gate.set()
+
+    def test_verified_input_ligand_offers_2d_interactions(self):
+        panel = self.window.pocket_evidence_panel
+        observation = {'entry': 'Input', 'ligand': 'ID8 B:602', 'source': 'input_structure',
+                       'source_ligand_id': 'input/ID8/B/602', 'aligned_ligand_pdb': '/tmp/input.pdb'}
+        with patch('docking_universal.services.evidence_interactions.evidence_inputs', return_value={}):
+            panel.set_candidate({'id': 'B1', 'evidence': {
+                'input_ligand_evidence': {'observation_count': 1, 'observations': [observation]}}})
+            panel.table.selectRow(0)
+            self.assertTrue(panel.render_2d_button.isEnabled())
+    def test_failed_linked_sugar_render_stops_progress_and_explains_failure(self):
+        from PyQt6.QtTest import QTest
+        from unittest.mock import Mock
+        self.window.linked_pose_panel = Mock()
+        source = self.root / 'linked.pdb'
+        line = list(' ' * 80)
+        line[:6] = 'LINK  '
+        line[47:50] = 'NAG'
+        line[51:52] = 'C'
+        line[52:57] = '   2 '
+        source.write_text(''.join(line) + '\n')
+        cache = self.root / 'failure-cache'
+        cache.mkdir()
+        (cache / 'worker.log').write_text('ValueError: Deposited ligand atoms do not match CCD chemistry; interaction rendering stopped\n')
+        record = {'cache': str(cache), 'source': str(source), 'entry': '5F19',
+                  'ligand': 'NAG', 'chain': 'C', 'residue': '2'}
+        self.window._show_evidence_render_progress(record)
+        self.window._evidence_2d_finished(record, 1)
+        self.assertIsNone(self.window._evidence_2d_progress)
+        self.assertIsNone(self.window._evidence_2d_progress_timer)
+        dialog = self.window._evidence_2d_error_dialog
+        self.assertIn('covalently linked', dialog.text())
+        self.assertFalse(dialog.isModal())
+        QTest.qWait(1100)
+        self.assertTrue(dialog.isVisible())
+        dialog.accept()
+
+    def test_site_list_divider_keeps_resized_height_on_refresh(self):
+        state = self.store.load('desktop')
+        self.window.state = state
+        self.window.show()
+        self.window.review_splitter.show()
+        self.window.candidates.show()
+        self.window.review_splitter.setSizes([300, 300])
+        self.application.processEvents()
+        before = self.window.review_splitter.sizes()
+        self.window._size_candidate_table()
+        self.application.processEvents()
+        self.assertEqual(self.window.review_splitter.sizes(), before)
+        self.assertGreater(self.window.candidates.maximumHeight(), 300)
+
+    def test_evidence_only_site_shows_one_supporting_observation_and_fixed_controls(self):
+        from unittest.mock import Mock
+        state = self.store.load('desktop')
+        state.workflow_data['pocket_candidates'] = [{'id': 'L1', 'label': 'L1', 'rank': 1,
+            'summary': '', 'evidence': {'kind': 'ligand_defined', 'geometry': {
+                'center_x': 0, 'center_y': 0, 'center_z': 0,
+                'size_x': 20, 'size_y': 20, 'size_z': 20},
+                'experimental_ligand_evidence': {'observation_count': 1, 'observations': [
+                    {'entry': '1ABC', 'ligand': 'NAG', 'aligned_ligand_pdb': '/tmp/nag.pdb'}]}}}]
+        self.window.state = state
+        self.window._render_candidates(state)
+        viewer = Mock(connected=True)
+        with patch.object(self.window, 'viewer_coordinator', viewer), \
+             patch.object(self.window, '_ensure_pocket_space'), patch.object(self.window, '_show_embedded_viewer'):
+            self.window._candidate_highlight_changed()
+        panel = self.window.pocket_evidence_panel
+        self.assertFalse(panel.supporting_toggle.isChecked())
+        self.assertEqual(panel._selected_paths(), [])
+        panel.supporting_toggle.setChecked(True)
+        self.assertEqual(panel.table.item(0, 0).text(), 'supporting component')
+        self.assertEqual(panel.evidence_title.text(), 'Supporting components')
+        self.assertIn('1 supporting component', panel.heading.text())
+        self.assertTrue(self.window.pocket_evidence_actions.isAncestorOf(panel.render_2d_button))
+        self.assertTrue(self.window.pocket_evidence_actions.isAncestorOf(panel.supporting_toggle))
+        self.assertTrue(self.window.pocket_evidence_actions.isAncestorOf(panel.note))
+        self.assertFalse(panel.isAncestorOf(panel.render_2d_button))
+        self.assertFalse(panel.isAncestorOf(panel.note))
+        self.assertTrue(self.window.pocket_evidence_page.isAncestorOf(self.window.pocket_graph_area))
+        self.assertFalse(panel.isAncestorOf(self.window.pocket_graph_area))
+
+    def test_detached_site_approval_uses_same_selection_and_note(self):
+        from unittest.mock import Mock
+        from docking_universal.gui.full_pymol_study import FullPyMOLStudyPanel
+        state = self.store.load('desktop')
+        self.window.state = state
+        self.window._render_candidates(state)
+        host = Mock(available=True)
+        with patch.object(self.window, 'host_controller', host), patch.object(self.window, 'refresh'):
+            panel = FullPyMOLStudyPanel(self.window)
+            try:
+                self.assertIn('P1', panel.approval_selection.text())
+                self.assertTrue(panel.approve_regions.isEnabled())
+                panel.approval_note.setText('Reviewed in full viewer')
+                self.assertEqual(self.window.rationale.text(), 'Reviewed in full viewer')
+                host.resolve_pockets.assert_not_called()
+                panel.approve_regions.click()
+                from PyQt6.QtTest import QTest
+                QTest.qWait(50)
+                host.resolve_pockets.assert_called_once_with(
+                    state.pending_decisions[0].id, ['P1'], 'Reviewed in full viewer', state.revision)
+            finally:
+                panel.dispose()
+                panel.close()
+
+    def test_site_approval_keeps_ui_responsive_and_prevents_duplicate_requests(self):
+        import threading
+        from unittest.mock import Mock
+        from PyQt6.QtTest import QTest
+        state = self.store.load('desktop')
+        self.window.state = state
+        self.window._render_candidates(state)
+        release = threading.Event()
+        host = Mock(available=True)
+        host.resolve_pockets.side_effect = lambda *args: release.wait(2)
+        with patch.object(self.window, 'host_controller', host), patch.object(self.window, 'refresh'):
+            self.window.approve_selected_regions()
+            self.assertTrue(self.window._pocket_approval_pending)
+            self.assertTrue(self.window._pocket_approval_progress.isVisible())
+            self.window.approve_selected_regions()
+            self.assertEqual(host.resolve_pockets.call_count, 1)
+            release.set()
+            for _ in range(30):
+                QTest.qWait(20)
+                if not self.window._pocket_approval_pending:
+                    break
+            self.assertFalse(self.window._pocket_approval_pending)
+
+    def test_detached_site_list_selects_multiple_and_approves_exactly_those(self):
+        import copy
+        from unittest.mock import Mock
+        from docking_universal.gui.full_pymol_study import FullPyMOLStudyPanel
+        from docking_universal.gui.qt import QtCore
+        state = self.store.load('desktop')
+        second = copy.deepcopy(state.workflow_data['pocket_candidates'][0])
+        second['id'] = second['label'] = 'P2'
+        second['rank'] = 2
+        state.workflow_data['pocket_candidates'].append(second)
+        self.window.state = state
+        self.window._render_candidates(state)
+        viewer = Mock(connected=True)
+        host = Mock(available=True)
+        with patch.object(self.window, 'viewer_coordinator', viewer), patch.object(self.window, 'host_controller', host), \
+             patch.object(self.window, '_ensure_pocket_space'), patch.object(self.window, 'refresh'):
+            panel = FullPyMOLStudyPanel(self.window)
+            try:
+                self.assertTrue(panel.regions.isHidden())
+                self.assertTrue(panel.tabs.tabBar().isHidden())
+                panel.site_list.item(1).setSelected(True)
+                self.assertEqual({item.data(QtCore.Qt.ItemDataRole.UserRole) for item in panel.site_list.selectedItems()}, {'P1', 'P2'})
+                self.assertIn('P1, P2', panel.approval_selection.text())
+                viewer.show_candidates.assert_called_with(state, ['P1', 'P2'])
+                panel.approve_regions.click()
+                from PyQt6.QtTest import QTest
+                QTest.qWait(50)
+                host.resolve_pockets.assert_called_once_with(state.pending_decisions[0].id, ['P1', 'P2'], '', state.revision)
+                panel.site_list.item(0).setSelected(False)
+                self.assertEqual([item.data(QtCore.Qt.ItemDataRole.UserRole) for item in panel.site_list.selectedItems()], ['P2'])
+                viewer.show_candidate.assert_called_with(state, 'P2')
+            finally:
+                panel.dispose()
+                panel.close()
+
+    def test_grouped_site_displays_the_named_prediction_cavity(self):
+        from unittest.mock import Mock
+        state = self.store.load('desktop')
+        state.workflow_data['pocket_candidates'] = [
+            {'id': 'B1', 'label': 'B1', 'rank': 1, 'summary': '', 'evidence': {
+                'site_group': {'representative_id': 'B1', 'members': [],
+                               'member_ids': ['P2', 'P11', 'B1']}}},
+            {'id': 'P3', 'label': 'P3', 'rank': 2, 'summary': '', 'evidence': {}},
+        ]
+        self.window.state = state
+        self.window._render_candidates(state)
+        adapter = Mock()
+        adapter.show_pocket_space.return_value = ['du_pocket_space_2', 'du_pocket_space_11']
+        self.window.viewer_coordinator = Mock(adapter=adapter)
+        self.window.candidates.selectRow(0)
+        self.window._apply_pocket_space({'counts': {'2': 550, '11': 154, '3': 4}})
+        self.assertEqual(adapter.show_pocket_space.call_args.args[1], [2])
+        self.assertIn('P2', self.window.viewer_status.text())
+        self.window.candidates.selectRow(1)
+        self.window._apply_pocket_space({'counts': {'2': 550, '11': 154, '3': 4}})
+        self.assertEqual(adapter.show_pocket_space.call_args.args[1], [3])
+        from docking_universal.gui.qt import QtCore
+        selection = self.window.candidates.selectionModel()
+        selection.select(self.window.candidates.model().index(0, 0),
+            QtCore.QItemSelectionModel.SelectionFlag.Select | QtCore.QItemSelectionModel.SelectionFlag.Rows)
+        self.window.viewer_coordinator.show_candidates.assert_called_with(state, ['B1', 'P3'])
+        self.window._apply_pocket_space({'counts': {'2': 550, '11': 154, '3': 4}})
+        self.assertEqual(adapter.show_pocket_space.call_args.args[1], [2, 3])
+        self.assertEqual(set(adapter.show_pocket_space.call_args.args[2]), {2, 3})
+
+    def test_selected_predicted_pocket_displays_only_its_own_space(self):
+        from unittest.mock import Mock
+        state = self.store.load('desktop')
+        state.workflow_data['pocket_candidates'] = [{'id': 'P5', 'label': 'P5', 'rank': 1,
+            'summary': '', 'evidence': {'site_group': {'representative_id': 'P5', 'members': [],
+                                                         'member_ids': ['P5', 'P16', 'P18']}}}]
+        self.window.state = state
+        self.window._render_candidates(state)
+        adapter = Mock()
+        adapter.show_pocket_space.return_value = ['du_pocket_space_5']
+        self.window.viewer_coordinator = Mock(adapter=adapter)
+        self.window.candidates.selectRow(0)
+        self.window._apply_pocket_space({'counts': {'5': 10, '16': 10, '18': 10}})
+        self.assertEqual(adapter.show_pocket_space.call_args.args[1], [5])
+
+    def test_compact_and_full_graph_keep_selection_and_retained_candidates(self):
+        from docking_universal.gui.qt import QtCore
+        from PyQt6.QtTest import QTest
+        state = self.store.load('desktop')
+        candidates = [{'id': f'P{i}', 'label': f'P{i}', 'rank': i, 'summary': '',
+                       'evidence': {'score': 11 - i}} for i in range(1, 11)]
+        candidates[7]['evidence']['experimental_ligand_evidence'] = {'observation_count': 1}
+        state.workflow_data['pocket_candidates'] = candidates
+        before = self.store.path_for('desktop').read_bytes()
+        self.window.state = state
+        self.window._render_candidates(state)
+        self.assertEqual(len(self.window.pocket_score_plot.points), 5)
+        self.assertEqual(len(self.window.full_pocket_score_plot.points), 10)
+        self.assertIn('1 other site has possible ligand evidence', self.window.pocket_graph_summary.text())
+        self.assertGreaterEqual(self.window.full_pocket_score_plot.grab().width(),
+                                self.window.full_pocket_score_plot.minimumWidth())
+        self.window.show_full_pocket_graph()
+        self.application.processEvents()
+        full = self.window.full_pocket_score_plot
+        target = next(i for i, point in enumerate(full.points) if point[0] == 'P9')
+        QTest.mouseClick(full, QtCore.Qt.MouseButton.LeftButton, pos=full.positions()[target].toPoint())
+        self.assertEqual(self.window.pocket_score_plot.selected, 'P9')
+        self.assertNotIn('P9', [p[0] for p in self.window.pocket_score_plot.points])
+        self.assertEqual(self.window.show_selected_site_button.text(), 'Add selected site')
+        self.assertIn('Selected: P9', self.window.pocket_graph_summary.text())
+        self.window.show_selected_site_button.click()
+        self.assertIn('P9', [p[0] for p in self.window.pocket_score_plot.points])
+        self.assertEqual(self.window.show_selected_site_button.text(), 'Remove selected site')
+        self.window._select_plotted_candidate('P1')
+        self.assertIn('P9', [p[0] for p in self.window.pocket_score_plot.points])
+        self.window._select_plotted_candidate('P9')
+        self.assertEqual(self.window.show_selected_site_button.text(), 'Remove selected site')
+        self.window.show_selected_site_button.click()
+        self.assertNotIn('P9', [p[0] for p in self.window.pocket_score_plot.points])
+        self.assertEqual(full.selected, 'P9')
+        self.assertEqual(self.store.path_for('desktop').read_bytes(), before)
+        self.window.full_pocket_graph_dialog.close()
+
+    def test_review_transition_shows_loading_until_review_or_failure(self):
+        from docking_universal.models import CompletionStatus
+        state = self.store.load('desktop')
+        state.jobs = [Job(id='prep', stage='preparation_and_pocket_detection', status=JobStatus.COMPLETED)]
+        state.decisions = []
+        state.selected_pocket_ids = []
+        state.workflow_data['next_stage'] = 'pocket_review'
+        state.completion_status = CompletionStatus.RUNNING
+        self.window._update_workflow_progress(state)
+        self.assertEqual(self.window.feedback_heading.text(), 'Preparing docking-site review')
+        self.assertFalse(self.window.running_indicator.isHidden())
+        self.assertIn('collecting related-structure evidence', self.window.feedback_text.text())
+        state.workflow_data['pdb_pocket_evidence_progress'] = {'phase': 'checking', 'completed': 10, 'total': 100, 'entry': '1ABC'}
+        self.window._update_workflow_progress(state)
+        self.assertIn('10 of 100', self.window.feedback_text.text())
+        self.assertFalse(self.window.stop_pdb_search_button.isHidden())
+        state.completion_status = CompletionStatus.FAILED
+        self.window._update_workflow_progress(state)
+        self.assertTrue(self.window.running_indicator.isHidden())
+
+    def test_progress_updates_do_not_restyle_the_running_indicator(self):
+        state = self.store.load('desktop')
+        state.jobs = [Job(id='prep', stage='preparation_and_pocket_detection', status=JobStatus.RUNNING)]
+        self.window._update_workflow_progress(state)
+        with patch.object(self.window.feedback_card, 'setStyleSheet', wraps=self.window.feedback_card.setStyleSheet) as style:
+            state.jobs[0].progress_message = 'Another line of progress'
+            self.window._update_workflow_progress(state)
+            style.assert_not_called()
+
+    def test_existing_failed_preparation_shows_its_own_retained_diagnosis(self):
+        from types import SimpleNamespace
+        log = self.root / 'preparation.stdout.log'
+        log.write_text('ERROR: Receptor preparation failure category: Unsupported element\n'
+                       'Detected detail: Element Co is unsupported.\n')
+        artifact = SimpleNamespace(kind='job_stdout_log', path=str(log), metadata={'job_id': 'job-1'})
+        state = SimpleNamespace(artifacts=[artifact])
+        job = Job(id='job-1', stage='preparation_and_pocket_detection', status=JobStatus.FAILED, error='failed')
+        self.assertIn('Element Co is unsupported', _failure_summary(state, job))
+        job.id = 'another-job'
+        self.assertNotIn('Element Co', _failure_summary(state, job))
+
+    def test_reviewed_receptor_failure_uses_the_matching_attempt_diagnosis(self):
+        from types import SimpleNamespace
+        receptor = self.root / 'receptor'
+        receptor.mkdir()
+        (receptor / 'receptor_failure_diagnosis.txt').write_text(
+            'Receptor preparation failure category: Preparation backend valence-validation error\n')
+        state = SimpleNamespace(artifacts=[], workflow_data={'receptor_preparation_attempts': [
+            {'request_id': 'attempt-1', 'root': str(self.root)},
+        ]})
+        job = Job(id='job-1', stage='receptor_parameterization', request_id='attempt-1',
+                  status=JobStatus.FAILED, error='failed')
+        self.assertIn('valence-validation error', _failure_summary(state, job))
+        job.request_id = 'attempt-2'
+        self.assertNotIn('valence-validation error', _failure_summary(state, job))
+
     def test_failed_site_detection_exposes_revisioned_retry_only_when_supported(self):
         from types import SimpleNamespace
         from unittest.mock import Mock
@@ -56,6 +627,10 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.assertEqual(window.retry_site_button.text(), 'Restart screening')
         revision = window.state.revision
         window.retry_site_button.click()
+        from PyQt6.QtTest import QTest
+        for _ in range(100):
+            if not getattr(window, '_starting_screening', False): break
+            QTest.qWait(20)
         client.request.assert_called_once_with('failed-screen-study', 'retry_recorded_stage', {}, expected_revision=revision)
 
     def test_inspector_has_both_input_components_and_screening_records_in_one_list(self):
@@ -99,6 +674,37 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.assertIsNotNone(panel.picture.picture)
         self.assertEqual(self.store.path_for('desktop').read_bytes(), original)
         self.assertIsNone(self.window._input_preview_dialog)
+
+    def test_screening_preview_excludes_bound_components_and_restores_setup_list(self):
+        from tests.test_molecule_inspection import component_fixture
+        from rdkit import Chem
+        from docking_universal.services.ligand_library import inspect_ligand_library
+        source, _ = component_fixture(self.root)
+        compounds = self.root / 'screening-preview.sdf'
+        compounds.write_text(Chem.MolToMolBlock(Chem.MolFromSmiles('CCN')) + '\n$$$$\n')
+        library = self.window.screening_setup_panel.library_panel
+        library.library = inspect_ligand_library(compounds)
+        library._selected_ids = {'retained-selection'}
+        self.window.input_pdb.setText(str(source))
+        panel = self.window.molecule_inspector
+        bound = next(i for i in range(panel.choices.count()) if panel.choices.itemData(i).get('chain') == 'A')
+        panel.choices.setCurrentIndex(bound)
+        original = panel.entry_key(panel.choices.currentData())
+        study_before = self.store.path_for('desktop').read_bytes()
+        identifier = library.library['records'][0]['record_id']
+        self.window.preview_library_both(identifier)
+        dialog = self.window._input_preview_dialog
+        self.assertIsNotNone(dialog)
+        self.assertEqual(panel.title.text(), 'Screening compounds')
+        self.assertEqual(panel.choices.count(), 1)
+        self.assertEqual(panel.choices.currentData()['origin'], 'library')
+        self.assertTrue(panel.reference_button.isHidden())
+        self.assertTrue(panel.source_bar.isHidden())
+        self.assertEqual(library._selected_ids, {'retained-selection'})
+        self.assertEqual(self.store.path_for('desktop').read_bytes(), study_before)
+        dialog.close()
+        self.assertEqual(panel.entry_key(panel.choices.currentData()), original)
+        self.assertTrue(any(panel.choices.itemData(i).get('origin') == 'input' for i in range(panel.choices.count())))
 
     def test_input_preview_borrows_one_viewer_and_restores_without_mutating_study(self):
         from types import SimpleNamespace
@@ -326,11 +932,17 @@ class DesktopWorkspaceTests(unittest.TestCase):
         state.workflow_data['study_setup'] = {'explore_sites_first': True}
         state.workflow_data['receptor_parameterization_status'] = 'not_started'
         self.store.save(state)
-        with patch.object(self.window, 'host_controller', Mock(available=True)):
+        from docking_universal.gui.qt import QtWidgets
+        host = Mock(available=True)
+        with patch.object(self.window, 'host_controller', host):
             self.window.exploratory_approval.setChecked(True)
             self.window.refresh()
             self.assertFalse(self.window.finalize_button.isEnabled())
             self.assertTrue(self.window.protocol_finalization_panel.prepare_reviewed_button.isEnabled())
+            host.prepare_reviewed_receptor.side_effect = RuntimeError('Host rejected the preparation request.')
+            with patch.object(QtWidgets.QMessageBox, 'critical'):
+                self.window.prepare_reviewed_receptor()
+            self.assertIn('Host rejected the preparation request', self.window.feedback_text.text())
             state = self.store.load('desktop')
             state.workflow_data['receptor_parameterization_status'] = 'failed'
             self.store.save(state)
@@ -338,7 +950,9 @@ class DesktopWorkspaceTests(unittest.TestCase):
             self.assertFalse(self.window.finalize_button.isEnabled())
             self.assertFalse(self.window.protocol_finalization_panel.prepare_reviewed_button.isEnabled())
             self.assertEqual(self.window.candidates.rowCount(), 1)
-            self.assertIn('boxes remain available', self.window.finalization_status.text())
+            self.assertIn('approved regions are saved', self.window.finalization_status.text())
+            self.assertEqual(self.window.protocol_finalization_panel.review_model_button.text(),
+                             'Review preparation failure and model options…')
 
     def test_native_control_candidate_uses_capability_instead_of_unconditional_disable(self):
         from types import SimpleNamespace
@@ -404,6 +1018,7 @@ class DesktopWorkspaceTests(unittest.TestCase):
 
     def test_screening_cpu_choice_reaches_launch_payload_without_changing_state(self):
         from unittest.mock import Mock
+        from PyQt6.QtTest import QTest
         original = self.store.path_for('desktop').read_bytes()
         for mode, expected in (('default', None), ('automatic', 0), ('custom', 12)):
             panel = self.window.screening_setup_panel
@@ -414,6 +1029,9 @@ class DesktopWorkspaceTests(unittest.TestCase):
             with patch.object(self.window, 'host_controller', host), \
                     patch.object(self.window, 'refresh'):
                 self.window.start_screening()
+                for _ in range(100):
+                    if not getattr(self.window, '_starting_screening', False): break
+                    QTest.qWait(20)
             payload = host.start_screening.call_args.args[0]
             if expected is None:
                 self.assertNotIn('cpu', payload)
@@ -425,6 +1043,7 @@ class DesktopWorkspaceTests(unittest.TestCase):
 
     def test_clustering_presets_send_the_exact_numeric_launch_value(self):
         from unittest.mock import Mock
+        from PyQt6.QtTest import QTest
         original = self.store.path_for('desktop').read_bytes()
         panel = self.window.screening_setup_panel
         for index, expected in ((0, 1.0), (1, 1.5), (2, 2.0), (3, 1.25)):
@@ -435,6 +1054,9 @@ class DesktopWorkspaceTests(unittest.TestCase):
             host = Mock(available=True)
             with patch.object(self.window, 'host_controller', host), patch.object(self.window, 'refresh'):
                 self.window.start_screening()
+                for _ in range(100):
+                    if not getattr(self.window, '_starting_screening', False): break
+                    QTest.qWait(20)
             self.assertEqual(host.start_screening.call_args.args[0]['cluster_rmsd'], expected)
             self.assertEqual(self.store.path_for('desktop').read_bytes(), original)
 
@@ -556,6 +1178,21 @@ class DesktopWorkspaceTests(unittest.TestCase):
         state.jobs[-1].status = JobStatus.COMPLETED
         self.store.save(state)
 
+    def test_progress_only_poll_updates_status_without_rebuilding_tables(self):
+        self._running_finalization_fixture()
+        self.window.refresh()
+        self.store.update('desktop', lambda state: setattr(state.jobs[-1], 'progress_message', 'Writing next figure…'))
+        with patch.object(self.window, '_render_candidates') as candidates, \
+             patch.object(self.window, '_render_screening_results') as results:
+            self.window._refresh_polled_state()
+            candidates.assert_not_called()
+            results.assert_not_called()
+            self.assertIn('Writing next figure', self.window.feedback_text.text())
+        self.store.update('desktop', lambda state: setattr(state.jobs[-1], 'status', JobStatus.COMPLETED))
+        with patch.object(self.window, '_render_candidates') as candidates:
+            self.window._refresh_polled_state()
+            candidates.assert_called_once()
+
     def test_poll_does_not_wait_on_native_ray_lock_or_redraw_during_export(self):
         from types import SimpleNamespace
         self.window.viewer_widget = SimpleNamespace(_du_ray_export_active=True)
@@ -615,7 +1252,8 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.assertIn("review the evidence", self.window.feedback_text.text().lower())
         self.assertTrue(self.window.logs_dock.isHidden())
         self.assertTrue(self.window.reports_dock.isHidden())
-        self.assertTrue(self.window.decision_banner.isVisibleTo(self.window))
+        self.assertFalse(self.window.decision_banner.isVisibleTo(self.window))
+        self.assertTrue(self.window.decision_synopsis_button.isEnabled())
         self.window.detail.setCurrentText("Concise")
         self.assertIn("DECISION REQUIRED", self.window.decision_banner.text())
         self.assertEqual(self.window.candidates.rowCount(), 1)
@@ -660,7 +1298,7 @@ class DesktopWorkspaceTests(unittest.TestCase):
         payload.save(self.root / 'exported.png')
         self.assertEqual(original, figure.read_bytes())
 
-    def test_detached_contact_switches_remain_available_on_both_tabs_and_return_to_workspace(self):
+    def test_detached_contact_switches_are_shown_for_docked_poses_and_return_to_workspace(self):
         from docking_universal.gui.full_pymol_study import FullPyMOLStudyPanel
         from docking_universal.gui.cluster_contacts import ClusterContactControls
         from docking_universal.gui.qt import QtWidgets
@@ -672,13 +1310,14 @@ class DesktopWorkspaceTests(unittest.TestCase):
         controls = ClusterContactControls(Mock())
         self.window.live_layout.addWidget(controls)
         self.window.cluster_contact_controls = controls
+        self.window._linked_pose_active = True
         controls.set_contacts({'hydrogen_bond': STYLES['hydrogen_bond']}, [])
         panel = FullPyMOLStudyPanel(self.window)
         try:
             for tab in (0, 1):
                 panel.tabs.setCurrentIndex(tab)
                 self.assertFalse(panel.tabs.isAncestorOf(controls))
-                self.assertFalse(controls.isHidden())
+                self.assertEqual(controls.isHidden(), tab == 0)
                 self.assertTrue(controls.types.buttons['hydrogen_bond'].isChecked())
             panel.dispose()
             self.assertIs(controls.parent(), host)
@@ -702,11 +1341,11 @@ class DesktopWorkspaceTests(unittest.TestCase):
         choice.close()
 
     def test_background_refresh_keeps_the_selected_cluster_instead_of_returning_to_first(self):
-        from types import SimpleNamespace
         from docking_universal.gui.qt import QtCore
+        from docking_universal.gui.results_model import ClusterInteraction
         from unittest.mock import patch
-        choices = [SimpleNamespace(label='Cluster 1',diagram=self.root/'first.png'),
-                   SimpleNamespace(label='Cluster 2',diagram=self.root/'second.png')]
+        choices = [ClusterInteraction(self.root/'first.png', self.root, '1', 'primary', 1, -8, 2),
+                   ClusterInteraction(self.root/'second.png', self.root, '2', 'primary', 2, -7, 3)]
         original = self.store.path_for('desktop').read_bytes()
         with patch.object(self.window, '_selected_screening_compound', return_value=self.root/'compound'), \
              patch.object(self.window.results_model, 'cluster_interactions', return_value=choices), \
@@ -851,6 +1490,31 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.assertIsNone(panel._obstruction_details_window)
         panel.close()
 
+    def test_embedded_boxed_residue_centers_without_opening_review(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        residue = {'name': 'TYR', 'chain': 'B', 'number': '385'}
+        adapter = Mock()
+        with patch.object(self.window, 'viewer_coordinator', SimpleNamespace(adapter=adapter)), \
+             patch.object(self.window, 'linked_pose_panel', SimpleNamespace(status=Mock()), create=True), \
+             patch.object(self.window, '_open_interaction_review') as opened:
+            self.window._center_linked_residue(residue)
+        adapter.center_contact_residue.assert_called_once_with(residue)
+        opened.assert_not_called()
+
+    def test_embedded_diagram_click_centers_without_opening_review(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        view = SimpleNamespace(ligand=self.root / 'pose.sdf')
+        adapter = Mock()
+        adapter.review_pose = view.ligand.resolve()
+        with patch.object(self.window, 'viewer_coordinator', SimpleNamespace(adapter=adapter, connected=True)), \
+             patch.object(self.window, 'linked_pose_panel', SimpleNamespace(status=Mock()), create=True), \
+             patch.object(self.window, '_open_interaction_review') as opened:
+            self.window._center_linked_pose_view(view)
+        adapter.center_review_ligand.assert_called_once_with()
+        opened.assert_not_called()
+
     def test_experimental_diagram_opens_matched_source_pair_not_aligned_overlay(self):
         from docking_universal.gui.linked_pose_review import PoseView
         view = PoseView(self.root / "aligned.pdb", self.root / "original.pdb",
@@ -932,6 +1596,8 @@ class DesktopWorkspaceTests(unittest.TestCase):
         QtWidgets.QApplication.processEvents()
         before = record_to_dict(self.store.load('desktop'))
         try:
+            self.window.pocket_evidence_panel.supporting_toggle.setChecked(True)
+            browser.evidence.supporting_toggle.setChecked(True)
             table = browser.evidence.table
             first = table.visualItemRect(table.item(0, 2)).center()
             second = table.visualItemRect(table.item(1, 2)).center()
@@ -970,6 +1636,48 @@ class DesktopWorkspaceTests(unittest.TestCase):
             finally:
                 browser.dispose()
                 browser.close()
+
+    def test_paired_review_returns_to_detached_pymol(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from docking_universal.gui.qt import QtCore, QtWidgets
+        from docking_universal.gui.linked_pose_review import LinkedPosePanel
+        from PyQt6.QtTest import QTest
+        class Pair(QtWidgets.QDialog):
+            def __init__(self, view, panel, viewer, adapter, parent):
+                super().__init__(parent)
+                self.view = view
+                self.button = QtWidgets.QPushButton('Return to workspace', self)
+            def dispose(self):
+                pass
+        viewer = QtWidgets.QWidget()
+        panel = LinkedPosePanel()
+        panel.set_pose = Mock()
+        split = QtWidgets.QSplitter()
+        split.addWidget(viewer)
+        split.addWidget(panel)
+        adapter = SimpleNamespace(begin_interaction_review=Mock(return_value={}), end_interaction_review=Mock())
+        detached = SimpleNamespace(_du_full_pymol=True)
+        def close_detached():
+            self.window._detached_structure_window = None
+        view = SimpleNamespace(label='Pose', diagram=self.root / 'diagram.png')
+        with patch.object(self.window, 'viewer_widget', viewer), \
+             patch.object(self.window, 'viewer_coordinator', SimpleNamespace(adapter=adapter, connected=True)), \
+             patch.object(self.window, 'linked_pose_panel', panel, create=True), \
+             patch.object(self.window, 'pose_split', split, create=True), \
+             patch.object(self.window, '_detached_structure_window', detached), \
+             patch.object(self.window, '_return_detached_structure', side_effect=close_detached), \
+             patch.object(self.window, '_sync_residue_highlight_actions'), \
+             patch.object(self.window, '_ensure_pocket_space'), \
+             patch.object(self.window, 'open_full_pymol') as reopen, \
+             patch('docking_universal.gui.interaction_review_window.InteractionReviewWindow', Pair):
+            self.assertTrue(self.window._open_interaction_review(view))
+            pair = self.window._paired_interaction_window
+            self.assertEqual(pair.button.text(), 'Return to PyMOL')
+            pair.close()
+            QTest.qWait(10)
+            reopen.assert_called_once()
+        split.close()
 
     def test_main_evidence_panel_highlights_recorded_residue_without_detaching(self):
         from unittest.mock import Mock
@@ -1014,6 +1722,229 @@ class DesktopWorkspaceTests(unittest.TestCase):
             browser.dispose()
             browser.close()
 
+    def test_detached_sites_replace_selection_and_can_be_cleared(self):
+        from PyQt6.QtTest import QTest
+        from docking_universal.gui.qt import QtCore
+        from docking_universal.gui.full_pymol_study import FullPyMOLStudyPanel
+        candidate = self.window.state.workflow_data['pocket_candidates'][0]
+        self.window.state.workflow_data['pocket_candidates'] = [dict(candidate, id='P1'), dict(candidate, id='P2')]
+        self.window.candidates.setRowCount(2)
+        with patch.object(self.window, '_candidate_highlight_changed'):
+            browser = FullPyMOLStudyPanel(self.window)
+            try:
+                browser.show()
+                viewport = browser.site_list.viewport()
+                first = browser.site_list.visualItemRect(browser.site_list.item(0)).center()
+                second = browser.site_list.visualItemRect(browser.site_list.item(1)).center()
+                QTest.mouseClick(viewport, QtCore.Qt.MouseButton.LeftButton, pos=first)
+                QTest.mouseClick(viewport, QtCore.Qt.MouseButton.LeftButton, pos=second)
+                self.assertEqual([item.data(QtCore.Qt.ItemDataRole.UserRole) for item in browser.site_list.selectedItems()], ['P2'])
+                QTest.mouseClick(viewport, QtCore.Qt.MouseButton.LeftButton, QtCore.Qt.KeyboardModifier.ControlModifier, first)
+                self.assertEqual(len(browser.site_list.selectedItems()), 2)
+                browser.clear_sites.click()
+                self.assertEqual(browser.site_list.selectedItems(), [])
+            finally:
+                browser.dispose()
+                browser.close()
+
+    def test_detached_site_clears_previous_ligand_and_hides_pose_contacts(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from docking_universal.gui.full_pymol_study import FullPyMOLStudyPanel
+        from docking_universal.viewer.embedded_pymol import EmbeddedPymolAdapter
+        cmd = SimpleNamespace(get_names=Mock(return_value=['receptor', 'du_evidence_old', 'du_review_pose', 'du_multi_pose_1']),
+                              disable=Mock(), hide=Mock())
+        adapter = SimpleNamespace(cmd=cmd, widget=SimpleNamespace(update=Mock()), clear_linked_contacts=Mock())
+        adapter.clear_site_review_overlays = lambda: EmbeddedPymolAdapter.clear_site_review_overlays(adapter)
+        with patch.object(self.window, 'viewer_coordinator', SimpleNamespace(adapter=adapter, connected=False)), \
+             patch.object(self.window, '_update_candidate_review_action'), \
+             patch.object(self.window, 'open_selected_candidate_review'):
+            browser = FullPyMOLStudyPanel(self.window)
+            try:
+                browser.site_list.setCurrentRow(0)
+                browser._site_list_selected()
+                cmd.disable.assert_any_call('du_evidence_old')
+                cmd.disable.assert_any_call('du_review_pose')
+                cmd.disable.assert_any_call('du_multi_pose_1')
+                self.assertNotIn('receptor', [item.args[0] for item in cmd.disable.call_args_list])
+                adapter.clear_linked_contacts.assert_called()
+                if browser.contact_controls is not None:
+                    self.assertTrue(browser.contact_controls.isHidden())
+            finally:
+                browser.dispose()
+                browser.close()
+
+    def test_evidence_double_click_selects_and_centers_that_ligand(self):
+        from PyQt6.QtTest import QSignalSpy
+        from docking_universal.gui.qt import QtCore, QtWidgets
+        from docking_universal.gui.pocket_evidence import PocketEvidencePanel
+        panel = PocketEvidencePanel()
+        panel.table.setRowCount(1)
+        for column in range(panel.table.columnCount()):
+            item = QtWidgets.QTableWidgetItem('ligand')
+            item.setData(QtCore.Qt.ItemDataRole.UserRole, '/tmp/example.pdb')
+            panel.table.setItem(0, column, item)
+        spy = QSignalSpy(panel.ligandCenterRequested)
+        panel._request_ligand(panel.table.item(0, 1))
+        self.assertEqual(list(spy[0]), ['/tmp/example.pdb'])
+        self.assertEqual(panel._selected_paths(), ['/tmp/example.pdb'])
+        panel.close()
+
+    def test_pocket_table_and_graph_clicks_center_the_same_region(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+
+        candidate = self.window.state.workflow_data['pocket_candidates'][0]
+        candidate.setdefault('evidence', {})['geometry'] = {'center_x': 2, 'center_y': 3, 'center_z': 4}
+        adapter = SimpleNamespace(center_pocket=Mock(side_effect=ValueError('Grid pending')),
+                                  center_review_point=Mock())
+        with patch.object(self.window, 'viewer_coordinator', SimpleNamespace(adapter=adapter, connected=True)), \
+             patch.object(self.window, '_candidate_highlight_changed'):
+            self.window.pocket_pan_toggle.setChecked(False)
+            self.assertFalse(self.window.smooth_site_pan.isChecked())
+            self.window._select_plotted_candidate(candidate['id'])
+            adapter.center_review_point.assert_called_once_with([2, 3, 4], animate=False)
+            self.window._center_clicked_candidate(self.window.candidates.item(0, 0))
+            self.assertEqual(adapter.center_review_point.call_count, 2)
+
+    def test_detached_pocket_center_respects_animation_setting(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from docking_universal.gui.full_pymol_study import FullPyMOLStudyPanel
+        adapter = SimpleNamespace(center_pocket=Mock())
+        candidate = dict(self.window.state.workflow_data['pocket_candidates'][0], id='P35', label='P35')
+        self.window.state.workflow_data['pocket_candidates'] = [candidate]
+        with patch.object(self.window, 'viewer_coordinator', SimpleNamespace(adapter=adapter)):
+            browser = FullPyMOLStudyPanel(self.window)
+            try:
+                browser.animate_center.setChecked(False)
+                from docking_universal.gui.qt import QtCore
+                with QtCore.QSignalBlocker(browser.site_list):
+                    browser.site_list.item(0).setSelected(True)
+                browser._center_site(browser.site_list.item(0))
+                adapter.center_pocket.assert_called_with(35, animate=False)
+                browser.animate_center.setChecked(True)
+                browser._center_site(browser.site_list.item(0))
+                adapter.center_pocket.assert_called_with(35, animate=True)
+            finally:
+                browser.dispose()
+                browser.close()
+
+    def test_detached_pose_center_uses_animation_toggle(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from docking_universal.gui.full_pymol_study import FullPyMOLStudyPanel
+        from docking_universal.gui.qt import QtCore, QtWidgets
+        adapter = SimpleNamespace(center_displayed_pose=Mock())
+        table = self.window.pose_results
+        table.setRowCount(1)
+        for col in range(table.columnCount()):
+            item = QtWidgets.QTableWidgetItem('1')
+            item.setData(QtCore.Qt.ItemDataRole.UserRole, ('/tmp/analysis', 1))
+            table.setItem(0, col, item)
+        with patch.object(self.window, 'viewer_coordinator', SimpleNamespace(adapter=adapter, connected=False)), \
+             patch.object(self.window, '_expanded_pose_selection_changed'):
+            browser = FullPyMOLStudyPanel(self.window)
+            try:
+                browser.result_mode.setCurrentIndex(browser.result_mode.findData('all_poses'))
+                browser.poses.selectRow(0)
+                browser.animate_pose_center.setChecked(False)
+                browser._center_pose(browser.poses.item(0, 0))
+                adapter.center_displayed_pose.assert_called_with(0, animate=False)
+                self.assertFalse(self.window.smooth_site_pan.isChecked())
+                browser.animate_pose_center.setChecked(True)
+                browser._center_pose(browser.poses.item(0, 0))
+                adapter.center_displayed_pose.assert_called_with(0, animate=True)
+            finally:
+                browser.dispose()
+                browser.close()
+
+    def test_detached_pose_selection_does_not_center_camera(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        adapter = SimpleNamespace(show_linked_interactions=Mock(return_value=({}, [])),
+                                  center_review_ligand=Mock(), center_review_point=Mock())
+        coordinator = SimpleNamespace(adapter=adapter, connected=True)
+        view = SimpleNamespace(ligand=str(self.root / 'site_2' / 'pose.sdf'), label='Pose')
+        panel = SimpleNamespace(status=SimpleNamespace(setText=Mock()))
+        controls = SimpleNamespace(set_contacts=Mock())
+        with patch.object(self.window, 'viewer_coordinator', coordinator), \
+             patch.object(self.window, '_detached_structure_window', object(), create=True), \
+             patch.object(self.window, 'linked_pose_panel', panel, create=True), \
+             patch.object(self.window, 'cluster_contact_controls', controls, create=True), \
+             patch.object(self.window, '_show_embedded_viewer'):
+            self.assertTrue(self.window._highlight_linked_ligand(view, highlight=False))
+        adapter.show_linked_interactions.assert_called_once_with(view, focus_on_new_receptor=False)
+        adapter.center_review_ligand.assert_not_called()
+        adapter.center_review_point.assert_not_called()
+
+    def test_full_pymol_distinguishes_predicted_pocket_from_optional_box(self):
+        from functools import partial
+        from docking_universal.viewer.embedded_pymol import EmbeddedPymolAdapter
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from docking_universal.gui.qt import QtCore
+        from docking_universal.gui.full_pymol_study import FullPyMOLStudyPanel
+        candidate = dict(self.window.state.workflow_data['pocket_candidates'][0], id='P2', label='P2')
+        ligand_site = dict(candidate, id='L1', label='L1', evidence={'kind': 'ligand_defined'})
+        self.window.state.workflow_data['pocket_candidates'] = [candidate, ligand_site]
+        cmd = SimpleNamespace(get_names=Mock(return_value=['du_box']), enable=Mock(), disable=Mock(), hide=Mock())
+        adapter = SimpleNamespace(cmd=cmd, widget=SimpleNamespace(update=Mock()))
+        adapter.set_site_review_visibility = partial(EmbeddedPymolAdapter.set_site_review_visibility, adapter)
+        with patch.object(self.window, 'viewer_coordinator', SimpleNamespace(adapter=adapter)):
+            browser = FullPyMOLStudyPanel(self.window)
+            try:
+                with QtCore.QSignalBlocker(browser.site_list):
+                    browser.site_list.item(0).setSelected(True)
+                browser._update_box_visibility()
+                cmd.disable.assert_called_with('du_box')
+                browser.box_toggle.setChecked(True)
+                cmd.enable.assert_called_with('du_box')
+                browser.box_toggle.setChecked(False)
+                with QtCore.QSignalBlocker(browser.site_list):
+                    browser.site_list.clearSelection()
+                    browser.site_list.item(1).setSelected(True)
+                browser._update_box_visibility()
+                cmd.disable.assert_called_with('du_box')
+                browser.box_toggle.setChecked(True)
+                cmd.enable.assert_called_with('du_box')
+            finally:
+                browser.dispose()
+                browser.close()
+
+    def test_main_review_box_toggle_keeps_the_selected_candidate(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from docking_universal.gui.qt import QtCore
+        adapter = SimpleNamespace(set_site_review_visibility=Mock())
+        coordinator = SimpleNamespace(adapter=adapter, connected=True)
+        table = self.window.candidates
+        with QtCore.QSignalBlocker(table.selectionModel()), QtCore.QSignalBlocker(table):
+            table.selectRow(0)
+        with patch.object(self.window, 'viewer_coordinator', coordinator):
+            self.assertFalse(self.window.site_box_toggle.isChecked())
+            self.window.site_box_toggle.setChecked(True)
+            adapter.set_site_review_visibility.assert_called_once_with(has_selection=True, show_boxes=True)
+            self.assertEqual([row.row() for row in table.selectionModel().selectedRows()], [0])
+            self.window.site_box_toggle.setChecked(False)
+            adapter.set_site_review_visibility.assert_called_with(has_selection=True, show_boxes=False)
+
+    def test_show_all_pockets_keeps_region_selection_and_box_toggle_independent(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+
+        adapter = SimpleNamespace(show_pocket_space=Mock(return_value=['surface']))
+        manifest = {'counts': {'8': 3, '1': 10, '27': 4}}
+        with patch.object(self.window, 'viewer_coordinator', SimpleNamespace(adapter=adapter, connected=True)), \
+             patch.object(self.window, '_ensure_pocket_space'), patch.object(self.window, '_show_embedded_viewer'):
+            self.window.candidates.clearSelection()
+            self.assertFalse(self.window.all_pockets_toggle.isChecked())
+            self.window.all_pockets_toggle.setChecked(True)
+            self.window._apply_pocket_space(manifest)
+            self.assertEqual(adapter.show_pocket_space.call_args.args[1], [1, 8, 27])
+            self.assertFalse(self.window.candidates.selectionModel().hasSelection())
+            self.assertFalse(self.window.site_box_toggle.isChecked())
+
     def test_detached_navigation_does_not_activate_main_window(self):
         from docking_universal.gui.qt import QtWidgets
         self.window.viewer_widget = object()
@@ -1040,13 +1971,99 @@ class DesktopWorkspaceTests(unittest.TestCase):
             table.setItem(0, column, item)
         browser = FullPyMOLStudyPanel(self.window)
         try:
-            browser.poses.selectRow(0)
+            browser.result_mode.setCurrentIndex(browser.result_mode.findData('all_poses'))
+            with patch.object(self.window, '_expanded_pose_selection_changed') as display:
+                browser.poses.selectRow(0)
+                display.assert_called_once()
             self.assertEqual(self.window.pose_review_mode.currentData(), "all_poses")
             self.assertEqual(table.selectionModel().selectedRows()[0].row(), 0)
             self.assertEqual(table.item(0, 0).data(QtCore.Qt.ItemDataRole.UserRole), identity)
         finally:
             browser.dispose()
             browser.close()
+
+    def test_full_pymol_browser_shows_and_selects_cluster_representatives(self):
+        from docking_universal.gui.full_pymol_study import FullPyMOLStudyPanel
+        from docking_universal.gui.qt import QtCore, QtWidgets
+        table = self.window.cluster_comparison
+        table.setSortingEnabled(False)
+        table.setRowCount(1)
+        identity = {'analysis': str(self.root / 'analysis'), 'cluster_id': 3}
+        for column in range(table.columnCount()):
+            item = QtWidgets.QTableWidgetItem('Saved' if column == 8 else str(column + 1))
+            if column == 0:
+                item.setData(QtCore.Qt.ItemDataRole.UserRole, identity)
+            table.setItem(0, column, item)
+        browser = FullPyMOLStudyPanel(self.window)
+        try:
+            self.assertEqual(browser.result_mode.currentData(), 'clusters')
+            self.assertEqual(browser.poses.item(0, 8).text(), 'Saved')
+            with patch.object(self.window, '_cluster_comparison_selected') as display:
+                browser.poses.selectRow(0)
+                display.assert_called_once()
+            self.assertEqual(table.item(table.selectionModel().selectedRows()[0].row(), 0).data(QtCore.Qt.ItemDataRole.UserRole), identity)
+        finally:
+            browser.dispose()
+            browser.close()
+
+    def test_detached_plip_status_shows_failure_and_offers_retry(self):
+        from unittest.mock import Mock
+        from docking_universal.gui.full_pymol_study import FullPyMOLStudyPanel
+        from docking_universal.gui.qt import QtCore, QtWidgets
+        table = self.window.cluster_comparison
+        table.setSortingEnabled(False)
+        table.setRowCount(1)
+        for col in range(table.columnCount()):
+            item = QtWidgets.QTableWidgetItem(str(col))
+            item.setData(QtCore.Qt.ItemDataRole.UserRole, {'analysis': str(self.root), 'cluster_id': 1})
+            table.setItem(0, col, item)
+        browser = FullPyMOLStudyPanel(self.window)
+        try:
+            with QtCore.QSignalBlocker(browser.poses):
+                browser.poses.selectRow(0)
+            self.window._current_interaction_diagram = None
+            self.window.interaction_diagram_view.setText('Pose 3 interaction analysis could not start: another workflow is running')
+            browser._update_plip_status()
+            self.assertIn('could not start', browser.plip_status.text())
+            self.assertTrue(browser.calculate_plip.isEnabled())
+            with patch.object(browser, '_pose_selected', Mock()) as retry:
+                browser.calculate_plip.click()
+                retry.assert_called_once()
+            self.window.interaction_diagram_view.setText('Generating PLIP interactions for pose 3…')
+            browser._update_plip_status()
+            self.assertFalse(browser.plip_progress.isHidden())
+        finally:
+            browser.dispose()
+            browser.close()
+
+    def test_selected_ligand_sites_show_each_retained_representative(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        first, second = self.root / 'first.pdb', self.root / 'second.pdb'
+        first.write_text('END\n')
+        second.write_text('END\n')
+        candidates = [
+            {'id': 'L1', 'evidence': {'kind': 'ligand_defined', 'input_ligand_reference': str(first)}},
+            {'id': 'L2', 'evidence': {'kind': 'ligand_defined', 'input_ligand_reference': str(second)}},
+        ]
+        coordinator = SimpleNamespace(sync_evidence_ligands=Mock())
+        with patch.object(self.window, 'viewer_coordinator', coordinator):
+            self.window._show_selected_site_ligands(candidates)
+        coordinator.sync_evidence_ligands.assert_called_once_with([str(first.resolve()), str(second.resolve())])
+
+    def test_ligand_label_mode_clears_and_does_not_restore_amino_acid_labels(self):
+        from unittest.mock import Mock
+        from docking_universal.gui.cluster_contacts import ClusterContactControls
+        adapter = Mock()
+        controls = ClusterContactControls(adapter)
+        controls.residues = [{'name': 'ALA', 'chain': 'A', 'number': '1'}]
+        ligand_handler = Mock()
+        controls.set_ligand_label_mode(True, ligand_handler)
+        adapter.set_review_labels_visible.assert_called_once_with(controls.residues, False)
+        controls.labels.setChecked(True)
+        ligand_handler.assert_called_once_with(True)
+        adapter.set_review_labels_visible.assert_called_once()
+        controls.close()
 
     def test_empty_docked_diagram_refresh_preserves_evidence_render(self):
         from docking_universal.gui.linked_pose_review import LinkedPosePanel
@@ -1230,7 +2247,8 @@ class DesktopWorkspaceTests(unittest.TestCase):
     def test_only_interactive_surface_occupies_central_review(self):
         self.assertEqual(self.window.review_tabs.count(), 1)
         self.assertTrue(self.window.review_tabs.tabBar().isHidden())
-        self.assertLessEqual(self.window.candidates.maximumHeight(), 125)
+        self.assertIs(self.window.review_splitter.widget(1), self.window.candidates)
+        self.assertGreater(self.window.candidates.maximumHeight(), 125)
 
     def test_candidate_review_opens_retained_structure_without_report_figure(self):
         class Viewer:
@@ -1417,6 +2435,43 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.assertEqual(plot.selected, "P2")
         self.assertEqual(state.selected_pocket_ids, [])
 
+    def test_site_review_keeps_pose_controls_out_of_the_viewport_layout(self):
+        from docking_universal.gui.qt import QtWidgets
+        from unittest.mock import Mock
+
+        viewer = Mock(connected=True, status='connected', report_view_available=False)
+        window = StudyWindow(self.store, 'desktop', settings=self.settings,
+                             viewer_coordinator=viewer, viewer_widget=QtWidgets.QFrame())
+        self.addCleanup(window.close)
+        window._workflow_target = 'central'
+        window._update_stage_review_visibility()
+        self.assertTrue(window.pose_review_controls.isHidden())
+        controls = window.pymol_controls.layout()
+        self.assertEqual(controls.getItemPosition(controls.indexOf(window.detach_viewer_button))[0], 0)
+        self.assertEqual(controls.itemAtPosition(0, 2).layout().indexOf(window.all_pockets_toggle), 0)
+        window._workflow_target = 'screening_results_dock'
+        window._update_stage_review_visibility()
+        self.assertFalse(window.pose_review_controls.isHidden())
+
+    def test_results_opens_2d_3d_from_only_one_control(self):
+        from docking_universal.gui.qt import QtWidgets
+        from unittest.mock import Mock
+
+        viewer = Mock(connected=True, status='connected', report_view_available=False)
+        window = StudyWindow(self.store, 'desktop', settings=self.settings,
+                             viewer_coordinator=viewer, viewer_widget=QtWidgets.QFrame())
+        self.addCleanup(window.close)
+        window._activate_workflow_target('screening_results_dock')
+        window.show()
+        self.application.processEvents()
+        self.assertFalse(window.open_interaction_diagram_button.isHidden())
+        window.linked_pose_panel.show()
+        self.application.processEvents()
+        self.assertTrue(window.open_interaction_diagram_button.isHidden())
+        window.linked_pose_panel.hide()
+        self.application.processEvents()
+        self.assertFalse(window.open_interaction_diagram_button.isHidden())
+
     def test_initial_embedded_review_loads_the_already_selected_p1_once(self):
         from docking_universal.gui.qt import QtWidgets
         from unittest.mock import Mock
@@ -1510,6 +2565,9 @@ class DesktopWorkspaceTests(unittest.TestCase):
             self.assertTrue(window.viewer_button.isHidden())
             self.assertTrue(window.detach_viewer_button.isVisibleTo(window))
             self.assertTrue(window.open_pose_session_button.isHidden())
+            self.assertTrue(window.sync_pose_button.isHidden())
+            self.assertTrue(window.smooth_site_pan.isChecked())
+            self.assertFalse(window.smooth_site_pan.isHidden())
             self.assertEqual(
                 window.sync_pose_button.text(),
                 "Show selected pose in interactive structure",
@@ -1580,6 +2638,22 @@ class DesktopWorkspaceTests(unittest.TestCase):
         lowered.assert_not_called()
         self.assertEqual(viewer.paths, ["one.pdb", "two.pdb"])
         self.assertIn("Embedded PyMOL synchronized", self.window.viewer_status.text())
+
+    def test_scene_menu_distinguishes_sites_and_compounds(self):
+        from types import SimpleNamespace
+        report = self.root / 'scene-menu'
+        report.mkdir()
+        scenes = [report / f'pocket_evidence_site_{site}_AB.pse' for site in (1, 2)]
+        for scene in scenes:
+            scene.touch()
+        state = SimpleNamespace(artifacts=[
+            SimpleNamespace(path=str(scene), kind='report_view_session') for scene in scenes
+        ], workflow_data={})
+        self.window._refresh_structure_scenes(state)
+        labels = [self.window.structure_scene_choice.itemText(i)
+                  for i in range(self.window.structure_scene_choice.count())]
+        self.assertEqual(labels, ['Deposited-ligand site evidence — Site 1',
+                                  'Deposited-ligand site evidence — Site 2'])
 
     def test_embedded_scene_dropdown_loads_scene_without_leaving_structure_tab(self):
         from docking_universal.gui.qt import QtWidgets
@@ -1856,7 +2930,7 @@ class DesktopWorkspaceTests(unittest.TestCase):
         )
         self.assertIs(
             self.window.right_review_stack.currentWidget(),
-            self.window.pocket_evidence_panel,
+            self.window.pocket_evidence_page,
         )
         self.assertFalse(self.window.pocket_evidence_dock.isHidden())
         self.assertTrue(self.window.screening_results_dock.isHidden())
@@ -1958,26 +3032,11 @@ class DesktopWorkspaceTests(unittest.TestCase):
             & QtCore.Qt.ItemFlag.ItemIsEnabled
         )
 
-    def test_results_review_explicitly_detaches_and_redocks_without_state_change(self):
-        before = self.store.path_for("desktop").read_bytes()
-        dock = self.window.screening_results_dock
-        self.assertEqual(dock.windowTitle(), "Results Review")
-        self.assertFalse(dock.isFloating())
-
-        self.window.detach_results_review()
-        self.application.processEvents()
-
-        self.assertTrue(dock.isFloating())
-        self.assertEqual(dock.windowTitle(), "Docking Universal — Results Review")
-        self.assertEqual(self.window.results_window_button.text(), "Return to workspace")
-        self.assertEqual(self.store.path_for("desktop").read_bytes(), before)
-
-        self.window.redock_results_review()
-        self.application.processEvents()
-
-        self.assertFalse(dock.isFloating())
-        self.assertEqual(self.window.results_window_button.text(), "Detach review")
-        self.assertEqual(self.store.path_for("desktop").read_bytes(), before)
+    def test_results_review_stays_in_workspace_without_detach_control(self):
+        from docking_universal.gui.qt import QtWidgets
+        self.assertIsNone(self.window.results_review_panel.findChild(QtWidgets.QPushButton, 'detach_results_review_button'))
+        self.assertFalse(any(action.text() == 'Detach Results Review' for action in self.window.view_toolbar.actions()))
+        self.assertFalse(self.window.screening_results_dock.isFloating())
 
     def test_draft_forms_restore_but_scientific_approvals_do_not(self):
         receptor = self.root / "draft receptor.pdb"
@@ -2012,6 +3071,238 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.assertFalse(self.window.screen_exploratory_approval.isChecked())
         self.assertIsNone(self.window._screening_plan)
 
+    def test_unanalysed_cluster_selects_lowest_energy_retained_pose(self):
+        from types import SimpleNamespace
+        from docking_universal.gui.qt import QtCore, QtWidgets
+        compound = self.root / 'compound'
+        analysis = compound / 'pose_analysis'
+        row = {'energy_rank': '4', 'cluster_id': '7', 'site': 'primary site',
+               'analysis': str(analysis), 'best_energy_kcal_per_mol': '-8.0'}
+        poses = [(analysis, SimpleNamespace(cluster_id=7, pose_id=5, energy_kcal_per_mol=-7.0)),
+                 (analysis, SimpleNamespace(cluster_id=7, pose_id=8, energy_kcal_per_mol=-8.0))]
+        table = self.window.pose_results
+        table.setRowCount(2)
+        for index, (_root, pose) in enumerate(poses):
+            item = QtWidgets.QTableWidgetItem(str(pose.pose_id))
+            item.setData(QtCore.Qt.ItemDataRole.UserRole, (str(analysis), pose.pose_id))
+            table.setItem(index, 0, item)
+            table.setItem(index, 1, QtWidgets.QTableWidgetItem(str(pose.cluster_id)))
+        with patch.object(self.window.results_model, 'cluster_comparison', return_value=(row,)), \
+             patch.object(self.window.results_model, 'poses', return_value=poses), \
+             patch.object(self.window, '_selected_screening_compound', return_value=compound), \
+             patch.object(self.window, '_request_pose_interaction') as request, \
+             QtCore.QSignalBlocker(table):
+            self.window._populate_cluster_comparison(compound)
+            self.window.cluster_comparison.selectRow(0)
+            request.assert_called_once_with(analysis, 8, 7, '-8 kcal/mol', False)
+            self.assertEqual(self.window.pose_review_mode.currentData(), 'clusters')
+            self.assertEqual(self.window.session.selection.cluster_id, 7)
+            self.assertIsNone(self.window.session.selection.pose_id)
+            self.window._pose_review_mode_changed()
+            self.assertEqual(self.window.pose_review_mode.currentData(), 'clusters')
+
+    def test_uncached_pose_displays_before_interaction_analysis(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from docking_universal.gui.results_controller import PoseLoadDecision
+        analysis = self.root / 'analysis'
+        adapter = SimpleNamespace(show_multiple_review_poses=Mock())
+        coordinator = SimpleNamespace(adapter=adapter, connected=True)
+        decision = PoseLoadDecision(('compound', 'site', 42), analysis, 'host_unavailable')
+        with patch.object(self.window, 'viewer_widget', object()), \
+             patch.object(self.window, 'viewer_coordinator', coordinator), \
+             patch.object(self.window, 'linked_pose_panel', SimpleNamespace(clear_pose=Mock()), create=True), \
+             patch.object(self.window.results_controller, 'select_pose', return_value=decision), \
+             patch.object(self.window, 'begin_pose_interaction_loading', return_value=decision.key):
+            self.window._request_pose_interaction(analysis, 42, 3, '-8.0', False)
+        adapter.show_multiple_review_poses.assert_called_once_with([(analysis, 42)])
+
+    def test_uncached_pose_requests_plip_worker(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        analysis = self.root / 'analysis'
+        host = SimpleNamespace(available=True, start_pose_interaction=Mock(return_value={'result': {'job_id': 'job'}}))
+        class Task:
+            def __init__(self):
+                self.finished = SimpleNamespace(connect=lambda callback: None)
+            def start(self, operation):
+                operation()
+        with patch.object(self.window, 'host_controller', host), \
+             patch.object(self.window, 'poseedit_runtime', {'status': 'available'}), \
+             patch('docking_universal.gui.ligand_library_panel.LibraryReadTask', Task):
+            self.window._request_pose_interaction(analysis, 42, 3, '-8.0', False)
+        host.start_pose_interaction.assert_called_once_with(analysis, 42, self.window.state.revision)
+
+    def test_automatic_plip_can_be_disabled_and_manually_requested(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        analysis = self.root / 'analysis'
+        host = SimpleNamespace(available=True, start_pose_interaction=Mock())
+        class Task:
+            def __init__(self):
+                self.finished = SimpleNamespace(connect=lambda callback: None)
+            def start(self, operation):
+                operation()
+        with patch.object(self.window, 'host_controller', host), \
+             patch.object(self.window, 'poseedit_runtime', {'status': 'available'}), \
+             patch.object(self.window, '_auto_plip_enabled', False, create=True), \
+             patch('docking_universal.gui.ligand_library_panel.LibraryReadTask', Task):
+            self.window._request_pose_interaction(analysis, 42, 3, '-8.0', False)
+            host.start_pose_interaction.assert_not_called()
+            self.assertIn('Automatic PLIP calculation is off', self.window.interaction_diagram_view.text())
+            self.window._request_pose_interaction(analysis, 42, 3, '-8.0', False, force_plip=True)
+            host.start_pose_interaction.assert_called_once()
+
+    def test_pose_waits_and_retries_when_plip_worker_busy(self):
+        from types import SimpleNamespace
+        analysis = self.root / 'analysis'
+        class Task:
+            def __init__(self):
+                self.finished = SimpleNamespace(connect=self.connect)
+            def connect(self, callback):
+                self.callback = callback
+            def start(self, operation):
+                self.callback(None, 'Study example already has an active stage: pose_interaction')
+            def deleteLater(self):
+                pass
+        host = SimpleNamespace(available=True)
+        with patch.object(self.window, 'host_controller', host), \
+             patch.object(self.window, 'poseedit_runtime', {'status': 'available'}), \
+             patch('docking_universal.gui.ligand_library_panel.LibraryReadTask', Task), \
+             patch('docking_universal.gui.desktop.QtCore.QTimer.singleShot') as schedule:
+            self.window._request_pose_interaction(analysis, 42, 3, '-8.0', False)
+            self.assertIn('will start automatically', self.window.interaction_diagram_view.text())
+            self.assertEqual(schedule.call_args.args[0], 2000)
+
+    def test_detached_pose_selection_displays_later_retained_poses(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from docking_universal.gui.full_pymol_study import FullPyMOLStudyPanel
+        from docking_universal.gui.results_controller import PoseLoadDecision
+        from docking_universal.gui.qt import QtCore, QtWidgets
+        analysis = self.root / 'analysis'
+        table = self.window.pose_results
+        table.setSortingEnabled(False)
+        table.setRowCount(3)
+        for row, pose in enumerate((8, 9, 100)):
+            for col in range(table.columnCount()):
+                item = QtWidgets.QTableWidgetItem(str(pose if col == 0 else 1))
+                item.setData(QtCore.Qt.ItemDataRole.UserRole, (str(analysis), pose))
+                table.setItem(row, col, item)
+        adapter = SimpleNamespace(show_multiple_review_poses=Mock())
+        coordinator = SimpleNamespace(adapter=adapter, connected=True)
+        def decision(**kwargs):
+            pose = kwargs['pose_id']
+            return PoseLoadDecision(('compound', 'site', pose), analysis, 'host_unavailable')
+        with patch.object(self.window, 'viewer_widget', object()), \
+             patch.object(self.window, 'viewer_coordinator', coordinator), \
+             patch.object(self.window, 'linked_pose_panel', SimpleNamespace(clear_pose=Mock()), create=True), \
+             patch.object(self.window.results_controller, 'select_pose', side_effect=decision), \
+             patch.object(self.window, 'begin_pose_interaction_loading', side_effect=lambda *key: key):
+            browser = FullPyMOLStudyPanel(self.window)
+            try:
+                browser.result_mode.setCurrentIndex(browser.result_mode.findData('all_poses'))
+                for pose in (8, 9, 100):
+                    row = next(i for i in range(browser.poses.rowCount()) if int(browser.poses.item(i, 0).text()) == pose)
+                    browser.poses.selectRow(row)
+                    adapter.show_multiple_review_poses.assert_called_with([(analysis, pose)])
+            finally:
+                browser.dispose()
+                browser.close()
+
+    def test_cluster_comparison_highlights_lowest_energy_across_sites(self):
+        rows = (
+            {'energy_rank': '1', 'cluster_id': '1', 'site': 'site_1', 'best_energy_kcal_per_mol': '-7.5'},
+            {'energy_rank': '1', 'cluster_id': '2', 'site': 'site_2', 'best_energy_kcal_per_mol': '-9.1'},
+        )
+        with patch.object(self.window.results_model, 'cluster_comparison', return_value=rows):
+            self.window._populate_cluster_comparison(self.root)
+        table = self.window.cluster_comparison
+        self.assertFalse(table.item(0, 0).font().bold())
+        self.assertTrue(table.item(1, 0).font().bold())
+        self.assertIn('Lowest docking energy', table.item(1, 0).toolTip())
+
+    def test_cluster_numeric_sort_orders_values_numerically(self):
+        from docking_universal.gui.qt import QtCore
+        rows = tuple({'energy_rank': str(rank), 'cluster_id': str(rank), 'site': 'primary site',
+                      'best_energy_kcal_per_mol': str(score), 'analysis': '/tmp/analysis'}
+                     for rank, score in [(2, -7.0), (10, -10.0), (1, -9.0)])
+        with patch.object(self.window.results_model, 'cluster_comparison', return_value=rows):
+            self.window._populate_cluster_comparison(self.root)
+        table = self.window.cluster_comparison
+        table.sortItems(0, QtCore.Qt.SortOrder.AscendingOrder)
+        self.assertEqual([table.item(i, 0).text() for i in range(3)], ['1', '2', '10'])
+        table.sortItems(3, QtCore.Qt.SortOrder.AscendingOrder)
+        self.assertEqual([table.item(i, 3).text() for i in range(3)], ['-10.0', '-9.0', '-7.0'])
+
+    def test_multiple_clusters_overlay_representatives_and_hide_2d(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from docking_universal.gui.qt import QtCore, QtWidgets
+        compound = self.root / 'compound'
+        analysis = compound / 'pose_analysis'
+        rows = tuple({'energy_rank': str(i), 'cluster_id': str(i), 'site': 'primary site',
+                      'best_energy_kcal_per_mol': str(-i), 'analysis': str(analysis)} for i in (1, 2))
+        poses = [(analysis, SimpleNamespace(cluster_id=i, pose_id=i + 10, energy_kcal_per_mol=-i)) for i in (1, 2)]
+        viewer = QtWidgets.QWidget()
+        linked = QtWidgets.QWidget()
+        adapter = SimpleNamespace(show_multiple_review_poses=Mock())
+        with patch.object(self.window.results_model, 'cluster_comparison', return_value=rows), \
+             patch.object(self.window.results_model, 'poses', return_value=poses), \
+             patch.object(self.window, '_selected_screening_compound', return_value=compound), \
+             patch.object(self.window, 'viewer_widget', viewer), \
+             patch.object(self.window, 'linked_pose_panel', linked, create=True), \
+             patch.object(self.window, 'viewer_coordinator', SimpleNamespace(adapter=adapter)):
+            table = self.window.cluster_comparison
+            self.window._populate_cluster_comparison(compound)
+            with QtCore.QSignalBlocker(table):
+                for index in range(2):
+                    table.selectionModel().select(table.model().index(index, 0),
+                        QtCore.QItemSelectionModel.SelectionFlag.Select | QtCore.QItemSelectionModel.SelectionFlag.Rows)
+            self.window._cluster_comparison_selected()
+            adapter.show_multiple_review_poses.assert_called_once_with([(analysis, 11), (analysis, 12)])
+            self.assertTrue(self.window.linked_pose_panel.isHidden())
+
+    def test_multiple_individual_poses_are_sent_together(self):
+        from docking_universal.gui.qt import QtCore, QtWidgets
+        analysis = self.root / 'compound/pose_analysis'
+        table = self.window.pose_results
+        table.setSortingEnabled(False)
+        table.setRowCount(2)
+        with QtCore.QSignalBlocker(table):
+            for row, pose_id in enumerate((3, 9)):
+                item = QtWidgets.QTableWidgetItem(str(pose_id))
+                item.setData(QtCore.Qt.ItemDataRole.UserRole, (str(analysis), pose_id))
+                table.setItem(row, 0, item)
+                table.setItem(row, 1, QtWidgets.QTableWidgetItem('1'))
+                table.selectionModel().select(table.model().index(row, 0),
+                    QtCore.QItemSelectionModel.SelectionFlag.Select | QtCore.QItemSelectionModel.SelectionFlag.Rows)
+        with patch.object(self.window, '_show_multiple_result_poses') as display:
+            self.window.pose_review_mode.setCurrentIndex(self.window.pose_review_mode.findData('all_poses'))
+            self.window._expanded_pose_selection_changed()
+            display.assert_called_once_with([(str(analysis), 3), (str(analysis), 9)])
+
+    def test_saved_on_demand_diagram_is_safe_to_synchronize(self):
+        from docking_universal.gui.qt import QtCore
+        compound = self.root / 'compound'
+        analysis = compound / 'pose_analysis'
+        cache = analysis / 'pose_interactions' / 'pose_0042'
+        cache.mkdir(parents=True)
+        diagram = cache / 'interaction_diagram.png'
+        diagram.write_bytes(b'png')
+        self.window.state.artifacts.append(ArtifactRecord(
+            'cached-pose', 'pose_interaction_diagram', str(diagram),
+            metadata={'analysis_root': str(analysis), 'pose_id': 42, 'cluster_id': 7, 'score': -8.0}))
+        choice = self.window.interaction_diagram_choice
+        with QtCore.QSignalBlocker(choice):
+            choice.clear()
+            choice.addItem('On-demand cluster 7', str(diagram))
+        self.window.session.select_cluster(compound, analysis, 7, site='primary site')
+        self.assertEqual(choice.currentData(), str(diagram))
+        with patch.object(self.window, '_selected_screening_compound', return_value=compound):
+            self.window._show_selected_interaction_diagram()
+        self.assertEqual(self.window.session.selection.cluster_id, 7)
+
     def test_results_review_shows_the_shared_nonapproval_selection(self):
         compound = self.root / "screen/compounds/ligand_a"
         analysis = compound / "pose_analysis"
@@ -2027,6 +3318,12 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.assertIn("pose 6", status)
         self.assertIn("ligand_a", self.window.central_selection_status.text())
         self.assertIn("pose 6", self.window.central_selection_status.text())
+
+    def test_status_message_does_not_follow_navigation_to_another_stage(self):
+        self.window._activate_workflow_target('study_setup_dock')
+        self.window.statusBar().showMessage('Choose the ligand that defines the site.')
+        self.window._activate_workflow_target('screening_results_dock')
+        self.assertEqual(self.window.statusBar().currentMessage(), '')
         self.assertEqual(self.store.load("desktop").approvals, [])
 
     def test_candidate_table_summarizes_nested_evidence_without_dumping_json(self):
@@ -2063,11 +3360,10 @@ class DesktopWorkspaceTests(unittest.TestCase):
         displayed = self.window.candidates.item(0, 3).text()
         self.assertEqual(
             displayed,
-            "Possible ligand obstruction: ASP30A · 17 ligand observations / 15 PDBs "
-            "(4 exact; 13 homolog)",
+            "Possible ligand obstruction: ASP30A · 17 possible ligand observations; details incomplete",
         )
         self.assertNotIn("automation_eligible", displayed)
-        self.assertNotIn("observations", displayed.replace("ligand observations", ""))
+        self.assertNotIn("observations", displayed.replace("possible ligand observations", ""))
         self.assertNotIn("/private/path", displayed)
 
         evidence_item = self.window.candidates.item(0, 3)
@@ -2217,6 +3513,12 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.assertEqual(self.store.load("desktop").approvals, [])
         self.window.rationale.setText("Reviewed in required structure view")
         self.window.approve_button.click()
+        from PyQt6.QtTest import QTest
+        for _ in range(50):
+            if not self.window._pocket_approval_pending:
+                break
+            QTest.qWait(20)
+        self.assertFalse(self.window._pocket_approval_pending)
         self.assertEqual(len(host.calls), 1)
         state = self.store.load("desktop")
         self.assertEqual(state.selected_pocket_ids, ["P1"])
@@ -2295,6 +3597,12 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.window.protocol_base_seed.setValue(99001)
         self.window.protocol_exhaustiveness.setValue(32)
         self.window.finalize_button.click()
+        from PyQt6.QtTest import QTest
+        for _ in range(100):
+            if not getattr(self.window, '_starting_protocol', False):
+                break
+            QTest.qWait(20)
+        self.assertFalse(self.window._starting_protocol)
         self.assertEqual(len(host.calls), 1)
         study_id, operation, payload, revision = host.calls[0]
         self.assertEqual((study_id, operation), ("desktop", "start_protocol_finalization"))
@@ -2364,12 +3672,19 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.window.refresh()
         self.assertFalse(self.window.start_screening_button.isEnabled())
         self.window.preview_screening()
-        self.assertIn("60 sequential docking jobs", self.window.screening_status.text())
+        self.assertIn("60 sequential docking searches", self.window.screening_status.text())
+        self.assertIn("docking has not started", self.window.screening_status.text())
         self.assertFalse(self.window.screening_setup_panel.inline_explanations['approval'].isHidden())
         self.assertFalse(self.window.start_screening_button.isEnabled())
         self.window.screen_exploratory_approval.setChecked(True)
         self.assertTrue(self.window.start_screening_button.isEnabled())
         self.window.start_screening_button.click()
+        from PyQt6.QtTest import QTest
+        for _ in range(100):
+            if not getattr(self.window, '_starting_screening', False):
+                break
+            QTest.qWait(20)
+        self.assertFalse(self.window._starting_screening)
         self.assertEqual(host.calls[-1][1], "start_screening")
         self.assertEqual(host.calls[-1][2]["analysis"], "representatives")
         self.assertTrue(host.calls[-1][2]["exploratory_use_approved"])
@@ -2379,6 +3694,50 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.window.preview_screening()
         self.assertTrue(self.window.screen_exploratory_approval.isHidden())
         self.assertTrue(self.window.screening_setup_panel.inline_explanations['approval'].isHidden())
+
+    def test_leaving_results_defers_plip_presentation_without_stopping_batch(self):
+        from types import SimpleNamespace
+
+        result = SimpleNamespace(name='first', path=self.root / 'first', status='complete',
+                                 site_count=1, planned_jobs=1, best_score=-7,
+                                 scoring_function='Vina', cluster_count=1)
+        batch = {'queue': [], 'job': 'current-plip', 'starting': False, 'stopped': False}
+        with patch.object(self.window.results_model, 'compounds', return_value=[result]), \
+             patch.object(self.window, '_screening_result_selection_changed') as present, \
+             patch.object(self.window.results_controller, 'completed_artifact', return_value=None) as completed:
+            self.window._activate_workflow_target('screening_results_dock')
+            self.window._render_screening_results(self.window.state)
+            self.window._cluster_plip_batch = batch
+            present.reset_mock()
+            self.window._activate_workflow_target('central')
+            self.window._render_screening_results(self.window.state)
+            self.window._refresh_pending_pose_interaction(self.window.state)
+            present.assert_not_called()
+            completed.assert_not_called()
+            self.assertIs(self.window._cluster_plip_batch, batch)
+            self.assertFalse(batch['stopped'])
+            self.window._activate_workflow_target('screening_results_dock')
+            present.assert_called_once_with()
+            completed.assert_called_once_with(self.window.state)
+            self.assertEqual(self.window._selected_screening_compound(), result.path)
+
+    def test_results_review_loads_first_compound_and_preserves_later_selection(self):
+        from types import SimpleNamespace
+
+        results = [
+            SimpleNamespace(name=name, path=self.root / name, status='complete',
+                            site_count=1, planned_jobs=1, best_score=-7,
+                            scoring_function='Vina', cluster_count=1)
+            for name in ('first', 'second')
+        ]
+        with patch.object(self.window.results_model, 'compounds', return_value=results):
+            self.window._render_screening_results(self.window.state)
+            self.assertIsNone(self.window._selected_screening_compound())
+            self.window._activate_workflow_target('screening_results_dock')
+            self.assertEqual(self.window._selected_screening_compound(), results[0].path)
+            self.window.screening_results.selectRow(1)
+            self.window._render_screening_results(self.window.state)
+            self.assertEqual(self.window._selected_screening_compound(), results[1].path)
 
     def test_screening_results_show_scores_as_review_outputs(self):
         compound = self.root / "screen/compounds/ligand_a"
@@ -2402,6 +3761,7 @@ class DesktopWorkspaceTests(unittest.TestCase):
         image = QtGui.QImage(80, 60, QtGui.QImage.Format_RGB32)
         image.fill(QtGui.QColor("white"))
         self.assertTrue(image.save(str(diagram)))
+        diagram.with_suffix('.manifest.json').write_text('{"schema_name": "docking-universal-poseedit-render", "renderer_policy": "approved-poseedit-local-v1"}')
         report = self.root / "screen/report/screen.pdf"
         report.parent.mkdir(parents=True)
         report.write_bytes(b"%PDF-1.4\n%%EOF\n")
@@ -2425,10 +3785,12 @@ class DesktopWorkspaceTests(unittest.TestCase):
         with patch.object(QtGui.QDesktopServices, "openUrl", return_value=True) as opened:
             self.window.open_selected_pose_session()
         self.assertEqual(Path(opened.call_args.args[0].toLocalFile()).resolve(), session.resolve())
-        with patch.object(self.window, '_activate_interaction_ligand') as linked, \
+        with patch('docking_universal.gui.desktop.pose_view') as verified, \
+                patch.object(self.window, '_open_interaction_review') as linked, \
                 patch.object(QtGui.QDesktopServices, 'openUrl') as opened:
             self.window.open_selected_interaction_diagram()
-        linked.assert_called_once()
+        verified.assert_called_once_with(diagram)
+        linked.assert_called_once_with(verified.return_value)
         opened.assert_not_called()
 
     def test_pose_interaction_loading_clears_old_image_and_rejects_stale_completion(self):
@@ -2454,6 +3816,37 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.window.interaction_zoom.setCurrentText("200%")
         self.assertEqual(self.window.interaction_diagram_view.pixmap().size().width(), 80)
 
+    def test_failed_pose_interaction_clears_loading_in_both_panels(self):
+        from unittest.mock import Mock
+        from types import SimpleNamespace
+        self.window._pose_interaction_job_id = 'pose-job'
+        self.window.viewer_widget = Mock()
+        self.window.linked_pose_panel = Mock()
+        job = Job(id='pose-job', stage='pose_interaction', status=JobStatus.FAILED, error='renderer stopped')
+        with patch.object(self.window.results_controller, 'completed_artifact', return_value=None):
+            self.window._refresh_pending_pose_interaction(SimpleNamespace(jobs=[job]))
+        self.assertIn('renderer stopped', self.window.interaction_diagram_view.text())
+        self.assertIn('renderer stopped', self.window.linked_pose_panel.clear_pose.call_args.args[0])
+        self.assertIsNone(self.window._pose_interaction_job_id)
+
+    def test_cluster_representative_shows_embedded_2d_panel(self):
+        from unittest.mock import Mock
+        from docking_universal.gui.qt import QtWidgets
+        viewer = Mock(connected=True, status='connected', report_view_available=False)
+        window = StudyWindow(self.store, 'desktop', settings=self.settings,
+                             viewer_coordinator=viewer, viewer_widget=QtWidgets.QWidget())
+        try:
+            view = Mock()
+            with patch('docking_universal.gui.desktop.pose_view', return_value=view), \
+                 patch('docking_universal.gui.desktop.control_view', return_value=None), \
+                 patch.object(window.linked_pose_panel, 'set_pose') as set_pose, \
+                 patch.object(window, '_highlight_linked_ligand', return_value=True):
+                self.assertTrue(window._present_linked_diagram(self.root / 'cluster.png'))
+            set_pose.assert_called_once_with(view, None)
+            self.assertFalse(window.linked_pose_panel.isHidden())
+        finally:
+            window.close()
+
     def test_cluster_synopsis_orders_representatives_by_retained_energy_rank(self):
         from docking_universal.gui.qt import QtGui
 
@@ -2476,6 +3869,7 @@ class DesktopWorkspaceTests(unittest.TestCase):
             image = QtGui.QImage(40, 30, QtGui.QImage.Format_RGB32)
             image.fill(QtGui.QColor("white"))
             self.assertTrue(image.save(str(diagram)))
+            diagram.with_suffix('.manifest.json').write_text('{"schema_name": "docking-universal-poseedit-render", "renderer_policy": "approved-poseedit-local-v1"}')
             diagrams.append(diagram)
         state = self.store.load("desktop")
         state.artifacts.append(ArtifactRecord(
@@ -2537,6 +3931,7 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.assertTrue(self.window.pose_results.isRowHidden(0))
         self.assertFalse(self.window.pose_results.isRowHidden(2))
         self.window.pose_cluster_filter.setCurrentIndex(0)
+        self.window.pose_results.selectRow(1)
         self.window.refresh()
         selected = self.window.pose_results.selectionModel().selectedRows()
         self.assertEqual(len(selected), 1)
@@ -2562,6 +3957,7 @@ class DesktopWorkspaceTests(unittest.TestCase):
         image = QtGui.QImage(80, 60, QtGui.QImage.Format_RGB32)
         image.fill(QtGui.QColor("white"))
         self.assertTrue(image.save(str(diagram)))
+        diagram.with_suffix('.manifest.json').write_text('{"schema_name": "docking-universal-poseedit-render", "renderer_policy": "approved-poseedit-local-v1"}')
         state = self.store.load("desktop")
         state.artifacts.append(ArtifactRecord(
             "screen-manifest", "screening_compound_manifest", str(manifest),
@@ -2585,10 +3981,12 @@ class DesktopWorkspaceTests(unittest.TestCase):
         self.assertEqual(self.window._current_interaction_diagram, diagram)
         self.assertEqual(viewer.calls, [(analysis, 1)])
         self.assertIn("retained pose 1", self.window.viewer_status.text())
-        with patch.object(self.window, '_activate_interaction_ligand') as linked, \
+        with patch('docking_universal.gui.desktop.pose_view') as verified, \
+                patch.object(self.window, '_open_interaction_review') as linked, \
                 patch.object(QtGui.QDesktopServices, 'openUrl') as opened:
             self.window.open_selected_interaction_diagram()
-        linked.assert_called_once()
+        verified.assert_called_once_with(diagram)
+        linked.assert_called_once_with(verified.return_value)
         opened.assert_not_called()
 
 

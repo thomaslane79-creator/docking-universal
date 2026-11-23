@@ -12,6 +12,22 @@ from docking_universal_dock import DockOptions, EngineInvocation, DockRuntimeErr
 
 
 class VinaBatchTests(unittest.TestCase):
+    @unittest.skipIf(os.name == 'nt', 'Unix Conda layout fixture')
+    def test_conda_found_from_scientific_python_without_shell_path(self):
+        from docking_universal_dock import _find_conda
+        base = self.root / 'miniforge'
+        python = base / 'envs' / 'docking-universal' / 'bin' / 'python'
+        python.parent.mkdir(parents=True)
+        python.touch()
+        conda = base / 'condabin' / 'conda'
+        conda.parent.mkdir(parents=True)
+        conda.write_text('#!/bin/sh\nexit 0\n')
+        conda.chmod(0o755)
+        with patch('docking_universal_dock.shutil.which', return_value=None):
+            self.assertEqual(_find_conda({'PATH': '/usr/bin:/bin', 'DOCKING_UNIVERSAL_PYTHON': str(python)}), str(conda.resolve()))
+            conda.chmod(0o644)
+            self.assertIsNone(_find_conda({'PATH': '/usr/bin:/bin', 'DOCKING_UNIVERSAL_PYTHON': str(python)}))
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

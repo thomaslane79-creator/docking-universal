@@ -301,22 +301,32 @@ def _alignment_pairs(first, second):
     a = "".join(item.one_letter for item in first)
     b = "".join(item.one_letter for item in second)
     rows, cols = len(a) + 1, len(b) + 1
-    score = np.zeros((rows, cols), dtype=int)
-    trace = np.zeros((rows, cols), dtype=np.int8)
-    score[:, 0] = -2 * np.arange(rows)
-    score[0, :] = -2 * np.arange(cols)
-    trace[1:, 0] = 1
-    trace[0, 1:] = 2
+    # Keep the same linear gap scoring and diagonal/up/left tie order as the
+    # original algorithm, without millions of tiny NumPy argmax allocations.
+    previous = [-2 * j for j in range(cols)]
+    trace = [bytearray(cols) for _ in range(rows)]
+    trace[0][1:] = bytes([2]) * (cols - 1)
     for i in range(1, rows):
+        current = [-2 * i] + [0] * (cols - 1)
+        trace[i][0] = 1
+        residue = a[i - 1]
         for j in range(1, cols):
-            choices = (score[i - 1, j - 1] + (2 if a[i - 1] == b[j - 1] else -1),
-                       score[i - 1, j] - 2, score[i, j - 1] - 2)
-            trace[i, j] = int(np.argmax(choices))
-            score[i, j] = choices[trace[i, j]]
+            diagonal = previous[j - 1] + (2 if residue == b[j - 1] else -1)
+            up = previous[j] - 2
+            left = current[j - 1] - 2
+            if diagonal >= up and diagonal >= left:
+                current[j] = diagonal
+            elif up >= left:
+                current[j] = up
+                trace[i][j] = 1
+            else:
+                current[j] = left
+                trace[i][j] = 2
+        previous = current
     pairs = []
     i, j = len(a), len(b)
     while i or j:
-        direction = trace[i, j]
+        direction = trace[i][j]
         if direction == 0:
             pairs.append((i - 1, j - 1))
             i -= 1; j -= 1
@@ -806,6 +816,8 @@ def collect_pocket_evidence(
     maximum_ca_rmsd_angstrom=2.0,
     max_entries=None,
     opener=urllib.request.urlopen,
+    progress_callback=None,
+    stop_requested=None,
 ):
     """Collect sequence-screened, backbone-verified ligand-site evidence.
 
@@ -835,6 +847,8 @@ def collect_pocket_evidence(
     reference_id, reference = max(reference_chains.items(), key=lambda item: len(item[1]))
     reference_identifiers = reference_identifiers_by_chain.get(reference_id, set())
     sequence = "".join(item.one_letter for item in reference)
+    if progress_callback:
+        progress_callback('searching', 0, None, None)
     identifiers = sequence_search(sequence, query_identity_cutoff,
                                   None if max_entries is None else max_entries * 2, opener)
     entries = []
@@ -851,6 +865,8 @@ def collect_pocket_evidence(
     # The GUI host owns stdout for framed JSON replies. Progress belongs on
     # stderr (retained by the job log), never interleaved with host responses.
     print(f"  Verifying {len(entries)} candidate related PDB entr{'y' if len(entries) == 1 else 'ies'}...", file=sys.stderr, flush=True)
+    if progress_callback:
+        progress_callback('checking', 0, len(entries), None)
     geometries = []
     for index, box in enumerate(boxes, 1):
         box = Path(box)
@@ -872,7 +888,15 @@ def collect_pocket_evidence(
         ensemble_root, reference_file=receptor_pdb, reference_chain=reference_id,
     )
     downloaded_components = {}
+    processed_entries = 0
+    stopped_early = False
     for index, entry in enumerate(entries, 1):
+        if stop_requested and stop_requested():
+            stopped_early = True
+            break
+        processed_entries = index
+        if progress_callback and (index == 1 or index % 5 == 0 or index == len(entries)):
+            progress_callback('checking', index - 1, len(entries), entry)
         print(f"  Checking related structure {index}/{len(entries)}: {entry}", file=sys.stderr, flush=True)
         try:
             text = download_entry(entry, opener)
@@ -1070,9 +1094,15 @@ def collect_pocket_evidence(
                 "cavity_match_reason": cavity_match_reason,
                 "pocket_relationships": relationships,
             })
+    if progress_callback:
+        progress_callback('finalizing', processed_entries, len(entries), None)
     record = {
         "schema_name": "docking-universal-pocket-evidence", "schema_version": 1,
-        "status": "completed", "selection_policy": "evidence_only_user_decides",
+        "status": "partial" if stopped_early or max_entries is not None else "completed",
+        "search_scope": "stopped_early" if stopped_early else "limited" if max_entries is not None else "all",
+        "unsearched_candidate_count": (None if max_entries is not None and not stopped_early
+                                       else len(entries) - processed_entries),
+        "selection_policy": "evidence_only_user_decides",
         "pocket_engine": pocket_engine,
         "query": {
             "reference_file": receptor_pdb.name,
@@ -1097,7 +1127,7 @@ def collect_pocket_evidence(
                 "unique fpocket contact and full-box-containment agreement",
             ],
         },
-        "candidate_entries": entries, "evidence": evidence, "skipped": skipped,
+        "candidate_entries": entries[:processed_entries], "evidence": evidence, "skipped": skipped,
     }
     record["ligand_site_groups"] = group_ligand_sites(record, output_dir)
     ambiguous_rows = [row for row in evidence if row.get("chain_assignment_ambiguous")]

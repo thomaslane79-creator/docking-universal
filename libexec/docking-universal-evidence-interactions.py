@@ -10,7 +10,7 @@ import hashlib
 from uuid import uuid4
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from docking_universal.services.evidence_interactions import materialize_inputs, render_contact_summary
+from docking_universal.services.evidence_interactions import materialize_inputs
 from docking_universal.poseedit_renderer import LAYOUT_REVISION
 
 child = None
@@ -73,7 +73,6 @@ def main():
             raise ValueError("PLIP did not identify exactly the selected ligand")
         (cache / "plip").mkdir(exist_ok=True)
         xml.write(cache / "plip" / "report.xml", encoding="utf-8", xml_declaration=True)
-    diagram_kind = "poseedit_interactions"
     rendered = False
     spacing = None
     # Never render over the last valid derivative: a failed layout must leave
@@ -91,12 +90,13 @@ def main():
     if not rendered:
         if args.diagram_only:
             raise RuntimeError("Updated residue layout could not be rendered; the previous diagram and contacts were preserved")
-        render_contact_summary(cache)
-        diagram = cache / "interaction_diagram.png"
-        diagram_kind = "ligand_and_plip_contact_summary"
-    manifest = dict(record, network_used=False, interaction_basis="original_deposited_structure",
-                    chemistry_source="retained_rcsb_ccd", coordinates_source="deposited_first_model",
-                    diagram_kind=diagram_kind, ligand_spacing=spacing if rendered else None,
+        raise RuntimeError("The current 2D interaction layout could not be rendered; PLIP contacts were preserved")
+    input_structure = record.get('chemistry_kind') == 'input_mmcif'
+    manifest = dict(record, network_used=False,
+                    interaction_basis="original_input_structure" if input_structure else "original_deposited_structure",
+                    chemistry_source="input_mmcif_component" if input_structure else "retained_rcsb_ccd",
+                    coordinates_source="normalized_input_first_model" if input_structure else "deposited_first_model",
+                    diagram_kind="poseedit_interactions", ligand_spacing=spacing,
                     diagram_file=diagram.name, layout_revision=LAYOUT_REVISION, contacts_reused=args.diagram_only,
                     source_hashes={key: hashlib.sha256(path.read_bytes()).hexdigest() for key, path in {
                         "ligand": cache / "ligand.sdf", "receptor": cache / "receptor.pdb",

@@ -6,11 +6,12 @@ import base64
 import html
 import json
 import hashlib
+import re
 import xml.etree.ElementTree as ET
 
 from .qt import QtCore, QtGui, QtWidgets
 from .results_review import InteractionDiagramLabel
-from ..pose_visuals import cluster_color, retained_pose_color, read_pose_view
+from ..pose_visuals import approved_interaction_diagram, cluster_color, retained_pose_color, read_pose_view
 from ..plip_sites import retained_binding_site
 
 
@@ -51,7 +52,7 @@ def retained_ligand_name(view):
 def pose_view(diagram: Path) -> PoseView | None:
     """Resolve only established artifact layouts; never infer a pose by energy."""
     diagram = diagram.resolve()
-    if not diagram.is_file():
+    if not approved_interaction_diagram(diagram):
         return None
     if Path(str(diagram) + ".view.json").is_file():
         record = read_pose_view(diagram)
@@ -227,6 +228,7 @@ class LinkedPosePanel(QtWidgets.QWidget):
     ligandActivated = QtCore.pyqtSignal(object)
     exportRequested = QtCore.pyqtSignal()
     detaching = QtCore.pyqtSignal()
+    closeRequested = QtCore.pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -241,26 +243,32 @@ class LinkedPosePanel(QtWidgets.QWidget):
         self._detached_window = None
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(6, 4, 6, 4)
-        # Reuse the existing heading row: a visible named target, not another
-        # toolbar taking space away from the diagram.
-        self.heading = QtWidgets.QPushButton("2D interactions")
-        self.heading.setObjectName('center_review_ligand')
+        self.heading = QtWidgets.QLabel("2D interactions")
+        self.heading.setObjectName('interaction_ligand_heading')
         self.heading.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Fixed)
         self.heading.setEnabled(False)
-        self.heading.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
-        self.heading.clicked.connect(lambda: self.query_image.activated.emit())
-        layout.addWidget(self.heading)
-        tools = QtWidgets.QHBoxLayout()
+        heading_row = QtWidgets.QHBoxLayout()
+        heading_row.addWidget(self.heading, 1)
+        self.close_2d_button = QtWidgets.QToolButton()
+        self.close_2d_button.setText('×')
+        self.close_2d_button.setToolTip('Close the 2D panel and browse the 3D structure')
+        self.close_2d_button.clicked.connect(self.closeRequested.emit)
+        heading_row.addWidget(self.close_2d_button)
+        layout.addLayout(heading_row)
         self.detach_button = QtWidgets.QPushButton("Detach 2D")
         self.detach_button.setEnabled(False)
         self.detach_button.clicked.connect(self.detach_diagram)
-        tools.addWidget(self.detach_button)
+        layout.addWidget(self.detach_button)
+        self.zoom_controls = QtWidgets.QWidget()
+        tools = QtWidgets.QHBoxLayout(self.zoom_controls)
+        tools.setContentsMargins(0, 0, 0, 0)
         for text, callback in (("Fit", self.fit_diagram), ("100%", lambda: self.zoom_diagram(1.0)),
                                ("−", lambda: self.step_zoom(0.8)), ("+", lambda: self.step_zoom(1.25))):
             button = QtWidgets.QPushButton(text)
             button.clicked.connect(callback)
             tools.addWidget(button)
-        layout.addLayout(tools)
+        self.zoom_controls.hide()
+        layout.addWidget(self.zoom_controls)
         self.compare = QtWidgets.QCheckBox("Compare experimental control")
         self.compare.setEnabled(False)
         self.compare.toggled.connect(self._comparison_changed)
@@ -346,9 +354,12 @@ class LinkedPosePanel(QtWidgets.QWidget):
         self.control_image.setVisible(reference is not None and self.compare.isChecked())
         self._scrolls[self.control_image].setVisible(reference is not None and self.compare.isChecked())
         name = retained_ligand_name(query)
-        self._ligand_heading = name + ' · Center ligand in 3D'
+        match = re.fullmatch(r'pose[_ ]0*(\d+)', name, flags=re.IGNORECASE)
+        if match:
+            name = 'Pose ' + str(int(match.group(1)))
+        self._ligand_heading = name + ' · 2D interactions'
         self.heading.setText(self._ligand_heading)
-        self.heading.setToolTip(name + ' — click to center this exact ligand; camera zoom and 2D diagram stay unchanged.')
+        self.heading.setToolTip('Click the 2D ligand to center it in 3D.')
         self.heading.setEnabled(True)
         self.compare.setEnabled(reference is not None)
         self.compare.setToolTip("No experimental control with the same retained receptor is available."
@@ -363,9 +374,9 @@ class LinkedPosePanel(QtWidgets.QWidget):
         if reference:
             self._pixmaps[self.control_image] = QtGui.QPixmap(str(reference.diagram))
             self.control_image.setToolTip("Experimental control — click to show in the same 3D view")
-        self.status.setText("Click a boxed residue name or the ligand heading to center in 3D. Checkboxes control residue sticks."
+        self.status.setText("Click a boxed residue name or the ligand in the diagram to center in 3D. Checkboxes control residue sticks."
                            if self.query_image.hit_regions else
-                           "Retained diagram has no verified residue links. Click the ligand heading to center in 3D; checkboxes control residue sticks.")
+                           "Retained diagram has no verified residue links. Click the ligand in the diagram to center in 3D; checkboxes control residue sticks.")
         self._fit()
 
     def _comparison_changed(self, checked):

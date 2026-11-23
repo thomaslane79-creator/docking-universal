@@ -152,69 +152,6 @@ class RetainedReportArtifactTests(unittest.TestCase):
         self.assertNotIn("The fpocket search status was not recorded", source)
         self.assertNotIn("supporting fpocket surface", source)
 
-    def test_retained_plip_calls_prefer_approved_renderer_without_fallback(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            with (
-                patch.object(FIGURES, "render_poseedit_plip2d", return_value=True) as approved,
-                patch.object(FIGURES, "render_sdf_plip2d") as legacy,
-                patch.object(FIGURES.subprocess, "run") as run,
-            ):
-                rendered = FIGURES.render_plip2d(
-                    root / "interactions",
-                    root / "ligand.sdf",
-                    root / "diagram.png",
-                    root / "plip_to_2d.py",
-                    ligand_id="LIG:A:1",
-                )
-        self.assertTrue(rendered)
-        approved.assert_called_once()
-        legacy.assert_not_called()
-        run.assert_not_called()
-
-    def test_unavailable_approved_renderer_uses_existing_sdf_compatibility_path(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            with (
-                patch.object(FIGURES, "render_poseedit_plip2d", return_value=False),
-                patch.object(FIGURES, "render_sdf_plip2d", return_value=True) as compatibility,
-            ):
-                self.assertTrue(FIGURES.render_plip2d(
-                    root / "interactions", root / "ligand.sdf", root / "diagram.png", None,
-                ))
-        compatibility.assert_called_once()
-
-    def test_native_renderer_uses_protein_side_coordinates_for_layout(self):
-        from rdkit import Chem
-        from rdkit.Chem import AllChem
-
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            interactions = root / "interactions"
-            interactions.mkdir()
-            molecule = Chem.AddHs(Chem.MolFromSmiles("CCO"))
-            self.assertGreaterEqual(AllChem.EmbedMolecule(molecule, randomSeed=9), 0)
-            writer = Chem.SDWriter(str(root / "ligand.sdf"))
-            writer.write(molecule)
-            writer.close()
-            conf = molecule.GetConformer()
-            p1 = conf.GetAtomPosition(0)
-            p2 = conf.GetAtomPosition(1)
-            (interactions / "report.xml").write_text(f"""<?xml version='1.0'?>
-<report><bindingsite><identifiers><hetid>LIG</hetid><chain>A</chain><position>1</position></identifiers>
-<interactions><hydrogen_bonds><hydrogen_bond><restype>Asp</restype><resnr>42</resnr><reschain>A</reschain>
-<ligcoo><x>{p1.x}</x><y>{p1.y}</y><z>{p1.z}</z></ligcoo>
-<protcoo><x>4.0</x><y>1.0</y><z>0.0</z></protcoo><dist_d-a>2.8</dist_d-a><don_angle>120</don_angle></hydrogen_bond>
-<hydrogen_bond><restype>Tyr</restype><resnr>77</resnr><reschain>A</reschain>
-<ligcoo><x>{p2.x}</x><y>{p2.y}</y><z>{p2.z}</z></ligcoo>
-<protcoo><x>4.0</x><y>-1.0</y><z>0.3</z></protcoo><dist_d-a>3.0</dist_d-a><don_angle>115</don_angle></hydrogen_bond>
-</hydrogen_bonds></interactions></bindingsite></report>""")
-            output = root / "diagram.png"
-            self.assertTrue(FIGURES.render_sdf_plip2d(interactions, root / "ligand.sdf", output, ligand_id="LIG:A:1"))
-            manifest = json.loads(output.with_suffix(".manifest.json").read_text())
-            self.assertTrue(manifest["layout_projection_used"])
-            self.assertTrue(output.is_file())
-
     def test_existing_control_clusters_are_reused_without_reclustering(self):
         with tempfile.TemporaryDirectory() as directory:
             control = Path(directory)

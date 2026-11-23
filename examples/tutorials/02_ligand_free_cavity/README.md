@@ -18,6 +18,14 @@ Here, indinavir is an example prospective ligand: its chemistry is supplied inde
 
 ## Included inputs
 
+The [RCSB Protein Data Bank](https://www.rcsb.org/) is a public resource for
+three-dimensional structures of proteins and other biological molecules. Open
+the [2R8N entry](https://www.rcsb.org/structure/2R8N) to review the structure
+and its experimental details, or [download 2R8N.pdb](https://files.rcsb.org/download/2R8N.pdb)
+in your browser. Choose that local file in Docking Universal instead of fetching
+the structure from inside the app. The bundled copy is the input used in
+the walkthrough; the optional related-structure search can stay off.
+
 - `inputs/2R8N.pdb`: original unbound RCSB structure.
 - `inputs/2R8N_provenance.json`: source and checksum.
 - `inputs/indinavir_pubchem_5362440.sdf`: an ordinary prospective compound input from PubChem. It does not define the pocket and is unrelated to the coordinate-free CCD identity lookup used by bound controls.

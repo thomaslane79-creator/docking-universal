@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import copy
 import hashlib
 import re
 import subprocess
@@ -22,6 +23,7 @@ from ..protocol_finalization import (
     build_protocol_record,
     build_site_guided_report_manifest,
     publish_final_outputs,
+    sha256,
     selected_region_records,
     write_protocol_record,
 )
@@ -39,6 +41,69 @@ class ProtocolFinalizationPaths:
 
 def _safe_id(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._-") or "target"
+
+
+def attach_report_reference_figures(protocol, report_root, state):
+    """Retain portable figures, pairing the control images by exact pose identity."""
+    from docking_universal.pose_visuals import approved_interaction_diagram, read_pose_view
+    from .screening import read_protocol_record
+    import shutil
+    import subprocess
+    import sys
+
+    refs = {}
+    report_root = Path(report_root)
+    for key, name in [('docking_box_overview', 'cavity_panel_B_structure.png'),
+                      ('selected_docking_boxes', 'cavity_selected_box.png'),
+                      ('candidate_site_overview', 'cavity_panels_AB.png'),
+                      ('candidate_site_overview_metadata', 'cavity_panels_AB.metadata.json')]:
+        source = report_root / 'report' / name
+        if source.is_file():
+            refs[key] = {'path': str(source.resolve()), 'sha256': sha256(source)}
+    scope = protocol.get('related_site_control') or {}
+    expected_bundle = (scope.get('result_summary') or {}).get('source_bundle_sha256')
+    if expected_bundle:
+        for artifact in state.artifacts:
+            source = Path(artifact.path)
+            if artifact.kind not in {'control_protocol_bundle', 'protocol_bundle'} or not source.is_file() or sha256(source) != expected_bundle:
+                continue
+            control = read_protocol_record(source)
+            top = control.get('global_top_ranked_pose') or {}
+            comparison = Path(str(top.get('summary') or '')).parent
+            visuals = comparison.parent.parent.parent / 'selected_visuals'
+            control_root = source.parent / 'control'
+            diagram = control_root / 'report' / 'control_top_ranked_plip2d.png'
+            image3d = visuals / 'top_ranked_interactions.png'
+            view = read_pose_view(diagram) if approved_interaction_diagram(diagram) else None
+            if (view and image3d.is_file() and view['ligand'] == (comparison / 'top_score_pose.sdf').resolve()
+                    and view['interactions'] == (visuals / 'top_ranked_interactions' / 'report.xml').resolve()):
+                destination = report_root / 'reference_figures_source'
+                destination.mkdir(parents=True, exist_ok=True)
+                for key, image in [('control_top_2d', diagram),
+                                   ('control_top_2d_metadata', diagram.with_suffix('.manifest.json')),
+                                   ('control_top_3d', image3d)]:
+                    copied = destination / (key + image.suffix)
+                    shutil.copy2(image, copied)
+                    if key == 'control_top_3d':
+                        # Regenerate from the exact verified control interaction
+                        # scene so newly bundled references use current labels.
+                        scenes = sorted(view['interactions'].parent.glob('*_plip_all_in_one.pml'))
+                        renderer = Path(__file__).resolve().parents[2] / 'docking-universal-render3d.py'
+                        pymol = shutil.which('pymol') or str(Path(sys.executable).parent / 'pymol')
+                        if len(scenes) == 1 and renderer.is_file() and Path(pymol).is_file():
+                            updated = destination / 'control_top_3d_refreshed.png'
+                            try:
+                                result = subprocess.run([sys.executable, str(renderer), str(scenes[0]),
+                                    '--out', str(updated), '--contact-residue-labels', '--pymol', pymol],
+                                    capture_output=True, text=True)
+                            except OSError:
+                                result = None
+                            if result is not None and result.returncode == 0 and updated.is_file():
+                                shutil.copy2(updated, copied)
+                    refs[key] = {'path': str(copied.resolve()), 'sha256': sha256(copied)}
+            break
+    if refs:
+        protocol['report_reference_figures'] = refs
 
 
 def finalization_paths(request: ProtocolFinalizationRequest) -> ProtocolFinalizationPaths:
@@ -115,14 +180,25 @@ def _all_candidate_regions(state: StudyState) -> list[dict]:
     artifacts = {item.id: item for item in state.artifacts}
     paths = []
     labels = []
+    candidate_groups = {}
     for candidate in state.workflow_data.get("pocket_candidates", []):
         artifact = artifacts.get(candidate.get("box_artifact_id"))
         if artifact is None or not Path(artifact.path).is_file():
             continue
         paths.append(Path(artifact.path))
+        group = (candidate.get('evidence') or {}).get('site_group')
+        if group:
+            candidate_groups[str(Path(artifact.path).resolve())] = group
         labels.append({"label": candidate.get("label") or candidate.get("id"), "path": artifact.path,
                        "site_source": (candidate.get("evidence") or {}).get("source")})
-    return selected_region_records(paths, labels) if paths else []
+    records = selected_region_records(paths, labels) if paths else []
+    for record in records:
+        group = candidate_groups.get(str(Path(record['box']).resolve()))
+        if group:
+            # Candidate evidence is retained for report display; this does not
+            # approve it or change any selected docking geometry.
+            record['site_group'] = copy.deepcopy(group)
+    return records
 
 
 def build_site_guided_protocol(
@@ -140,12 +216,15 @@ def build_site_guided_protocol(
     evidence_path = Path(evidence_artifact.path) if evidence_artifact else None
     evidence = _read_json(evidence_path)
     evidence_status = evidence.get("status") if evidence else None
+    from .molecule_inspection import split_ligand_site_groups
+    ligand_groups, supporting_groups = split_ligand_site_groups(evidence.get('ligand_site_groups', []))
     evidence_record = {
         "mode": "related-structures" if evidence_artifact else "off",
         "status": evidence_status or ("unavailable" if evidence_artifact else "not_requested"),
         "record": str(evidence_path.resolve()) if evidence_path and evidence_path.is_file() else None,
         "criteria": evidence.get("query", {}),
-        "ligand_site_groups": evidence.get("ligand_site_groups", []),
+        "ligand_site_groups": ligand_groups,
+        "supporting_component_site_groups": supporting_groups,
         "site_grouping_audit": evidence.get("site_grouping_audit", {}),
         "structural_ensemble": evidence.get("structural_ensemble", {}),
         "user_evidence_decision": {
@@ -255,6 +334,51 @@ def build_site_guided_protocol(
     scope = state.workflow_data.get("control_site_review")
     if scope:
         record["related_site_control"] = dict(scope)
+        # Retain the measured control result with the protocol, so future
+        # reports do not depend on a path to this machine's study folder.
+        from .screening import read_protocol_record
+        for artifact in state.artifacts:
+            if artifact.kind not in {'control_protocol_bundle', 'protocol_bundle'}:
+                continue
+            source = Path(artifact.path)
+            if not source.is_file() or (artifact.sha256 and sha256(source) != artifact.sha256):
+                continue
+            try:
+                control = read_protocol_record(source)
+            except ValueError:
+                continue
+            locked = control.get('locked_inputs') or {}
+            tested = next((r for r in request.regions if r.get('box_label') == scope.get('tested_box_label')), None)
+            if (not tested or control.get('control_status') != 'approved'
+                    or locked.get('box_sha256') != tested.get('box_sha256')
+                    or locked.get('receptor_sha256') != sha256(request.receptor_pdbqt)):
+                continue
+            top = control.get('global_top_ranked_pose') or {}
+            closest = control.get('global_best_sampled_pose') or {}
+            record['related_site_control']['result_summary'] = {
+                'ligand': (control.get('control_evidence') or {}).get('compound'),
+                'engine': control.get('engine'),
+                'lowest_energy_kcal_per_mol': top.get('top_score_affinity_kcal_per_mol'),
+                'lowest_energy_pose_rmsd_angstrom': top.get('top_score_rmsd_angstrom'),
+                'lowest_rmsd_angstrom': closest.get('best_rmsd_angstrom'),
+                'acceptance': control.get('acceptance') or {},
+                'parameters': control.get('parameters') or {},
+                'seed_results': [{'seed': item.get('seed'), 'sampling_pass': item.get('sampling_pass'),
+                    'ranking_pass': item.get('ranking_pass'),
+                    'top_energy_kcal_per_mol': (item.get('global_top_ranked_pose') or {}).get('top_score_affinity_kcal_per_mol'),
+                    'top_pose_rmsd_angstrom': (item.get('global_top_ranked_pose') or {}).get('top_score_rmsd_angstrom'),
+                    'best_rmsd_angstrom': (item.get('global_best_sampled_pose') or {}).get('best_rmsd_angstrom')}
+                    for item in control.get('seed_results') or []],
+                'source_bundle_sha256': sha256(source),
+                'receptor_sha256': locked.get('receptor_sha256'),
+                'box_sha256': locked.get('box_sha256'),
+            }
+            import csv
+            cluster_csv = source.parent / 'control' / 'report' / 'control_panel_A_cluster.csv'
+            if cluster_csv.is_file():
+                with cluster_csv.open(newline='') as handle:
+                    record['related_site_control']['result_summary']['clusters'] = list(csv.DictReader(handle))
+            break
         record["evidence_basis"] += (
             " A separate pose-recovery control concerns only " + str(scope["tested_box_label"])
             + "; this selected-site protocol remains explicitly exploratory."
@@ -303,9 +427,11 @@ def finalize_site_guided_protocol(
 
     execute = command_runner or run
     execute([sys.executable, str(libexec / "docking-universal-report-figures.py"), str(paths.root)])
+    attach_report_reference_figures(protocol, paths.root, state)
+    write_protocol_record(paths.protocol, protocol)
     execute([
         sys.executable, str(libexec / "docking-universal-pdf-report.py"),
-        str(paths.root), "--out", str(paths.report),
+        str(paths.root), "--out", str(paths.report), "--reuse-figures",
     ])
     publisher = bundle_writer
     if bundle_writer is create_bundle:

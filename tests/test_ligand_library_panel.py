@@ -85,6 +85,50 @@ class LigandLibraryPanelTests(unittest.TestCase):
              'valid': i != 72, 'error': 'Invalid chemistry' if i == 72 else ''}
             for i in range(count)]}
 
+    def test_name_edit_survives_pagination_and_is_sent_only_for_selected_compounds(self):
+        panel = LigandLibraryPanel()
+        panel.set_library(self._library(70))
+        panel.table.item(3, 1).setText('My compound')
+        panel.table.item(3, 0).setCheckState(QtCore.Qt.CheckState.Checked)
+        panel.next_button.click()
+        panel.previous_button.click()
+        self.assertEqual(panel.table.item(3, 1).text(), 'My compound')
+        self.assertEqual(panel.selection()['name_overrides'], {'3': 'My compound'})
+        self.assertFalse(panel.table.item(3, 2).flags() & QtCore.Qt.ItemFlag.ItemIsEditable)
+        panel.close()
+
+    def test_edited_name_survives_reloading_the_same_library(self):
+        from unittest.mock import patch
+        values = {}
+        class Settings:
+            def value(self, key, default):
+                return values.get(key, default)
+            def setValue(self, key, value):
+                values[key] = value
+        with patch('docking_universal.gui.ligand_library_panel.QtCore.QSettings', return_value=Settings()):
+            panel = LigandLibraryPanel()
+            library = self._library(5)
+            panel.set_library(library)
+            panel.table.item(3, 1).setText('pyronaridine')
+            panel.clear()
+            panel.set_library(library)
+            self.assertEqual(panel.table.item(3, 1).text(), 'pyronaridine')
+            panel.table.item(3, 0).setCheckState(QtCore.Qt.CheckState.Checked)
+            self.assertEqual(panel.selection()['name_overrides'], {'3': 'pyronaridine'})
+            panel.close()
+
+    def test_reload_restores_checked_records_only_for_same_library(self):
+        panel = LigandLibraryPanel()
+        library = self._library(5)
+        saved = {'fingerprint': library['fingerprint'], 'record_ids': ['1', '3'],
+                 'name_overrides': {'3': 'pyronaridine'}}
+        panel.set_library(library, restore_selection=saved)
+        self.assertEqual(panel.selection()['record_ids'], ['1', '3'])
+        self.assertEqual(panel.selection()['name_overrides']['3'], 'pyronaridine')
+        panel.set_library({**library, 'fingerprint': 'changed'}, restore_selection=saved)
+        self.assertEqual(panel.selection()['record_ids'], [])
+        panel.close()
+
     def test_pagination_retains_global_selection_and_does_not_emit_selection_on_page_changes(self):
         panel = LigandLibraryPanel()
         panel.set_library(self._library(123))

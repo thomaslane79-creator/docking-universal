@@ -59,11 +59,11 @@ class ControlLandscapeTests(unittest.TestCase):
                  mock.patch.object(figures, 'first', return_value=analysis / 'reference.sdf'), \
                  mock.patch.object(figures, 'render_overlay', return_value=False), \
                  mock.patch.object(figures, 'ensure_control_interactions', return_value=[('lowest_rmsd', interactions, closest, 'UNL:Z:1')]), \
-                 mock.patch.object(figures, 'render_plip2d', side_effect=render):
-                outputs = figures.build_control_figures(root, protocol, None, None, None)
+                 mock.patch.object(figures, 'render_poseedit_plip2d', side_effect=render):
+                outputs = figures.build_control_figures(root, protocol, None, None)
             view = read_pose_view(root / 'report/control_lowest_rmsd_plip2d.png')
-            self.assertEqual(view['ligand'], closest.resolve())
-            self.assertEqual(view['ligand_color'], 'red')
+            self.assertEqual(view["ligand"], closest.resolve())
+            self.assertEqual(view["interactions"], (interactions / "report.xml").resolve())
             self.assertIn(str(root / 'report/control_energy_rank_2_plip2d.png'), outputs)
             view = read_pose_view(root / 'report/control_energy_rank_2_plip2d.png')
             self.assertEqual(view['ligand_color'], 'marine')
@@ -126,7 +126,7 @@ class ControlLandscapeTests(unittest.TestCase):
             self.assertIsNone(audit["rmsd_cutoff"])
             self.assertTrue(output.is_file())
             caption = pdf_report.control_landscape_description(output, "test ligand")
-            self.assertEqual(audit["plot_scope"], "top20_control_clusters_plus_global_lowest_rmsd_pose")
+            self.assertEqual(audit["plot_scope"], "top20_control_clusters_independent_minima")
             self.assertEqual(audit["plotted_pose_count"], 3)
             self.assertIn("2 control pose clusters", caption)
             self.assertIn("may belong to different poses", caption)
@@ -134,7 +134,7 @@ class ControlLandscapeTests(unittest.TestCase):
             self.assertEqual(audit["highlighted_cluster_ids"], [1, 99])
             self.assertIn("Red, blue, and gold", caption)
             self.assertIn("number of docked poses", caption)
-            self.assertIn("one actual globally lowest-RMSD evaluable pose", caption)
+            self.assertNotIn("one actual globally lowest-RMSD evaluable pose", caption)
             self.assertNotIn("diamond", caption)
             self.assertNotIn("star", caption)
             self.assertIn("top 20 clusters by lowest energy", caption)
@@ -160,8 +160,8 @@ class ControlLandscapeTests(unittest.TestCase):
                 self.assertTrue(figures.plot_clusters(root, root / "clusters.png",
                                                      root / "reference.sdf", "test ligand"))
             labels = [call.args[3] for call in text.call_args_list if len(call.args) > 3]
-            self.assertIn("Cluster circles: minimum energy and minimum experimental RMSD; these may come from different poses.\n"
-                          "Green circle: globally lowest-RMSD pose, plotted at its own binding energy.", labels)
+            self.assertIn("Each circle shows the cluster's minimum energy and minimum experimental RMSD;\n"
+                          "these values may come from different poses within the same cluster.", labels)
 
     def test_original_circle_population_and_axis_contract(self):
         from matplotlib.axes import Axes
@@ -172,7 +172,7 @@ class ControlLandscapeTests(unittest.TestCase):
             with mock.patch.object(Axes, "scatter", autospec=True, side_effect=Axes.scatter) as scatter:
                 self.assertTrue(figures.plot_clusters(root, root / "clusters.png",
                                                      root / "reference.sdf", "test ligand"))
-            self.assertEqual(scatter.call_count, 3)  # Cluster circles, white-spaced ring, closest pose.
+            self.assertEqual(scatter.call_count, 1)  # One point per cluster.
             call = scatter.call_args_list[0]
             self.assertEqual(call.args[1], [-12, -5])
             self.assertAlmostEqual(call.args[2][0], .4, places=3)
@@ -180,61 +180,6 @@ class ControlLandscapeTests(unittest.TestCase):
             self.assertEqual(call.kwargs["s"], [86, 78])  # Two poses versus one.
             self.assertEqual(call.kwargs["c"], list(figures.TOP_COLORS[:2]))
             self.assertEqual(call.kwargs["marker"], "o")
-            ring = scatter.call_args_list[1]
-            closest = scatter.call_args_list[2]
-            self.assertEqual(closest.args[1], [-10])  # NOT the cluster's minimum energy (-12).
-            self.assertAlmostEqual(closest.args[2][0], .4, places=3)
-            self.assertEqual(closest.kwargs["marker"], "o")
-            self.assertEqual(closest.kwargs["edgecolors"], "black")
-            self.assertEqual(closest.kwargs["facecolors"], figures.TOP_COLORS[0])
-            self.assertEqual(ring.kwargs["facecolors"], "white")
-            self.assertEqual(ring.kwargs["edgecolors"], "#008a45")
-            self.assertEqual(ring.args[1:3], closest.args[1:3])
-            self.assertLess(ring.kwargs["zorder"], closest.kwargs["zorder"])
-            gap = (ring.kwargs["s"] ** .5 - ring.kwargs["linewidths"]
-                   - closest.kwargs["s"] ** .5 - closest.kwargs["linewidths"]) / 2
-            self.assertAlmostEqual(gap, 3.0)
-            self.assertIn("binding energy", call.args[0].get_xlabel())
-            self.assertIn("Experimental RMSD", call.args[0].get_ylabel())
-            self.assertEqual(call.args[0].get_title(), "test ligand: pose recovery")
-
-    def test_incomplete_cluster_minima_are_not_claimed_as_exact(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            reference = self.fixture(root)
-            with mock.patch.object(figures, "rmsd_between", side_effect=[1.5, float("nan"), 12]):
-                points, audit = figures.control_cluster_points(root, reference)
-            self.assertEqual([point["cluster_id"] for point in points], [99])
-            self.assertEqual(audit["excluded_cluster_ids"], ["1"])
-
-    def test_white_gap_preserves_each_energy_color_and_legend_is_only_a_ring(self):
-        from matplotlib.axes import Axes
-
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            reference = self.fixture(root)
-            for rank, color in enumerate(figures.TOP_COLORS, 1):
-                with self.subTest(rank=rank):
-                    poses = [{"pose_id": index, "cluster_id": str(index),
-                              "energy_kcal_per_mol": -15 + index,
-                              "rmsd_angstrom": .4 if index == rank else 3.0}
-                             for index in range(1, 4)]
-                    with mock.patch.object(figures, "read_molecule", return_value=reference), \
-                         mock.patch.object(figures, "control_pose_points", return_value=(poses,
-                             {"inventory_count": 3, "plotted_count": 3, "excluded": []})), \
-                         mock.patch.object(Axes, "scatter", autospec=True, side_effect=Axes.scatter) as scatter, \
-                         mock.patch.object(Axes, "legend", autospec=True, side_effect=Axes.legend) as legend:
-                        self.assertTrue(figures.plot_clusters(root, root / "clusters.png",
-                                                             root / "reference.sdf", "test"))
-                    self.assertEqual(scatter.call_args_list[1].kwargs["facecolors"], "white")
-                    self.assertEqual(scatter.call_args_list[2].kwargs["facecolors"], color)
-                    ring = legend.call_args.kwargs["handles"][-1]
-                    self.assertEqual(ring.get_markerfacecolor(), "white")
-                    self.assertEqual(ring.get_markeredgecolor(), "#008a45")
-                    self.assertEqual(ring.get_marker(), "o")
-                    self.assertIn("Top 20 clusters by energy + globally lowest-RMSD pose",
-                                  legend.call_args.kwargs["title"])
-
     def test_no_top_twenty_cluster_prefilter(self):
         poses = [{"pose_id": index, "cluster_id": str(index), "energy_kcal_per_mol": -index,
                   "rmsd_angstrom": index / 10} for index in range(1, 26)]
@@ -269,17 +214,10 @@ class ControlLandscapeTests(unittest.TestCase):
             self.assertEqual(audit["all_evaluable_cluster_count"], 25)
             self.assertEqual(audit["plotted_cluster_ids"], shown)
             self.assertEqual(audit["highlighted_cluster_ids"], [25, 24, 23])
-            self.assertEqual(scatter.call_count, 3)
+            self.assertEqual(scatter.call_count, 1)
             self.assertEqual(scatter.call_args_list[0].kwargs["c"], list(figures.TOP_COLORS) + ["#b8c0c8"] * 17)
             self.assertEqual(scatter.call_args_list[0].kwargs["s"], [78] * 20)
-            # Globally closest cluster 1 must remain visible despite its energy rank.
-            self.assertEqual(audit["closest_to_crystal_pose_id"], 1)
-            self.assertEqual(scatter.call_args.args[1], [-1])
-            self.assertEqual(scatter.call_args.args[2], [.1])
-            self.assertEqual(scatter.call_args.kwargs["facecolors"], "#b8c0c8")
-            axis = scatter.call_args.args[0]
-            self.assertLess(axis.get_xlim()[0], -25)
-            self.assertGreater(axis.get_xlim()[1], -1)  # The high-energy closest pose is not clipped.
+            self.assertEqual(audit["closest_to_crystal_pose_id"], 1)  # Retained in the full CSV.
             self.assertIsNone(audit["rmsd_cutoff"])
 
     def test_caption_still_describes_older_shape_marker_images_truthfully(self):
@@ -299,13 +237,11 @@ class ControlLandscapeTests(unittest.TestCase):
             output = root / "clusters.png"
             self.assertTrue(figures.plot_clusters(root, output, root / "reference.sdf", "test"))
             paths, colors, audit = figures.control_overlay_poses(root, output, root)
-            self.assertEqual(colors, ["red", "marine", "red"])
-            self.assertEqual([row["pose_id"] for row in audit["poses"]], [1, 3, 2])
-            closest = Chem.SDMolSupplier(str(paths[-1]), removeHs=False)[0]
-            self.assertAlmostEqual(figures.rmsd_between(reference, closest), .4, places=3)
+            self.assertEqual(colors, ["red", "marine"])
+            self.assertEqual([row["pose_id"] for row in audit["poses"]], [1, 3])
             self.assertEqual(audit["closest_to_crystal_pose"]["energy_kcal_per_mol"], -10)
             output.with_suffix(".manifest.json").write_text(json.dumps(audit))
-            self.assertIn("otherwise green", pdf_report.control_overlay_description(output))
+            self.assertIn("one lowest-energy representative", pdf_report.control_overlay_description(output))
 
     def test_2d_interactions_use_global_closest_pose_not_lowest_energy_pose(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -342,8 +278,8 @@ class ControlLandscapeTests(unittest.TestCase):
             with mock.patch.object(figures, "rmsd_between", side_effect=[.1, .4, 12]):
                 self.assertTrue(figures.plot_clusters(root, output, root / "reference.sdf", "test"))
             paths, colors, audit = figures.control_overlay_poses(root, output, root)
-            self.assertEqual([row["pose_id"] for row in audit["poses"]], [3, 1])
-            self.assertEqual(colors, ["marine", "red"])
+            self.assertEqual([row["pose_id"] for row in audit["poses"]], [1, 3])
+            self.assertEqual(colors, ["red", "marine"])
 
     def test_legacy_caption_discloses_cluster_filtering(self):
         caption = pdf_report.control_landscape_description(Path("missing_legacy.png"), "TLF")

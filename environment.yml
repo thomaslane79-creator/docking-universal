@@ -39,3 +39,4 @@ dependencies:
       # allowing Meeko to consume it.
       - pdb2pqr==3.6.2
       - reportlab==4.2.5
+      - pypdf==6.21.4

@@ -81,6 +81,21 @@ class ProtocolImportTests(unittest.TestCase):
         self.assertEqual(retained['sha256'], self.preview['sha256'])
         self.assertEqual(self.store.load('fresh').artifacts[0], result.artifacts[0])
 
+    def test_reviewed_control_packages_its_explicit_region_without_locked_boxes(self):
+        source = self.root / 'protocol.json'
+        record = json.loads(source.read_text())
+        record.update(protocol_type='control-validated', unknown_docking_allowed=True, control_status='approved')
+        record['docking_regions'] = record['locked_inputs'].pop('boxes')
+        record['docking_regions'][0]['box_label'] = 'B1'
+        source.write_text(json.dumps(record))
+        bundle = create_bundle(source, self.root, self.root / 'control.duprotocol')
+        Path(record['locked_inputs']['box']).unlink()
+        preview = inspect_protocol_bundle(bundle)
+        self.assertEqual(preview['protocol_type'], 'control-validated')
+        self.assertEqual(preview['regions'][0]['box_label'], 'B1')
+        self.assertEqual(preview['regions'][0]['box'], 'assets/box.conf')
+        self.assertFalse(preview['exploratory_authorization_required'])
+
     def test_idempotent_request_and_second_import_rejected(self):
         result = self.do_import()
         self.assertEqual(self.do_import().revision, result.revision)

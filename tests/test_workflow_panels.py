@@ -9,6 +9,17 @@ class WorkflowPanelTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls): cls.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 
+    def test_gpu_control_is_offered_only_when_its_runtime_is_available(self):
+        from unittest.mock import patch
+        with patch('docking_universal.ad4_gpu.available', return_value=True):
+            panel = StudySetupPanel()
+            self.addCleanup(panel.close)
+            self.assertGreaterEqual(panel.control_engine.findData('adgpu'), 0)
+        with patch('docking_universal.ad4_gpu.available', return_value=False):
+            panel = StudySetupPanel()
+            self.addCleanup(panel.close)
+            self.assertEqual(panel.control_engine.findData('adgpu'), -1)
+
     def test_explanation_link_is_keyboard_accessible_read_only_and_literal(self):
         from PyQt6.QtTest import QTest
         from docking_universal.gui.qt import QtCore
@@ -145,6 +156,8 @@ class WorkflowPanelTests(unittest.TestCase):
     def test_quickvina_cpu_explanation_does_not_rewrite_an_explicit_selection(self):
         from unittest.mock import patch
         panel = ScreeningSetupPanel()
+        self.assertTrue(panel.approval.isHidden())
+        self.assertTrue(panel.inline_explanations['approval'].isHidden())
         panel.cpu.setCurrentIndex(panel.cpu.findData('automatic'))
         with patch('docking_universal.gui.workflow_panels.sys.platform', 'win32'):
             panel.set_engine('qvinaw')
@@ -464,7 +477,7 @@ class WorkflowPanelTests(unittest.TestCase):
                          {'output', 'analysis', 'cpu', 'representatives', 'cluster_rmsd', 'stop_on_error', 'approval'})
         for key, note in panel.inline_explanations.items():
             self.assertTrue(note.wordWrap())
-            self.assertFalse(note.isHidden())
+            self.assertEqual(note.isHidden(), key == 'approval')
             self.assertEqual(getattr(panel, key).accessibleDescription(), note.details_text)
             note.show_explanation()
             self.assertFalse(note.explanation_window.isModal())
@@ -489,6 +502,9 @@ class WorkflowPanelTests(unittest.TestCase):
         self.assertIn('internet required', panel.pdb_evidence.text())
         self.assertIn('protein sequence', panel.pdb_evidence_note.text())
         self.assertEqual(panel.values().pdb_pocket_evidence, 'related-structures')
+        panel.pdb_search_scope.setCurrentIndex(panel.pdb_search_scope.findData('limited-structures'))
+        self.assertEqual(panel.values().pdb_pocket_evidence, 'limited-structures')
+        panel.pdb_search_scope.setCurrentIndex(panel.pdb_search_scope.findData('related-structures'))
         panel.pdb_evidence.setChecked(False)
         self.assertEqual(panel.values().pdb_pocket_evidence, 'off')
         self.assertIn('Local-only evidence', panel.pdb_evidence_note.text())

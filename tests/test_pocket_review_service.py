@@ -32,6 +32,68 @@ def box_text(center):
 
 
 class PocketReviewServiceTests(unittest.TestCase):
+    def test_additional_input_ligands_are_separate_from_reference_and_keep_alternates(self):
+        import hashlib
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from docking_universal.services.pocket_review import _other_input_ligands
+        def atom(serial, name, alt, res, number, x):
+            return (f'HETATM{serial:5d} {name:4s}{alt:1s}{res:3s} A{number:4d}    '
+                    f'{x:8.3f}{0.:8.3f}{0.:8.3f}{1.:6.2f}{10.:6.2f}          C ')
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            source, normalized, selected = root / 'source.cif', root / 'input.pdb', root / 'selected.pdb'
+            source.write_text('source')
+            reference = atom(1, ' C1 ', '', 'REF', 1, 0.)
+            normalized.write_text('\n'.join([reference, atom(2, ' C1 ', 'A', 'LIG', 2, 1.),
+                                             atom(3, ' C1 ', 'B', 'LIG', 2, 2.),
+                                             atom(4, ' C1 ', '', 'NAG', 3, 3.)]) + '\nEND\n')
+            selected.write_text(reference + '\nEND\n')
+            def asset(kind, path):
+                return SimpleNamespace(kind=kind, path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+            state = SimpleNamespace(artifacts=[asset('source_receptor_structure', source),
+                                              asset('normalized_receptor_input', normalized)])
+            entries = [dict(kind='component', resname=code, chain='A', residue_number=str(number),
+                            insertion_code='', supporting_component=(code == 'NAG'))
+                       for code, number in [('REF', 1), ('LIG', 2), ('NAG', 3)]]
+            with patch('docking_universal.services.molecule_inspection.input_molecules', return_value=entries):
+                observations = _other_input_ligands(state, asset('bound_ligand', selected))
+            self.assertEqual([row['ligand'] for _, row in observations], ['LIG A:2 (alt A)', 'LIG A:2 (alt B)'])
+            self.assertEqual([atoms[0][0] for atoms, _ in observations], [1., 2.])
+
+    def test_supporting_components_are_retained_but_not_counted_as_ligand_evidence(self):
+        from docking_universal.services.pocket_review import _experimental_site_evidence, _conformational_site_evidence
+        ids = ['1ABC/COH/A/1', '1ABC/NAG/A/2', '1ABC/BOG/A/3', '1ABC/ID8/A/4']
+        groups = [{'members': [{'source_ligand_id': identity} for identity in ids]}]
+        record = {'evidence': [{'source_ligand_id': identity, 'entry': '1ABC',
+                    'ligand': identity.split('/')[1], 'evidence_class': 'same_protein'} for identity in ids]}
+        with tempfile.TemporaryDirectory() as root:
+            result = _experimental_site_evidence(groups, record, Path(root))
+        self.assertEqual(result['observation_count'], 1)
+        self.assertEqual(result['observations'][0]['ligand'], 'ID8')
+        self.assertEqual(result['supporting_components']['observation_count'], 3)
+        conformation = {'observations': [{'residue': {'name': 'A', 'number': '1', 'chain': 'A'},
+            'known_ligand_accessibility': [{'source_ligand_id': ids[0], 'consistent_with_side_chain_occlusion': True}]}]}
+        filtered = _conformational_site_evidence(groups, conformation)
+        self.assertEqual(filtered['status'], 'not_evaluated')
+        self.assertIsNone(filtered['box_decision_warning'])
+
+    def test_report_groups_keep_supporting_records_without_claiming_their_pocket_match(self):
+        from docking_universal.services.molecule_inspection import split_ligand_site_groups
+        groups = [{'site_number': 1, 'members': [
+            {'ligand': 'COH', 'matched_cavity': 3, 'evidence_class': 'same_protein'},
+            {'ligand': 'ID8', 'matched_cavity': None, 'evidence_class': 'same_protein'}],
+            'representative_ligand': {'ligand': 'COH'},
+            'pocket_recovery': {'status': 'recovered', 'best_matching_pocket': 3},
+            'site_identity': {'is_separate_from_predicted_pocket': False}},
+            {'site_number': 2, 'members': [{'ligand': 'BOG'}]}]
+        possible, supporting = split_ligand_site_groups(groups)
+        self.assertEqual([member['ligand'] for member in possible[0]['members']], ['ID8'])
+        self.assertEqual(possible[0]['representative_ligand']['ligand'], 'ID8')
+        self.assertIsNone(possible[0]['pocket_recovery']['best_matching_pocket'])
+        self.assertEqual(len(supporting), 2)
+        self.assertEqual(groups[0]['representative_ligand']['ligand'], 'COH')
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)

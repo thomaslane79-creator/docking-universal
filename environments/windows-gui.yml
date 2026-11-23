@@ -11,6 +11,8 @@ dependencies:
   - freetype>=2.14
   - libpng>=1.6
   - pillow
+  - pypdf=6.21.4
+  - reportlab
   - pip
   # Private extraction only; no preinstalled 7-Zip or compiler is required.
   - 7zip=26.04

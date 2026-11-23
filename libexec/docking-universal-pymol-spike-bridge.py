@@ -7,6 +7,7 @@ import json
 import math
 import os
 import re
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -14,6 +15,8 @@ from typing import Any
 
 from pymol import cgo, cmd
 from pymol.wizard import Wizard
+sys.path.insert(0, os.environ.get('DU_PYMOL_BRIDGE_LIBEXEC') or str(Path(__file__).resolve().parent))
+from docking_universal.pocket_metadata import POCKET_COLOR_RGB
 
 
 PROTOCOL_VERSION = 1
@@ -21,6 +24,8 @@ SAFE_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
 SAFE_SUFFIXES = {".pdb", ".pdbqt", ".mol2", ".sdf", ".pqr"}
 # Match the report/GUI palette while keeping arbitrary expressions forbidden.
 SAFE_COLORS = {"red", "marine", "gold", "magenta", "cyan", "orange", "violet", "salmon", "yellow"}
+SAFE_COLORS.update(POCKET_COLOR_RGB)
+SAFE_COLORS.add('du_report_unscored')
 
 
 class BridgeCore:
@@ -155,7 +160,8 @@ class BridgeCore:
             # Recenter on the complete receptor so repeated evidence choices
             # never leave a ligand-only, tightly magnified camera.
             self.cmd.orient("receptor")
-            self.cmd.zoom("receptor", buffer=12)
+            selection = " or ".join(f"du_evidence_ligand_{i}" for i in range(1, len(paths) + 1))
+            self.cmd.zoom(selection, buffer=2, complete=0, animate=0)
             self.cmd.set("clip_mode", 0)
             self.cmd.clip("near", 0)
             self.cmd.clip("far", 0)
@@ -227,6 +233,10 @@ class BridgeCore:
             self.cmd.load(str(path), name)
             self.cmd.hide("everything", name)
             self.cmd.show("spheres", name)
+            if color in POCKET_COLOR_RGB:
+                self.cmd.set_color(color, POCKET_COLOR_RGB[color])
+            elif color == 'du_report_unscored':
+                self.cmd.set_color(color, (0.4, 0.447, 0.49))
             self.cmd.color(color, name)
             self.cmd.set("sphere_scale", 0.35, name)
             return {"object_name": name, "path": str(path), "atoms": int(self.cmd.count_atoms(name)), "color": color}
@@ -275,6 +285,8 @@ class BridgeCore:
                 "gold": (1.0, 0.65, 0.0), "magenta": (1.0, 0.0, 1.0),
                 "cyan": (0.0, 1.0, 1.0), "orange": (1.0, 0.5, 0.0),
                 "violet": (0.56, 0.37, 0.6),
+                "du_report_unscored": (0.4, 0.447, 0.49),
+                **POCKET_COLOR_RGB,
             }
             if color_name not in colors:
                 raise ValueError(f"Unsupported docking-box color: {color_name}")
@@ -333,6 +345,30 @@ class BridgeCore:
                 "visible_associated": sorted(visible_associated),
             }
             return {"name": name, **self.boxes[name]}
+        if operation == "set_site_review_visibility":
+            visible = bool(payload.get("has_selection") and payload.get("show_boxes"))
+            for name in self.cmd.get_names("objects"):
+                if name.startswith("candidate_box_") or name == "ligand_site_box":
+                    self.cmd.disable(name)
+                elif name == "du_box":
+                    (self.cmd.enable if visible else self.cmd.disable)(name)
+            return {"visible": visible}
+        if operation == "center_review_point":
+            center = payload.get("center")
+            if not isinstance(center, list) or len(center) != 3 or not all(math.isfinite(float(v)) for v in center):
+                raise ValueError("Region center must contain three finite coordinates")
+            name = "du_temporary_box_center"
+            camera = list(self.cmd.get_view())
+            try:
+                self.cmd.pseudoatom(name, pos=[float(v) for v in center])
+                self.cmd.center(name, animate=0)
+                centered = list(self.cmd.get_view())
+                camera[9:11] = centered[9:11]
+                camera[12:15] = centered[12:15]
+                self.cmd.set_view(camera, animate=0.5 if payload.get("animate") else 0)
+            finally:
+                self.cmd.delete(name)
+            return {}
         if operation == "get_view":
             return {"view": list(self.cmd.get_view())}
         if operation == "set_view":

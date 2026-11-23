@@ -1,0 +1,123 @@
+{
+  "study": "Test Shannon",
+  "recorded_revision": 154,
+  "recorded_local_time": "2026-11-22T21:27:49.243053-05:00",
+  "inputs": {
+    "receptor": {
+      "file": "inputs/6E2P.cif",
+      "sha256": "9727c063c6c8ef8fe3fac65cea1a5cb536006bbe160c9e9cd1720d2551baf74e",
+      "public_id": "RCSB PDB 6E2P"
+    },
+    "screening_compound": {
+      "file": "inputs/pyronaridine_pubchem_107771.sdf",
+      "sha256": "6f290fdff8928c3cf53f7b68c73a9272261df63c3088ab44efd84f0cdc13d225",
+      "public_id": "PubChem CID 107771"
+    }
+  },
+  "setup": {
+    "site_mode": "pockets",
+    "pocket_engine": "p2rank",
+    "pdb_pocket_evidence": "related-structures",
+    "explore_sites_first": true
+  },
+  "approved_regions": [
+    "P1",
+    "P2"
+  ],
+  "accepted_receptor_changes": {
+    "alternate_locations": [],
+    "exclusions": [
+      {
+        "chain": "B",
+        "insertion_code": "",
+        "number": "215",
+        "resname": "ARG"
+      },
+      {
+        "chain": "B",
+        "insertion_code": "",
+        "number": "230",
+        "resname": "ARG"
+      },
+      {
+        "chain": "B",
+        "insertion_code": "",
+        "number": "461",
+        "resname": "GLU"
+      },
+      {
+        "chain": "B",
+        "insertion_code": "",
+        "number": "359",
+        "resname": "LEU"
+      },
+      {
+        "chain": "A",
+        "insertion_code": "",
+        "number": "244",
+        "resname": "LYS"
+      }
+    ],
+    "repair_after_exclusions": true
+  },
+  "receptor_execution_policy": {
+    "preparation_backend": "meeko",
+    "pdbfixer": "auto",
+    "reduce2": "off",
+    "protonation": "off",
+    "reviewed_model_only": true,
+    "parameterization_only": true
+  },
+  "protocol": {
+    "engine": "vina",
+    "ph": 7.4,
+    "conformers": 3,
+    "seed_count": 5,
+    "base_seed": 20260808,
+    "exhaustiveness": 16,
+    "num_modes": 15,
+    "energy_range": 8.0,
+    "exploratory_use_approved": true
+  },
+  "screening": {
+    "analysis": "representatives",
+    "representatives": 3,
+    "cluster_rmsd": 1.5,
+    "stop_on_error": false
+  },
+  "stages": {
+    "site_exploration": {
+      "status": "completed",
+      "elapsed_seconds": 2.6
+    },
+    "receptor_parameterization": {
+      "status": "completed",
+      "elapsed_seconds": 13.8
+    },
+    "final_report": {
+      "status": "completed",
+      "elapsed_seconds": 7.8
+    },
+    "screening": {
+      "status": "completed",
+      "elapsed_seconds": 526.3
+    }
+  },
+  "retained_outputs": [
+    {
+      "kind": "final_report",
+      "filename": "6E2P_site-guided-exploratory_vina_protocol_report.pdf",
+      "sha256": "385e339a6c90415da15ec18b4c9e1fd2835b66f130a865f04364cb072b7d4393"
+    },
+    {
+      "kind": "protocol_bundle",
+      "filename": "6E2P_site-guided-exploratory_vina.duprotocol",
+      "sha256": "455fea082b32cb397b4d442fc9d08e4d5cee3ca98901238b66ce13f8b0354a6e"
+    },
+    {
+      "kind": "screening_report",
+      "filename": "6E2P_107771_2026-11-23_docking_report.pdf",
+      "sha256": "c52fd6a39d7f42996ea7cd5424d721cef5c2bde6fcbd60410e1c418da2ede245"
+    }
+  ]
+}

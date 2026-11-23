@@ -59,6 +59,21 @@ class FakeAdapter:
 
 
 class StudyViewerTests(unittest.TestCase):
+    def test_multiple_candidates_keep_individual_box_geometry_and_color(self):
+        from unittest.mock import Mock
+        first = self.state.workflow_data['pocket_candidates'][0]
+        second = {'id': 'P2', 'rank': 2, 'evidence': {'geometry': {
+            'center_x': 11, 'center_y': 12, 'center_z': 13,
+            'size_x': 18, 'size_y': 19, 'size_z': 20}}}
+        self.state.workflow_data['pocket_candidates'].append(second)
+        self.adapter.show_multiple_boxes = Mock()
+        self.viewer.show_candidates(self.state, ['P1', 'P2'])
+        boxes = self.adapter.show_multiple_boxes.call_args.args[0]
+        self.assertEqual([box['source_object_name'] for box in boxes], ['candidate_box_P1', 'candidate_box_P2'])
+        self.assertEqual(boxes[0]['center'], [1, 2, 3])
+        self.assertEqual(boxes[1]['center'], [11, 12, 13])
+        self.assertNotEqual(boxes[0]['color'], boxes[1]['color'])
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         root = Path(self.temporary.name)
@@ -91,7 +106,7 @@ class StudyViewerTests(unittest.TestCase):
         self.assertTrue(self.viewer.connected)
         self.assertEqual([call[0] for call in self.adapter.calls], ["launch", "structure", "pocket", "box", "view"])
         self.assertEqual(self.adapter.calls[3], (
-            "box", [1, 2, 3], [20, 22, 24], "red", "candidate_box_P1", (), (),
+            "box", [1, 2, 3], [20, 22, 24], "du_report_pocket_1", "candidate_box_P1", (), (),
         ))
 
     def test_coordinate_review_has_its_own_identity_without_preparation_claim(self):
@@ -116,7 +131,7 @@ class StudyViewerTests(unittest.TestCase):
         self.viewer.show_candidate(self.state, "P2")
 
         self.assertEqual(self.adapter.calls[-1], (
-            "box", [4, 5, 6], [20, 22, 24], "marine", "candidate_box_P2", (), (),
+            "box", [4, 5, 6], [20, 22, 24], "du_report_pocket_2", "candidate_box_P2", (), (),
         ))
 
     def test_candidate_with_corresponding_ligand_evidence_hides_legacy_evidence_box(self):

@@ -37,8 +37,14 @@ class MoleculeInspectorPanel(QtWidgets.QWidget):
         self._extras = []
         self._entries = []
         self._paired = False
+        self._library_context = False
+        self._setup_selection = None
         self._read_task = LibraryReadTask()
         self._read_task.finished.connect(self._local_file_loaded)
+        self._generated_task = LibraryReadTask()
+        self._generated_task.finished.connect(self._generated_finished)
+        self._generated_cache = {}
+        self._generated_pending = None
         layout = QtWidgets.QGridLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.title = QtWidgets.QLabel('Molecule')
@@ -92,11 +98,14 @@ class MoleculeInspectorPanel(QtWidgets.QWidget):
         self.receptor_context.setToolTip('Show the selected deposited ligand with its original receptor. Uncheck to view the same deposited ligand conformation alone. Screening coordinates are not overlaid on an unrelated receptor.')
         self.receptor_context.toggled.connect(self._show_current)
         three_d_controls.addWidget(self.receptor_context)
-        pick_hint = QtWidgets.QLabel('Click a ligand to select it')
-        pick_hint.setToolTip('The selected ligand is highlighted in cyan. Its exact chain and residue are selected in the molecule list. Use the bound-reference button to apply it for docking.')
-        three_d_controls.addWidget(pick_hint)
+        self.pick_hint = QtWidgets.QLabel('Click a ligand to select it')
+        self.pick_hint.setToolTip('The selected ligand is highlighted in cyan. Its exact chain and residue are selected in the molecule list. Use the bound-reference button to apply it for docking.')
+        three_d_controls.addWidget(self.pick_hint)
         three_d_controls.addStretch(1)
         self._three_d_layout.addLayout(three_d_controls)
+        self.three_d_basis = QtWidgets.QLabel('')
+        self.three_d_basis.setWordWrap(True)
+        self._three_d_layout.addWidget(self.three_d_basis)
         self.three_d_message = QtWidgets.QLabel('Select a molecule to inspect its supplied 3D coordinates.')
         self.three_d_message.setWordWrap(True)
         self.three_d_message.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
@@ -109,7 +118,7 @@ class MoleculeInspectorPanel(QtWidgets.QWidget):
         frame_layout.setSizeConstraint(QtWidgets.QLayout.SizeConstraint.SetNoConstraint)
         self._inspection_help = (
             '2D drawings use local chemical definitions or the selected compound file/SMILES; no PDB lookup is needed. '
-            '3D uses supplied coordinates, with the receptor when available. No new conformation is generated.\n\n'
+            '3D uses supplied coordinates when available; otherwise a minimized conformation is generated for preview.\n\n'
             'Click a ligand in the 3D overview or choose it in the list to inspect its exact chain and residue. '
             'Use as bound reference ligand explicitly applies the choice; browsing changes no docking selection. '
             'Loaded screening compounds and added local molecules are inspection sources, not bound references.\n\n'
@@ -178,6 +187,11 @@ class MoleculeInspectorPanel(QtWidgets.QWidget):
             return None
         return tuple(entry.get(key) for key in ('origin', 'path', 'sha256', 'kind', 'resname', 'chain', 'resi', 'segment', 'source', 'fingerprint', 'record_id', 'smiles'))
 
+    def preview_identity(self, entry):
+        state = getattr(self._window, 'state', None)
+        protocol = next((a.sha256 for a in getattr(state, 'artifacts', []) if a.kind == 'protocol_bundle'), None)
+        return (self.entry_key(entry), protocol)
+
     def refresh_sources(self, path, library=None):
         from pathlib import Path
         source = Path(path).expanduser()
@@ -203,9 +217,10 @@ class MoleculeInspectorPanel(QtWidgets.QWidget):
 
     def _populate_entries(self, current=None):
         """Keep one filtered list for the drawing, native picks and 3D visibility."""
-        entries = [entry for entry in self._entries
+        source_entries = [entry for entry in self._entries if entry.get('origin') == 'library'] if self._library_context else self._entries
+        entries = [entry for entry in source_entries
                    if self.all_components.isChecked() or not entry.get('supporting_component')]
-        hidden = sum(bool(entry.get('supporting_component')) for entry in self._entries)
+        hidden = sum(bool(entry.get('supporting_component')) for entry in source_entries)
         self.all_components.setVisible(bool(hidden))
         self.all_components.setText('All components' + (f' ({hidden} hidden)' if hidden and not self.all_components.isChecked() else ''))
         with QtCore.QSignalBlocker(self.choices):
@@ -215,6 +230,25 @@ class MoleculeInspectorPanel(QtWidgets.QWidget):
             if selected is None:
                 selected = next((i for i, entry in enumerate(entries) if entry['kind'] != 'whole'), 0 if entries else -1)
             self.choices.setCurrentIndex(selected)
+
+    def set_library_context(self, enabled):
+        """Limit screening inspection to its library; restore setup browsing afterward."""
+        enabled = bool(enabled)
+        if enabled == self._library_context:
+            return
+        current = self.entry_key(self.choices.currentData())
+        if enabled:
+            self._setup_selection = current
+        self._library_context = enabled
+        self.source_bar.setVisible(not enabled)
+        self.source_options.hide()
+        self.reference_button.setVisible(not enabled)
+        self.receptor_context.setVisible(not enabled)
+        self.pick_hint.setVisible(not enabled)
+        self._populate_entries(None if enabled else self._setup_selection)
+        if not enabled:
+            self._setup_selection = None
+        self._show_current()
 
     def _apply_component_filter(self, *_args):
         current = self.entry_key(self.choices.currentData())
@@ -254,7 +288,7 @@ class MoleculeInspectorPanel(QtWidgets.QWidget):
                 reference += ' ' + identity['chain_id'] + ':' + identity['residue_number'] + identity.get('insertion_code', '')
             else:
                 reference += ' (choose an instance)'
-        self.title.setText('Molecule · reference: ' + reference)
+        self.title.setText('Screening compounds' if self._library_context else 'Molecule · reference: ' + reference)
 
     def set_paired(self, paired):
         self._paired = paired
@@ -276,6 +310,9 @@ class MoleculeInspectorPanel(QtWidgets.QWidget):
 
     def _show_current(self, *_args):
         entry = self.choices.currentData()
+        inspection_help = ('Inspect compounds from the selected screening library. The 2D drawing comes from the local input. '
+                           '3D uses supplied coordinates or a generated, minimized preview. '
+                           'Viewing does not select a compound for docking.' if self._library_context else self._inspection_help)
         if not self._picking:
             self._overview = bool(entry and entry.get('origin') == 'input' and entry.get('kind') == 'whole')
         if entry and entry.get('kind') == 'whole':
@@ -284,11 +321,11 @@ class MoleculeInspectorPanel(QtWidgets.QWidget):
         self.update_reference_action()
         self.receptor_context.setEnabled(bool(entry and entry.get('origin') == 'input' and entry.get('kind') == 'component'))
         if not entry:
-            self.origin.set_content('No molecule selected.', self._inspection_help)
+            self.origin.set_content('No molecule selected.', inspection_help)
             self.picture.setText('No molecules are loaded. Add a local molecule file or SMILES to the list.')
             self.three_d_message.setText('No molecule is selected.')
             return
-        self.origin.set_content(entry['label'], entry['label'] + '\n\n' + self._inspection_help)
+        self.origin.set_content(entry['label'], entry['label'] + '\n\n' + inspection_help)
         try:
             preview = self._inspect(entry)
             png = base64.b64decode(preview['png_base64'], validate=True)
@@ -300,7 +337,7 @@ class MoleculeInspectorPanel(QtWidgets.QWidget):
             self.origin.set_content(
                 'Local mmCIF chemical definition; observed atoms may be incomplete.'
                 if entry.get('origin') == 'input' else '2D from the selected local compound.',
-                entry['label'] + '\n\n' + basis + '\n\n' + self._inspection_help)
+                entry['label'] + '\n\n' + basis + '\n\n' + inspection_help)
             self.origin.setToolTip(entry['label'] + '\n' + basis)
         except Exception as exc:
             self.picture.setText(str(exc))
@@ -326,8 +363,23 @@ class MoleculeInspectorPanel(QtWidgets.QWidget):
             key = ('input', str(path), entry['sha256'])
             block = None
         else:
-            key = ('compound', entry.get('record_id'), entry.get('fingerprint'), entry.get('smiles'))
-            block = self._inspect(entry, 'coordinates')['mol_block']
+            identity = self.preview_identity(entry)
+            key = ('compound', identity)
+            preview = self._generated_cache.get(identity)
+            if preview is None:
+                if self._generated_pending != identity:
+                    self._generated_pending = identity
+                    def generate():
+                        try:
+                            return identity, self._inspect(entry, 'generated_coordinates')
+                        except Exception as error:
+                            return identity, str(error)
+                    self._generated_task.start(generate)
+                raise ValueError('Generating and minimizing a 3D preview…')
+            if isinstance(preview, str):
+                raise ValueError(preview)
+            block = preview['mol_block']
+            self.three_d_basis.setText(preview['basis'])
         if key != self._preview_key:
             self._release_viewer()
             self._split_sizes = self._window.pose_split.sizes()
@@ -351,6 +403,15 @@ class MoleculeInspectorPanel(QtWidgets.QWidget):
                                                                   and self.choices.itemData(i).get('kind') == 'component'])
         self.three_d_message.hide()
         self._viewer.show()
+
+    def _generated_finished(self, result, error):
+        identity = result[0] if result else self._generated_pending
+        if identity is not None:
+            self._generated_cache[identity] = error or result[1]
+        if self._generated_pending == identity:
+            self._generated_pending = None
+        if self._paired and self.preview_identity(self.choices.currentData()) == identity:
+            self._show_current()
 
     def _picked_molecule(self, picked):
         """Map a live atom pick to one source instance without committing it."""
@@ -471,6 +532,7 @@ class InputStructurePreview(QtWidgets.QDialog):
 
     def restore_viewer(self, *_args):
         self.inspector.set_paired(False)
+        self.inspector.set_library_context(False)
         self.layout().removeWidget(self.inspector)
         self._window.study_setup_panel.molecule_preview_slot.layout().addWidget(self.inspector, 0, QtCore.Qt.AlignmentFlag.AlignLeft)
         self.inspector.show()
