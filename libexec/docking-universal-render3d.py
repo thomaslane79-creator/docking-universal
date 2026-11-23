@@ -80,6 +80,8 @@ def main():
             f"sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})",
             "from docking_universal.viewer.figure_labels import label_contact_residues",
             "residue_callouts = label_contact_residues(cmd)",
+            "cmd.set('dash_width', 3.0)",
+            "cmd.set('dash_radius', 0.055)",
             f"open({str(output.with_suffix('.residue-labels.json'))!r}, 'w').write(json.dumps(residue_callouts, indent=2))",
         ])
     commands.extend([
