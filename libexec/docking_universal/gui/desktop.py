@@ -4033,6 +4033,7 @@ if QtWidgets is not None:
         def read_screening_library(self, column_mapping=None, sheet=None, *, restore_selection=None):
             if not self.host_controller.available:
                 return
+            self._library_restore_attempted = True
             panel = self.screening_setup_panel.library_panel
             source = self.screen_ligands.text().strip()
             if restore_selection is None and panel.library is not None:

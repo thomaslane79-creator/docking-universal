@@ -137,6 +137,25 @@ class DesktopWorkspaceTests(unittest.TestCase):
             self.window._restore_screening_library_if_needed()
             read.assert_called_once()
 
+    def test_refresh_does_not_reload_a_manually_read_screening_library(self):
+        from types import SimpleNamespace
+        source = self.root / 'library.sdf'
+        source.write_text('example')
+        self.window.screen_ligands.setText(str(source))
+        self.window._library_restore_attempted = False
+        library = {'fingerprint': 'reviewed', 'records': [{
+            'record_id': 'first', 'name': 'Example', 'source_record': 1, 'source': str(source),
+            'formula': 'C', 'formal_charge': 0, 'valid': True, 'error': '',
+        }]}
+        with patch.object(self.window, 'host_controller', SimpleNamespace(available=True)), \
+             patch.object(self.window, '_read_library_async',
+                          side_effect=lambda operation, callback: callback(library, None)) as read, \
+             patch.object(self.window, '_update_screening_controls'):
+            self.window.read_screening_library()
+            self.window._restore_screening_library_if_needed()
+            read.assert_called_once()
+        self.assertIs(self.window.screening_setup_panel.library_panel.library, library)
+
     def test_older_screening_restores_only_verified_records_and_display_name(self):
         import json
         from types import SimpleNamespace
