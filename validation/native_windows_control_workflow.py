@@ -211,11 +211,34 @@ def main():
             if len(protocols) != 1:
                 raise GateError('Native control did not retain its shared selected-tier protocol record')
             protocol = json.loads(protocols[0].read_text(encoding='utf-8'))
-            approved = tier == 'repeatability'
-            if (bool(protocol.get('unknown_docking_allowed')) != approved
-                    or state.workflow_data['latest_control_status'] != ('approved' if approved else 'not_approved')
-                    or bool(protocol['acceptance']['seed_requirement_pass']) != approved):
-                raise GateError('Native control did not preserve the real quick/five-seed approval outcome; no criterion changed')
+            acceptance = protocol['acceptance']
+            seeds = set(protocol['parameters']['seeds'])
+            seed_results = protocol['seed_results']
+            case.update(
+                independent_seed_count=len(seeds),
+                sampling_pass=acceptance['sampling_pass'],
+                ranking_pass=acceptance['ranking_pass'],
+                unknown_docking_allowed=protocol['unknown_docking_allowed'],
+            )
+            # Both Standard (legacy quick ID) and Repeatability use five
+            # independently seeded searches under the current default policy.
+            if (acceptance['minimum_independent_seeds'] != 5
+                    or acceptance['independent_seed_count'] != 5
+                    or len(seeds) != 5 or len(seed_results) != 5
+                    or {result['seed'] for result in seed_results} != seeds
+                    or acceptance['seed_requirement_pass'] is not True):
+                raise GateError('Native control did not retain the default five independent searches')
+            sampling_pass = all(result['sampling_pass'] for result in seed_results)
+            ranking_pass = all(result['ranking_pass'] for result in seed_results)
+            approved = sampling_pass and ranking_pass
+            if (acceptance.get('requires_both') is not True
+                    or acceptance['sampling_pass'] != sampling_pass
+                    or acceptance['ranking_pass'] != ranking_pass
+                    or protocol['unknown_docking_allowed'] != approved
+                    or state.workflow_data['latest_control_status'] != ('approved' if approved else 'not_approved')):
+                raise GateError('Native control approval disagrees with the retained sampling, ranking, and seed results')
+            if tier == 'repeatability' and not approved:
+                raise GateError('The public repeatability fixture did not pass the retained pose-recovery criteria')
             if any(sha256(Path(path)) != expected for path, expected in protected.items()):
                 raise GateError('Control changed the reviewed source/receptor/box or repeated preparation')
             bundles = [Path(a.path) for a in state.artifacts if a.kind == 'protocol_bundle']
