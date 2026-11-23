@@ -81,7 +81,7 @@ def main():
             "from docking_universal.viewer.figure_labels import label_contact_residues",
             "residue_callouts = label_contact_residues(cmd)",
             "cmd.set('dash_width', 3.0)",
-            "cmd.set('dash_radius', 0.055)",
+            "cmd.set('dash_radius', 0.085)",
             f"open({str(output.with_suffix('.residue-labels.json'))!r}, 'w').write(json.dumps(residue_callouts, indent=2))",
         ])
     commands.extend([
