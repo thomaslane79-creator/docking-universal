@@ -58,8 +58,6 @@ def round_contact_label_backgrounds(rendered, unlabeled, callouts):
             points = [(cx * scale, cy * scale), (ax, ay)]
             leader_draw.line(points, fill='white', width=stroke + max(2 * scale, stroke // 2))
             leader_draw.line(points, fill='#252525', width=stroke)
-            leader_draw.ellipse((ax-stroke, ay-stroke, ax+stroke, ay+stroke),
-                                fill='#252525', outline='white', width=max(scale, stroke // 3))
         picture.alpha_composite(leaders.resize(picture.size, Image.Resampling.LANCZOS))
     for row, _, _, rect, origin in badges:
         draw.rounded_rectangle(rect, radius=10, fill='white', outline='#333333', width=2)
