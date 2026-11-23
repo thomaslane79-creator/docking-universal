@@ -54,7 +54,7 @@ class FigureLabelTests(unittest.TestCase):
             Image.new('RGB', (400, 300), 'blue').save(result)
             round_contact_label_backgrounds(result, base, rows)
             with Image.open(result) as picture:
-                self.assertEqual(picture.getpixel((256, 150)), (37, 37, 37))
+                self.assertLess(max(picture.getpixel((256, 150))), 100)
 
     def test_bold_font_keeps_size_compact_placement_and_one_label_per_residue(self):
         cmd = FakeCommand()

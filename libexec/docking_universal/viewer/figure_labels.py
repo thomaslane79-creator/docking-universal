@@ -43,18 +43,24 @@ def round_contact_label_backgrounds(rendered, unlabeled, callouts):
         picture.paste(base.crop(restore), restore)
         badges.append((row, cx, cy, rect,
                        (cx-text_width/2-text_box[0], cy-text_height/2-text_box[1])))
-    for row, cx, cy, _, _ in badges:
-        anchor = row.get('anchor_screen_point')
-        if anchor is None:
-            continue
-        ax, ay = (anchor[0] + 1) * width / 2, (1 - anchor[1]) * height / 2
-        points = [(cx, cy), (ax, ay)]
-        stroke = max(2, round(width / 450))
-        draw.line(points, fill='white', width=stroke + max(2, stroke))
-        draw.line(points, fill='#252525', width=stroke)
-        radius = max(2, stroke)
-        draw.ellipse((ax-radius, ay-radius, ax+radius, ay+radius),
-                     fill='#252525', outline='white', width=max(1, stroke // 3))
+    if any(row.get('anchor_screen_point') is not None for row, *_ in badges):
+        # Supersample the overlay alone, leaving the ray-traced scene untouched.
+        scale = 3
+        leaders = Image.new('RGBA', (width * scale, height * scale))
+        leader_draw = ImageDraw.Draw(leaders)
+        stroke = max(2, round(width / 450)) * scale
+        for row, cx, cy, _, _ in badges:
+            anchor = row.get('anchor_screen_point')
+            if anchor is None:
+                continue
+            ax = (anchor[0] + 1) * width * scale / 2
+            ay = (1 - anchor[1]) * height * scale / 2
+            points = [(cx * scale, cy * scale), (ax, ay)]
+            leader_draw.line(points, fill='white', width=2 * stroke)
+            leader_draw.line(points, fill='#252525', width=stroke)
+            leader_draw.ellipse((ax-stroke, ay-stroke, ax+stroke, ay+stroke),
+                                fill='#252525', outline='white', width=max(scale, stroke // 3))
+        picture.alpha_composite(leaders.resize(picture.size, Image.Resampling.LANCZOS))
     for row, _, _, rect, origin in badges:
         draw.rounded_rectangle(rect, radius=10, fill='white', outline='#333333', width=2)
         draw.text(origin, row['label'], font=font, fill='black')
