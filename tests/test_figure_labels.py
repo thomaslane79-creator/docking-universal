@@ -20,6 +20,8 @@ class FakeCommand:
                                      resn='ASP' if resi=='30' else 'ILE',resi=resi,chain='A',segi=''))
 
     def get_view(self): return self.view[:]
+    def get_setting_float(self, name): return 30.0
+    def get_setting_int(self, name): return 1
     def get_atom_coords(self, selection): return [int(selection.split()[-1]),0,0]
     def hide(self, *args): pass
     def deselect(self): pass
@@ -38,6 +40,21 @@ class FigureLabelTests(unittest.TestCase):
             with Image.open(result) as picture:
                 self.assertEqual(picture.getpixel((20, 20)), (0, 0, 255))
                 self.assertEqual(picture.getpixel((200, 137)), (255, 255, 255))
+
+    def test_foreground_leader_connects_to_projected_atom(self):
+        from PIL import Image
+        cmd = FakeCommand()
+        rows = label_contact_residues(cmd, viewport=(400, 300))
+        self.assertEqual(cmd.settings['label_connector', 'all'], 0)
+        self.assertAlmostEqual(rows[0]['anchor_screen_point'][0], .2799, places=3)
+        self.assertEqual(rows[0]['anchor_screen_point'][1], 0)
+        with tempfile.TemporaryDirectory() as temporary:
+            base, result = Path(temporary)/'base.png', Path(temporary)/'result.png'
+            Image.new('RGB', (400, 300), 'blue').save(base)
+            Image.new('RGB', (400, 300), 'blue').save(result)
+            round_contact_label_backgrounds(result, base, rows)
+            with Image.open(result) as picture:
+                self.assertEqual(picture.getpixel((256, 150)), (37, 37, 37))
 
     def test_bold_font_keeps_size_compact_placement_and_one_label_per_residue(self):
         cmd = FakeCommand()
