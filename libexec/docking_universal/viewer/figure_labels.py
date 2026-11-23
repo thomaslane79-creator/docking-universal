@@ -77,7 +77,7 @@ def label_contact_residues(cmd, *, size=40):
     cmd.hide('labels','all')
     for name,value in {'label_color':'black','label_outline_color':'white','label_font_id':7,
         'label_size':size,'float_labels':1,'label_shadow_mode':0,'label_connector':1,
-        'label_connector_color':'gray35','label_connector_width':2.5,'label_position':[0,0,0],
+        'label_connector_color':'gray20','label_connector_width':3.0,'label_position':[0,0,0],
         'label_bg_color':'white','label_bg_transparency':0.}.items():cmd.set(name,value)
     result=[]
     for key,row in sorted(residues.items()):
