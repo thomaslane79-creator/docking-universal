@@ -49,8 +49,8 @@ def round_contact_label_backgrounds(rendered, unlabeled, callouts):
             continue
         ax, ay = (anchor[0] + 1) * width / 2, (1 - anchor[1]) * height / 2
         points = [(cx, cy), (ax, ay)]
-        stroke = max(2, round(width / 300))
-        draw.line(points, fill='white', width=stroke + max(2, stroke // 2))
+        stroke = max(2, round(width / 450))
+        draw.line(points, fill='white', width=stroke + max(2, stroke))
         draw.line(points, fill='#252525', width=stroke)
         radius = max(2, stroke)
         draw.ellipse((ax-radius, ay-radius, ax+radius, ay+radius),
