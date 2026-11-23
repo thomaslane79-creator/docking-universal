@@ -49,7 +49,7 @@ class LaterBoxProjectionTests(unittest.TestCase):
                         for change in self.review['changes']]}))
         self.box = self.root / 'later.conf'
         self.set_box(0)
-        self.state = SimpleNamespace(artifacts=[
+        self.state = SimpleNamespace(workflow_data={}, artifacts=[
             self.artifact('history', 'receptor_model_history', self.history),
             self.artifact('prepared', 'prepared_receptor', self.prepared),
             self.artifact('review', 'reviewed_receptor_model', self.record),

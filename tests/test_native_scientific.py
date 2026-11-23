@@ -25,7 +25,9 @@ class NativeScientificSpecificationTests(unittest.TestCase):
     def test_two_phase_install_preserves_exact_pip_requirements(self):
         original = MODULE.scientific_specification((ROOT / "environment.yml").read_text(encoding="utf-8"))
         conda, requirements = MODULE.split_pip_phase(original)
-        self.assertEqual(requirements, ["meeko==0.7.1", "pdb2pqr==3.6.2", "reportlab==4.2.5"])
+        self.assertEqual(requirements, [
+            "meeko==0.7.1", "pdb2pqr==3.6.2", "reportlab==4.2.5", "pypdf==6.21.4",
+        ])
         self.assertIn("  - pip\n", conda)
         self.assertNotIn("  - pip:", conda)
         with self.assertRaisesRegex(ValueError, "review"):

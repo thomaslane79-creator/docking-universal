@@ -2342,7 +2342,7 @@ def combine_docking_cluster_panels(panel_a, panel_b, output):
         axes.apply_aspect()
         panel_bottoms.append(axes.get_position().y0)
 
-    legend_top = min(panel_bottoms) - .006
+    legend_top = min(panel_bottoms) - .022
     for row in top_clusters:
         rank = int(row["energy_rank"])
         x = .022 + (rank - 1) * .33
